@@ -1,6 +1,9 @@
 // Article page specific JavaScript
 
 // DOM Elements
+const articleTitle = document.getElementById('article-title');
+const articleHeader = document.querySelector('.article-header');
+const articleBody = document.querySelector('.article-body');
 const relatedArticlesList = document.querySelector('.related-articles-list');
 
 // Initialize AOS
@@ -11,9 +14,82 @@ document.addEventListener('DOMContentLoaded', function() {
         once: true
     });
     
+    // Load article content
+    loadArticleContent();
+    
     // Render related articles
     renderRelatedArticles();
 });
+
+// Load article content based on URL
+function loadArticleContent() {
+    // Get current article slug from URL
+    const currentPath = window.location.pathname;
+    const currentSlug = currentPath.split('/').pop().replace('.html', '');
+    
+    // Find current article
+    const currentArticle = articles.find(article => article.slug === currentSlug);
+    
+    if (!currentArticle) {
+        // If article not found, display error message
+        articleHeader.innerHTML = `
+            <div class="flex flex-wrap items-center gap-2 mb-4">
+                <span class="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">Error</span>
+            </div>
+            <h1 class="text-3xl md:text-4xl font-bold mb-4 text-gray-800">Article Not Found</h1>
+        `;
+        
+        articleBody.innerHTML = `
+            <p>The article you're looking for could not be found. Please check the URL or return to the <a href="../index.html" class="text-primary hover:underline">home page</a>.</p>
+        `;
+        
+        return;
+    }
+    
+    // Update page title
+    articleTitle.textContent = `${currentArticle.title} | MyLog`;
+    
+    // Determine category badge color
+    let categoryColor = '';
+    switch(currentArticle.category) {
+        case 'machine-learning':
+            categoryColor = 'bg-blue-100 text-blue-800';
+            break;
+        case 'nlp':
+            categoryColor = 'bg-purple-100 text-purple-800';
+            break;
+        case 'computer-vision':
+            categoryColor = 'bg-green-100 text-green-800';
+            break;
+        case 'programming':
+            categoryColor = 'bg-yellow-100 text-yellow-800';
+            break;
+        default:
+            categoryColor = 'bg-gray-100 text-gray-800';
+    }
+    
+    // Update article header
+    articleHeader.innerHTML = `
+        <div class="flex-wrap items-center gap-2 mb-4">
+            <span class="px-3 py-1 ${categoryColor} rounded-full text-sm font-medium">${getCategoryName(currentArticle.category)}</span>
+            <span class="text-gray-500 text-sm">${formatDate(currentArticle.date)}</span>
+        </div>
+        <h1 class="text-3xl md:text-4xl font-bold mb-4 text-gray-800">${currentArticle.title}</h1>
+    `;
+    
+    // Update article body
+    articleBody.innerHTML = `
+        <p>${currentArticle.content}</p>
+        
+        <h2>Further Reading</h2>
+        <p>Check out some of our other articles on related topics:</p>
+        <ul class="list-disc pl-5 mt-2 space-y-1">
+            <li><a href="#" class="text-primary hover:underline">Getting Started with Machine Learning</a></li>
+            <li><a href="#" class="text-primary hover:underline">Advanced Techniques in NLP</a></li>
+            <li><a href="#" class="text-primary hover:underline">Future Trends in AI</a></li>
+        </ul>
+    `;
+}
 
 // Render related articles
 function renderRelatedArticles() {
