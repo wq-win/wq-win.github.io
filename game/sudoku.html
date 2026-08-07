@@ -68,6 +68,35 @@
                 background-color: rgba(212, 175, 55, 0.15);
                 transform: scale(1.05);
             }
+            .cell-content {
+                position: relative;
+                width: 100%;
+                height: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .cell-value {
+                z-index: 10;
+            }
+            .cell-hints {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                grid-template-rows: repeat(3, 1fr);
+                font-size: 0.5rem;
+                color: #666;
+                pointer-events: none;
+            }
+            .hint-number {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
             .bounce-in {
                 animation: bounce-in 0.5s ease forwards;
             }
@@ -280,6 +309,35 @@
                         cell.dataset.row = row;
                         cell.dataset.col = col;
                         
+                        // 创建单元格内容容器
+                        const cellContent = document.createElement('div');
+                        cellContent.classList.add('cell-content');
+                        
+                        // 创建单元格值元素
+                        const cellValue = document.createElement('div');
+                        cellValue.classList.add('cell-value');
+                        
+                        // 创建提示数字容器
+                        const cellHints = document.createElement('div');
+                        cellHints.classList.add('cell-hints');
+                        
+                        // 添加1-9的提示数字
+                        for (let i = 1; i <= 9; i++) {
+                            const hintNumber = document.createElement('div');
+                            hintNumber.classList.add('hint-number');
+                            hintNumber.dataset.value = i;
+                            hintNumber.textContent = i;
+                            cellHints.appendChild(hintNumber);
+                        }
+                        
+                        // 初始化时隐藏提示（因为此时board还未初始化）
+                        cellHints.style.display = 'none';
+                        
+                        // 组装单元格内容
+                        cellContent.appendChild(cellHints);
+                        cellContent.appendChild(cellValue);
+                        cell.appendChild(cellContent);
+                        
                         cell.addEventListener('click', () => {
                             // 如果单元格有数字，高亮相同数字
                             if (Sudoku.board[row][col] !== 0) {
@@ -320,7 +378,7 @@
             let highlightedNumber = null;
             
             function highlightSameNumbers(row, col) {
-                const cell = getCellElement(row, col);
+                const cellValue = getCellValueElement(row, col);
                 const value = Sudoku.board[row][col];
                 
                 // 如果单元格为空或已经高亮，则清除高亮
@@ -339,9 +397,9 @@
                 for (let r = 0; r < 9; r++) {
                     for (let c = 0; c < 9; c++) {
                         if (Sudoku.board[r][c] === value) {
-                            const sameCell = getCellElement(r, c);
-                            sameCell.style.color = '#FF0000';
-                            sameCell.style.fontWeight = 'bold';
+                            const sameCellValue = getCellValueElement(r, c);
+                            sameCellValue.style.color = '#FF0000';
+                            sameCellValue.style.fontWeight = 'bold';
                         }
                     }
                 }
@@ -354,18 +412,18 @@
                 // 恢复所有高亮数字的原始颜色
                 for (let row = 0; row < 9; row++) {
                     for (let col = 0; col < 9; col++) {
-                        const cell = getCellElement(row, col);
+                        const cellValue = getCellValueElement(row, col);
                         const value = Sudoku.board[row][col];
                         
                         // 清除之前的样式
-                        cell.style.color = '';
-                        cell.style.fontWeight = '';
+                        cellValue.style.color = '';
+                        cellValue.style.fontWeight = '';
                         
                         // 恢复原始样式
                         if (Sudoku.original[row][col] !== 0) {
-                            cell.classList.add('text-darkMagic', 'font-bold');
+                            cellValue.classList.add('text-darkMagic', 'font-bold');
                         } else if (value !== 0) {
-                            cell.classList.add('text-shadow-gold', 'font-bold');
+                            cellValue.classList.add('text-shadow-gold', 'font-bold');
                         }
                     }
                 }
@@ -467,34 +525,162 @@
                 return true;
             }
 
+            // 获取单元格值元素
+            function getCellValueElement(row, col) {
+                return getCellElement(row, col).querySelector('.cell-value');
+            }
+            
+            // 获取单元格提示元素
+            function getCellHintsElement(row, col) {
+                return getCellElement(row, col).querySelector('.cell-hints');
+            }
+            
+            // 计算单元格的可能取值
+            function getPossibleValues(row, col) {
+                const possibleValues = [];
+                
+                // 如果单元格已经有值（初始数字或玩家输入），没有可能取值
+                if (Sudoku.board[row][col] !== 0 || Sudoku.original[row][col] !== 0) {
+                    return possibleValues;
+                }
+                
+                // 检查1-9的每个数字
+                for (let num = 1; num <= 9; num++) {
+                    if (isValidMove(Sudoku.board, row, col, num)) {
+                        possibleValues.push(num);
+                    }
+                }
+                
+                return possibleValues;
+            }
+            
+            // 获取某行已有的数字
+            function getRowValues(row) {
+                const values = new Set();
+                for (let col = 0; col < 9; col++) {
+                    if (Sudoku.board[row][col] !== 0) {
+                        values.add(Sudoku.board[row][col]);
+                    }
+                }
+                return values;
+            }
+            
+            // 获取某列已有的数字
+            function getColValues(col) {
+                const values = new Set();
+                for (let row = 0; row < 9; row++) {
+                    if (Sudoku.board[row][col] !== 0) {
+                        values.add(Sudoku.board[row][col]);
+                    }
+                }
+                return values;
+            }
+            
+            // 获取某个九宫格已有的数字
+            function getBlockValues(row, col) {
+                const values = new Set();
+                const blockRow = Math.floor(row / 3) * 3;
+                const blockCol = Math.floor(col / 3) * 3;
+                
+                for (let i = 0; i < 3; i++) {
+                    for (let j = 0; j < 3; j++) {
+                        const value = Sudoku.board[blockRow + i][blockCol + j];
+                        if (value !== 0) {
+                            values.add(value);
+                        }
+                    }
+                }
+                
+                return values;
+            }
+            
+            // 更新所有单元格的提示
+            function updateAllHints() {
+                for (let row = 0; row < 9; row++) {
+                    for (let col = 0; col < 9; col++) {
+                        updateCellHints(row, col);
+                    }
+                }
+            }
+            
+            // 更新单个单元格的提示
+            function updateCellHints(row, col) {
+                const hintsElement = getCellHintsElement(row, col);
+                
+                // 如果单元格有初始数字或已填入数字，隐藏提示
+                const hasValue = Sudoku.board[row][col] !== 0 || Sudoku.original[row][col] !== 0;
+                
+                // 确保提示容器的显示状态正确
+                if (hasValue) {
+                    hintsElement.style.display = 'none';
+                    return;
+                }
+                
+                hintsElement.style.display = 'grid';
+                
+                // 获取已有的数字
+                const rowValues = getRowValues(row);
+                const colValues = getColValues(col);
+                const blockValues = getBlockValues(row, col);
+                
+                // 更新每个提示数字的可见性
+                // 第一行显示1-3，第二行显示4-6，第三行显示7-9
+                for (let num = 1; num <= 9; num++) {
+                    const hintElement = hintsElement.querySelector(`.hint-number[data-value="${num}"]`);
+                    
+                    // 检查数字是否已在当前行、列或九宫格中存在
+                    const isUsed = rowValues.has(num) || colValues.has(num) || blockValues.has(num);
+                    
+                    if (isUsed) {
+                        // 如果数字已存在，隐藏提示
+                        hintElement.style.visibility = 'hidden';
+                        hintElement.style.opacity = '0';
+                    } else {
+                        // 如果数字不存在，显示提示
+                        hintElement.style.visibility = 'visible';
+                        hintElement.style.opacity = '0.5';
+                    }
+                }
+            }
+            
             // 更新棋盘UI
             function updateBoardUI() {
                 for (let row = 0; row < 9; row++) {
                     for (let col = 0; col < 9; col++) {
                         const cell = getCellElement(row, col);
+                        const cellValue = getCellValueElement(row, col);
                         const value = Sudoku.board[row][col];
                         
-                        cell.textContent = value !== 0 ? value : '';
+                        // 更新单元格值
+                        cellValue.textContent = value !== 0 ? value : '';
+                        
+                        // 清除单元格和值元素的样式
                         cell.classList.remove('text-darkMagic', 'text-shadow-gold', 'bg-error', 'bg-success');
+                        cellValue.classList.remove('text-darkMagic', 'text-shadow-gold', 'font-bold');
                         
                         // 清除自定义样式
                         cell.style.color = '';
                         cell.style.fontWeight = '';
+                        cellValue.style.color = '';
+                        cellValue.style.fontWeight = '';
                         
                         // 设置初始数字和玩家输入数字的样式区别
                         if (Sudoku.original[row][col] !== 0) {
-                            cell.classList.add('text-darkMagic', 'font-bold');
+                            cellValue.classList.add('text-darkMagic', 'font-bold');
                         } else if (value !== 0) {
-                            cell.classList.add('text-shadow-gold', 'font-bold');
+                            cellValue.classList.add('text-shadow-gold', 'font-bold');
                         }
                         
                         // 如果有高亮数字，保持高亮
                         if (highlightedNumber !== null && value === highlightedNumber) {
-                            cell.style.color = '#FF0000';
-                            cell.style.fontWeight = 'bold';
+                            cellValue.style.color = '#FF0000';
+                            cellValue.style.fontWeight = 'bold';
                         }
                     }
                 }
+                
+                // 更新所有单元格的提示
+                updateAllHints();
             }
 
             // 输入数字
@@ -508,12 +694,9 @@
                 
                 // 更新棋盘
                 Sudoku.board[row][col] = num;
-                const cell = getCellElement(row, col);
                 
                 // 更新UI
-                cell.textContent = num;
-                cell.classList.remove('bg-error', 'bg-success');
-                cell.classList.add('text-shadow-gold', 'font-bold');
+                updateBoardUI();
                 
                 // 移动到下一个单元格
                 moveToNextCell();
@@ -530,9 +713,9 @@
                 
                 // 清除单元格
                 Sudoku.board[row][col] = 0;
-                const cell = getCellElement(row, col);
-                cell.textContent = '';
-                cell.classList.remove('bg-error', 'bg-success');
+                
+                // 更新UI
+                updateBoardUI();
             }
 
             // 移动到下一个单元格
