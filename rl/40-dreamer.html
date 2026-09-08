@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 40 天｜Dreamer：把策略训练搬到潜在世界里 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Dreamer：把策略训练搬到潜在世界里</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 40 天｜Dreamer：把策略训练搬到潜在世界里
+
+[系列首页](README.md) · [上一篇](39-mbpo.md) · [下一篇](41-muzero.md)
+
+**原论文与版本**：Hafner 等，*Dream to Control: Learning Behaviors by Latent Imagination*，2019／2020。[正文](https://arxiv.org/html/1912.01603v3)。本文讨论初代 Dreamer；V3、V4 属于后续工作。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：从像素高效学习长期控制
+
+**旧方法卡点**：像素空间规划昂贵，短模型预测难解决长期目标
+
+**作者主张**：学习潜在动态模型，在想象轨迹中训练Actor和价值网络
+
+**论文证据**：20个视觉控制任务及表示／想象跨度实验支持方法
+
+**一句话**：在在线视觉、模型驱动、潜在Actor–Critic中，作者通过“学习潜在动态模型，在想象轨迹中训练Actor和价值网络”应对“从像素高效学习长期控制”这一问题；证据边界或代价是：模型幻觉与潜在表示丢失仍会影响控制。
+
+## 二、研究背景与问题定义
+
+本篇将“从像素高效学习长期控制”放在在线视觉、模型驱动、潜在Actor–Critic的边界内研究。像素空间规划昂贵，短模型预测难解决长期目标。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 在线视觉、模型驱动、潜在Actor–Critic |
+| 状态／观测 | 图像编码后的随机／递归潜在状态 |
+| 动作 | 连续控制动作 |
+| 奖励或学习信号 | 学习奖励预测，真实环境监督 |
+| 终止／边界 | 学习继续／终止语义并处理想象边界 |
+
+## 三、方法：到底改了什么
+
+世界模型通过图像重构、奖励预测与潜变量正则学习状态；Actor在模型想象中得到可微长程信号，价值网络补足想象末端。训练Actor时冻结模型参数，但保留通过模型到动作的梯度。这与执行时每步做MCTS的MuZero不同。
+
+### 关键公式与符号
+
+$$G_t^\lambda=\hat r_t+\gamma[(1-\lambda)V(z_{t+1})+\lambda G_{t+1}^\lambda].$$
+Actor最大化想象回报，Critic回归停止梯度的λ-return；世界模型另有重构、奖励、KL等损失，不是所有项共同随意反传。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+真实环境收集图像轨迹到replay
+从序列训练潜在世界模型：重构＋奖励＋KL
+从真实序列后验潜在状态开始想象
+冻结世界模型参数
+Actor采样动作，经模型展开H步
+用预测奖励与末端V计算λ-return
+沿模型动作路径更新Actor
+以停止梯度return训练Critic
+再到真实环境收集经验
+输出：世界模型与直接行动策略
+```
+
+**实现要点**：模型幻觉与潜在表示丢失仍会影响控制。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 世界模型重构／奖励／KL损失；想象λ-return训练Actor与Critic |
+| 机制改变 | 学习潜在动态模型，在想象轨迹中训练Actor和价值网络 |
+| 评价改善的指标 | 回报、真实样本效率、训练时间 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 20个DeepMind Control视觉任务 |
+| 数据来源与规模 | 64×64RGB；动作维度约1—12 |
+| 对比基线 | PlaNet、D4PG及表示／长度消融 |
+| 训练预算与资源 | 原文V100加10CPU；平台与旧基线资源不完全一致 |
+| 指标及其含义 | 回报、真实样本效率、训练时间 |
+| 随机性与不确定性 | 完整种子与区间按图核对，本文未完整核实 |
+| 实际验证的假设 | 潜在想象行为学习是否减少真实交互 |
+
+**实验解读（本文分析）**：模型幻觉与潜在表示丢失仍会影响控制。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图4 | 想象跨度与价值补足 | 价值处理长程后果的作用 | 不意味着越长越好 |
+| 图6 | 20任务主结果 | 原文平均回报与效率 | 旧论文预算不能当完全匹配 |
+| 图8 | 像素重构／对比／奖励表征 | 表示学习对控制重要 | 重构好不保证动力学正确 |
+
+原文汇总中Dreamer在5M步平均回报约823，对比D4PG在更大预算内约786；这是不同训练方案与预算的作者报告，不是“同算力提升37分”的结论。
+
+## 六、贡献、代价与局限
+
+**作者贡献**是用可微潜在想象训练行为。**本文分析**：奖励预测正确也可能漏掉控制所需信息；模型外推会被Actor利用。必须分别评价重构质量、控制回报和真实环境稳健性。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+模型误认为某动作能穿墙，想象Actor会偏爱捷径；Critic又在同一想象分布上学习，可能一起变乐观。真实交互验证与短期误差诊断不可省略。
+
+### 五个前置概念
+
+1. **潜在状态**：用于预测和控制的压缩表征。
+2. **RSSM**：结合递归记忆与随机潜变量的动态模型。
+3. **想象轨迹**：在学习模型中生成的未来。
+4. **λ-return**：结合多步奖励与价值估计。
+5. **梯度穿模型**：通过预测动态把回报影响传给动作。
+
+### 三个值得继续追问的问题
+
+1. 冻结模型参数为何仍能对Actor反传？
+2. 图像重构与任务信息会冲突吗？
+3. 如何区分模型利用和真正控制改善？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 从像素高效学习长期控制 | 学习潜在动态模型，在想象轨迹中训练Actor和价值网络 | 潜在想象把真实经验转化为更多行为梯度，价值补足短想象 | 20个视觉控制任务及表示／想象跨度实验支持方法 | 模型幻觉与潜在表示丢失仍会影响控制 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](39-mbpo.md) · [下一篇](41-muzero.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "40-dreamer";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

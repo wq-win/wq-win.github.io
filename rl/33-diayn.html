@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 33 天｜DIAYN：没有任务奖励，能否先学会一组不同技能 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">DIAYN：没有任务奖励，能否先学会一组不同技能</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 33 天｜DIAYN：没有任务奖励，能否先学会一组不同技能
+
+[系列首页](README.md) · [上一篇](32-impala.md) · [下一篇](34-qmix.md)
+
+**原论文与版本**：*Diversity is All You Need: Learning Skills without a Reward Function*，2018。[原论文](https://arxiv.org/abs/1802.06070)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：无外部任务时的技能发现
+
+**旧方法卡点**：随机行为不保证覆盖可复用的行为类型
+
+**作者主张**：最大化技能与访问状态的可辨识性，同时保留技能内动作熵
+
+**论文证据**：导航与运动示例展示多样技能和下游用途
+
+**一句话**：在无监督技能发现、目标为技能变量z的最大熵RL中，作者通过“最大化技能与访问状态的可辨识性，同时保留技能内动作熵”应对“无外部任务时的技能发现”这一问题；证据边界或代价是：可辨识不等于有用，技能选择与实际任务还需额外学习。
+
+## 二、研究背景与问题定义
+
+本篇将“无外部任务时的技能发现”放在无监督技能发现、目标为技能变量z的最大熵RL的边界内研究。随机行为不保证覆盖可复用的行为类型。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 无监督技能发现、目标为技能变量z的最大熵RL |
+| 状态／观测 | 环境状态s与技能ID z |
+| 动作 | 条件随机策略π(a|s,z) |
+| 奖励或学习信号 | log判别概率减log技能先验 |
+| 终止／边界 | 通常一个回合固定技能；环境终止另处理 |
+
+## 三、方法：到底改了什么
+
+固定先验抽技能z，判别器从状态猜z，策略去到能让z被猜出的状态。固定先验避免训练只保留少数容易区分的技能。它借助SAC类最大熵优化；没有外部任务奖励，不等于完全没有训练信号。
+
+### 关键公式与符号
+
+$$r_z(s)=\log q_\phi(z|s)-\log p(z).$$
+策略最大化该伪奖励与动作熵；判别器最大化正确技能标签的log概率。z来自自采样，所以无需人工技能标签。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+固定技能先验p(z)
+每回合抽z，并以π(a|s,z)交互
+保存(s,a,s_next,z)到replay
+抽batch：
+  判别器拟合从s预测z
+  计算r_z=logq(z|s)-logp(z)
+  用最大熵Actor–Critic更新条件策略
+评价：看技能覆盖，并单独测试下游任务
+输出：技能库，不是已完成所有任务的单一策略
+```
+
+**实现要点**：可辨识不等于有用，技能选择与实际任务还需额外学习。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 最大化技能可辨识性的互信息下界与技能内动作熵 |
+| 机制改变 | 最大化技能与访问状态的可辨识性，同时保留技能内动作熵 |
+| 评价改善的指标 | 技能可区分性、多样行为、下游回报 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 导航、MuJoCo技能、迁移／层级用途 |
+| 数据来源与规模 | 无任务奖励在线经验 |
+| 对比基线 | 不同技能先验／熵等配置与原文方法 |
+| 训练预算与资源 | 完整任务训练步数本文未逐项核实 |
+| 指标及其含义 | 技能可区分性、多样行为、下游回报 |
+| 随机性与不确定性 | 附录部分任务5种子，不能推广到全篇所有图 |
+| 实际验证的假设 | 可辨识性与熵能否产生多样技能 |
+
+**实验解读（本文分析）**：可辨识不等于有用，技能选择与实际任务还需额外学习。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图1 | 判别器与技能循环 | 明确自监督来源 | 不证明技能质量 |
+| 图2—3 | 导航轨迹与运动技能 | 展示多样行为 | 挑选视频不等于覆盖统计 |
+| 图4 | 固定与可变先验 | 检验技能坍缩问题 | 不保证固定先验总最佳 |
+
+**结论边界**：导航与运动示例展示多样技能和下游用途。可辨识不等于有用，技能选择与实际任务还需额外学习。
+
+## 六、贡献、代价与局限
+
+**作者贡献**是简洁的无监督技能目标。**本文分析**：技能可通过无用位置差异区分；判别器输入选择会改变学到什么。下游成功可能依赖选择器训练预算，必须单独计量。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+两个技能分别停在左角与右角，判别器很容易识别，目标很高；但任务若要求开门，这两个技能可能都没用。多样性是潜在资源，不是任务完成率。
+
+### 五个前置概念
+
+1. **技能变量**：索引一类条件行为的隐变量。
+2. **互信息**：两个变量可预测彼此的程度。
+3. **判别器**：从状态识别执行的技能。
+4. **先验**：技能采样频率分布。
+5. **技能坍缩**：多个技能变成相同或只剩少数有效技能。
+
+### 三个值得继续追问的问题
+
+1. 只观察位置和观察全状态会发现不同技能吗？
+2. 如何测量技能对未知任务的真实帮助？
+3. 固定均匀先验是否浪费困难技能的预算？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 无外部任务时的技能发现 | 最大化技能与访问状态的可辨识性，同时保留技能内动作熵 | 不同技能被鼓励访问可区分区域，固定先验防止丢弃技能 | 导航与运动示例展示多样技能和下游用途 | 可辨识不等于有用，技能选择与实际任务还需额外学习 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](32-impala.md) · [下一篇](34-qmix.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "33-diayn";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

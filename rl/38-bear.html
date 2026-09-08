@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 38 天｜BEAR：限制支持范围，而不必复制行为频率 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">BEAR：限制支持范围，而不必复制行为频率</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 38 天｜BEAR：限制支持范围，而不必复制行为频率
+
+[系列首页](README.md) · [上一篇](37-bcq.md) · [下一篇](39-mbpo.md)
+
+**原论文与版本**：*Stabilizing Off-Policy Q-Learning via Bootstrapping Error Reduction*，2019。[原论文](https://arxiv.org/abs/1906.00949)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：离线Q的自举误差传播
+
+**旧方法卡点**：不限制未知动作会失控，严格模仿又难提升
+
+**作者主张**：用分布约束让策略靠近数据动作支持，并优化Q
+
+**论文证据**：理论分析及离线控制实验支持减少分布外自举
+
+**一句话**：在离线、连续动作、约束Actor–Critic中，作者通过“用分布约束让策略靠近数据动作支持，并优化Q”应对“离线Q的自举误差传播”这一问题；证据边界或代价是：MMD是有限样本替代约束，不是精确支持集检测器。
+
+## 二、研究背景与问题定义
+
+本篇将“离线Q的自举误差传播”放在离线、连续动作、约束Actor–Critic的边界内研究。不限制未知动作会失控，严格模仿又难提升。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 离线、连续动作、约束Actor–Critic |
+| 状态／观测 | 离线状态 |
+| 动作 | 策略与行为模型采样动作 |
+| 奖励或学习信号 | 数据环境奖励 |
+| 终止／边界 | 固定转移终止 |
+
+## 三、方法：到底改了什么
+
+BEAR关注“只选择有数据支持的动作”，并不要求完全保持行为概率。实现用核最大均值差MMD近似限制策略与行为样本差异，再用Q推动策略改进。分布接近、支持相同和有限样本MMD小是不同概念。
+
+### 关键公式与符号
+
+$$\max_\pi E[Q(s,a)],\quad MMD(\pi(\cdot|s),\hat\beta(\cdot|s))\le\epsilon.$$
+MMD由策略样本间、行为样本间与交叉样本的核相似度构成；核带宽改变“接近”的尺度。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+输入固定D，拟合行为动作模型βhat
+循环：
+  更新Critic的原文目标
+  每个状态分别采策略动作与行为动作
+  计算核MMD约束量
+  Actor优化高Q，惩罚超过阈值的MMD
+  按实现更新约束乘子
+  更新目标网络
+输出：被数据支持约束的策略
+```
+
+**实现要点**：MMD是有限样本替代约束，不是精确支持集检测器。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 最大化估计Q，受策略与行为样本MMD约束 |
+| 机制改变 | 用分布约束让策略靠近数据动作支持，并优化Q |
+| 评价改善的指标 | 真实回报、Q异常、约束效果 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 离线连续控制与不同质量数据 |
+| 数据来源与规模 | 专家／混合行为等固定轨迹 |
+| 对比基线 | SAC离线、BCQ等原文比较 |
+| 训练预算与资源 | 各批规模与梯度预算本文未逐项核实 |
+| 指标及其含义 | 真实回报、Q异常、约束效果 |
+| 随机性与不确定性 | 完整种子与区间未核实 |
+| 实际验证的假设 | 支持约束能否阻止自举误差扩散 |
+
+**实验解读（本文分析）**：MMD是有限样本替代约束，不是精确支持集检测器。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图1 | SAC真实回报与logQ | 说明离线高估失控 | 不是所有SAC设定都如此 |
+| 图2／理论部分 | 不同策略约束的误差传播 | 支持控制分布偏离的动机 | 不保证MMD等同精确支持 |
+| 实验及消融部分（具体图表编号本文未核实） | 约束与基线表现 | 检验可用性 | 不能忽略行为模型和核调参 |
+
+**结论边界**：理论分析及离线控制实验支持减少分布外自举。MMD是有限样本替代约束，不是精确支持集检测器。
+
+## 六、贡献、代价与局限
+
+**作者贡献**是自举误差与策略支持约束的结合。**本文分析**：行为模型本身错时约束会错；离散少量样本下MMD小不能排除危险的低概率动作。阈值与核带宽属于重要超参数。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+行为在动作−1与1各有一半概率，均值为0但从未执行0。只匹配动作均值会允许策略总输出0；分布约束比均值更丰富，但有限样本核检验仍需校准。
+
+### 五个前置概念
+
+1. **行为分布**：数据采集策略的动作规律。
+2. **MMD**：用核函数比较两个分布的统计量。
+3. **支持约束**：限制策略到有证据的动作区域。
+4. **乘子**：调节约束违反惩罚的参数。
+5. **自举传播**：用错误后继价值污染当前价值。
+
+### 三个值得继续追问的问题
+
+1. MMD小与没有OOD动作有什么区别？
+2. 如何选择核带宽与约束阈值？
+3. 数据多模态时行为均值为何可能危险？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 离线Q的自举误差传播 | 用分布约束让策略靠近数据动作支持，并优化Q | 限制进入无证据区域，同时允许在支持范围内改变动作频率 | 理论分析及离线控制实验支持减少分布外自举 | MMD是有限样本替代约束，不是精确支持集检测器 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](37-bcq.md) · [下一篇](39-mbpo.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "38-bear";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

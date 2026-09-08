@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 39 天｜MBPO：不要在错误模型里想象太久 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">MBPO：不要在错误模型里想象太久</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 39 天｜MBPO：不要在错误模型里想象太久
+
+[系列首页](README.md) · [上一篇](38-bear.md) · [下一篇](40-dreamer.md)
+
+**原论文与版本**：*When to Trust Your Model: Model-Based Policy Optimization*，2019。[原论文](https://arxiv.org/abs/1906.08253)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：模型偏差与样本效率的权衡
+
+**旧方法卡点**：长模型rollout会逐步离开真实数据分布并累积误差
+
+**作者主张**：从真实replay状态出发做短分支rollout，用合成经验训练策略
+
+**论文证据**：图2等控制实验支持短模型rollout的高样本效率
+
+**一句话**：在在线模型驱动数据增强，通常搭配SAC中，作者通过“从真实replay状态出发做短分支rollout，用合成经验训练策略”应对“模型偏差与样本效率的权衡”这一问题；证据边界或代价是：模型误差、合成比例和模型训练成本仍需计量。
+
+## 二、研究背景与问题定义
+
+本篇将“模型偏差与样本效率的权衡”放在在线模型驱动数据增强，通常搭配SAC的边界内研究。长模型rollout会逐步离开真实数据分布并累积误差。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 在线模型驱动数据增强，通常搭配SAC |
+| 状态／观测 | 真实状态与短期模拟状态 |
+| 动作 | 随机连续策略动作 |
+| 奖励或学习信号 | 环境／模型预测奖励 |
+| 终止／边界 | 真实终止与模型rollout截断不同 |
+
+## 三、方法：到底改了什么
+
+模型不是用于每步MPC搜索，而是生成训练数据。每次从真实状态重新出发，减少误差沿长链累积；Actor随后像无模型SAC那样学习。理论界分析误差与分布变化，实践选择短rollout并不意味着模型越长越好。
+
+### 关键公式与符号
+
+教学目标 $L_Q=E_{D_{real}\cup D_{model}}(Q-y)^2$。模型训练最小化真实转移预测损失，策略训练使用soft Bellman目标。rollout长度k与真实环境交互预算是不同参数。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+收集真实转移到D_real
+定期用D_real训练概率模型集成
+反复：
+  从D_real抽起始状态
+  用当前策略在模型里生成k步短轨迹
+  将合成转移写入D_model
+  按设定比例混合真实／合成数据
+  对SAC执行若干梯度更新
+  继续收集真实经验修正模型
+输出：直接执行的策略
+```
+
+**实现要点**：模型误差、合成比例和模型训练成本仍需计量。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 世界模型最大似然拟合；混合真实与短模拟经验训练SAC |
+| 机制改变 | 从真实replay状态出发做短分支rollout，用合成经验训练策略 |
+| 评价改善的指标 | 回报与真实交互量；另计训练时间 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | MuJoCo连续控制 |
+| 数据来源与规模 | 真实在线经验＋模型短rollout |
+| 对比基线 | SAC、其他模型驱动方法 |
+| 训练预算与资源 | 图2 Ant约300k真实步达到所比SAC约3M步表现 |
+| 指标及其含义 | 回报与真实交互量；另计训练时间 |
+| 随机性与不确定性 | 5次试验均值，阴影为标准差 |
+| 实际验证的假设 | 短分支是否比长模型模拟更可靠 |
+
+**实验解读（本文分析）**：模型误差、合成比例和模型训练成本仍需计量。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图1 | 模型误差随策略分布变化 | 支持误差依赖训练覆盖 | 不是严格校准 |
+| 图2 | 多个控制任务学习曲线 | 支持原文样本效率 | 不等于十倍墙钟加速 |
+| rollout长度消融（具体图表编号本文未核实） | 短长想象比较 | 检验误差累积折中 | 不说明k=1对所有任务最佳 |
+
+**结论边界**：图2等控制实验支持短模型rollout的高样本效率。模型误差、合成比例和模型训练成本仍需计量。
+
+## 六、贡献、代价与局限
+
+**作者贡献**是可用的模型信任策略。**本文分析**：更多合成更新会反复学习模型偏差，混合比例也是关键；无法用合成样本数量冒充真实信息量。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+一步预测误差0.1，看似很小，但10步后既可能累积也可能改变动作选择，进入更大误差区。从真实状态重新开始会打断这条链，却不能修正一步预测本身。
+
+### 五个前置概念
+
+1. **分支rollout**：从真实样本状态开始想象。
+2. **模型偏差**：预测规律偏离环境。
+3. **合成replay**：保存模型生成转移。
+4. **数据混合比例**：真实与合成样本的训练权重。
+5. **分布漂移**：新策略访问不同区域。
+
+### 三个值得继续追问的问题
+
+1. 同样GPU时间下MBPO是否仍占优？
+2. 模型长度与合成比例如何联合调节？
+3. 如何发现Actor正在利用模型漏洞？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 模型偏差与样本效率的权衡 | 从真实replay状态出发做短分支rollout，用合成经验训练策略 | 从真实状态反复重新起步，限制模型误差长链累积 | 图2等控制实验支持短模型rollout的高样本效率 | 模型误差、合成比例和模型训练成本仍需计量 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](38-bear.md) · [下一篇](40-dreamer.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "39-mbpo";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

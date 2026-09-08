@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 11 天｜Double Q-learning：为什么取最大值会制造乐观偏差 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Double Q-learning：为什么取最大值会制造乐观偏差</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 11 天｜Double Q-learning：为什么取最大值会制造乐观偏差
+
+[系列首页](README.md) · [上一篇](10-lspi.md) · [下一篇](12-gps.md)
+
+**原论文与版本**：*Double Q-learning*，2010。[原论文](https://papers.nips.cc/paper/2010/file/091d584fced301b442654dd8c23b3fc9-Paper.pdf)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：噪声价值估计中的最大化偏差
+
+**旧方法卡点**：同一个带噪估计同时选动作又评价动作，容易挑中正误差
+
+**作者主张**：用两套价值估计分离动作选择与动作评价
+
+**论文证据**：理论双估计分析、收敛结果和随机环境例子支持减轻高估
+
+**一句话**：在表格、无模型、off-policy 控制中，作者通过“用两套价值估计分离动作选择与动作评价”应对“噪声价值估计中的最大化偏差”这一问题；证据边界或代价是：双估计也可能低估，两个估计高度相关时收益有限。
+
+## 二、研究背景与问题定义
+
+本篇将“噪声价值估计中的最大化偏差”放在表格、无模型、off-policy 控制的边界内研究。同一个带噪估计同时选动作又评价动作，容易挑中正误差。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 表格、无模型、off-policy 控制 |
+| 状态／观测 | 有限状态 |
+| 动作 | 离散动作 |
+| 奖励或学习信号 | 可能带噪的奖励 |
+| 终止／边界 | 终止时不 bootstrap |
+
+## 三、方法：到底改了什么
+
+分两张表并不等于取它们的最小值。更新 A 时，先用 A 的 argmax 选下一动作，再让 B 评价它；更新 B 时交换角色。选择偏爱 A 的正噪声，不一定也偏爱 B 的正噪声。TD3 的 min 双 Critic 是另一种设计，不应混在同一伪代码里。
+
+### 关键公式与符号
+
+$$a^*=\arg\max_a Q_A(s',a),\quad y=r+\gamma Q_B(s',a^*).$$
+$q$ 的带噪估计满足 $\mathbb E\max_a\hat q_a\ge\max_a\mathbb E\hat q_a$。这不等于 Double Q 对每次样本都准确，也不表示误差从此为零。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+初始化 Q_A,Q_B
+用 Q_A+Q_B 的探索策略采样转移
+每条转移随机选择一个表更新：
+  若更新 A：
+    a_star ← argmax Q_A(s_next,a)
+    y ← r if done else r+γ*Q_B(s_next,a_star)
+    Q_A(s,a) += α*(y-Q_A(s,a))
+  否则交换 A 与 B 执行同一过程
+输出：两表组合产生的策略
+```
+
+**实现要点**：双估计也可能低估，两个估计高度相关时收益有限。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 最优Q学习；用交叉选择与评价构造随机TD目标 |
+| 机制改变 | 用两套价值估计分离动作选择与动作评价 |
+| 评价改善的指标 | 价值偏差与决策表现 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 构造的随机 MDP |
+| 数据来源与规模 | 随机奖励转移流 |
+| 对比基线 | 单表 Q-learning |
+| 训练预算与资源 | 具体重复预算见实验节，本文未逐项核实 |
+| 指标及其含义 | 价值偏差与决策表现 |
+| 随机性与不确定性 | 理论期望与实验随机性分开 |
+| 实际验证的假设 | 选择／评价分离是否缓解高估并改善控制 |
+
+**实验解读（本文分析）**：双估计也可能低估，两个估计高度相关时收益有限。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| §2 双估计分析 | 单估计与双估计的偏差 | 指出最大化的误差来源 | 不保证双估计总无偏 |
+| 算法与收敛部分（具体图表编号本文未核实） | 双表更新与最优解 | 特定表格条件下收敛 | 不直接覆盖目标网络 |
+| 实验部分（具体图表编号本文未核实） | 随机环境单 Q 与双 Q | 展示高估可伤害决策 | 不证明所有任务都需要双估计 |
+
+**结论边界**：理论双估计分析、收敛结果和随机环境例子支持减轻高估。双估计也可能低估，两个估计高度相关时收益有限。
+
+## 六、贡献、代价与局限
+
+**作者指出**双估计有时会低估。**本文分析**：增加估计器意味着样本分配更复杂；一个估计对另一个不够独立时，选择偏差仍会残留。性能要同时看真实回报，不能只优化“Q 看起来不高”。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+两个动作真值都为0。一次 A 估计为(1,−1)，B 为(−0.2,0.2)。单表最大值为1；A 选择第一个动作，B 给目标−0.2。这次纠正了正偏差却低估了真值，说明降低高估不等于逐次准确。
+
+### 五个前置概念
+
+1. **最大化偏差**：选择最大噪声估计产生乐观倾向。
+2. **双估计**：将选择和评价交给不同估计器。
+3. **估计相关性**：两套误差是否一起变化。
+4. **低估**：预测低于真实期望。
+5. **随机逼近**：用采样更新渐进逼近期望方程。
+
+### 三个值得继续追问的问题
+
+1. 两张表完全共享噪声时还能减轻偏差吗？
+2. 真值差很大与几乎相等时，偏差风险有何不同？
+3. 取 min 和交叉评价分别解决什么问题？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 噪声价值估计中的最大化偏差 | 用两套价值估计分离动作选择与动作评价 | 对一套估计中的正误差进行选择，不一定同时选中另一套的正误差 | 理论双估计分析、收敛结果和随机环境例子支持减轻高估 | 双估计也可能低估，两个估计高度相关时收益有限 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](10-lspi.md) · [下一篇](12-gps.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "11-double-q";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 59 天｜TTPO：没有标准答案，测试时还能怎样更新模型 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">TTPO：没有标准答案，测试时还能怎样更新模型</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 59 天｜TTPO：没有标准答案，测试时还能怎样更新模型
+
+[系列首页](README.md) · [上一篇](58-factor.md) · [下一篇](60-draco.md)
+
+**原论文与版本**：Wang 等，*TTPO: Test-Time Policy Optimization*，2026-08-27。[正文](https://arxiv.org/html/2608.27448v1)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：无标签测试时推理适应
+
+**旧方法卡点**：多数票自奖励会把错误共识强化，正负样本token价值不同
+
+**作者主张**：以多数票伪答案为条件构造教师蒸馏，并对负回答进行token选择的RL抑制
+
+**论文证据**：原文小模型与数学基准报告测试时适应收益
+
+**一句话**：在无标签训练／测试时参数优化中，作者通过“以多数票伪答案为条件构造教师蒸馏，并对负回答进行token选择的RL抑制”应对“无标签测试时推理适应”这一问题；证据边界或代价是：多数票可能错，峰值检查点选择与全部适应成本必须说明。
+
+## 二、研究背景与问题定义
+
+本篇将“无标签测试时推理适应”放在无标签训练／测试时参数优化的边界内研究。多数票自奖励会把错误共识强化，正负样本token价值不同。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 无标签训练／测试时参数优化 |
+| 状态／观测 | 测试题与生成前缀 |
+| 动作 | token |
+| 奖励或学习信号 | 多数答案的一致性伪奖励，无真实答案参与更新 |
+| 终止／边界 | 生成上限；适应结束检查点需独立规定 |
+
+## 三、方法：到底改了什么
+
+每题先采较多回答形成伪答案，正分支利用答案条件教师与学生的分布差做蒸馏；负分支用组相对信号重点抑制某些置信错误token。方法不是只做多数投票的推理，还修改参数；教师与学生可来自同一模型但拥有不同条件信息。
+
+### 关键公式与符号
+
+教学总式 $L=L_{positive\ distill}+\lambda L_{negative\ RL}$。正分支权重含归一化熵与教师差异，负分支按学生置信相关分数筛token。原文例λ=0.1，不能把所有token统一广播当完整TTPO。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+对无标签题从当前策略采K=64条回答
+抽取答案并确定多数伪答案
+划分与伪答案一致／不一致的回答
+选训练子集，按正负比例构造batch
+正分支：教师以伪答案为条件，计算分布蒸馏与token权重
+负分支：构造组优势，筛选高置信相关token做负向更新
+某分支为空时显式跳过，不除零
+合并损失更新LoRA参数
+按预先定义规则选检查点后评估
+```
+
+**实现要点**：多数票可能错，峰值检查点选择与全部适应成本必须说明。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 正样本token加权蒸馏加负样本token选择RL |
+| 机制改变 | 以多数票伪答案为条件构造教师蒸馏，并对负回答进行token选择的RL抑制 |
+| 评价改善的指标 | Avg@12平均表现，不是pass@12 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | AIME25/26、HMMT25/26、BRUMO25等 |
+| 数据来源与规模 | 无标签题与自生成候选；OT训练和测试时训练分开 |
+| 对比基线 | OPSD、TTRL、GRPO等按标签权限区分 |
+| 训练预算与资源 | Qwen3-1.7/4/8B；LoRA rank64；K64；TTPO100步与部分基线500步 |
+| 指标及其含义 | Avg@12平均表现，不是pass@12 |
+| 随机性与不确定性 | 重复生成与训练种子区分；原文报告峰值检查点 |
+| 实际验证的假设 | 伪教师和正负token分工是否促进无标签适应 |
+
+**实验解读（本文分析）**：多数票可能错，峰值检查点选择与全部适应成本必须说明。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 表1 | OpenThoughts场景 | 无标签训练的相应结果 | 不能与直接测试时适应混写 |
+| 表2 | 测试时适应比较 | 1.7B平均38.0→45.2 | 不是固定权重独立测试 |
+| 表3／相关消融 | token权重与正负策略 | 检验模块组合 | 不保证多数伪标签正确 |
+| 长期训练／上界分析（具体图表编号本文未核实） | 更长训练与真标签参照 | 显示适应边界 | 不能证明无限自我改进 |
+
+38.0→45.2绝对提升7.2个百分点，相对约18.9%。**证据疑点**：§4.1描述保存并报告峰值检查点。即使训练不使用答案，若借评测分数挑峰值，模型选择也不再无标签；需补充如何部署时选模型以及预先固定检查点结果。
+
+## 六、贡献、代价与局限
+
+**作者方法**依赖伪标签和自蒸馏的互补。**本文分析**：错误多数可能把正确少数当负例；全部64次生成、教师重评分、LoRA更新都属于测试成本。题目在训练中出现但不使用标签，仍与普通未适应泛化评估不同。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+64条回答中40条答B、24条答A，而真答案是A。多数标签把A归负。token选择可能减少误伤，但没有独立真值就无法从机制上保证纠正错误共识。
+
+### 五个前置概念
+
+1. **测试时训练**：部署／评测题上继续修改参数。
+2. **伪标签**：由模型自身预测构成的监督。
+3. **多数票**：用最常见答案作聚合。
+4. **自蒸馏**：模型在不同条件下相互提供目标。
+5. **检查点选择**：决定最终报告哪个训练时刻。
+
+### 三个值得继续追问的问题
+
+1. 如何在完全无标签部署中选择停止时刻？
+2. 错误多数率怎样影响训练收益？
+3. 同样总生成token预算的纯推理基线表现如何？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 无标签测试时推理适应 | 以多数票伪答案为条件构造教师蒸馏，并对负回答进行token选择的RL抑制 | 把伪答案教师的纠正信号与负样本抑制分工 | 原文小模型与数学基准报告测试时适应收益 | 多数票可能错，峰值检查点选择与全部适应成本必须说明 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](58-factor.md) · [下一篇](60-draco.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "59-ttpo";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

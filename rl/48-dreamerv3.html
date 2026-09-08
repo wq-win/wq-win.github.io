@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 48 天｜DreamerV3：为什么跨任务稳定，比单个任务高分更难 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">DreamerV3：为什么跨任务稳定，比单个任务高分更难</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 48 天｜DreamerV3：为什么跨任务稳定，比单个任务高分更难
+
+[系列首页](README.md) · [上一篇](47-instructgpt.md) · [下一篇](49-dpo.md)
+
+**原论文与版本**：*Mastering Diverse Domains through World Models*，2023。[原论文](https://arxiv.org/abs/2301.04104)。
+
+**阅读范围**：引用 arXiv 修订正文中的方法与基准结果。2023 指首次预印本年份，后续修订结果不能全部归入首版。各版本的完整差异与代码尚未逐项核实。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：世界模型算法跨任务的超参数敏感性
+
+**旧方法卡点**：奖励尺度、观测类型和动态范围不同使同一配置难复用
+
+**作者主张**：用离散潜变量、尺度稳健的预测与归一化等配方统一世界模型学习
+
+**论文证据**：多领域基准展示固定超参数的广泛适用性
+
+**一句话**：在模型驱动、潜在世界模型与Actor–Critic，多领域中，作者通过“用离散潜变量、尺度稳健的预测与归一化等配方统一世界模型学习”应对“世界模型算法跨任务的超参数敏感性”这一问题；证据边界或代价是：同一配方分别训练不等于单模型零样本通用。
+
+## 二、研究背景与问题定义
+
+本篇将“世界模型算法跨任务的超参数敏感性”放在模型驱动、潜在世界模型与Actor–Critic，多领域的边界内研究。奖励尺度、观测类型和动态范围不同使同一配置难复用。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 模型驱动、潜在世界模型与Actor–Critic，多领域 |
+| 状态／观测 | 图像／状态经离散潜变量和递归记忆编码 |
+| 动作 | 离散或连续动作按任务设置 |
+| 奖励或学习信号 | 任务奖励的稳健编码与想象回报 |
+| 终止／边界 | 预测继续概率及真实终止 |
+
+## 三、方法：到底改了什么
+
+延续Dreamer的“真实数据学模型、想象中学行为”，重点是让损失在很不同的数值范围仍可用。symlog压缩大值，two-hot在相邻桶分配监督，KL相关平衡控制潜在模型学习，回报尺度归一化稳定Actor。不是一个新公式包打天下，而是完整学习系统。
+
+### 关键公式与符号
+
+$$symlog(x)=sign(x)\log(1+|x|),\quad symexp(y)=sign(y)(e^{|y|}-1).$$
+奖励／价值的分布预测与逆变换必须配套；Actor使用归一化的优势或回报信号时，不能把训练数值直接当原始任务回报。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+用真实轨迹训练离散潜在世界模型
+对不同预测头使用规定的尺度变换／分布损失
+平衡动态预测与表征KL目标
+从后验状态展开想象轨迹
+计算λ-return与稳健回报尺度
+更新Actor、Critic及目标统计
+继续真实交互
+跨任务保持论文规定的公共配置
+输出：每个任务训练出的模型与策略
+```
+
+**实现要点**：同一配方分别训练不等于单模型零样本通用。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 尺度稳健的模型预测与KL损失，配想象Actor–Critic |
+| 机制改变 | 用离散潜变量、尺度稳健的预测与归一化等配方统一世界模型学习 |
+| 评价改善的指标 | 任务分数、跨领域稳健性、扩展趋势 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 视觉控制、Atari、ProcGen、DMLab、Minecraft等 |
+| 数据来源与规模 | 各任务在线经验 |
+| 对比基线 | 领域专用算法及PPO等 |
+| 训练预算与资源 | 各域数据预算不同，固定超参不代表同样计算量 |
+| 指标及其含义 | 任务分数、跨领域稳健性、扩展趋势 |
+| 随机性与不确定性 | 完整种子与区间按基准图，本文未逐项核实 |
+| 实际验证的假设 | 一套训练配方能否减少跨任务调参 |
+
+**实验解读（本文分析）**：同一配方分别训练不等于单模型零样本通用。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图1 | 跨基准汇总 | 支持广域适用性 | 不是单模型同时掌握全部 |
+| 图3 | 世界模型与行为训练流程 | 明确继承和修改接口 | 流程不证明鲁棒性 |
+| 图4 | 长视频预测 | 展示潜在预测能力 | 视觉合理不等于物理正确 |
+| 消融／扩展结果（具体图表编号本文未核实） | 稳定化组件与模型尺度 | 检验训练配方 | 不可忽略版本变化 |
+
+**结论边界**：多领域基准展示固定超参数的广泛适用性。同一配方分别训练不等于单模型零样本通用。
+
+## 六、贡献、代价与局限
+
+**作者主张**是强通用训练配方。**本文分析**：固定超参的范围必须包含哪些参数可以随任务变动的说明；环境信息、预处理与动作编码也可能包含专业设计。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+任务A每步奖励0.01，B可得1000。原始平方误差会让大值任务主导数值尺度；symlog把1000压到约6.91，同时保留符号和顺序，但输出解码与评估仍应回到原单位。
+
+### 五个前置概念
+
+1. **Symlog**：保留符号的对数压缩。
+2. **Two-hot**：在相邻离散桶分配目标概率。
+3. **离散潜变量**：用离散随机编码描述隐状态。
+4. **KL平衡**：分配动态与表示学习的正则压力。
+5. **跨域稳健性**：在不同任务类型下保持训练有效。
+
+### 三个值得继续追问的问题
+
+1. 固定超参数具体包括哪些，不包括哪些？
+2. 预测更清晰是否一定提高控制？
+3. 首版与后续修订结果应怎样引用？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 世界模型算法跨任务的超参数敏感性 | 用离散潜变量、尺度稳健的预测与归一化等配方统一世界模型学习 | 统一不同任务的数值范围，减少同一训练机制的尺度敏感性 | 多领域基准展示固定超参数的广泛适用性 | 同一配方分别训练不等于单模型零样本通用 |
+
+## 资料与阅读范围
+
+原始资料的可用范围见文首说明。本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](47-instructgpt.md) · [下一篇](49-dpo.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "48-dreamerv3";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

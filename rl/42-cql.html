@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 42 天｜CQL：不敢相信未知动作，就直接惩罚乐观估值 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">CQL：不敢相信未知动作，就直接惩罚乐观估值</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 42 天｜CQL：不敢相信未知动作，就直接惩罚乐观估值
+
+[系列首页](README.md) · [上一篇](41-muzero.md) · [下一篇](43-awac.md)
+
+**原论文与版本**：Kumar 等，*Conservative Q-Learning for Offline Reinforcement Learning*，2020。[正文](https://arxiv.org/html/2006.04779v3)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：离线策略利用分布外高Q
+
+**旧方法卡点**：普通TD只约束数据动作，未知动作可能被随意高估
+
+**作者主张**：在TD损失外加入压低候选动作、相对抬高数据动作的保守正则
+
+**论文证据**：D4RL与离线Atari结果支持多场景收益
+
+**一句话**：在离线、无模型、保守价值学习中，作者通过“在TD损失外加入压低候选动作、相对抬高数据动作的保守正则”应对“离线策略利用分布外高Q”这一问题；证据边界或代价是：正则过强会过度保守；理论下界有具体条件。
+
+## 二、研究背景与问题定义
+
+本篇将“离线策略利用分布外高Q”放在离线、无模型、保守价值学习的边界内研究。普通TD只约束数据动作，未知动作可能被随意高估。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 离线、无模型、保守价值学习 |
+| 状态／观测 | 固定数据状态 |
+| 动作 | 离散动作或连续候选动作 |
+| 奖励或学习信号 | 数据奖励 |
+| 终止／边界 | 终止由原数据标记 |
+
+## 三、方法：到底改了什么
+
+与BCQ／BEAR限制Actor不同，CQL直接改变Critic。离散形式用logsumexp聚合动作价值，再减去数据动作价值；连续动作需近似积分。原文有不同变体，不能把所有变体的理论性质合并成“每个Q永远是下界”。
+
+### 关键公式与符号
+
+$$L=L_{TD}+\alpha[E_s\log\sum_a e^{Q(s,a)}-E_{(s,a)\sim D}Q(s,a)].$$
+第一项倾向压低高估动作，第二项相对保留数据动作。α权衡保守性与拟合，连续动作的采样近似改变实现。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+输入固定离线D
+每轮：
+  抽(s,a,r,s_next,done)
+  按底层算法构建冻结TD目标
+  计算数据动作Q
+  枚举／采样候选动作估计logsumexp项
+  最小化TD误差+α*(候选聚合Q-数据Q)
+  若有Actor，按原文策略目标更新
+  更新目标网络
+输出：保守Critic与策略
+```
+
+**实现要点**：正则过强会过度保守；理论下界有具体条件。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | TD误差加候选高Q与数据Q差的保守正则 |
+| 机制改变 | 在TD损失外加入压低候选动作、相对抬高数据动作的保守正则 |
+| 评价改善的指标 | 归一化回报、成功率、游戏分数 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | D4RL locomotion、AntMaze、Adroit、Kitchen；离线Atari |
+| 数据来源与规模 | 多质量固定数据；Atari含1%/10%等子集 |
+| 对比基线 | SAC离线、BC、BCQ、BEAR及相关基线 |
+| 训练预算与资源 | D4RL表1/2四种子；基线部分引自D4RL |
+| 指标及其含义 | 归一化回报、成功率、游戏分数 |
+| 随机性与不确定性 | 4种子汇总；全部误差形式逐表 |
+| 实际验证的假设 | 保守评价是否减少OOD自举失效 |
+
+**实验解读（本文分析）**：正则过强会过度保守；理论下界有具体条件。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| §3理论 | 保守目标的下界性质 | 特定条件／变体下的保证 | 非每个神经Q无条件下界 |
+| 表1 | 不同质量运动数据 | 支持多数据情形 | 基线并非全部同机重跑 |
+| 表2 | 迷宫、操作和厨房 | 检验稀疏／组合任务 | 大迷宫非全部解决 |
+| 表3 | 离线Atari子集 | 展示视觉离散扩展 | 存在无收益任务 |
+
+表3 Seaquest的10%数据：CQL约3674.1，REM约3936.6，说明并非所有设置取胜。表1 walker2d-medium-expert中CQL约98.7是归一化分数，不能解释成98.7%成功率。
+
+## 六、贡献、代价与局限
+
+**作者论证**是保守价值可以帮助离线控制。**本文分析**：未知并不等于差，保守性会阻止潜在更优动作；数据奖励错误时，保守也无法恢复真实目标。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+数据动作Q=2，未见动作Q=10，logsumexp几乎由10决定，会强烈压低它。若未见动作真实确实很好，这一惩罚仍会发生，因为数据没有足够证据。
+
+### 五个前置概念
+
+1. **保守正则**：对证据不足的高估施加代价。
+2. **Logsumexp**：平滑聚合较大值。
+3. **OOD动作**：超出数据覆盖的动作。
+4. **价值下界**：在特定假设下低于真实价值。
+5. **D4RL分数**：按任务参考值归一化的回报。
+
+### 三个值得继续追问的问题
+
+1. α如何同时影响安全性和收益？
+2. 连续动作积分近似会引入什么误差？
+3. “数据动作好”在劣质数据中是否成立？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 离线策略利用分布外高Q | 在TD损失外加入压低候选动作、相对抬高数据动作的保守正则 | 压制未受数据约束的乐观动作价值 | D4RL与离线Atari结果支持多场景收益 | 正则过强会过度保守；理论下界有具体条件 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](41-muzero.md) · [下一篇](43-awac.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "42-cql";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 56 天｜MBDPO：让世界模型、价值学习与扩散策略更一致 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">MBDPO：让世界模型、价值学习与扩散策略更一致</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 56 天｜MBDPO：让世界模型、价值学习与扩散策略更一致
+
+[系列首页](README.md) · [上一篇](55-dr-grpo.md) · [下一篇](57-worldsample.md)
+
+**原论文与版本**：Cheng 等，*Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization*，2026-05-25。[正文](https://arxiv.org/html/2605.26282v1)。这里的 Diffusion Policy Optimization 与直接偏好优化 DPO 不是同一算法。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：模型搜索与价值训练的策略分布不一致
+
+**旧方法卡点**：搜索可能挑中价值网络未训练过的动作序列，误差被下一轮继续放大
+
+**作者主张**：加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器
+
+**论文证据**：121任务、视觉控制和多任务扩展实验支持所报告方案
+
+**一句话**：在模型驱动在线、离线预训练及在线微调中，作者通过“加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器”应对“模型搜索与价值训练的策略分布不一致”这一问题；证据边界或代价是：能量密度解释有采样假设；最大模型并非所有设置都继续改善。
+
+## 二、研究背景与问题定义
+
+本篇将“模型搜索与价值训练的策略分布不一致”放在模型驱动在线、离线预训练及在线微调的边界内研究。搜索可能挑中价值网络未训练过的动作序列，误差被下一轮继续放大。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 模型驱动在线、离线预训练及在线微调 |
+| 状态／观测 | 潜在状态z和环境观测 |
+| 动作 | 多步连续动作序列 |
+| 奖励或学习信号 | 预测任务回报加能量相关正则 |
+| 终止／边界 | 环境终止与模型展开长度分别处理 |
+
+## 三、方法：到底改了什么
+
+世界模型预测动作后果，价值网络补足后续收益，能量模型约束偏离行为分布。训练时对候选序列计算正则化想象回报，形成加权Monte Carlo score目标，再让score网络拟合。部署时使用学到的score做扩散采样，把训练中的昂贵估计摊销到网络；不是每次执行都完整重跑同样Monte Carlo规划。
+
+### 关键公式与符号
+
+$$w_i=\frac{\exp(\widetilde G_i/\kappa)}{\sum_j\exp(\widetilde G_j/\kappa)},\quad L_{score}=E\|\hat\phi(z,a^\tau,\tau)-\phi_{MC}(z,a^\tau,\tau)\|^2.$$
+κ是回报权重温度；φ_MC使用噪声级别和加权干净候选序列计算，详见式15。能量用于正则化G，其与−log行为密度的联系取决于负样本分布。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+从真实replay训练编码、潜在动态、奖励和价值模型
+训练能量模型：数据动作正例，规定的错配动作负例
+训练扩散score：
+  抽状态z、噪声级别τ和带噪动作序列
+  从对应提议分布采T个干净候选序列
+  在世界模型中展开，求正则化回报G_tilde
+  softmax(G_tilde/κ)得到权重
+  按原文式15构造Monte Carlo score目标
+  停止目标梯度，拟合score网络
+部署：从噪声用score迭代生成动作序列并执行规定动作
+继续真实交互更新数据
+```
+
+**实现要点**：能量密度解释有采样假设；最大模型并非所有设置都继续改善。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 世界模型／能量训练，以及回报加权Monte Carlo score目标的回归 |
+| 机制改变 | 加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器 |
+| 评价改善的指标 | 回报／成功、cross TD误差、策略漂移和时间 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | DMControl、MetaWorld、ManiSkill2、MyoSuite共121任务 |
+| 数据来源与规模 | 在线replay、30／80任务离线数据及微调 |
+| 对比基线 | TD-MPC、TD-MPC2、SAC、DreamerV3 |
+| 训练预算与资源 | 模型1.7M—340M；表1在线A800、离线H200上10M更新成本 |
+| 指标及其含义 | 回报／成功、cross TD误差、策略漂移和时间 |
+| 随机性与不确定性 | 视觉图5各任务5种子；其他实验范围单独核对 |
+| 实际验证的假设 | 分布约束和摊销扩散策略是否改善世界模型学习 |
+
+**实验解读（本文分析）**：能量密度解释有采样假设；最大模型并非所有设置都继续改善。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图3 | cross TD误差与策略漂移 | 支持所测训练不一致减少 | 不是完全无模型误差证明 |
+| 图4—5 | 多基准和视觉控制 | 支持实验覆盖内收益 | 不代表每个子任务均更好 |
+| 图6 | 30／80任务模型扩展 | 考察容量收益 | 30任务340M下降，非严格单调 |
+| 图7 | 离线到在线微调 | 展示可迁移性及失败例 | Hopper Hop仍有明显问题 |
+| 表1 | 训练硬件与时间 | 提供部分计算成本证据 | 不能混用不同GPU时间 |
+
+**证据疑点**：正文概括“单调扩展”，同时写明30任务数据上340M模型两方法表现下降。应以分设置曲线解读，不把概括句当全范围定律。能量解释也需核对：对比估计一般学习相对负样本分布的密度比，不能不看负例分布就称为精确行为密度。
+
+## 六、贡献、代价与局限
+
+**作者解释**较大模型下降可能与数据容量饱和有关；这是解释而非被独立证明的原因。**本文分析**：候选数、去噪步数、score拟合误差及能量正则共同决定成本和质量；只看世界模型参数量不足以解释扩展行为。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+模型给两序列想象回报10与9，但高分序列偏离数据很远。正则后可能变为6与8，权重转向后者。若能量模型把罕见但有效动作也当危险，它会限制真实改进。
+
+### 五个前置概念
+
+1. **Score**：扩散分布对输入的log密度梯度。
+2. **能量模型**：用标量分数描述样本相容性。
+3. **Gibbs权重**：按指数回报分配候选权重。
+4. **摊销推断**：把昂贵求解结果学习进网络。
+5. **策略漂移**：行动分布偏离训练支持。
+
+### 三个值得继续追问的问题
+
+1. 负样本采样如何改变能量的密度解释？
+2. 固定总训练成本而非参数量时扩展趋势是否保持？
+3. score拟合与世界模型误差各贡献多少失败？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 模型搜索与价值训练的策略分布不一致 | 加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器 | 行为相关正则减少搜索偏离，score网络摊销昂贵策略求解 | 121任务、视觉控制和多任务扩展实验支持所报告方案 | 能量密度解释有采样假设；最大模型并非所有设置都继续改善 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](55-dr-grpo.md) · [下一篇](57-worldsample.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "56-mbdpo";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

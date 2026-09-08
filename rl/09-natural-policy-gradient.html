@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 09 天｜自然策略梯度：同样改一个参数，行为变化为什么不同 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">自然策略梯度：同样改一个参数，行为变化为什么不同</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 09 天｜自然策略梯度：同样改一个参数，行为变化为什么不同
+
+[系列首页](README.md) · [上一篇](08-policy-gradient-theorem.md) · [下一篇](10-lspi.md)
+
+**原论文与版本**：*A Natural Policy Gradient*，2001。[原论文](https://proceedings.neurips.cc/paper/2001/file/4b86abe48d358ecf194c56c69108433e-Paper.pdf)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：普通梯度对参数尺度敏感
+
+**旧方法卡点**：参数欧氏距离不等于策略分布距离
+
+**作者主张**：按策略 Fisher 几何预条件化梯度
+
+**论文证据**：§5 的简单 MDP、LQG 与 Tetris 展示优化路径差异
+
+**一句话**：在可微随机策略的单智能体策略搜索中，作者通过“按策略 Fisher 几何预条件化梯度”应对“普通梯度对参数尺度敏感”这一问题；证据边界或代价是：估计 Fisher 与求解线性系统有成本，近似会改变保证。
+
+## 二、研究背景与问题定义
+
+本篇将“普通梯度对参数尺度敏感”放在可微随机策略的单智能体策略搜索的边界内研究。参数欧氏距离不等于策略分布距离。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 可微随机策略的单智能体策略搜索 |
+| 状态／观测 | MDP 状态；实验含 LQG 和 Tetris 特征 |
+| 动作 | 策略输出的控制／放置动作 |
+| 奖励或学习信号 | 任务收益或负成本 |
+| 终止／边界 | 按任务定义回合或持续目标 |
+
+## 三、方法：到底改了什么
+
+自然梯度没有换任务，而是换“多大一步”的度量。某个参数在概率已经饱和时改很多也没什么行为变化，另一个参数微调就可能改写决策。Fisher 用局部 KL 刻画这些敏感性；兼容优势逼近又把自然梯度和近似策略迭代连起来。
+
+### 关键公式与符号
+
+$$g=\nabla J,\quad F=\mathbb E[\nabla\log\pi\nabla\log\pi^\top],\quad \tilde g=F^{-1}g.$$
+局部 $D_{KL}(\pi_\theta\|\pi_{\theta+\Delta})\approx\frac12\Delta^\top F\Delta$。实现通常解线性系统而不求显式逆，阻尼 F+ηI 是数值近似。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+采集当前策略数据
+估计普通梯度 g
+构建 Fisher 矩阵或 Fisher-vector product
+解 (F+ηI)d = g
+按选定步长／局部 KL 尺度设置 Δθ
+θ ← θ+Δθ
+重新评估策略并采集新数据
+输出：更新后的策略
+```
+
+**实现要点**：估计 Fisher 与求解线性系统有成本，近似会改变保证。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 最大化原回报，以Fisher几何确定局部更新方向 |
+| 机制改变 | 按策略 Fisher 几何预条件化梯度 |
+| 评价改善的指标 | 成本、平均回报、Tetris 得分 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | §5：LQG、简单 MDP、Tetris |
+| 数据来源与规模 | 策略生成经验 |
+| 对比基线 | 普通梯度、近似贪心策略迭代等 |
+| 训练预算与资源 | 迭代尺度按各图；硬件和完整样本账本本文未核实 |
+| 指标及其含义 | 成本、平均回报、Tetris 得分 |
+| 随机性与不确定性 | 全部随机重复与误差区间本文未核实 |
+| 实际验证的假设 | 改变几何能否缓解普通梯度的平台现象 |
+
+**实验解读（本文分析）**：估计 Fisher 与求解线性系统有成本，近似会改变保证。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| Theorem 1 | 兼容近似参数与自然梯度的联系 | 理论桥梁 | 不保证有限样本逆矩阵准确 |
+| 图1 | 简单任务普通与自然梯度轨迹 | 优化速度及方向差异 | 不能外推所有深度网络 |
+| 图2 | Tetris 的迭代表现 | 较复杂问题中也观察到收益 | 横轴迭代不是总算力 |
+
+**结论边界**：§5 的简单 MDP、LQG 与 Tetris 展示优化路径差异。估计 Fisher 与求解线性系统有成本，近似会改变保证。
+
+## 六、贡献、代价与局限
+
+**作者论证**强调参数化不变性及与策略迭代的联系。**本文分析**：奇异 Fisher、有限样本噪声和大步长会破坏局部近似；自然梯度不是“自动最优学习率”。TRPO 将这种局部几何推进为更明确的步幅约束。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+若 g=(1,1)，F=diag(100,1)，自然方向为 (0.01,1)。第一维被压小是因为相同参数步幅会造成更大概率变化，不代表第一维任务梯度不重要。
+
+### 五个前置概念
+
+1. **Fisher 信息**：刻画分布对参数扰动的敏感性。
+2. **KL 散度**：比较两个概率分布。
+3. **预条件化**：按曲率调整梯度方向。
+4. **局部近似**：只在足够小的步长附近可靠。
+5. **阻尼**：改善线性系统数值稳定性。
+
+### 三个值得继续追问的问题
+
+1. Fisher 估计样本不够时方向会怎样变？
+2. 相同 KL 步长是否保证相同回报提升？
+3. 自然梯度与 Adam 的预条件化有何区别？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 普通梯度对参数尺度敏感 | 按策略 Fisher 几何预条件化梯度 | 按行为分布变化而非参数绝对尺度控制更新 | §5 的简单 MDP、LQG 与 Tetris 展示优化路径差异 | 估计 Fisher 与求解线性系统有成本，近似会改变保证 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](08-policy-gradient-theorem.md) · [下一篇](10-lspi.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "09-natural-policy-gradient";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

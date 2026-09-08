@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 02 天｜TD(λ)：结果还没出现，预测为什么就能学习 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">TD(λ)：结果还没出现，预测为什么就能学习</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 02 天｜TD(λ)：结果还没出现，预测为什么就能学习
+
+[系列首页](README.md) · [上一篇](01-actor-critic.md) · [下一篇](03-dyna.md)
+
+**原论文与版本**：*Learning to Predict by the Methods of Temporal Differences*，1988。[原论文](https://jmvidal.cse.sc.edu/library/sutton88a.pdf)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：长序列中的预测与信用分配
+
+**旧方法卡点**：Monte Carlo 要等终局，早期预测难以及时修正
+
+**作者主张**：用相邻预测差和资格迹更新历史状态
+
+**论文证据**：原文随机游走实验与特殊条件下的理论分析支持 TD 的有效性
+
+**一句话**：在固定过程的在线预测，通常先不学习策略中，作者通过“用相邻预测差和资格迹更新历史状态”应对“长序列中的预测与信用分配”这一问题；证据边界或代价是：函数表示、步长和 λ 改变偏差与方差，非任意设置都更好。
+
+## 二、研究背景与问题定义
+
+本篇将“长序列中的预测与信用分配”放在固定过程的在线预测，通常先不学习策略的边界内研究。Monte Carlo 要等终局，早期预测难以及时修正。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 固定过程的在线预测，通常先不学习策略 |
+| 状态／观测 | 随机过程当前状态 |
+| 动作 | 预测任务不必有可学习动作 |
+| 奖励或学习信号 | 终局结果或一般化后的逐步奖励 |
+| 终止／边界 | 吸收终点；终值作为预测目标 |
+
+## 三、方法：到底改了什么
+
+TD 先解决评价问题：不知道终局，也可让当前预测靠近下一步更有信息的预测。资格迹 e 保存过去哪些参数应该收到这次误差。λ 小让影响集中于近处，λ 大把责任传播更远。与 Q-learning 不同，本文的基础目标不是比较动作的最大 Q。
+
+### 关键公式与符号
+
+现代奖励形式：$\delta_t=r_t+\gamma V_w(s_{t+1})-V_w(s_t)$，$e_t=\gamma\lambda e_{t-1}+\nabla_wV_w(s_t)$，$w\leftarrow w+\alpha\delta_t e_t$。λ 是迹衰减，不是学习率。原文终局预测形式可以在中间奖励为零时对应理解。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+输入：固定过程，V 参数 w，α,γ,λ
+每个回合开始：e ← 0
+逐步观察 s,r,s_next：
+  next_value ← 0 if 真终止 else V(s_next)
+  δ ← r + γ*next_value - V(s)
+  e ← γ*λ*e + ∇w V(s)
+  w ← w + α*δ*e
+回合结束清空 e
+输出：预测函数 V
+```
+
+**实现要点**：在线变化参数下，普通累积迹与离线前向 λ-return 的逐步严格等价不能不加条件；不要倒灌后来 true-online TD 的结论。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 拟合未来结果或策略价值；以TD残差与资格迹进行随机逼近 |
+| 机制改变 | 用相邻预测差和资格迹更新历史状态 |
+| 评价改善的指标 | 预测值对真实概率的误差 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 有界随机游走等预测问题 |
+| 数据来源与规模 | 由马尔可夫过程产生训练序列 |
+| 对比基线 | 监督／Monte Carlo 风格更新与不同 λ |
+| 训练预算与资源 | 序列数、重复训练协议见随机游走实验；完整预算本文未逐项核实 |
+| 指标及其含义 | 预测值对真实概率的误差 |
+| 随机性与不确定性 | 具体图的重复次数须按原文读取；不统一改称置信区间 |
+| 实际验证的假设 | 相邻预测能否更有效利用状态转移结构 |
+
+**实验解读（本文分析）**：函数表示、步长和 λ 改变偏差与方差，非任意设置都更好。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| Theorem 1 | 线性 TD(1) 与相应传统更新的联系 | 揭示两类学习规则的关系 | 不覆盖任意非线性在线网络 |
+| 图2 | 随机游走生成过程 | 给出可计算真实预测值的任务 | 不代表复杂控制 |
+| 随机游走实验图3—5 | 不同 λ 与学习设置的预测误差 | TD 在所测条件下利用序列结构 | 不证明 λ 越小或越大越好 |
+
+**结论边界**：原文随机游走实验与特殊条件下的理论分析支持 TD 的有效性。函数表示、步长和 λ 改变偏差与方差，非任意设置都更好。
+
+## 六、贡献、代价与局限
+
+**作者论证**包括特定线性情形的收敛与预测优势。**本文分析**：bootstrapping 把样本等待成本换成估计依赖；状态不是充分统计量时，相邻预测也可能系统性出错。后续 GAE 将类似混合思想用于策略优势估计，但两者优化角色不同。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+状态 A→B→终点1，初始 V(A)=V(B)=0.5，γ=1。A→B 的 δ=0；B→终点的 δ=0.5。若 λ=0，主要更新 B；λ=0.8，A 的残留迹也让它得到 α×0.5×0.8 的修正。
+
+### 五个前置概念
+
+1. **预测学习**：估计未来结果而非直接找动作。
+2. **Bootstrapping**：把另一个当前估计用于目标。
+3. **资格迹**：保存历史特征的衰减记忆。
+4. **λ-return**：混合不同长度回报的目标。
+5. **偏差—方差**：错误先验与采样噪声的折中。
+
+### 三个值得继续追问的问题
+
+1. 转移噪声变大时，最优 λ 会怎样变化？
+2. 若状态表示混合了两个不同真实状态，TD 的目标是什么？
+3. 为什么 TD 误差小不能直接证明策略最优？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 长序列中的预测与信用分配 | 用相邻预测差和资格迹更新历史状态 | 迹保存过去状态的参与程度，让当前误差影响较早预测 | 原文随机游走实验与特殊条件下的理论分析支持 TD 的有效性 | 函数表示、步长和 λ 改变偏差与方差，非任意设置都更好 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](01-actor-critic.md) · [下一篇](03-dyna.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "02-td-lambda";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

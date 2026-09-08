@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 34 天｜QMIX：用单调混合，让局部贪心与团队价值一致 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">QMIX：用单调混合，让局部贪心与团队价值一致</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 34 天｜QMIX：用单调混合，让局部贪心与团队价值一致
+
+[系列首页](README.md) · [上一篇](33-diayn.md) · [下一篇](35-pets.md)
+
+**原论文与版本**：*QMIX: Monotonic Value Function Factorisation for Deep Multi-Agent Reinforcement Learning*，2018。[原论文](https://arxiv.org/abs/1803.11485)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：合作团队的分散动作选择
+
+**旧方法卡点**：联合Q的动作组合指数增长，简单相加表达能力有限
+
+**作者主张**：以单调混合网络把各智能体局部Q组合为团队Q
+
+**论文证据**：两步博弈与StarCraft II实验展示比VDN更强的表示与表现
+
+**一句话**：在合作多智能体、集中训练分散执行、值分解中，作者通过“以单调混合网络把各智能体局部Q组合为团队Q”应对“合作团队的分散动作选择”这一问题；证据边界或代价是：单调性限制能表示的协作价值，不能覆盖所有博弈。
+
+## 二、研究背景与问题定义
+
+本篇将“合作团队的分散动作选择”放在合作多智能体、集中训练分散执行、值分解的边界内研究。联合Q的动作组合指数增长，简单相加表达能力有限。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 合作多智能体、集中训练分散执行、值分解 |
+| 状态／观测 | 局部历史给agent Q，全局状态给mixer超网络 |
+| 动作 | 各单位离散动作 |
+| 奖励或学习信号 | 共享团队奖励 |
+| 终止／边界 | 团队胜败或任务截断 |
+
+## 三、方法：到底改了什么
+
+每个单位可独立argmax自己的Q。若团队Q对每个局部Q单调不减，局部最大化组合就能最大化已表示的团队Q。超网络用全局状态产生非负混合权重，训练时有全局信息，执行时不需要mixer。
+
+### 关键公式与符号
+
+$$Q_{tot}=f_s(Q_1,\ldots,Q_n),\quad\frac{\partial Q_{tot}}{\partial Q_i}\ge0.$$
+这是表示约束，不是对真实环境自动成立的事实。TD训练的是Qtot；局部Qi不必等于某个单独奖励的价值。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+各agent用局部历史选择动作并交互
+将联合轨迹存入replay
+抽序列以恢复循环网络状态
+计算各局部Q_i(历史_i,a_i)
+全局状态经超网络产生非负mixer权重
+得到Q_tot
+用目标网络的各局部argmax构造下一Q_tot目标
+最小化团队TD损失
+部署仅运行各agent网络
+```
+
+**实现要点**：单调性限制能表示的协作价值，不能覆盖所有博弈。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 最小化团队Q的TD误差，同时约束混合器单调 |
+| 机制改变 | 以单调混合网络把各智能体局部Q组合为团队Q |
+| 评价改善的指标 | 胜率、团队Q拟合 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 两步矩阵博弈、六个StarCraft II战斗地图 |
+| 数据来源与规模 | 联合在线轨迹 |
+| 对比基线 | IQL(独立Q，非2021离线IQL)、VDN、QMIX |
+| 训练预算与资源 | 完整环境步数与版本见实验节，本文未完整核实 |
+| 指标及其含义 | 胜率、团队Q拟合 |
+| 随机性与不确定性 | 种子与区间本文未全部核实 |
+| 实际验证的假设 | 更丰富的单调分解是否提高协作 |
+
+**实验解读（本文分析）**：单调性限制能表示的协作价值，不能覆盖所有博弈。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图2 | agent、mixer与超网络 | 说明训练／部署信息 | 不证明真实价值单调 |
+| 表1—2 | 两步博弈的价值表示 | 比VDN更有表达力 | 不等于能表示任意矩阵 |
+| 图3 | 六图胜率 | 特定任务协作收益 | 不代表所有单位数量和版本 |
+
+**结论边界**：两步博弈与StarCraft II实验展示比VDN更强的表示与表现。单调性限制能表示的协作价值，不能覆盖所有博弈。
+
+## 六、贡献、代价与局限
+
+**作者机制**保证已表示Qtot的局部贪心一致性。**本文分析**：如果真实最优需要某局部Q降低才能与别的动作配合，单调形式可能不够。训练全局状态也属于额外信息预算。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+团队Q=2Q1+3Q2，正权重确保分别增大Q1、Q2会增加总值；若某任务要求两个动作不同才奖励，而局部排序随队友动作翻转，固定单调排序就难表达。
+
+### 五个前置概念
+
+1. **VDN**：把局部Q简单相加的分解。
+2. **Mixer**：组合局部价值的网络。
+3. **超网络**：输出另一个网络参数的网络。
+4. **单调性**：某输入增加时输出不下降。
+5. **局部历史**：部分观测下用于决策的记忆。
+
+### 三个值得继续追问的问题
+
+1. 单调限制排除了哪些协作任务？
+2. 局部Qi能否直接解释为各单位贡献？
+3. StarCraft版本变化如何影响复现胜率？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 合作团队的分散动作选择 | 以单调混合网络把各智能体局部Q组合为团队Q | 已表示的团队价值可通过各局部Q独立贪心最大化 | 两步博弈与StarCraft II实验展示比VDN更强的表示与表现 | 单调性限制能表示的协作价值，不能覆盖所有博弈 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](33-diayn.md) · [下一篇](35-pets.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "34-qmix";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

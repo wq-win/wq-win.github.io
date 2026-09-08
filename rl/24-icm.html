@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 24 天｜ICM：好奇心奖励应该预测什么 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">ICM：好奇心奖励应该预测什么</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 24 天｜ICM：好奇心奖励应该预测什么
+
+[系列首页](README.md) · [上一篇](23-gail.md) · [下一篇](25-maddpg.md)
+
+**原论文与版本**：*Curiosity-driven Exploration by Self-supervised Prediction*，2017。[原论文](https://arxiv.org/abs/1705.05363)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：稀疏奖励下的探索
+
+**旧方法卡点**：没有外部成功信号时策略难以发现有价值区域，像素预测又容易被噪声吸引
+
+**作者主张**：用逆动力学学习动作相关特征，再以特征前向预测误差作为内在奖励
+
+**论文证据**：VizDoom、Mario与噪声／迁移实验支持特征空间好奇心
+
+**一句话**：在在线、无模型策略学习加内在奖励中，作者通过“用逆动力学学习动作相关特征，再以特征前向预测误差作为内在奖励”应对“稀疏奖励下的探索”这一问题；证据边界或代价是：预测误差不等于任务价值，也未完全消除不可控噪声。
+
+## 二、研究背景与问题定义
+
+本篇将“稀疏奖励下的探索”放在在线、无模型策略学习加内在奖励的边界内研究。没有外部成功信号时策略难以发现有价值区域，像素预测又容易被噪声吸引。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 在线、无模型策略学习加内在奖励 |
+| 状态／观测 | 视觉观测 |
+| 动作 | 游戏／导航动作 |
+| 奖励或学习信号 | 外部奖励加特征预测误差 |
+| 终止／边界 | 任务回合边界，内在信号处理按实现 |
+
+## 三、方法：到底改了什么
+
+逆模型从相邻特征推断动作，促使编码保留与控制有关的信息；前向模型根据当前特征和动作预测下一特征。策略去寻找当前预测困难的转移。它不需要规划器，但内在奖励依赖一个学习模型，故不能简单把“无模型策略”理解成系统中没有任何预测网络。
+
+### 关键公式与符号
+
+$$r_t^i=\frac\eta2\|\hat\phi(s_{t+1})-\phi(s_{t+1})\|^2,\quad L_{ICM}=(1-\beta)L_{inverse}+\beta L_{forward}.$$
+η控制探索奖励尺度，β控制表示训练中两个任务的比例，二者不同。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+收集当前策略轨迹
+编码相邻观测 φ(s),φ(s_next)
+逆模型预测 a 并最小化动作分类损失
+前向模型从 φ(s),a 预测下一特征
+内在奖励 ← 当前前向预测误差
+用 r_external+r_intrinsic 计算策略优势
+以A3C等更新策略，同时按原文权重训练ICM
+输出：策略与探索表征
+```
+
+**实现要点**：预测误差不等于任务价值，也未完全消除不可控噪声。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 逆动作预测和前向特征预测联合训练；策略优化内外奖励 |
+| 机制改变 | 用逆动力学学习动作相关特征，再以特征前向预测误差作为内在奖励 |
+| 评价改善的指标 | 外部得分、探索距离与迁移表现 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | VizDoom导航、Mario探索及迁移 |
+| 数据来源与规模 | 在线视觉轨迹 |
+| 对比基线 | A3C、像素预测好奇心、ICM-A3C |
+| 训练预算与资源 | 任务难度按起点距目标等改变；总预算逐图 |
+| 指标及其含义 | 外部得分、探索距离与迁移表现 |
+| 随机性与不确定性 | 图5三独立运行，阴影为均值±标准误 |
+| 实际验证的假设 | 控制相关表示是否比像素误差更适合探索 |
+
+**实验解读（本文分析）**：预测误差不等于任务价值，也未完全消除不可控噪声。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图2 | 模块和奖励信息流 | 说明内在奖励来源 | 不等于收益 |
+| 图5 | 稠密到更稀疏奖励 | ICM在所测困难导航中受益 | 不保证所有稀疏任务 |
+| 噪声与迁移实验节（具体图表编号本文未核实） | 不可控视觉扰动和新地图 | 检验部分鲁棒性／迁移 | 不等于彻底解决noisy-TV |
+
+**结论边界**：VizDoom、Mario与噪声／迁移实验支持特征空间好奇心。预测误差不等于任务价值，也未完全消除不可控噪声。
+
+## 六、贡献、代价与局限
+
+**作者解释**是控制相关特征减少无关噪声影响。**本文分析**：逆模型也可能保留与动作相关但任务无用的变化，前向误差可能持续来自随机性。要同时看外部任务指标与探索范围。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+背景电视随机变色而角色不动，像素预测误差很高；若逆模型只需角色位置推断动作，背景更可能被过滤。若随机闪光与按钮相关，编码仍可能保留它并吸引策略。
+
+### 五个前置概念
+
+1. **内在奖励**：由学习系统自身产生的反馈。
+2. **逆动力学**：从前后状态预测动作。
+3. **前向动力学**：从状态动作预测后继状态。
+4. **特征表示**：从原始输入抽取可学习信息。
+5. **Noisy-TV**：不可预测噪声诱发无用探索。
+
+### 三个值得继续追问的问题
+
+1. 如何分开模型未知与环境随机性？
+2. 探索更远是否等于任务更好？
+3. 更强前向模型会让内在奖励如何变化？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 稀疏奖励下的探索 | 用逆动力学学习动作相关特征，再以特征前向预测误差作为内在奖励 | 控制相关表示可能减少无关像素随机性对探索的吸引 | VizDoom、Mario与噪声／迁移实验支持特征空间好奇心 | 预测误差不等于任务价值，也未完全消除不可控噪声 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](23-gail.md) · [下一篇](25-maddpg.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "24-icm";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

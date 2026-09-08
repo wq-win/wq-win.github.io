@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 45 天｜TD3+BC：离线学习中，一项模仿损失能走多远 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">TD3+BC：离线学习中，一项模仿损失能走多远</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 45 天｜TD3+BC：离线学习中，一项模仿损失能走多远
+
+[系列首页](README.md) · [上一篇](44-decision-transformer.md) · [下一篇](46-iql.md)
+
+**原论文与版本**：*A Minimalist Approach to Offline Reinforcement Learning*，2021。[原论文](https://arxiv.org/abs/2106.06860)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：离线方法复杂度与复现敏感性
+
+**旧方法卡点**：大量工程差异掩盖真正算法收益，TD3又会选择OOD动作
+
+**作者主张**：在TD3 Actor目标中加入行为克隆，并规范化状态输入
+
+**论文证据**：原文D4RL实验展示简洁方案的竞争力和评价波动
+
+**一句话**：在离线、连续动作、TD3加行为约束中，作者通过“在TD3 Actor目标中加入行为克隆，并规范化状态输入”应对“离线方法复杂度与复现敏感性”这一问题；证据边界或代价是：简单不等于无超参数，BC约束也可能限制改进。
+
+## 二、研究背景与问题定义
+
+本篇将“离线方法复杂度与复现敏感性”放在离线、连续动作、TD3加行为约束的边界内研究。大量工程差异掩盖真正算法收益，TD3又会选择OOD动作。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 离线、连续动作、TD3加行为约束 |
+| 状态／观测 | 按数据统计规范化的状态 |
+| 动作 | 连续策略动作 |
+| 奖励或学习信号 | 固定数据奖励 |
+| 终止／边界 | 数据终止语义 |
+
+## 三、方法：到底改了什么
+
+Critic基本沿用TD3，Actor既希望Q高又希望动作靠近数据。以Q绝对值的批统计调整权重，降低奖励尺度影响；该权重用于归一化，通常不向Critic反传。状态规范化与BC是明确新增部分，不宜只写成“加一个loss”。
+
+### 关键公式与符号
+
+$$\max_\theta E[\lambda Q(s,\pi_\theta(s))-\|\pi_\theta(s)-a\|^2],\quad\lambda=\alpha/E|Q(s,a)|.$$
+实际分母需数值保护并停止梯度。α仍决定价值优化与模仿折中。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。`stop_gradient` 表示停止向目标量传播梯度。
+
+```text
+固定D，计算状态均值与标准差
+规范化训练与评估观测
+循环：
+  按TD3更新双Critic
+  到延迟Actor更新步时：
+    λ←α/stop_gradient(mean(abs(Q(s,a))))
+    Actor最小化 -λQ(s,π(s))+||π(s)-a||²
+    更新目标网络
+输出：带相同状态规范化的策略
+```
+
+**实现要点**：简单不等于无超参数，BC约束也可能限制改进。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | TD3价值损失；Actor优化尺度化Q收益减数据动作MSE |
+| 机制改变 | 在TD3 Actor目标中加入行为克隆，并规范化状态输入 |
+| 评价改善的指标 | 归一化回报、跨回合／跨检查点评价波动 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | D4RL locomotion多质量数据 |
+| 数据来源与规模 | 固定离线数据 |
+| 对比基线 | CQL、BCQ等原文基线与简化版本 |
+| 训练预算与资源 | 完整梯度预算见原文；不新增训练交互 |
+| 指标及其含义 | 归一化回报、跨回合／跨检查点评价波动 |
+| 随机性与不确定性 | 论文特别检查10回合和末段评价差异；训练种子需另计 |
+| 实际验证的假设 | 少量修改能否达到竞争结果 |
+
+**实验解读（本文分析）**：简单不等于无超参数，BC约束也可能限制改进。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 表1／图1 | 各算法实施改动与简化版 | 工程选择影响成绩 | 不证明所有复杂设计无用 |
+| 图2—3 | 同策略回合及末段检查点波动 | 提醒报告完整不确定性 | 不是训练种子方差 |
+| 实验主表（具体图表编号本文未核实） | D4RL比较 | 支持极简基线价值 | 不涵盖所有离线任务 |
+
+**结论边界**：原文D4RL实验展示简洁方案的竞争力和评价波动。简单不等于无超参数，BC约束也可能限制改进。
+
+## 六、贡献、代价与局限
+
+**作者贡献**是有力的简洁基线与复现分析。**本文分析**：多峰数据下MSE可能输出从未见过的中间动作；分母归一化也不消除所有奖励平移影响。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+数据动作为−1与1，若纯MSE平均会输出0，可能处在无支持区域。Q项有机会选更好模式，但前提是Critic能正确区分，而不是凭空高估0。
+
+### 五个前置概念
+
+1. **行为克隆正则**：惩罚偏离数据动作。
+2. **状态规范化**：统一输入尺度。
+3. **延迟Actor**：继承TD3的更新频率。
+4. **评价方差**：同一策略多次执行也可波动。
+5. **极简基线**：用较少机制检验复杂方法必要性。
+
+### 三个值得继续追问的问题
+
+1. 多峰动作分布为何会使MSE危险？
+2. 奖励平移与缩放对λ有什么不同影响？
+3. 最佳检查点与末段平均会产生多大差异？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 离线方法复杂度与复现敏感性 | 在TD3 Actor目标中加入行为克隆，并规范化状态输入 | 在回报改进与行为接近之间设置简单可控折中 | 原文D4RL实验展示简洁方案的竞争力和评价波动 | 简单不等于无超参数，BC约束也可能限制改进 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](44-decision-transformer.md) · [下一篇](46-iql.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "45-td3-bc";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 26 天｜HER：失败轨迹也能成为另一个目标的成功经验 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">HER：失败轨迹也能成为另一个目标的成功经验</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 26 天｜HER：失败轨迹也能成为另一个目标的成功经验
+
+[系列首页](README.md) · [上一篇](25-maddpg.md) · [下一篇](27-ppo.md)
+
+**原论文与版本**：*Hindsight Experience Replay*，2017。[原论文](https://arxiv.org/abs/1707.01495)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：目标条件任务中的稀疏成功信号
+
+**旧方法卡点**：随机探索很少完成指定目标，绝大多数轨迹奖励相同
+
+**作者主张**：将已达到的结果重标为目标，重算奖励并复用轨迹
+
+**论文证据**：机器人推、滑、抓取等实验支持稀疏奖励学习
+
+**一句话**：在目标条件、off-policy、机器人控制中，作者通过“将已达到的结果重标为目标，重算奖励并复用轨迹”应对“目标条件任务中的稀疏成功信号”这一问题；证据边界或代价是：必须能合法重算目标奖励，随机环境重标可能引入偏差。
+
+## 二、研究背景与问题定义
+
+本篇将“目标条件任务中的稀疏成功信号”放在目标条件、off-policy、机器人控制的边界内研究。随机探索很少完成指定目标，绝大多数轨迹奖励相同。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 目标条件、off-policy、机器人控制 |
+| 状态／观测 | 状态s与期望目标g，另记录已达目标 |
+| 动作 | 机械臂连续动作 |
+| 奖励或学习信号 | 根据实际到达位置与目标重算稀疏奖励 |
+| 终止／边界 | 终止逻辑若依赖目标也需同步重算 |
+
+## 三、方法：到底改了什么
+
+HER没有把失败说成原任务成功，而是把同一物理转移用于另一个目标条件的训练。底层可用DDPG等off-policy算法。未来状态采样策略很关键：挑选轨迹后面实际到达的目标，增加有信息的回报。它依赖目标变化不改变原物理转移有效性。
+
+### 关键公式与符号
+
+$$g'\leftarrow achieved(s_k),\quad r'=r(s,a,s',g'),\quad Q(s,a,g')\gets TD\ update.$$
+只替换g不替换r会产生错误数据；策略与Critic输入都应包含g。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+输入：目标条件Actor／Critic与目标奖励函数
+每回合按目标g收集完整轨迹
+对每个真实转移：
+  保存原(s,a,r,s_next,g)
+  从本轨迹未来状态选择若干已达目标g_prime
+  对每个g_prime：
+    r_prime←重新计算奖励
+    done_prime←若终止依赖目标则重算
+    保存重标转移
+从混合replay训练底层off-policy算法
+评价时使用原始指定目标
+```
+
+**实现要点**：必须能合法重算目标奖励，随机环境重标可能引入偏差。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 底层目标条件TD损失；重算目标与奖励后训练 |
+| 机制改变 | 将已达到的结果重标为目标，重算奖励并复用轨迹 |
+| 评价改善的指标 | 原指定目标成功率 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | bit-flipping与机器人推／滑／抓取 |
+| 数据来源与规模 | 真实交互轨迹及重标副本 |
+| 对比基线 | DDPG无HER、稀疏／稠密奖励与重标策略 |
+| 训练预算与资源 | 重标增加训练样本但不增加真实环境步数 |
+| 指标及其含义 | 原指定目标成功率 |
+| 随机性与不确定性 | 完整种子／区间与预算本文未逐项核实 |
+| 实际验证的假设 | 重用失败是否提高稀疏目标学习 |
+
+**实验解读（本文分析）**：必须能合法重算目标奖励，随机环境重标可能引入偏差。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 算法1 | 收集与重标流程 | 明确新增数据来自哪里 | 不是新真实经验 |
+| 机器人结果部分（具体图表编号本文未核实） | 有无HER的成功曲线 | 支持稀疏任务收益 | 不证明任意奖励可重标 |
+| 重标策略消融（具体图表编号本文未核实） | future等目标选择 | 支持目标采样影响效果 | 不说明未来采样在所有环境无偏 |
+
+**结论边界**：机器人推、滑、抓取等实验支持稀疏奖励学习。必须能合法重算目标奖励，随机环境重标可能引入偏差。
+
+## 六、贡献、代价与局限
+
+**作者贡献**是目标重标经验机制。**本文分析**：在高度随机动力学中，以未来结果选择目标会把偶然性当成可控性；不可逆任务也可能不适合。评价必须回到原任务，不能用重标后成功率证明能力。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+原目标把物体推到x=10，最后只到x=4。原任务仍失败；重标g'=4后，可以学习“从这些状态采取这些动作能到4”。多种局部到达技能可能帮助未来组合，但没有凭空得到到10的成功示范。
+
+### 五个前置概念
+
+1. **目标条件策略**：动作还依赖期望目标。
+2. **已达目标**：从实际状态提取的结果。
+3. **重标**：为同一经验换训练条件。
+4. **稀疏奖励**：大多数转移没有区分性反馈。
+5. **Off-policy复用**：学习目标可不同于采样时行为。
+
+### 三个值得继续追问的问题
+
+1. 目标改变会改变终止或动力学时怎么办？
+2. 为什么随机环境中的重标会带来选择偏差？
+3. 原目标成功率与重标成功率为何必须分开？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 目标条件任务中的稀疏成功信号 | 将已达到的结果重标为目标，重算奖励并复用轨迹 | 将原任务失败转化为另一个目标的有信息样本 | 机器人推、滑、抓取等实验支持稀疏奖励学习 | 必须能合法重算目标奖励，随机环境重标可能引入偏差 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](25-maddpg.md) · [下一篇](27-ppo.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "26-her";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

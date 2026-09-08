@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 29 天｜Rainbow：六种DQN改进叠加后，哪些真的重要 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Rainbow：六种DQN改进叠加后，哪些真的重要</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 29 天｜Rainbow：六种DQN改进叠加后，哪些真的重要
+
+[系列首页](README.md) · [上一篇](28-c51.md) · [下一篇](30-sac.md)
+
+**原论文与版本**：*Rainbow: Combining Improvements in Deep Reinforcement Learning*，2017。[原论文](https://arxiv.org/abs/1710.02298)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：独立DQN改进能否互补
+
+**旧方法卡点**：单篇改进的收益不说明组合后的贡献
+
+**作者主张**：组合Double、优先回放、Dueling、多步、分布式、Noisy Nets
+
+**论文证据**：57 Atari整体与移除组件实验支持组合方案
+
+**一句话**：在off-policy、离散视觉价值学习的组合算法中，作者通过“组合Double、优先回放、Dueling、多步、分布式、Noisy Nets”应对“独立DQN改进能否互补”这一问题；证据边界或代价是：贡献有交互，不能把单独提升相加。
+
+## 二、研究背景与问题定义
+
+本篇将“独立DQN改进能否互补”放在off-policy、离散视觉价值学习的组合算法的边界内研究。单篇改进的收益不说明组合后的贡献。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | off-policy、离散视觉价值学习的组合算法 |
+| 状态／观测 | Atari叠帧 |
+| 动作 | 带参数噪声的动作价值策略 |
+| 奖励或学习信号 | 裁剪训练奖励 |
+| 终止／边界 | 多步回报遇终止应截断 |
+
+## 三、方法：到底改了什么
+
+Double改选评分工；PER改采样；Dueling改结构；多步改回报跨度；分布式改预测对象；Noisy Nets改探索。六项作用在不同接口，所以可组合，但它们也会互相改变误差与数据分布。
+
+### 关键公式与符号
+
+$$G_t^{(n)}=\sum_{k=0}^{n-1}\gamma^kr_{t+k},\quad Z_{target}=\Phi(G_t^{(n)}+\gamma^n Z_{targetnet}(s_{t+n},a^*)).$$
+用在线分布期望选a*、目标分布评价，训练分布交叉熵并乘PER权重；具体终止掩码按多步有效长度。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+建立带Noisy层与Dueling结构的分布Q网络
+用带噪网络与环境交互
+将n步转移加入优先replay
+按优先级采样并计算重要性权重
+在线网络按期望选择下一动作
+目标网络提供该动作的回报分布
+形成n步分布目标并投影
+加权交叉熵更新；按实现更新优先级
+定期复制目标参数
+输出：组合价值策略
+```
+
+**实现要点**：贡献有交互，不能把单独提升相加。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 带优先权重的多步分布式TD交叉熵，结合其他结构与探索机制 |
+| 机制改变 | 组合Double、优先回放、Dueling、多步、分布式、Noisy Nets |
+| 评价改善的指标 | 中位人类归一化分数、曲线面积 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 57款Atari |
+| 数据来源与规模 | 在线replay |
+| 对比基线 | DQN、六相关基线、逐项移除版本 |
+| 训练预算与资源 | 图1报告7M帧达到DQN最好表现，44M帧超所比较基线；不是墙钟 |
+| 指标及其含义 | 中位人类归一化分数、曲线面积 |
+| 随机性与不确定性 | 完整训练种子本文未核实；部分基线引自各自论文 |
+| 实际验证的假设 | 组件在完整系统中是否互补 |
+
+**实验解读（本文分析）**：贡献有交互，不能把单独提升相加。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图1 | 组合与已发表基线 | 整体样本效率 | 不同实现预算未必全匹配 |
+| 图3 | 一次移除一个组件 | 条件于其他组件的边际作用 | 不是六项独立因果收益 |
+| 图4 | 各游戏消融曲线面积 | 展示任务差异 | 汇总不能替代失败案例 |
+| 表2 | 最佳快照汇总 | 原文评价协议下的成绩 | 最佳快照不等于最终固定模型 |
+
+**结论边界**：57 Atari整体与移除组件实验支持组合方案。贡献有交互，不能把单独提升相加。
+
+## 六、贡献、代价与局限
+
+**作者贡献**是系统组合与经验消融。**本文分析**：删除一模块后最优超参数可能改变，因此未重新调参的消融并不等于该模块的普遍必要性。更多模块也增加故障定位和复现成本。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+多步回报让成功奖励更快传播，PER又更常采到传播中的大误差；两者收益重叠，分别提升10分不代表一起提升20分。组合也可能放大噪声。
+
+### 五个前置概念
+
+1. **多步目标**：使用多次真实奖励再自举。
+2. **Noisy Nets**：通过可学习参数噪声探索。
+3. **组合消融**：在完整方案中移除组件。
+4. **交互作用**：一个模块的效果依赖另一个模块。
+5. **曲线面积**：汇总整个训练过程而非终点。
+
+### 三个值得继续追问的问题
+
+1. 移除组件后是否应重新调参？
+2. 六项中哪些改变数学对象，哪些只改训练机制？
+3. 用最终检查点而非最佳快照，结论是否保持？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 独立DQN改进能否互补 | 组合Double、优先回放、Dueling、多步、分布式、Noisy Nets | 分别改进采样、表示、目标跨度和探索的模块可能互补 | 57 Atari整体与移除组件实验支持组合方案 | 贡献有交互，不能把单独提升相加 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](28-c51.md) · [下一篇](30-sac.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "29-rainbow";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

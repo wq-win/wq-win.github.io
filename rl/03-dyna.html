@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 03 天｜Dyna：一次真实交互，如何产生多次学习 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Dyna：一次真实交互，如何产生多次学习</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 03 天｜Dyna：一次真实交互，如何产生多次学习
+
+[系列首页](README.md) · [上一篇](02-td-lambda.md) · [下一篇](04-q-learning.md)
+
+**原论文与版本**：*Integrated Modeling and Control Based on Reinforcement Learning and Dynamic Programming*，1990。[原论文](https://proceedings.neurips.cc/paper/1990/file/d9fc5b73a8d78fad3d6dffe419384e70-Paper.pdf)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：昂贵交互下的学习与规划
+
+**旧方法卡点**：只用真实经验更新不能充分利用已学到的环境规律
+
+**作者主张**：学习环境模型，并把模型生成的一步经验送入同一更新器
+
+**论文证据**：所选 1990 NIPS 论文在导航及环境变化例子中展示整合架构
+
+**一句话**：在在线、单智能体、模型驱动的学习与规划中，作者通过“学习环境模型，并把模型生成的一步经验送入同一更新器”应对“昂贵交互下的学习与规划”这一问题；证据边界或代价是：错误模型会反复灌输错误，规划更新也有计算成本。
+
+## 二、研究背景与问题定义
+
+本篇将“昂贵交互下的学习与规划”放在在线、单智能体、模型驱动的学习与规划的边界内研究。只用真实经验更新不能充分利用已学到的环境规律。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 在线、单智能体、模型驱动的学习与规划 |
+| 状态／观测 | 导航位置等状态 |
+| 动作 | 移动指令 |
+| 奖励或学习信号 | 任务奖励，由环境与模型分别返回 |
+| 终止／边界 | 目标或边界由任务定义，模型也必须编码 |
+
+## 三、方法：到底改了什么
+
+本文以 1990 年 NIPS 论文为依据；它与同年 ICML 的 Dyna 论文是两篇相关工作。Dyna-AHC 将评价、行为和模型组合；教学伪代码聚焦较简单的 Dyna-Q。真实转移同时更新 Q 和模型，随后在已见状态动作上产生模拟转移。规划是在参数中积累结果，执行动作时不必进行一整棵树搜索。
+
+### 关键公式与符号
+
+真实更新与规划更新共享 $Q(s,a)\leftarrow Q(s,a)+\alpha[r+\gamma\max_bQ(s',b)-Q(s,a)]$。区别在于 $(r,s')$ 来自真实环境还是 $\hat M(s,a)$。规划次数 n 增大不增加真实信息量，只增加对已有模型的利用。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+输入：Q、模型 M、每步规划次数 n
+每次真实交互：
+  a ← ε-greedy(Q,s)
+  r,s_next,done ← 环境执行 a
+  用真实转移做一次 Q 更新
+  用 (s,a,r,s_next,done) 更新 M
+  重复 n 次：
+    抽取已见过的 (s_sim,a_sim)
+    r_sim,next_sim,done_sim ← M(s_sim,a_sim)
+    用模拟转移做同一种 Q 更新
+  s ← s_next 或回合重置
+输出：Q 与可用的环境模型
+```
+
+**实现要点**：此处使用最基本模型回放，不把探索奖励或优先规划当作所有 Dyna 的必选模块。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 任务回报最大化；真实和模型经验共同进行Bellman更新 |
+| 机制改变 | 学习环境模型，并把模型生成的一步经验送入同一更新器 |
+| 评价改善的指标 | 到达目标、路线适应和学习进程 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 网格导航与变化环境 |
+| 数据来源与规模 | 在线真实经验加内部模拟经验 |
+| 对比基线 | 不同规划／学习配置 |
+| 训练预算与资源 | 真实步数与内部规划次数必须分开；原文硬件本文未核实 |
+| 指标及其含义 | 到达目标、路线适应和学习进程 |
+| 随机性与不确定性 | 本文未核实全部重复次数 |
+| 实际验证的假设 | 模型学习与增量规划能否同时进行并加快适应 |
+
+**实验解读（本文分析）**：错误模型会反复灌输错误，规划更新也有计算成本。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| §2 与图1 | Dyna-AHC 组件信息流 | 展示学习、模型、行为的统一接口 | 框图本身不是效果证据 |
+| §2 导航示例 | 学习过程中路线与评价改变 | 支持所示任务的联合学习 | 不证明任意模型都可靠 |
+| Dyna-Q 与变化环境部分（具体图表编号本文未核实） | 旧模型遇到环境改变 | 展示需持续修正与探索 | 不能说明单靠更多规划即可发现新通路 |
+
+**结论边界**：所选 1990 NIPS 论文在导航及环境变化例子中展示整合架构。错误模型会反复灌输错误，规划更新也有计算成本。
+
+## 六、贡献、代价与局限
+
+**作者贡献**是整合架构而非某一深度损失。**本文分析**：真实经验是纠错源，模拟经验不能发现模型不知道的改变。比较样本效率应报告环境步数，比较实际效率还需模型拟合与规划时间。它与 MBPO、Dreamer 的共同问题是何时值得相信模型。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+已知 A→B→目标，但只刚刚在 B 获得成功奖励。纯一步 Q 更新需再次访问 A 才能传播；Dyna 可立即从模型回放 A→B。若 B→目标实际已经封路，重复回放反而会使过时路线显得更好。
+
+### 五个前置概念
+
+1. **环境模型**：预测动作的下一状态与奖励。
+2. **规划**：利用模型进行决策计算。
+3. **真实样本**：来自环境而非模型的经验。
+4. **模拟样本**：从学习模型生成的经验。
+5. **模型偏差**：模型与真实环境的系统差异。
+
+### 三个值得继续追问的问题
+
+1. 固定总计算预算，规划 n 次是否仍优于更多真实交互？
+2. 环境出现新捷径时，旧模型如何发现？
+3. 何时应该停止规划并去收集新证据？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 昂贵交互下的学习与规划 | 学习环境模型，并把模型生成的一步经验送入同一更新器 | 反复利用已学模型传播价值，节省再次走同一路径的真实交互 | 所选 1990 NIPS 论文在导航及环境变化例子中展示整合架构 | 错误模型会反复灌输错误，规划更新也有计算成本 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](02-td-lambda.md) · [下一篇](04-q-learning.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "03-dyna";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

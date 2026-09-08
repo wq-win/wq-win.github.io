@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 58 天｜FACTOR：先分配动作信用，再决定哪些token承担它 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">FACTOR：先分配动作信用，再决定哪些token承担它</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 58 天｜FACTOR：先分配动作信用，再决定哪些token承担它
+
+[系列首页](README.md) · [上一篇](57-worldsample.md) · [下一篇](59-ttpo.md)
+
+**原论文与版本**：Ma 等，*How Much, Then Where: Credit-Conserving Action-to-Token Allocation for Multi-Turn Agent Reinforcement Learning*，2026-08-07。[正文](https://arxiv.org/html/2608.07118v1)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：多轮Agent中轨迹、动作和token三层信用混杂
+
+**旧方法卡点**：整轨迹优势广播太粗，教师token权重又会无意改变动作总量
+
+**作者主张**：用边界校准TD分动作信用，再用均值为1的非负token权重分配
+
+**论文证据**：三个Agent环境及消融支持两阶段接口，动作TD信用贡献较大
+
+**一句话**：在多轮Agent RL与可恢复环境状态中，作者通过“用边界校准TD分动作信用，再用均值为1的非负token权重分配”应对“多轮Agent中轨迹、动作和token三层信用混杂”这一问题；证据边界或代价是：代数守恒不是因果正确，也不是梯度向量守恒。
+
+## 二、研究背景与问题定义
+
+本篇将“多轮Agent中轨迹、动作和token三层信用混杂”放在多轮Agent RL与可恢复环境状态的边界内研究。整轨迹优势广播太粗，教师token权重又会无意改变动作总量。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 多轮Agent RL与可恢复环境状态 |
+| 状态／观测 | 每次动作前的完整历史x_t |
+| 动作 | 由多个token组成的可执行动作 |
+| 奖励或学习信号 | 真实环境奖励／终局回报 |
+| 终止／边界 | 有限回合，γ=1；首尾势函数固定 |
+
+## 三、方法：到底改了什么
+
+TAC借助中间状态续跑校准价值，动作信用由TD残差给出。HTA让冻结教师看到动作后的反馈，计算与学生的token似然差。APM把非负权重归一到每动作均值1。损失先在动作内平均token，再平均动作，保证指定位置的标量贡献不被长度改变。
+
+### 关键公式与符号
+
+$$A_t^*=r_t+\widetilde V(x_{t+1})-\widetilde V(x_t),\quad\widetilde V(x_0)=b,\ \widetilde V(x_T)=0,\quad\sum_tA_t^*=G-b.$$
+$$C_{t,j}=A_t^*\omega_{t,j},\quad\frac1{L_t}\sum_j\omega_{t,j}=1.$$
+守恒对象是信用系数／旧策略处裁剪前标量surrogate，非任意参数位置的梯度总和。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。`stop_gradient` 表示停止向目标量传播梯度。
+
+```text
+用冻结行为策略采多轮轨迹
+选择少量中间checkpoint，恢复环境并采续跑
+用续跑回报校准价值头
+设置首势函数=b、末势函数=0
+计算每动作TD信用A_star
+教师看到动作后反馈，重评分动作token
+将sign-aware分数变成非负权重并按动作归一均值1
+C_token←stop_gradient(A_star*weight)
+对token构造裁剪项，先动作内平均再跨动作平均
+保留原文辅助蒸馏损失并更新策略
+```
+
+**实现要点**：代数守恒不是因果正确，也不是梯度向量守恒。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 动作内均值保持的裁剪目标，加非动作分支和原辅助损失 |
+| 机制改变 | 用边界校准TD分动作信用，再用均值为1的非负token权重分配 |
+| 评价改善的指标 | 成功率、信用守恒与跨骨干表现 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | ALFWorld、WebShop、ScienceWorld |
+| 数据来源与规模 | 在线多轮轨迹加checkpoint续跑 |
+| 对比基线 | SERL重现、延长计算基线及组件消融 |
+| 训练预算与资源 | Qwen2.5-7B；150步、G=8；约3.5倍环境调用、1.25倍墙钟相对相关基线 |
+| 指标及其含义 | 成功率、信用守恒与跨骨干表现 |
+| 随机性与不确定性 | 3种子42/43/1337；训练重复与评估重复分别计 |
+| 实际验证的假设 | 动作信用与token分配解耦是否改善多轮学习 |
+
+**实验解读（本文分析）**：代数守恒不是因果正确，也不是梯度向量守恒。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| §3命题与式4—6 | TD及边界望远镜求和 | 标量信用严格求和 | 中间价值不准时仍守恒，所以不证明正确归因 |
+| 表1 | SERL重现与FACTOR | 92.0/82.4/48.9 对89.8/80.0/44.7 | 环境顺序与指标须按原表保留 |
+| 预算匹配与消融（具体图表编号本文未核实） | 延长基线／移除TAC等 | 支持不只来自更多训练 | 额外恢复状态权限仍重要 |
+| 跨骨干结果（具体图表编号本文未核实） | 不同规模／模型族 | 有限迁移证据 | 非任意Agent泛化 |
+
+按原表对应顺序，三个数值绝对差为2.2、2.4、4.2个百分点；不能说相对提升也是同样数字。最关键理论观察是：即使中间价值全错，首尾相减仍可守恒，因此守恒与估计准确性是两个独立问题。
+
+## 六、贡献、代价与局限
+
+**作者明确**区分真实值TD解释与边界调整后记账恒等式。**本文分析**：恢复环境状态和教师看后验反馈属于额外训练能力；token似然差是分配启发，不是独立token因果贡献。非负权重保留每个动作信用的符号。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+G=1、b=0.2，中间势函数0.9，两动作奖励0、1。信用为0.7与0.1，总和0.8。把中间值错估为10，信用变为9.8与−9，总和仍0.8；总和正确丝毫不能证明每步判断合理。
+
+### 五个前置概念
+
+1. **TAC**：用TD分解动作级信用。
+2. **Hindsight教师**：训练时看到动作后反馈的重评分者。
+3. **均值保持**：归一化后不改变动作平均系数。
+4. **望远镜求和**：中间相邻项相消只剩首尾。
+5. **Action-mean**：先在每个动作内平均再跨动作聚合。
+
+### 三个值得继续追问的问题
+
+1. 若中间价值严重不准，守恒是否仍帮助训练？
+2. 梯度方向不守恒为何不与标量守恒矛盾？
+3. 无法恢复工具环境状态时如何校准价值？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 多轮Agent中轨迹、动作和token三层信用混杂 | 用边界校准TD分动作信用，再用均值为1的非负token权重分配 | 把动作级信用数量与token落点分开，避免无意改变损失权重 | 三个Agent环境及消融支持两阶段接口，动作TD信用贡献较大 | 代数守恒不是因果正确，也不是梯度向量守恒 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](57-worldsample.md) · [下一篇](59-ttpo.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "58-factor";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

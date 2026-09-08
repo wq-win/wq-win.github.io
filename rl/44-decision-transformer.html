@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 44 天｜Decision Transformer：把控制写成条件序列预测 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Decision Transformer：把控制写成条件序列预测</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 44 天｜Decision Transformer：把控制写成条件序列预测
+
+[系列首页](README.md) · [上一篇](43-awac.md) · [下一篇](45-td3-bc.md)
+
+**原论文与版本**：*Decision Transformer: Reinforcement Learning via Sequence Modeling*，2021。[原论文](https://arxiv.org/abs/2106.01345)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：离线决策是否必须使用Bellman自举
+
+**旧方法卡点**：TD目标有外推误差，简单BC又不区分好坏轨迹
+
+**作者主张**：用期望回报、状态、动作序列训练因果Transformer预测动作
+
+**论文证据**：Atari、D4RL和序列任务实验展示条件序列建模的竞争力
+
+**一句话**：在离线、回报条件的序列建模控制中，作者通过“用期望回报、状态、动作序列训练因果Transformer预测动作”应对“离线决策是否必须使用Bellman自举”这一问题；证据边界或代价是：请求很高回报不保证可实现，数据覆盖仍限制行为。
+
+## 二、研究背景与问题定义
+
+本篇将“离线决策是否必须使用Bellman自举”放在离线、回报条件的序列建模控制的边界内研究。TD目标有外推误差，简单BC又不区分好坏轨迹。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 离线、回报条件的序列建模控制 |
+| 状态／观测 | 状态历史＋目标return-to-go |
+| 动作 | 离散分类或连续动作回归 |
+| 奖励或学习信号 | 训练RTG由数据未来奖励计算 |
+| 终止／边界 | 回合边界与上下文窗口独立处理 |
+
+## 三、方法：到底改了什么
+
+训练输入依序为(RTG,s,a)，因果mask防止看到未来动作和回报。部署时指定想达到的回报，执行动作后减去实际奖励更新剩余目标。没有独立Q、Critic或Bellman TD损失，也不意味着自动学会因果规划。
+
+### 关键公式与符号
+
+$$\hat R_t=\sum_{k=t}^T r_k,\quad \hat a_t=f_\theta(\hat R_{\le t},s_{\le t},a_{<t}).$$
+训练动作MSE或交叉熵；执行无折扣RTG时 $\hat R_{t+1}=\hat R_t-r_t$。折扣版本需改递推。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+从离线完整轨迹反向计算RTG
+抽长度K片段，构造RTG/状态/动作tokens
+加时序编码，使用因果attention mask
+从状态位置预测对应动作，最小化监督损失
+部署：
+  指定初始目标RTG
+  基于历史预测并执行动作
+  观察实际r，目标RTG←RTG-r
+  更新上下文窗口直到终止
+输出：回报条件策略
+```
+
+**实现要点**：请求很高回报不保证可实现，数据覆盖仍限制行为。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 给定RTG与历史，最小化动作预测MSE或交叉熵 |
+| 机制改变 | 用期望回报、状态、动作序列训练因果Transformer预测动作 |
+| 评价改善的指标 | 归一化回报、不同目标RTG效果 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 4 Atari、D4RL控制、Minigrid等 |
+| 数据来源与规模 | Atari用DQN-replay的1%，约500k转移 |
+| 对比基线 | CQL、BC及其他离线基线 |
+| 训练预算与资源 | 训练更新与数据比例分开；无新增训练交互 |
+| 指标及其含义 | 归一化回报、不同目标RTG效果 |
+| 随机性与不确定性 | 主要任务3种子；文字与表对离散度称呼需逐项核实 |
+| 实际验证的假设 | 序列监督能否替代TD提供有效控制 |
+
+**实验解读（本文分析）**：请求很高回报不保证可实现，数据覆盖仍限制行为。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图1 | 因果序列架构 | 明确条件与预测对象 | 不证明规划能力 |
+| 表1 | 4 Atari小数据比较 | 其中3个与CQL可比 | 并非所有任务胜出 |
+| 表2 | D4RL任务 | 支持连续控制可用性 | 不保证OOD目标可达 |
+| 条件／稀疏任务实验（具体图表编号本文未核实） | RTG与序列上下文变化 | 检验条件建模 | 不证明任意轨迹拼接 |
+
+**结论边界**：Atari、D4RL和序列任务实验展示条件序列建模的竞争力。请求很高回报不保证可实现，数据覆盖仍限制行为。
+
+## 六、贡献、代价与局限
+
+**作者贡献**是简洁的序列建模范式。**本文分析**：选择目标RTG是一项决策超参数；若用测试成绩调它，应计入模型选择。数据中的高回报关联未必是可控因果。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+目标回报10，第一步实际得3，下一步输入剩余目标7。模型只是在条件7下预测动作，不能保证环境还允许得到7；目标设100也不会自动产生新能力。
+
+### 五个前置概念
+
+1. **Return-to-go**：从当前时刻到终局的剩余奖励和。
+2. **因果mask**：禁止模型读取未来信息。
+3. **条件模仿**：在特定回报等条件下拟合行为。
+4. **上下文窗口**：模型保留的历史长度。
+5. **行为分布支持**：训练数据中可见的动作与结果。
+
+### 三个值得继续追问的问题
+
+1. RTG调参会怎样影响公平比较？
+2. 未来奖励条件是否可能携带不可控随机性？
+3. 何种任务需要TD式拼接而序列BC做不到？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 离线决策是否必须使用Bellman自举 | 用期望回报、状态、动作序列训练因果Transformer预测动作 | 把好坏轨迹区分为不同条件，避免直接使用自举标签 | Atari、D4RL和序列任务实验展示条件序列建模的竞争力 | 请求很高回报不保证可实现，数据覆盖仍限制行为 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](43-awac.md) · [下一篇](45-td3-bc.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "44-decision-transformer";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 04 天｜Q-learning：从一条经验开始，学会比较未来 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Q-learning：从一条经验开始，学会比较未来</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 04 天｜Q-learning：从一条经验开始，学会比较未来
+
+[系列首页](README.md) · [上一篇](03-dyna.md) · [下一篇](05-reinforce.md)
+
+**原论文与版本**：Watkins & Dayan，*Q-learning*，1992。[原文](https://www.gatsby.ucl.ac.uk/~dayan/papers/cjch.pdf)。1989 年博士论文提出算法，此篇重点是收敛证明。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：未知环境中的最优行动选择
+
+**旧方法卡点**：动态规划需要转移模型，表格中每个动作的长期后果尚不可知
+
+**作者主张**：用采样 Bellman 最优目标逐项更新 Q
+
+**论文证据**：§3 的定理在有限状态动作、充分访问与合适步长等条件下给出几乎必然收敛
+
+**一句话**：在单智能体、在线采样、无模型、off-policy 的有限 MDP中，作者通过“用采样 Bellman 最优目标逐项更新 Q”应对“未知环境中的最优行动选择”这一问题；证据边界或代价是：渐近结论没有承诺有限预算速度，也不能直接覆盖神经网络。
+
+## 二、研究背景与问题定义
+
+Q 不是当前奖励，而是执行一个动作后继续行动的累计收益。难点在于现在不知道未来，又希望从有限经验开始学习。本文以 1992 年收敛证明为中心；算法在 Watkins 1989 年博士论文中已有提出。探索行为与被评价的最优策略可以不同，这是理解 off-policy 的第一处入口。证明要求环境规律固定、奖励有界；这些前提不能被“网络足够大”替代。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 单智能体、在线采样、无模型、off-policy 的有限 MDP |
+| 状态／观测 | 可枚举的状态 s |
+| 动作 | 有限动作 a |
+| 奖励或学习信号 | 有界标量 r，通常折扣 γ<1 |
+| 终止／边界 | 真实终止令未来值为零；继续任务另按折扣处理 |
+
+## 三、方法：到底改了什么
+
+沿用 Bellman 最优性关系，但不显式计算所有后继状态的概率加权平均，而以一次真实转移代替该期望。每次只修正当前访问的表项。没有独立 Actor、Critic 网络或环境模型；Q 表既提供学习量，也提供贪心行动依据。学习率控制新信息与旧信息的混合，探索规则控制能否获得必要的信息。
+
+### 关键公式与符号
+
+$$y_t=r_t+\gamma\max_b Q_t(s_{t+1},b),\quad \delta_t=y_t-Q_t(s_t,a_t),\quad Q_{t+1}(s_t,a_t)=Q_t(s_t,a_t)+\alpha_t\delta_t.$$
+
+γ 决定未来奖励的折扣，α 是更新幅度。真正终止时 y=r。对每一状态动作的访问子序列要求 $\sum\alpha_t=\infty$ 且 $\sum\alpha_t^2<\infty$：前者避免太早停止学习，后者抑制累积噪声。它们与无限访问条件一起使用。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+输入：有限状态动作空间，折扣 γ，学习率日程
+初始化所有 Q(s,a)，访问计数 N(s,a)=0
+重复采集回合：
+  s ← reset()
+  while 未真正终止：
+    a ← 有探索的行为策略(Q,s)
+    r,s_next,terminated ← step(a)
+    N(s,a) += 1
+    if terminated: y ← r
+    else: y ← r + γ max_b Q(s_next,b)
+    Q(s,a) ← Q(s,a)+α[N(s,a)]*(y-Q(s,a))
+    s ← s_next
+输出：π(s) ∈ argmax_a Q(s,a)
+```
+
+固定 ε 的 ε-greedy 是教学采样选择，不自动证明所有状态都可达。代码中用每个表项的访问计数确定步长，比只按全局时间递减更贴近定理条件。有限训练不得因曲线暂时平稳就宣称满足无限时间结论。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 求解最优折扣回报对应的 Bellman 不动点；单步更新是随机逼近，不是一次监督真值拟合 |
+| 机制改变 | 用采样 Bellman 最优目标逐项更新 Q |
+| 评价改善的指标 | 理论误差趋于零；本文不提供现代控制基准分数 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 理论有限 MDP；不是 Atari 实验 |
+| 数据来源与规模 | 随机转移流，关键是每一状态动作无限访问 |
+| 对比基线 | Bellman 最优解是理论参照 |
+| 训练预算与资源 | 渐近分析，无 GPU 或固定训练预算 |
+| 指标及其含义 | 几乎必然收敛，不是平均成功率 |
+| 随机性与不确定性 | 概率 1 的理论结论；随机种子表不适用 |
+| 实际验证的假设 | 不用已知模型的异步更新能否得到最优 Q |
+
+**实验解读（本文分析）**：把定理作为证据时，公平性问题变为前提是否真的满足：可达性、采样覆盖、固定转移和步长不可忽略。不能把证明用的 action-replay process 写成已验证的经验回放训练技巧。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| §2 | 定义问题和采样更新 | 明确学习对象是 Q* | 不提供有限样本误差 |
+| §3 主定理 | 随机更新与最优 Q 比较 | 满足条件时几乎必然收敛 | 不保证神经网络稳定 |
+| 附录 action-replay process | 把更新历史对应到辅助决策过程 | 支撑收敛证明 | 不是现代 replay 的性能消融 |
+| §4 扩展 | 讨论更一般的终止或更新情形 | 结论可在附加条件下延伸 | 不意味着 γ=1 任意任务都收敛 |
+
+Q-learning 的核心证据是一条有条件的收敛定理：在充分访问和合适步长等前提下，表格估计最终到达最优 Q 值。有限预算内需要多久、探索是否足够，仍需另行分析。
+
+## 六、贡献、代价与局限
+
+**作者证明的贡献**是为无模型最优控制提供收敛基础。**本文分析**是它把难题从“知道动力学”转移为“获得充分而持续的经验”。大状态空间使表格不可行；不充分探索无法确认未访问动作。与函数逼近、bootstrapping、off-policy 同时结合时，不能照搬本定理。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+设当前 Q=2，r=1，下一状态最大 Q=4，γ=0.9，α=0.1。目标为 4.6，误差为 2.6，更新得到 2.26。若这步真正终止，目标变成 1，更新为 1.9。只改一个终止标志，方向就完全不同，说明终止处理不是无关紧要的工程细节。
+
+### 五个前置概念
+
+1. **MDP**：当前状态包含预测下一步所需的信息。
+2. **Q 值**：一个状态动作对的未来累计回报。
+3. **Bellman 最优性**：最优价值与下一状态的最优选择相一致。
+4. **TD 误差**：当前目标与当前价值估计的差。
+5. **off-policy**：采集经验的行为与更新所针对的策略可以不同。
+
+### 三个值得继续追问的问题
+
+1. 固定探索概率能否保证所有表项无限访问？还缺哪些环境条件？
+2. α 长期保持常数时，确定环境和随机环境会有什么不同？
+3. 把表格换成共享参数网络，证明中哪一步失去了保障？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 未知环境中的最优行动选择 | 用采样 Bellman 最优目标逐项更新 Q | 采样目标的期望对应 Bellman 最优算子，充分访问和步长条件让噪声逐渐被平均 | §3 的定理在有限状态动作、充分访问与合适步长等条件下给出几乎必然收敛 | 渐近结论没有承诺有限预算速度，也不能直接覆盖神经网络 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](03-dyna.md) · [下一篇](05-reinforce.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "04-q-learning";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

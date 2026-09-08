@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 41 天｜MuZero：不用重构世界，也能学出供搜索使用的模型 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">MuZero：不用重构世界，也能学出供搜索使用的模型</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 41 天｜MuZero：不用重构世界，也能学出供搜索使用的模型
+
+[系列首页](README.md) · [上一篇](40-dreamer.md) · [下一篇](42-cql.md)
+
+**原论文与版本**：Schrittwieser 等，*Mastering Atari, Go, Chess and Shogi by Planning with a Learned Model*，2019／2020。[正文](https://arxiv.org/html/1911.08265v2)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：未知动力学下如何保留树搜索优势
+
+**旧方法卡点**：AlphaZero需要精确规则，像素世界的完整模型难学
+
+**作者主张**：只学习与搜索有关的潜在转移、奖励、策略与价值
+
+**论文证据**：棋类与57 Atari结果及搜索预算实验展示可行性
+
+**一句话**：在模型驱动、潜在搜索、自我对弈或环境交互中，作者通过“只学习与搜索有关的潜在转移、奖励、策略与价值”应对“未知动力学下如何保留树搜索优势”这一问题；证据边界或代价是：潜在模型不是物理真相，训练与搜索资源巨大。
+
+## 二、研究背景与问题定义
+
+本篇将“未知动力学下如何保留树搜索优势”放在模型驱动、潜在搜索、自我对弈或环境交互的边界内研究。AlphaZero需要精确规则，像素世界的完整模型难学。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 模型驱动、潜在搜索、自我对弈或环境交互 |
+| 状态／观测 | 观测历史经表示网络h编码 |
+| 动作 | 合法动作 |
+| 奖励或学习信号 | 环境奖励／终局胜负 |
+| 终止／边界 | 按游戏结束；潜在展开长度只是训练截断 |
+
+## 三、方法：到底改了什么
+
+h把历史变成潜在状态，g给动作后的潜在状态与奖励，f预测策略先验和价值。MCTS在潜在空间搜索，把根节点访问分布当策略训练目标；真实未来回报训练价值，真实奖励训练奖励头。没有要求把潜在状态解码回像素。
+
+### 关键公式与符号
+
+$$s^0=h(o_{\le t}),\quad(\hat r^k,s^k)=g(s^{k-1},a_{t+k-1}),\quad(\hat p^k,\hat v^k)=f(s^k).$$
+训练损失是多步奖励、价值、搜索策略目标之和加正则；每个头的监督来源不同。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+真实行动时：
+  s0←h(观测历史)
+  用f先验／价值和g潜在转移执行MCTS
+  按根访问统计选择动作
+  保存观测、真实奖励和搜索策略
+训练时抽片段：
+  编码起点并按真实动作展开K步
+  奖励头对齐真实奖励
+  价值头对齐真实回报／bootstrap目标
+  策略头对齐当时搜索分布
+  更新h,g,f
+输出：网络加搜索决策器
+```
+
+**实现要点**：潜在模型不是物理真相，训练与搜索资源巨大。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 潜在展开的奖励、价值和搜索策略预测损失 |
+| 机制改变 | 只学习与搜索有关的潜在转移、奖励、策略与价值 |
+| 评价改善的指标 | 棋力、游戏分数、搜索扩展收益 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 围棋、国际象棋、将棋、57 Atari |
+| 数据来源与规模 | 自我对弈或真实环境数据 |
+| 对比基线 | AlphaZero及原文Atari方法 |
+| 训练预算与资源 | 展开K=5；棋类800、Atari50搜索模拟；训练用大量TPU |
+| 指标及其含义 | 棋力、游戏分数、搜索扩展收益 |
+| 随机性与不确定性 | 完整种子与区间本文未逐项核实 |
+| 实际验证的假设 | 任务相关模型是否足以支持强搜索 |
+
+**实验解读（本文分析）**：潜在模型不是物理真相，训练与搜索资源巨大。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 主要结果图2 | 棋类与Atari表现 | 多任务类型可训练 | 各任务分别训练非通用单模型 |
+| 图3 | 搜索预算增加的变化 | 模型可供进一步规划 | 不证明无限搜索持续改善 |
+| 补充架构／训练流程（具体图表编号本文未核实） | 三个网络与监督来源 | 解释为何无需像素重构 | 潜在状态不保证因果可解释 |
+
+**结论边界**：棋类与57 Atari结果及搜索预算实验展示可行性。潜在模型不是物理真相，训练与搜索资源巨大。
+
+## 六、贡献、代价与局限
+
+**作者贡献**是任务相关潜在模型与搜索联合训练。**本文分析**：搜索会改变访问分布和训练目标，不能把收益仅归因于网络结构。隐藏信息、环境随机性和错误奖励也不因潜在表示而消失。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+棋盘模型无需预测渲染后每个像素，只需预测某步产生的奖励和下一局面对胜负／搜索的影响。但如果两个外观相近局面需要不同合法动作，h仍必须区分。
+
+### 五个前置概念
+
+1. **表示网络**：把观测历史变成搜索状态。
+2. **动态网络**：预测潜在后继与奖励。
+3. **预测网络**：给策略先验和价值。
+4. **搜索策略**：由访问次数形成的动作目标。
+5. **展开训练**：在多个预测步上施加监督。
+
+### 三个值得继续追问的问题
+
+1. 搜索预算增加时为何可能利用模型误差？
+2. 没有重构损失如何保留关键信息？
+3. 模型与搜索各贡献多少需要什么消融？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 未知动力学下如何保留树搜索优势 | 只学习与搜索有关的潜在转移、奖励、策略与价值 | 只拟合搜索所需信息，降低完整观测生成的建模负担 | 棋类与57 Atari结果及搜索预算实验展示可行性 | 潜在模型不是物理真相，训练与搜索资源巨大 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](40-dreamer.md) · [下一篇](42-cql.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "41-muzero";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

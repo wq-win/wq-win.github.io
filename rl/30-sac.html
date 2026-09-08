@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 30 天｜SAC：随机性进入目标，而不仅是探索噪声 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">SAC：随机性进入目标，而不仅是探索噪声</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 30 天｜SAC：随机性进入目标，而不仅是探索噪声
+
+[系列首页](README.md) · [上一篇](29-rainbow.md) · [下一篇](31-td3.md)
+
+**原论文与版本**：Haarnoja 等，*Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor*，2018。[正文](https://arxiv.org/html/1801.01290v2)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：连续控制的探索与样本效率
+
+**旧方法卡点**：确定性动作可能过早收缩，on-policy数据复用不足
+
+**作者主张**：联合最大化回报与策略熵，使用 off-policy Actor–Critic
+
+**论文证据**：§5 连续控制实验与温度／目标更新分析支持可用性
+
+**一句话**：在off-policy、无模型、最大熵随机 Actor–Critic中，作者通过“联合最大化回报与策略熵，使用 off-policy Actor–Critic”应对“连续控制的探索与样本效率”这一问题；证据边界或代价是：熵系数改变任务折中，原始版本不自动调温度。
+
+## 二、研究背景与问题定义
+
+本篇将“连续控制的探索与样本效率”放在off-policy、无模型、最大熵随机 Actor–Critic的边界内研究。确定性动作可能过早收缩，on-policy数据复用不足。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | off-policy、无模型、最大熵随机 Actor–Critic |
+| 状态／观测 | 连续控制状态 |
+| 动作 | 可重参数化的随机连续动作 |
+| 奖励或学习信号 | 环境奖励加熵的训练目标 |
+| 终止／边界 | 终止截断按任务处理 |
+
+## 三、方法：到底改了什么
+
+本篇固定原始 2018 论文版本：有独立 V 网络和目标 V，并使用双 Q；不能把后来省去 V、自动调 α 的版本冒充原文。随机 Actor 同时寻找高价值与足够多样的动作。Critic 评价的也是包含未来熵的 soft 回报。
+
+### 关键公式与符号
+
+$$V(s)\approx E_{a\sim\pi}[\min_iQ_i(s,a)-\alpha\log\pi(a|s)],\quad y_Q=r+\gamma(1-d)V_{\bar\psi}(s').$$
+$$L_\pi=E[\alpha\log\pi_\theta(a|s)-\min_iQ_i(s,a)].$$
+重参数化 a=fθ(ε,s) 让动作路径可微；tanh 压缩后 log 概率必须包含雅可比修正。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。`stop_gradient` 表示停止向目标量传播梯度。
+
+```text
+初始化随机Actor、两个Q、V与目标V、replay
+循环：
+  从 Actor 采样动作与环境交互
+  抽 replay batch
+  停止梯度构造 yQ=r+γ*(1-done)*目标V(s_next)
+  更新两个 Q
+  从当前 Actor 重采动作
+  用 stop_gradient(minQ-αlogπ) 回归 V
+  冻结 Q 参数，重参数化更新 Actor 的 αlogπ-minQ 损失
+  软更新目标 V
+输出：随机策略
+注：此版固定 α／奖励尺度，不含后来自动温度目标
+```
+
+**实现要点**：熵系数改变任务折中，原始版本不自动调温度。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 最大化奖励加熵的soft回报；原版分别训练Q、V和随机Actor |
+| 机制改变 | 联合最大化回报与策略熵，使用 off-policy Actor–Critic |
+| 评价改善的指标 | 回报与样本效率 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | §5 六种连续控制，包括高维 humanoid |
+| 数据来源与规模 | 在线经验回放 |
+| 对比基线 | 原文随机／确定控制基线 |
+| 训练预算与资源 | 每1000步评价；各任务总交互预算见曲线 |
+| 指标及其含义 | 回报与样本效率 |
+| 随机性与不确定性 | 5种子；部分图阴影是最小—最大，不是95%CI |
+| 实际验证的假设 | 最大熵 off-policy 是否改善效率和稳健性 |
+
+**实验解读（本文分析）**：熵系数改变任务折中，原始版本不自动调温度。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图1 | 六任务学习曲线 | 支持所测任务性能 | 不建立永久算法排名 |
+| 图2 | 随机性与相关版本比较 | 检验策略形式影响 | 不证明随机性越大越好 |
+| 图3 | 奖励尺度／目标更新敏感性 | 显示超参数作用 | 不是无需调参的证据 |
+
+**结论边界**：§5 连续控制实验与温度／目标更新分析支持可用性。熵系数改变任务折中，原始版本不自动调温度。
+
+## 六、贡献、代价与局限
+
+**作者贡献**是最大熵框架的实用 off-policy 实现。**本文分析**：高熵会降低精确动作任务中的即时收益；reward scale 改变与 α 的相对权重。比较确定评价动作与随机采样策略时，必须明确评估使用哪一个。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+两个动作Q为5与4.9，确定贪心只留前者；适当熵奖励允许两者保留概率，给后续探索留空间。如果第二动作灾难性地差，熵系数过大也会产生代价。
+
+### 五个前置概念
+
+1. **最大熵目标**：奖励之外还偏好多样行为。
+2. **温度 α**：控制熵与环境收益的权衡。
+3. **Soft value**：包含未来熵收益的价值。
+4. **重参数化**：把随机动作写成可微函数与独立噪声。
+5. **雅可比修正**：变量变换后修正概率密度。
+
+### 三个值得继续追问的问题
+
+1. 奖励整体乘10但 α 不变会怎样？
+2. 为什么评估用均值动作可能改变结论？
+3. 原始 SAC 与自动温度版有哪些训练对象不同？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 连续控制的探索与样本效率 | 联合最大化回报与策略熵，使用 off-policy Actor–Critic | 回放提高复用率，熵项减少过早锁定单一动作 | §5 连续控制实验与温度／目标更新分析支持可用性 | 熵系数改变任务折中，原始版本不自动调温度 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](29-rainbow.md) · [下一篇](31-td3.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "30-sac";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

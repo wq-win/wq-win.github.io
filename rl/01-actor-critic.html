@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 01 天｜早期 Actor–Critic：让行动者拥有一个评价者 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">早期 Actor–Critic：让行动者拥有一个评价者</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 01 天｜早期 Actor–Critic：让行动者拥有一个评价者
+
+[系列首页](README.md) · [下一篇](02-td-lambda.md)
+
+**原论文与版本**：*Neuronlike Adaptive Elements That Can Solve Difficult Learning Control Problems*，1983。[原论文](https://www.derongliu.org/adp/adp-cdrom/refs/barto19830834.pdf)。
+
+**阅读范围**：原始资料限于摘要与书目信息，全文尚未可靠获取。现代 Actor–Critic 公式与伪代码用于解释两类组件的作用，并非 1983 年 ASE/ACE 更新规则的精确复刻；实验曲线与数值尚未核实。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：只有失败信号时怎样学会控制
+
+**旧方法卡点**：最后倒下不说明哪一步开始出了问题
+
+**作者主张**：把行动搜索 ASE 与学习评价 ACE 分开，让预测变化提供更及时的强化
+
+**论文证据**：原文摘要描述两类自适应单元在倒立摆控制中的作用
+
+**一句话**：在在线、单智能体、无模型的倒立摆控制中，作者通过“把行动搜索 ASE 与学习评价 ACE 分开，让预测变化提供更及时的强化”应对“只有失败信号时怎样学会控制”这一问题；证据边界或代价是：原文全文访问受限，不能确认曲线、重复次数和成功门槛。
+
+## 二、研究背景与问题定义
+
+本篇将“只有失败信号时怎样学会控制”放在在线、单智能体、无模型的倒立摆控制的边界内研究。最后倒下不说明哪一步开始出了问题。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 在线、单智能体、无模型的倒立摆控制 |
+| 状态／观测 | 小车与杆的运动状态及其编码 |
+| 动作 | 对小车施加方向性作用力 |
+| 奖励或学习信号 | 越界或倒杆时的失败信号 |
+| 终止／边界 | 杆倾斜超过阈值或小车到轨道端点 |
+
+## 三、方法：到底改了什么
+
+这里的历史问题不是深度网络容量，而是延迟反馈如何指导动作。ASE 负责搜索行为，ACE 学习比最终失败更密集的评价。现代教学对应是 Actor 输出动作概率、Critic 预测未来回报，再以 TD 误差联结两者。不能由概念相似就推断早期论文已经具有 PPO 的损失、现代神经架构或稳定性保证。
+
+### 关键公式与符号
+
+**现代教学对应**：$\delta=r+\gamma V(s')-V(s)$，$w\leftarrow w+\alpha_v\delta\nabla_w V(s)$，$\theta\leftarrow\theta+\alpha_\pi\delta\nabla_\theta\log\pi(a|s)$。V 是预测，δ 是比预期更好或更坏；这组公式不是所选原文符号的转录。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。`stop_gradient` 表示停止向目标量传播梯度。
+
+```text
+输入：环境；教学版 Actor π 与 Critic V
+循环：
+  s ← 当前观测
+  a ← π(s) 采样
+  r,s_next,done ← 环境反馈
+  v_next ← 0 if done else V(s_next)
+  δ ← stop_gradient(r+γ*v_next-V(s))
+  Critic 沿 δ*∇V(s) 更新
+  Actor 沿 δ*∇logπ(a|s) 更新
+  若 done 则重置环境
+输出：学习后的行为和评价函数
+```
+
+**实现要点**：现代代码只解释两种角色；把它称为原文的精确算法会混淆历史实现。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 历史ASE/ACE以失败反馈改善平衡；文中现代教学式用TD评价并更新动作概率 |
+| 机制改变 | 把行动搜索 ASE 与学习评价 ACE 分开，让预测变化提供更及时的强化 |
+| 评价改善的指标 | 平衡控制表现；精确成功门槛未核实 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 倒立摆，摘要可确认 |
+| 数据来源与规模 | 环境交互；总数量本文未核实 |
+| 对比基线 | 具体比较方法本文未核实 |
+| 训练预算与资源 | 计算资源、更新预算本文未核实 |
+| 指标及其含义 | 平衡控制表现；精确成功门槛未核实 |
+| 随机性与不确定性 | 独立训练次数及误差条未核实 |
+| 实际验证的假设 | 只有稀疏失败反馈是否足以训练控制系统 |
+
+**实验解读（本文分析）**：原文全文访问受限，不能确认曲线、重复次数和成功门槛。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 原文摘要：任务 | 未知运动方程、失败反馈 | 任务是弱监督的控制学习 | 不证明无需状态编码 |
+| 原文摘要：ASE/ACE | 行动单元与评价单元协作 | 支持两种功能的分离 | 不能量化各模块独立收益 |
+| 原文实验图表 | 尚未可靠获取 | 定量证据不足 | 无法判断具体分数、重复次数与成功门槛 |
+
+**结论边界**：原文摘要描述两类自适应单元在倒立摆控制中的作用。原文全文访问受限，不能确认曲线、重复次数和成功门槛。
+
+## 六、贡献、代价与局限
+
+**作者主张**是两个自适应单元能解决困难控制问题。**本文分析**：Critic 仍可能错，错误评价会传给 Actor；状态编码与控制频率也影响难度。原始全文尚未可靠获取，因此无法完整评价消融实验及各组件的独立贡献。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+假设某动作没有立刻失败，r=0，V(s)=−0.8，V(s')=−0.2，γ=1，则 δ=0.6：虽然未获得显式成功奖励，系统仍能鼓励这个让失败前景下降的动作。若下一状态估计错误，这个鼓励也可能错误。
+
+### 五个前置概念
+
+1. **Actor**：选择行为的组件。
+2. **Critic**：估计行为前景的组件。
+3. **延迟强化**：后果在多步之后才显现。
+4. **状态编码**：把传感器信息变成学习器输入。
+5. **TD**：以相邻预测之差学习。
+
+### 三个值得继续追问的问题
+
+1. 如何区分学会平衡与利用终止判定漏洞？
+2. 不用评价者，仅最终失败信号会增加多少样本成本？
+3. 现代策略梯度版与原始 ASE 的更新差异有哪些？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 只有失败信号时怎样学会控制 | 把行动搜索 ASE 与学习评价 ACE 分开，让预测变化提供更及时的强化 | 评价器把迟到的失败信号变成更及时的预测变化 | 原文摘要描述两类自适应单元在倒立摆控制中的作用 | 原文全文访问受限，不能确认曲线、重复次数和成功门槛 |
+
+## 资料与阅读范围
+
+原始资料的可用范围见文首说明。本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [下一篇](02-td-lambda.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "01-actor-critic";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

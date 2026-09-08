@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 53 天｜DeepSeek-R1：区分纯RL探索、完整训练管线与蒸馏 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">DeepSeek-R1：区分纯RL探索、完整训练管线与蒸馏</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 53 天｜DeepSeek-R1：区分纯RL探索、完整训练管线与蒸馏
+
+[系列首页](README.md) · [上一篇](52-grpo.md) · [下一篇](54-dapo.md)
+
+**原论文与版本**：DeepSeek-AI，*DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning*，2025。[初版正文](https://arxiv.org/html/2501.12948v1)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：大模型推理行为能否通过强化学习增强
+
+**旧方法卡点**：只模仿推理数据难区分自主探索和数据复制的贡献
+
+**作者主张**：研究R1-Zero的直接RL，再用冷启动、推理RL、拒绝采样SFT和其他RL构建R1
+
+**论文证据**：R1-Zero的AIME2024 pass@1由15.6提高到71.0，完整R1与蒸馏另有结果
+
+**一句话**：在大模型可验证推理后训练；多个不同训练路径中，作者通过“研究R1-Zero的直接RL，再用冷启动、推理RL、拒绝采样SFT和其他RL构建R1”应对“大模型推理行为能否通过强化学习增强”这一问题；证据边界或代价是：不是从随机权重开始，也不能把小模型蒸馏成绩当独立RL涌现。
+
+## 二、研究背景与问题定义
+
+本篇将“大模型推理行为能否通过强化学习增强”放在大模型可验证推理后训练；多个不同训练路径的边界内研究。只模仿推理数据难区分自主探索和数据复制的贡献。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 大模型可验证推理后训练；多个不同训练路径 |
+| 状态／观测 | 题目与推理／回答前缀 |
+| 动作 | token |
+| 奖励或学习信号 | 正确性与格式规则等；完整R1还含其他任务反馈 |
+| 终止／边界 | EOS／生成预算；超长处理影响结果 |
+
+## 三、方法：到底改了什么
+
+R1-Zero从预训练DeepSeek-V3基础出发，核心RL采用GRPO式更新。完整R1加入冷启动改善可读性与语言混杂，经过多阶段数据筛选和训练；蒸馏小模型使用大模型生成数据。论文贡献更多是研究结果与训练流程，不是全新策略梯度定理。
+
+### 关键公式与符号
+
+核心仍是组相对优势与裁剪目标；规则奖励 $r=r_{accuracy}+r_{format}$ 是示意，具体规则与权重以版本为准。正确性奖励可验证最终结果，但不逐token证明推理真实或必要。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+路径A：R1-Zero
+  从预训练基座出发
+  多次采同题回答→规则评分→GRPO更新
+路径B：完整R1
+  冷启动数据SFT
+  推理定向RL
+  生成并筛选推理／非推理训练数据
+  再SFT，再进行多场景RL
+路径C：蒸馏
+  用R1生成的筛选数据监督训练较小模型
+三条路径分别评估，不混成同一个算法成绩
+```
+
+**实现要点**：不是从随机权重开始，也不能把小模型蒸馏成绩当独立RL涌现。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 不同阶段分别使用SFT与GRPO等RL目标；无新的统一梯度公式 |
+| 机制改变 | 研究R1-Zero的直接RL，再用冷启动、推理RL、拒绝采样SFT和其他RL构建R1 |
+| 评价改善的指标 | pass@1、重复平均、多数票各自定义 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 数学、代码及综合能力基准 |
+| 数据来源与规模 | 预训练基座、RL题目、冷启动／筛选数据；路径各不同 |
+| 对比基线 | R1-Zero、R1、不同基座／蒸馏模型及外部模型 |
+| 训练预算与资源 | 原文未给足以完整等成本复现全部流程的账本 |
+| 指标及其含义 | pass@1、重复平均、多数票各自定义 |
+| 随机性与不确定性 | 多次生成不等于多次独立训练 |
+| 实际验证的假设 | RL、冷启动和蒸馏分别能带来什么 |
+
+**实验解读（本文分析）**：不是从随机权重开始，也不能把小模型蒸馏成绩当独立RL涌现。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| §2.2 图2 | R1-Zero训练中AIME表现 | 直接RL能增强此基座推理表现 | 不证明从零获得推理 |
+| §2.2行为分析 | 响应长度、自检等样例 | 提出行为变化观察 | 单例aha不是因果证明 |
+| 完整模型主结果表（具体图表编号本文未核实） | R1与其他模型 | 支持多基准表现 | 成本／数据未全匹配 |
+| 蒸馏结果表（具体图表编号本文未核实） | 小模型监督蒸馏 | 展示数据迁移价值 | 不是每个小模型独立RL |
+
+15.6→71.0是指定基座与AIME2024评估下的R1-Zero曲线，不能与多数投票或完整R1最终表直接拼接。响应变长是可观察现象，但长度增加本身不是推理质量的独立证据。
+
+## 六、贡献、代价与局限
+
+**作者描述**R1-Zero有可读性和语言混合等问题。**本文分析**：可验证题对RL友好，开放式目标的奖励更难可靠；高分仍可能受数据覆盖、验证器和采样预算影响。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+模型输出十次“让我再检查一下”但最终答案错误，长度与自检措辞都增加了，正确性却没提高。判断推理增强需要看相同题目、相同采样预算下的真实答案质量。
+
+### 五个前置概念
+
+1. **冷启动**：RL之前使用少量格式良好数据。
+2. **可验证奖励**：能以规则或执行器判断的反馈。
+3. **拒绝采样**：从生成候选中筛选合格样本。
+4. **蒸馏**：把大模型行为迁移给小模型。
+5. **Pass@k**：k候选至少一次成功的指标，需按论文定义。
+
+### 三个值得继续追问的问题
+
+1. RL新增了什么行为，如何与基座已有能力区分？
+2. 如何控制长输出导致的额外计算收益？
+3. 开放任务没有可靠验证器时可沿用多少配方？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 大模型推理行为能否通过强化学习增强 | 研究R1-Zero的直接RL，再用冷启动、推理RL、拒绝采样SFT和其他RL构建R1 | 可靠结果反馈与数据筛选可增强预训练基座已有能力 | R1-Zero的AIME2024 pass@1由15.6提高到71.0，完整R1与蒸馏另有结果 | 不是从随机权重开始，也不能把小模型蒸馏成绩当独立RL涌现 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](52-grpo.md) · [下一篇](54-dapo.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "53-r1";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

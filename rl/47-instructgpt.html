@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 47 天｜InstructGPT：从预测下一个词，到学习人类更偏好的回答 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">InstructGPT：从预测下一个词，到学习人类更偏好的回答</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 47 天｜InstructGPT：从预测下一个词，到学习人类更偏好的回答
+
+[系列首页](README.md) · [上一篇](46-iql.md) · [下一篇](48-dreamerv3.md)
+
+**原论文与版本**：Ouyang 等，*Training language models to follow instructions with human feedback*，2022。[正文](https://arxiv.org/html/2203.02155v1)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：语言模型的输出与用户意图不一致
+
+**旧方法卡点**：更大的预训练模型不自动更遵循指令，也可能输出无帮助或不真实内容
+
+**作者主张**：用示范SFT、成对偏好奖励模型、PPO及预训练混合更新进行对齐
+
+**论文证据**：特定API提示分布的人类评价中1.3B对齐模型优于175B基础模型
+
+**一句话**：在语言模型RLHF；提示条件的序列策略学习中，作者通过“用示范SFT、成对偏好奖励模型、PPO及预训练混合更新进行对齐”应对“语言模型的输出与用户意图不一致”这一问题；证据边界或代价是：不是全面能力超越，标注群体、奖励投机与能力回退仍重要。
+
+## 二、研究背景与问题定义
+
+本篇将“语言模型的输出与用户意图不一致”放在语言模型RLHF；提示条件的序列策略学习的边界内研究。更大的预训练模型不自动更遵循指令，也可能输出无帮助或不真实内容。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 语言模型RLHF；提示条件的序列策略学习 |
+| 状态／观测 | 用户提示和已生成token前缀 |
+| 动作 | 下一个token |
+| 奖励或学习信号 | 奖励模型终局评分减参考策略KL；PPO-ptx另加预训练目标 |
+| 终止／边界 | EOS或生成长度上限，截断的奖励语义需明确 |
+
+## 三、方法：到底改了什么
+
+SFT教模型回答的基本样式；奖励模型把人类比较变成标量；PPO探索并增加高奖励回答概率。Critic预测未来训练回报，奖励模型判断偏好，二者角色不同。π_old生成本轮样本，π_ref约束偏离SFT，不能混用。
+
+### 关键公式与符号
+
+$$L_{RM}=-E\log\sigma(r_\phi(x,y_w)-r_\phi(x,y_l)).$$
+RL目标示意 $E[r_\phi(x,y)-\beta\log(\pi_\theta(y|x)/\pi_{ref}(y|x))]$；PPO-ptx再加入预训练文本log似然。并非直接对离散采样后的RM分数穿透求导。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+收集人类示范，训练SFT策略
+收集同提示候选的人类排序，训练RM
+固定参考策略与RM，初始化Actor/Critic
+每轮：
+  冻结π_old并生成回答
+  用RM终局评分、参考KL形成奖励
+  Critic估计价值，计算优势
+  PPO更新Actor并训练Critic
+  PPO-ptx版本同时学习预训练文本
+用独立人类评价及能力任务检查效果
+输出：对齐策略
+```
+
+**实现要点**：不是全面能力超越，标注群体、奖励投机与能力回退仍重要。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | RM偏好分类；PPO优化RM分数减参考KL，ptx另加预训练似然 |
+| 机制改变 | 用示范SFT、成对偏好奖励模型、PPO及预训练混合更新进行对齐 |
+| 评价改善的指标 | 人类偏好胜率、有帮助／真实性及能力回退 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | API提示、人类偏好评估与NLP能力测试 |
+| 数据来源与规模 | 示范、比较标签、未标注提示与预训练文本 |
+| 对比基线 | GPT-3、SFT、PPO、PPO-ptx |
+| 训练预算与资源 | RL约256k episodes、约31k不同提示；基座规模分开 |
+| 指标及其含义 | 人类偏好胜率、有帮助／真实性及能力回退 |
+| 随机性与不确定性 | 人类评价含95%CI；这不是训练种子CI |
+| 实际验证的假设 | 偏好优化是否改善用户感受，混合预训练能否缓解回退 |
+
+**实验解读（本文分析）**：不是全面能力超越，标注群体、奖励投机与能力回退仍重要。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图1 | 不同规模模型的人类偏好 | 小对齐模型可优于大基础模型 | 不代表所有智能能力更强 |
+| §3训练流程 | 三阶段监督来源 | 明确RL依赖数据与RM | 不等于从零靠RL学语言 |
+| 能力评价及附录E.6 | PPO与ptx混合的回退 | 支持混合目标缓解部分退化 | 不消除全部对齐代价 |
+| 偏差／真实性分析（具体图表编号本文未核实） | 多项行为评价 | 显示有限改善 | 不能承诺绝对真实安全 |
+
+**结论边界**：特定API提示分布的人类评价中1.3B对齐模型优于175B基础模型。不是全面能力超越，标注群体、奖励投机与能力回退仍重要。
+
+## 六、贡献、代价与局限
+
+**作者承认**偏好来自特定人群，能力与对齐并非完全一致。**本文分析**：奖励模型容易被过度优化，人工胜率也依赖问题分布、盲评与回答长度。新增监督和训练算力必须计入小模型比较。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+基础模型续写“请解释重力”可能产出相似网页文本；SFT学会解释格式，RM偏好清晰回答，PPO提升其概率。但若RM把长回答误判为更好，策略可能学会啰嗦而非更准确。
+
+### 五个前置概念
+
+1. **SFT**：用示范监督微调语言模型。
+2. **奖励模型**：从偏好比较学习评价函数。
+3. **参考策略**：固定的漂移约束基准。
+4. **Critic**：预测RL训练中的未来回报。
+5. **对齐代价**：改善偏好指标伴随其他能力下降。
+
+### 三个值得继续追问的问题
+
+1. RM和Critic为何不能混为一谈？
+2. 如何检查回答变长造成的评价偏差？
+3. 小对齐模型优于大基础模型的结论边界在哪？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 语言模型的输出与用户意图不一致 | 用示范SFT、成对偏好奖励模型、PPO及预训练混合更新进行对齐 | 人类比较把目标从预测文本转向更有帮助的输出 | 特定API提示分布的人类评价中1.3B对齐模型优于175B基础模型 | 不是全面能力超越，标注群体、奖励投机与能力回退仍重要 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](46-iql.md) · [下一篇](48-dreamerv3.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "47-instructgpt";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

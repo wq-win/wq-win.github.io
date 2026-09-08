@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 36 天｜RND：预测一个冻结随机网络，也能产生探索奖励 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">RND：预测一个冻结随机网络，也能产生探索奖励</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 36 天｜RND：预测一个冻结随机网络，也能产生探索奖励
+
+[系列首页](README.md) · [上一篇](35-pets.md) · [下一篇](37-bcq.md)
+
+**原论文与版本**：*Exploration by Random Network Distillation*，2018。[原论文](https://arxiv.org/abs/1810.12894)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：难探索环境中的新颖性估计
+
+**旧方法卡点**：动力学预测误差易受转移随机性影响
+
+**作者主张**：固定随机目标网络，训练预测器拟合它，以拟合误差奖励新观测
+
+**论文证据**：Montezuma等探索实验与新颖性诊断展示作用
+
+**一句话**：在在线内在奖励探索，通常配PPO中，作者通过“固定随机目标网络，训练预测器拟合它，以拟合误差奖励新观测”应对“难探索环境中的新颖性估计”这一问题；证据边界或代价是：观测噪声、泛化和遗忘仍会影响新颖性。
+
+## 二、研究背景与问题定义
+
+本篇将“难探索环境中的新颖性估计”放在在线内在奖励探索，通常配PPO的边界内研究。动力学预测误差易受转移随机性影响。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 在线内在奖励探索，通常配PPO |
+| 状态／观测 | 图像观测 |
+| 动作 | 游戏动作 |
+| 奖励或学习信号 | 外部奖励与RND误差两个信号流 |
+| 终止／边界 | 内在与外在回报可使用不同回合边界处理 |
+
+## 三、方法：到底改了什么
+
+目标函数f在训练前随机初始化后冻结；预测器g只在访问过的观测上被训练。熟悉状态误差通常下降，没见过状态误差可能较大。它不预测下一状态，因此减少了对随机动力学结果的直接预测需求；但并不是“完全不受随机噪声影响”。
+
+### 关键公式与符号
+
+$$r^i(s)=\|g_\theta(s)-f_{fixed}(s)\|^2.$$
+预测器最小化该误差，策略最大化沿轨迹遇到的误差与任务收益。归一化与不同价值流影响实际权重。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+随机初始化并冻结目标f
+初始化预测器g与策略／价值网络
+循环：
+  用策略采样观测轨迹
+  在预测器更新前计算r_int=||g(s)-f(s)||²
+  按选定规范化处理内外奖励
+  分别计算需要的内外价值目标与优势
+  用PPO更新策略
+  用访问观测训练g拟合固定f
+输出：带探索能力的策略
+```
+
+**实现要点**：观测噪声、泛化和遗忘仍会影响新颖性。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 预测器拟合固定随机目标；策略优化该误差加外部奖励 |
+| 机制改变 | 固定随机目标网络，训练预测器拟合它，以拟合误差奖励新观测 |
+| 评价改善的指标 | 房间数、游戏回报、预测误差 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | MNIST新颖性诊断、Montezuma及Atari探索 |
+| 数据来源与规模 | 在线访问观测 |
+| 对比基线 | 纯探索、不同内外奖励流、不同策略网络等 |
+| 训练预算与资源 | 并行采样与折扣配置需分开；完整总预算本文未完整核实 |
+| 指标及其含义 | 房间数、游戏回报、预测误差 |
+| 随机性与不确定性 | 部分曲线5种子；其他图单独核对 |
+| 实际验证的假设 | 静态目标误差能否提供实用探索信号 |
+
+**实验解读（本文分析）**：观测噪声、泛化和遗忘仍会影响新颖性。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图2 | MNIST样本频率与拟合误差 | 检验误差与熟悉程度关系 | 不是RL任务成功 |
+| 图3 | 纯探索的房间与回报 | 展示无外部奖励探索 | 不代表已学最优任务策略 |
+| 图4 | 内外回报边界组合 | 显示实现决定探索行为 | 不证明统一处理最好 |
+
+**结论边界**：Montezuma等探索实验与新颖性诊断展示作用。观测噪声、泛化和遗忘仍会影响新颖性。
+
+## 六、贡献、代价与局限
+
+**作者设计**避开直接预测随机后继的部分问题。**本文分析**：新奇不一定有益；预测器遗忘会让旧状态重新显得新。归一化、预测器容量和训练频率改变奖励非平稳性。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+走进新房间时g没学过其图像，误差大；多次重访后误差降低。如果房间只含随机闪烁屏幕，每帧都不同，也可能持续造成误差，需额外诊断。
+
+### 五个前置概念
+
+1. **随机目标**：初始化后不再学习的映射。
+2. **蒸馏**：让可训练网络模仿目标输出。
+3. **新颖性**：对学习系统而言的陌生程度。
+4. **内外价值流**：分别预测探索与任务收益。
+5. **奖励非平稳**：奖励函数随预测器学习改变。
+
+### 三个值得继续追问的问题
+
+1. 预测器过强或过弱会怎样改变探索？
+2. 遗忘会不会导致无用循环？
+3. 房间数与任务分数矛盾时如何判断方法？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 难探索环境中的新颖性估计 | 固定随机目标网络，训练预测器拟合它，以拟合误差奖励新观测 | 熟悉观测的预测误差降低，为未熟悉区域留下探索奖励 | Montezuma等探索实验与新颖性诊断展示作用 | 观测噪声、泛化和遗忘仍会影响新颖性 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](35-pets.md) · [下一篇](37-bcq.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "36-rnd";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

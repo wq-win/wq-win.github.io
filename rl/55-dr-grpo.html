@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 55 天｜Dr. GRPO：两个归一化分母，怎样改变学习方向的权重 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Dr. GRPO：两个归一化分母，怎样改变学习方向的权重</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 55 天｜Dr. GRPO：两个归一化分母，怎样改变学习方向的权重
+
+[系列首页](README.md) · [上一篇](54-dapo.md) · [下一篇](56-mbdpo.md)
+
+**原论文与版本**：Liu 等，*Understanding R1-Zero-Like Training: A Critical Perspective*，2025。[初版正文](https://arxiv.org/html/2503.20783v1)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：GRPO长度与题目难度相关的梯度偏置
+
+**旧方法卡点**：按回答长度平均及组标准差归一化改变样本权重
+
+**作者主张**：移除这两类归一化，用固定分母保留奖励差优势
+
+**论文证据**：原文诊断与消融展示不同训练动态
+
+**一句话**：在数学推理RL，GRPO的目标权重分析中，作者通过“移除这两类归一化，用固定分母保留奖励差优势”应对“GRPO长度与题目难度相关的梯度偏置”这一问题；证据边界或代价是：作者所说去偏针对具体来源，不是任何策略梯度意义都无偏。
+
+## 二、研究背景与问题定义
+
+本篇将“GRPO长度与题目难度相关的梯度偏置”放在数学推理RL，GRPO的目标权重分析的边界内研究。按回答长度平均及组标准差归一化改变样本权重。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 数学推理RL，GRPO的目标权重分析 |
+| 状态／观测 | 题目与回答前缀 |
+| 动作 | token |
+| 奖励或学习信号 | 终局可验证奖励 |
+| 终止／边界 | 固定最大长度与有效token掩码 |
+
+## 三、方法：到底改了什么
+
+原GRPO每条回答除自身长度，长短回答每token贡献不同；标准差小的题可能被放大。Dr. GRPO保留r−组均值，去掉标准差除法，并使用固定最大长度等常数归约。它与DAPO按实际总token归约不是同一分母。
+
+### 关键公式与符号
+
+$$A_i=r_i-\bar r,\quad L\propto\frac1{G L_{max}}\sum_i\sum_{t=1}^{L_i}\min(\rho_{it}A_i,clip(\rho_{it})A_i).$$
+常数不随本批实际回答长度变化。有限组中含自身的均值、裁剪与采样仍有各自统计影响。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+对每题采G条回答并评分
+A_i←r_i-mean_group(r)；不除组标准差
+计算有效token的PPO式裁剪项
+将有效项求和
+除以G*固定最大长度（及明确的batch常数）
+不要改成逐回答长度或本批实际token数
+更新策略
+记录正确／错误回答的长度与题目梯度权重
+输出：修改归一化后的推理策略
+```
+
+**实现要点**：作者所说去偏针对具体来源，不是任何策略梯度意义都无偏。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 不除组标准差，按固定长度常数归约的组优势裁剪目标 |
+| 机制改变 | 移除这两类归一化，用固定分母保留奖励差优势 |
+| 评价改善的指标 | 正确率、正确／错误回答长度、权重分布 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 原文数学推理基座、模板与训练配方研究 |
+| 数据来源与规模 | 同题多回答与可验证奖励 |
+| 对比基线 | GRPO与去除各偏差来源的版本 |
+| 训练预算与资源 | 具体模型、题集和模板分开；完整成本本文未完整核实 |
+| 指标及其含义 | 正确率、正确／错误回答长度、权重分布 |
+| 随机性与不确定性 | 全部训练种子／区间本文未核实 |
+| 实际验证的假设 | 去除特定归一化能否改变不利训练动态 |
+
+**实验解读（本文分析）**：作者所说去偏针对具体来源，不是任何策略梯度意义都无偏。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| §3.1／图5 | 长度及难度权重分析 | 定位特定偏差来源 | 不等于所有估计偏差 |
+| 图6 | 长度与准确率动态 | 支持归一化影响行为 | 不证明长度单独决定准确率 |
+| 图7—8 | 模板／题目混合／基座比较 | 显示起点与配方重要 | 不能把全部收益归公式 |
+
+**结论边界**：原文诊断与消融展示不同训练动态。作者所说去偏针对具体来源，不是任何策略梯度意义都无偏。
+
+## 六、贡献、代价与局限
+
+**作者称谓**中的unbiased应结合其定义。**本文分析**：使用同组含自身均值时，简单独立样本推导会出现(G−1)/G因子；裁剪目标也不等于完整无偏策略梯度。去掉一种偏差不等于任意假设下完全无偏。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+长度10与100的两回答优势均为1。逐回答平均下每token权重为1/10与1/100；固定Lmax=100下都为1/100。前者给短回答每token十倍权重，后者给长回答更大总权重；哪种训练效果更好仍需实验。
+
+### 五个前置概念
+
+1. **长度归一化**：按样本token数缩放损失。
+2. **难度归一化**：组奖励标准差隐含的题目权重。
+3. **固定分母**：不随当前回答长度变化的归约。
+4. **组均值基线**：同题奖励平均。
+5. **偏差定义**：必须指明偏离哪个目标或估计量。
+
+### 三个值得继续追问的问题
+
+1. 固定最大长度变化时是否需同步调学习率？
+2. 去掉标准差后各难度题梯度如何分配？
+3. 哪些偏差仍未被此修改消除？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| GRPO长度与题目难度相关的梯度偏置 | 移除这两类归一化，用固定分母保留奖励差优势 | 移除随回答长度与组标准差变化的隐式样本权重 | 原文诊断与消融展示不同训练动态 | 作者所说去偏针对具体来源，不是任何策略梯度意义都无偏 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](54-dapo.md) · [下一篇](56-mbdpo.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "55-dr-grpo";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

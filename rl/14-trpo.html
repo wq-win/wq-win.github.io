@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 14 天｜TRPO：策略更新太猛，为什么会毁掉好不容易学会的行为 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">TRPO：策略更新太猛，为什么会毁掉好不容易学会的行为</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 14 天｜TRPO：策略更新太猛，为什么会毁掉好不容易学会的行为
+
+[系列首页](README.md) · [上一篇](13-dpg.md) · [下一篇](15-gae.md)
+
+**原论文与版本**：Schulman 等，*Trust Region Policy Optimization*，2015。[正文](https://arxiv.org/html/1502.05477v5)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：策略更新的稳定性
+
+**旧方法卡点**：旧策略样本上的改进不一定迁移到大幅变化的新策略
+
+**作者主张**：以 KL 信赖域限制策略变化，近似求解受约束替代目标
+
+**论文证据**：理论界与控制实验支持保守更新的设计
+
+**一句话**：在单智能体、on-policy 随机策略优化中，作者通过“以 KL 信赖域限制策略变化，近似求解受约束替代目标”应对“策略更新的稳定性”这一问题；证据边界或代价是：实际平均 KL 与理论最坏状态约束不同，不构成无条件单调保证。
+
+## 二、研究背景与问题定义
+
+本篇将“策略更新的稳定性”放在单智能体、on-policy 随机策略优化的边界内研究。旧策略样本上的改进不一定迁移到大幅变化的新策略。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 单智能体、on-policy 随机策略优化 |
+| 状态／观测 | 控制状态或 Atari 图像 |
+| 动作 | 连续或离散动作 |
+| 奖励或学习信号 | 任务回报 |
+| 终止／边界 | 真终止及 rollout 截断要区分 |
+
+## 三、方法：到底改了什么
+
+从旧策略得到优势与样本，使用概率比比较新旧策略对已执行动作的倾向。实际求解把目标线性化、KL 二次化，用共轭梯度求方向，再回溯验证近似是否可靠。它沿用策略梯度与自然梯度几何，新增的是受限更新及可执行近似。
+
+### 关键公式与符号
+
+$$\max_\theta E_{old}[\rho_t(\theta)\hat A_t],\quad E_sD_{KL}(\pi_{old}\|\pi_\theta)\le\delta,\quad\rho_t=\pi_\theta(a_t|s_t)/\pi_{old}(a_t|s_t).$$
+理论推导中的最坏状态散度不能直接替换为实验平均散度后仍声称完全相同保证。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+冻结旧策略 π_old
+用 π_old 收集轨迹，估计优势 A
+计算替代目标梯度 g
+定义 KL Hessian-vector product Fv
+用共轭梯度解 Fd≈g
+缩放 d 使局部二次 KL≈δ
+沿 d 回溯候选 θ：
+  若样本替代目标改善且样本平均 KL≤δ：接受
+  否则缩短步长；无可行步则保持 θ
+更新价值估计，开始下一轮
+```
+
+**实现要点**：实际平均 KL 与理论最坏状态约束不同，不构成无条件单调保证。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 最大化旧数据上的概率比优势替代目标，受平均KL约束 |
+| 机制改变 | 以 KL 信赖域限制策略变化，近似求解受约束替代目标 |
+| 评价改善的指标 | 回报与学习曲线 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | §8 连续控制和 Atari |
+| 数据来源与规模 | on-policy 轨迹；single-path 与 vine 分开 |
+| 对比基线 | 自然梯度、其他策略搜索等 |
+| 训练预算与资源 | 实验 δ=0.01；完整任务步数本文未逐项核实 |
+| 指标及其含义 | 回报与学习曲线 |
+| 随机性与不确定性 | 运动任务图4 平均5次运行；其他图按各自协议 |
+| 实际验证的假设 | 受限更新是否改善稳定性与样本利用 |
+
+**实验解读（本文分析）**：实际平均 KL 与理论最坏状态约束不同，不构成无条件单调保证。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| §3 理论界 | 真实性能差与替代目标／散度 | 解释小步更新动机 | 不等于实际网络严格保证 |
+| §4—5 近似与采样 | 可计算 KL 与优化流程 | 展示理论如何落地 | 不证明近似误差为零 |
+| §8 图4 | 连续运动学习曲线 | 支持所测任务的表现 | 不提供所有场景的最优性 |
+
+**结论边界**：理论界与控制实验支持保守更新的设计。实际平均 KL 与理论最坏状态约束不同，不构成无条件单调保证。
+
+## 六、贡献、代价与局限
+
+**作者区分**理论与实际近似。**本文分析**：vine 采样需要恢复环境状态，可能拥有现实机器人没有的权限；样本 KL 也可能漏掉未访问状态的大变化。对照 PPO 时应同时看更新速度、样本效率与实现复杂度。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+旧策略动作概率0.1，新策略0.9，优势为正，替代目标会强烈奖励这个变化。但旧数据几乎没覆盖新策略大量访问的后续状态。KL 约束的意义是限制这种外推，不是证明该动作不值得增加。
+
+### 五个前置概念
+
+1. **信赖域**：限制一步优化偏离可靠区域。
+2. **重要性比**：新旧策略对样本概率的比值。
+3. **替代目标**：用旧样本估计新策略收益的代理。
+4. **共轭梯度**：无需显式逆矩阵的线性求解方法。
+5. **回溯搜索**：逐步缩短候选更新直到满足条件。
+
+### 三个值得继续追问的问题
+
+1. 平均 KL 很小却有少数状态变化巨大，可能发生什么？
+2. 恢复状态的 vine 采样额外提供了什么能力？
+3. 回溯通过是否意味着真实回报一定提升？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 策略更新的稳定性 | 以 KL 信赖域限制策略变化，近似求解受约束替代目标 | 限制更新区域，使旧策略样本对新策略更有参考价值 | 理论界与控制实验支持保守更新的设计 | 实际平均 KL 与理论最坏状态约束不同，不构成无条件单调保证 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](13-dpg.md) · [下一篇](15-gae.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "14-trpo";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

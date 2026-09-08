@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 25 天｜MADDPG：训练时看全局，执行时各自行动 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">MADDPG：训练时看全局，执行时各自行动</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 第 25 天｜MADDPG：训练时看全局，执行时各自行动
+
+[系列首页](README.md) · [上一篇](24-icm.md) · [下一篇](26-her.md)
+
+**原论文与版本**：*Multi-Agent Actor-Critic for Mixed Cooperative-Competitive Environments*，2017。[原论文](https://arxiv.org/abs/1706.02275)。
+
+## 一、先用一分钟讲明白
+
+**研究问题**：多个学习者使彼此的环境不断变化
+
+**旧方法卡点**：独立Critic把其他策略变化误认为环境噪声
+
+**作者主张**：为每个智能体用集中Critic，Actor执行时只用局部观测
+
+**论文证据**：合作、竞争和混合粒子任务实验显示作用
+
+**一句话**：在多智能体、集中训练分散执行、连续策略梯度中，作者通过“为每个智能体用集中Critic，Actor执行时只用局部观测”应对“多个学习者使彼此的环境不断变化”这一问题；证据边界或代价是：集中信息和联合动作输入限制可扩展性。
+
+## 二、研究背景与问题定义
+
+本篇将“多个学习者使彼此的环境不断变化”放在多智能体、集中训练分散执行、连续策略梯度的边界内研究。独立Critic把其他策略变化误认为环境噪声。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+
+| 要素 | 本文设定 |
+|---|---|
+| 研究场景 | 多智能体、集中训练分散执行、连续策略梯度 |
+| 状态／观测 | Actor用局部o_i；Critic用联合信息x |
+| 动作 | 每个智能体a_i，联合为a_1…a_N |
+| 奖励或学习信号 | 可合作共享或各自不同奖励r_i |
+| 终止／边界 | 联合任务终止 |
+
+## 三、方法：到底改了什么
+
+每个Actor只负责自己的动作，但Critic可看其他智能体实际做了什么，从而让条件分布更稳定。与单智能体DDPG相比，关键修改是价值函数的条件信息；训练时额外信息必须在评估声明中说清楚。原文还讨论策略集合与对手建模，核心代码先聚焦集中Critic。
+
+### 关键公式与符号
+
+$$\nabla_{\theta_i}J_i=E[\nabla_{\theta_i}\mu_i(o_i)\nabla_{a_i}Q_i(x,a_1,\ldots,a_N)].$$
+只有a_i路径对Actor i反传；别的动作应按该更新的采样与停止梯度约定处理。
+
+### 输入 → 处理 → 输出：教学伪代码
+
+以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+
+```text
+用各Actor+探索噪声联合交互
+存储联合观测、动作、各奖励与后继观测
+每个智能体i：
+  用所有目标Actor生成后继联合动作
+  y_i←r_i+γ*(1-done)*目标Q_i(x_next,联合动作)
+  更新集中Q_i
+  用μ_i(o_i)替换联合动作中的a_i
+  最大化Q_i更新Actor i，冻结其他Actor
+  软更新目标网络
+部署：每个Actor只接收自己的o_i
+```
+
+**实现要点**：集中信息和联合动作输入限制可扩展性。
+
+### 三种“优化”要分开
+
+| 层次 | 这里具体是什么 |
+|---|---|
+| 数学目标／训练损失 | 每个智能体最大化自身回报；集中Critic提供局部Actor梯度 |
+| 机制改变 | 为每个智能体用集中Critic，Actor执行时只用局部观测 |
+| 评价改善的指标 | 各智能体回报、合作／竞争任务结果 |
+
+## 四、实验如何验证方法
+
+| 实验要素 | 原文设定与证据范围 |
+|---|---|
+| 环境与任务 | 合作通信、捕食追逐、协作导航、欺骗等粒子任务 |
+| 数据来源与规模 | 联合在线replay |
+| 对比基线 | 独立DDPG及原文相关基线 |
+| 训练预算与资源 | 完整步数、网络和调参预算本文未逐项核实 |
+| 指标及其含义 | 各智能体回报、合作／竞争任务结果 |
+| 随机性与不确定性 | 全部种子与不确定性本文未核实 |
+| 实际验证的假设 | 集中评价能否缓解其他策略变化 |
+
+**实验解读（本文分析）**：集中信息和联合动作输入限制可扩展性。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+
+## 五、结果：证据到底有多强
+
+| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 图1 | 集中Critic／局部Actor | 部署信息分工 | 不等于训练也只用局部信息 |
+| 图2 | 多种交互任务 | 明确协作／竞争覆盖 | 不是复杂现实社会仿真 |
+| §5结果与相关消融 | 集中方法与独立学习 | 支持所测多智能体场景 | 不证明任意人数下扩展 |
+
+**结论边界**：合作、竞争和混合粒子任务实验显示作用。集中信息和联合动作输入限制可扩展性。
+
+## 六、贡献、代价与局限
+
+**作者贡献**是可处理混合互动的集中评价。**本文分析**：联合输入随人数增长，训练中熟悉的对手分布也可能与部署不同。一个智能体回报增加可能意味着别人损失，不能把所有结果都叫整体协作提高。
+
+## 七、帮助建立理解
+
+### 教学例子
+
+以下是教学推演，不是原论文实验。
+
+两机器人同时推箱子，单个机器人观察到箱子不动，不知道自己推错还是伙伴没推。Critic看到双方动作后能区分这两种情况；部署Actor仍只能依据自己的观测行动。
+
+### 五个前置概念
+
+1. **非平稳性**：其他策略更新改变数据规律。
+2. **集中训练**：学习时可使用联合信息。
+3. **分散执行**：部署时各自凭可用信息决策。
+4. **联合动作**：所有智能体动作的组合。
+5. **信用分配**：把共同结果归因到参与者行为。
+
+### 三个值得继续追问的问题
+
+1. 集中Critic使用的全局信息部署时真的不需要吗？
+2. 新对手策略会造成怎样的分布偏移？
+3. 如何评价竞争任务中谁受益？
+
+## 方法与证据总结
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
+|---|---|---|---|---|
+| 多个学习者使彼此的环境不断变化 | 为每个智能体用集中Critic，Actor执行时只用局部观测 | 条件化其他智能体的动作，减少其变化造成的评价混淆 | 合作、竞争和混合粒子任务实验显示作用 | 集中信息和联合动作输入限制可扩展性 |
+
+## 资料与阅读范围
+
+资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+
+文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+
+[系列首页](README.md) · [上一篇](24-icm.md) · [下一篇](26-her.md)
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/render.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "25-maddpg";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>
