@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>027｜T5：把不同语言任务变成同一种文本输入输出接口 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">T5：把不同语言任务变成同一种文本输入输出接口</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 027｜T5：把不同语言任务变成同一种文本输入输出接口
+
+[目录](README.md) · [上一篇](026-zero.md) · [下一篇](028-bart.md)
+
+**论文**：Colin Raffel 等，*Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer*，2019 年预印本、JMLR 2020。[原文](https://arxiv.org/abs/1910.10683) · [PDF](https://arxiv.org/pdf/1910.10683)。这是一篇包含大量受控研究的长论文；本文定向讨论统一接口、span corruption、数据与训练比较，不声称穷尽全部附录实验。
+
+## 一分钟理解
+
+分类输出标签，翻译输出句子，问答输出答案，是否必须使用完全不同的模型头？T5 把任务输入写成文本，把输出也写成文本，通过任务前缀区分要求。这样架构、损失和解码接口能够共享，便于比较预训练策略。
+
+作者系统研究架构、破坏目标、数据集、迁移方法与规模，最终结合有效设计形成 T5。贡献不只是一个去噪公式，而是一套统一实验平台。统一格式不等于所有任务无需标签，也不保证任务之间没有负迁移。
+
+## 背景：接口差异会干扰算法比较
+
+如果一项研究改变预训练目标，同时换了下游头和数据处理，结果很难归因。文本到文本让许多任务都使用同样的条件生成目标。例如情感分类生成“positive”，翻译生成目标语言句子，回归任务也可按规定文本形式表示。
+
+这种统一保留了任务差异：标签词、前缀、输出长度和评价方式仍不同。文本输出并不意味着评价只看字符串完全相同，也不意味着生成任何近义标签都自动算对。解码与任务映射必须固定。
+
+预训练数据 C4 来自对 Common Crawl 的清洗。过滤策略决定哪些文本被保留，也可能排除某些语言或风格。因此数据集不是背景附件，而是方法和可复现性的核心部分。
+
+## 方法：缺失片段用哨兵串联
+
+T5 的常用 span corruption 将连续片段替换为特殊哨兵 token，目标只生成被移除片段及相应哨兵，而非总是重建整段文本。设输入为 $x$、破坏函数为 $C$、目标缺失片段序列为 $T(x)$：
+
+$$
+L=-\log P_\theta(T(x)\mid C(x)).
+$$
+
+每个哨兵标识一个缺口，解码器据此输出相关内容。连续片段被单一哨兵替换，输入和目标长度可以较短，影响训练速度。破坏比例与平均片段长度控制任务难度及计算。
+
+编码器双向读取破坏输入，解码器因果生成目标。下游同样使用编码解码结构，只将输入换成任务文本。预训练目标和监督任务共用条件生成形式，不代表它们具有相同数据分布。
+
+论文还比较仅解码、前缀语言模型、不同去噪和迁移方式。最终选择应理解为其研究范围内有效组合，而非数学上唯一最优。尤其一些去噪变体质量差异不大，计算长度可能成为选择依据。
+
+```text
+预训练：
+    从清洗语料取文本
+    选连续破坏片段，以不同哨兵替换
+    将缺失片段按顺序组织成目标文本
+    编码破坏输入，解码目标，计算条件生成损失
+下游：
+    添加任务前缀并把标签或答案转换成文本
+    按选定迁移策略训练
+    解码并按任务规则还原预测，再使用原任务指标
+```
+
+数学目标统一为文本交叉熵，机制统一输入输出接口并设计去噪任务，指标仍然多样。不能因为训练统一，就把 GLUE、翻译 BLEU 与摘要 ROUGE 混成一个没有定义的总准确率。
+
+## 实验与证据
+
+| 项目 | 原文范围 |
+|---|---|
+| 数据 | C4 及不同预训练语料/数据量比较 |
+| 架构 | 编码解码与其他架构控制研究 |
+| 目标 | 语言建模、去噪、不同破坏方式与span长度 |
+| 迁移 | 微调、多任务等策略，按实验单独控制 |
+| 任务 | 理解、问答、翻译、摘要等统一文本接口 |
+| 不确定性 | 表 1 明确基线均值与标准差；不能将其自动套到所有后续模型 |
+| 预算 | 小规模受控实验与最终大规模模型分层阅读 |
+
+**证据一，统一框架与第 3 节研究设计。**固定接口让架构、目标与数据比较更清楚。它是实验组织贡献，不是证明所有任务具有相同统计难度。
+
+**证据二，表 1。**基线均值、标准差与无预训练对照说明不同任务受预训练影响并不相同。某些任务差距大、某些小，反映数据与任务条件，而不是一个恒定迁移收益。
+
+**证据三，表 7 与第 3.3.5 节。**不同平均span长度的效果较接近，较长片段在部分任务略差；作者强调不同目标造成的序列长度和速度差异。这支持同时比较质量与计算，不能只追逐一个微小分数差。
+
+论文最后扩展模型和训练规模，成绩包含多种有效选择。不能拿最终大模型对小基线的差距，声称某一个哨兵设计带来了全部提升。长论文的受控研究与最终配方应分开引用。
+
+## 教学例子：哨兵的作用
+
+构造原文“红色小猫坐在温暖垫子上”，移除“小猫”和“温暖垫子”，输入可写成“红色<S1>坐在<S2>上”，目标为“<S1>小猫<S2>温暖垫子<S3>”。不同哨兵让解码器知道各段属于哪个缺口。
+
+与重建整句相比，只生成缺失部分减少目标长度，但也改变监督位置：已知片段不直接在目标中重复。若任务需要学习完整文本流畅生成，去噪形式与下游仍有差异，因此不能说压缩目标永远无损。
+
+分类教学例子中，输出“positive”本身只是标签编码。若换成无意义标记，只要训练映射一致，模型仍可学习；自然语言标签可能提供额外先验，但这需要控制实验，不能仅凭词义直觉判断。
+
+## 数据与预算的公平性
+
+同样步数下，不同破坏目标可能有不同输入输出 token 总量，因而计算不同。若只固定 batch 条数，质量更高可能来自更多有效监督或更长计算。应记录编码和解码长度，比较相同计算或相同原始文本覆盖下的结果。
+
+数据清洗同样需要完整说明。删除重复、模板或不符合规则的页面可能改善质量，也可能改变领域分布。评价某种清洗的收益，应查看任务分组，而不是只报告整体更好并忽略被削弱的内容类型。
+
+## 贡献与局限
+
+T5 将通用迁移学习的多种选择放在一致平台上，推动文本到文本成为常用接口。限制包括编码解码成本、任务格式依赖、数据偏差和昂贵规模扩展。统一接口也可能把数值或结构化任务的精确约束变成生成错误，需要额外验证。
+
+五个前置概念是条件生成、任务前缀、span corruption、哨兵标记和控制变量。理解它们，就能区分“格式统一”“参数共享”和“无监督获得所有任务”三个不同主张。
+
+统一生成标签还引入解码空间问题。一个三类分类任务可以限制只在三个合法标签中打分，也可以自由生成后再解析；前者不会输出非法标签，后者可能产生同义词或额外解释。两种评价并不等价，应在实验中固定。若模型生成正确语义却字符串不合法，错误属于接口或解码协议，不能简单归为完全不懂任务。
+
+生成式统一接口并不意味着各任务的评价指标也被统一。
+
+|原有问题|作者改动|为什么可能有效|实验证据|代价与局限|
+|---|---|---|---|---|
+|任务与实验接口分散难比较|统一text-to-text并系统比较预训练|共享输入输出接口以隔离部分变量|第3节设计、表1基线、表7span对照|统一接口不统一难度，额外生成计算|
+
+## 自测与参考答案
+
+**1. 所有任务写成文本，是否意味着不用任务监督？**
+
+不是。监督标签只是转换为文本输出，来源仍然存在。统一的是接口与损失形式，数据获取成本和任务定义并未消失。
+
+**2. 为什么不同去噪目标应比较输入输出长度？**
+
+它们决定编码和解码计算，以及每步监督量。相同步数不一定等计算，较短目标可能在质量接近时更便宜。
+
+**3. 哨兵为什么需要区分不同缺口？**
+
+它建立输入缺口与输出片段的对应关系，帮助解码器按顺序恢复。如果所有标记不可区分，多个缺口的目标组织会更含糊。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "027-t5",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

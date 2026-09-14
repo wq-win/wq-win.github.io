@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>070｜Reflexion：把失败经验写成语言，下一次真的会更好吗？ | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Reflexion：把失败经验写成语言，下一次真的会更好吗？</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 070｜Reflexion：把失败经验写成语言，下一次真的会更好吗？
+
+[返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
+
+论文：Noah Shinn 等，*Reflexion: Language Agents with Verbal Reinforcement Learning*，2023。原始来源：[论文](https://arxiv.org/abs/2303.11366)、[正文 v4](https://arxiv.org/html/2303.11366v4)、[官方代码](https://github.com/noahshinn024/reflexion)。以下依据 v4 的方法、实验与附录相关部分解读；没有独立运行仓库，也没有把所有提示词逐条复现。
+
+## 一分钟理解：改的是下次尝试的上下文
+
+假设一个助手写错程序。给它一句“错了”，它可能换种说法再错一次；给它一段可靠的错误分析，例如“循环遗漏了右端点，下一次先检查边界”，再次作答时就有了可以执行的修正方向。Reflexion 把这个过程组织成通用框架：执行任务、评价结果、生成反思、保存反思、再次尝试。
+
+过去的提示式 Agent 常常只保留当前行动轨迹，或者从头重试。前者可能让冗长错误淹没有用信息，后者会重复相同错误。作者希望用短小的语言记忆概括失败原因，使下一次行动受以前结果影响。
+
+作者把这称为“语言强化学习”。需要先划清边界：论文的推理循环没有通过梯度更新语言模型参数，反思也不是数学意义上的策略梯度。变化发生在模型的条件输入和外部记忆中。
+
+实验最醒目的结果之一是 HumanEval Python 上，表1中的 GPT-4 基线由80.1%提高到91.0%。但程序在提交最终答案前可以内部测试和重试；这不能理解成一次模型调用就有91%的成功率。同一张表中 MBPP Python 反而从80.1%降到77.1%。
+
+一句话总结：在能够获得有效反馈且允许重试的任务中，通过把失败经验压缩为语言记忆，改善后续尝试的成功率，代价是额外调用、反馈系统和错误反思可能带来的退化。
+
+## 研究背景：这里的环境和奖励是什么？
+
+论文研究固定语言模型驱动的单个 Agent，覆盖 ALFWorld 文本交互、HotpotQA 问答和程序生成。它不是一个统一训练好的新基础模型，也没有统一的状态空间。
+
+在 ALFWorld 中，观测是环境返回的文本，动作是导航、寻找和操作物体的命令，任务完成状态提供反馈。在问答中，输入问题与检索内容构成上下文，输出答案接受评价。在编程中，候选代码接受生成的单元测试，最后用独立测试集统计成绩。
+
+这三种反馈的可信程度不同。模拟器的任务完成信号比较直接；HotpotQA 实验可以使用真实答案导出的正确与否反馈；程序的自生成测试则可能把错误实现判为正确，也可能用错误期望值否定正确程序。因此，“有反思”不是唯一条件，“反思依据什么”更加关键。
+
+核心假设是：一次失败能够被压缩为有助于下一次决策的经验，而且模型读到经验后能够采取不同、更好的行动。论文用经验性实验检查这些假设，没有给出每次反思都使成功概率单调上升的定理。
+
+## 方法：三个角色与一份有限记忆
+
+Actor 负责行动或产生答案；Evaluator 评价轨迹；Self-Reflection 模块把轨迹和评价转换为自然语言反馈。这三个角色可以由语言模型或外部执行器承担，不能因为名称类似 Actor–Critic 就把 Evaluator 等同于学习状态价值的 TD critic。
+
+用教学记号描述第 $k$ 次尝试：
+
+$$
+\tau_k\sim\pi_M(\cdot\mid x,m_k),\qquad
+r_k=E(\tau_k),\qquad
+s_k=R(\tau_k,r_k,m_k),\qquad
+m_{k+1}=\operatorname{truncate}(m_k\oplus s_k).
+$$
+
+$x$ 是任务，$m_k$ 是记忆，$\tau_k$ 是轨迹或候选程序，$E$ 是评价器，$R$ 是反思生成过程，$\oplus$ 表示追加。截断操作限制上下文长度。模型参数 $M$ 在这一循环中保持不变。
+
+这里没有一个被梯度下降直接优化的统一 Reflexion 损失。任务成功率是评价指标；“执行—反馈—记忆”是算法机制；改变条件分布是机制产生的效果。三者不能合并成“优化奖励函数”一句话。
+
+```text
+输入：任务 x、固定模型、评价器 E、重试预算 K、记忆容量 Ω
+memory = []
+for trial in 1..K:
+    candidate, trajectory = Actor(x, memory)
+    feedback = E(candidate, trajectory)
+    if feedback indicates success:
+        return candidate
+    reflection = Reflect(x, trajectory, feedback, memory)
+    memory = last_Ω(memory + [reflection])
+return best_or_last_candidate_according_to_protocol
+```
+
+这是便于实现的教学版本。原文算法1的循环条件写法不宜脱离上下文机械照抄；实际程序必须同时保证成功后停止、预算耗尽后停止。最后返回哪个候选也应由评价协议明确规定。
+
+为什么语言记忆可能比原始轨迹有效？原始轨迹告诉模型“发生了什么”，反思还尝试提炼“下次应改变什么”。但这是信息压缩，不是无损记录：概括失真、过早归因以及错误测试都可能把下一次尝试引向错误方向。
+
+## 实验设计：反馈与预算是比较的一部分
+
+| 项目 | 原文设置与需要保留的口径 |
+|---|---|
+| ALFWorld | §4.1：134个环境、6类任务；基于 GPT-3 的 ReAct；连续12轮尝试，保留最近3份反思 |
+| ALFWorld 重试 | 重复相同行动与响应超过阈值，或行动过长时重置；基线也获得重试机会，不是只比较一次基线与多次新方法 |
+| HotpotQA | 图4的100道题；CoT、ReAct及记忆消融；使用正确性反馈，部分 CoT 设置提供真实支持上下文 |
+| 程序生成 | GPT-4；HumanEval、MBPP 的 Python/Rust 版本；HumanEval Rust 使用较难的50题子集；另有40道 LeetCode hard |
+| 内部反馈 | 模型生成单元测试，进行语法过滤与代码执行；语法正确不能保证测试的期望答案正确 |
+| 记忆与停止 | 编程保留最近一次反思；成功停止取决于内部测试。统一的编程总调用预算没有在这里所核对的正文中确认 |
+| 评价口径 | 最终候选提交隐藏测试；pass@1 描述最终提交，不排除内部多轮生成、执行与修正 |
+| 不确定性 | 不把有限任务集上的单个比例当作稳定总体参数；正文结果不足以推导所有模型与任务的置信区间 |
+
+HotpotQA 的正确与否反馈具有实验 oracle 的性质：真实部署的问题通常没有已知正确答案可随时判分。把这个系统搬到开放研究问题上，必须另行构建评价器，不能直接沿用其问答增益。
+
+还要注意不同论文的 GPT-4 成绩不可直接互换。这里 HumanEval 基线80.1%，并不是 GPT-4 技术报告中67%的同一实验配置；模型版本、提示、采样和评测流程都影响可比性。
+
+## 结果：五处证据应该怎样读？
+
+**证据1：图3，ALFWorld 的累计成功。** 最终完成130/134个任务，即约97.01%，这个比例由任务数自行计算。曲线支持记忆与重试可以帮助解决先前失败的任务，但它是多轮累计结果，不能证明首次行动就有相同可靠性，更不能只凭最终成功率判断调用效率。
+
+**证据2：图4，问答中的记忆消融。** 作者比较仅保留近期经历与加入语言反思的设置，报告反思记忆带来8个百分点的增益。这支持“如何编码过去经验”有作用；然而正确性反馈与部分实验的真实上下文也参与了结果，不能据此证明不依赖验证信息的自由反思同样有效。
+
+**证据3：表1，程序任务有明显异质性。** HumanEval Python 为80.1%→91.0%，绝对增加10.9个百分点；Rust 为60%→68%。MBPP Python 则80.1%→77.1%，下降3个百分点；MBPP Rust 为70.9%→75.4%。LeetCode hard 为7.5%→15%，在40题上对应3题→6题，样本很小。“翻倍”不能掩盖只多解3题的事实。
+
+**证据4：表2，自生成测试的可靠程度。** 作者讨论 MBPP 与 HumanEval 上内部测试放过错误程序的差异，正文给出16.3%与1.4%的相关比例。阅读时必须遵循表中条件归一化方式，不能擅自把它们当成以所有错误程序为分母的标准假阳性率。它支持测试质量影响最终效果，不能证明反思模块本身在 MBPP 上没有价值。
+
+**证据5：表3，Rust 子集的组件消融。** 基线0.60；省去测试生成而保留反思为0.52；有测试但省去语言反思为0.60；完整方法为0.68。在这一设置下，可靠反馈与语言修正共同出现才取得增益，缺少测试的反思甚至变差。结论范围是该子集与配置，不是任何任务都必须使用相同组件。
+
+## 贡献、成本与尚未解决的问题
+
+这篇论文的重要贡献是把语言反馈、有限记忆与任务重试组织成清晰的 Agent 框架，并跨交互、问答和代码任务实验。它展示了一种无参数更新的适应方式，为后来“经验记忆”“自修正”系统提供了可讨论的基线。
+
+成本至少包括更多生成 token、评价器调用、代码执行与任务重置。最终准确率提高并不自动意味着单位时间成功率提高；若两个方法可用预算不同，应该同时报告成功率随总 token、调用次数和墙钟时间的变化。
+
+作者讨论了复杂代码与不可靠测试带来的困难。进一步分析还包括：短记忆可能遗忘早期有效信息；同一模型生成答案和反思时可能共享盲点；错误归因可以积累成顽固记忆；任务无法重置时，试错本身可能改变环境，不能照搬离线修正流程。
+
+论文对 LeetCode 时间切分的解释涉及 GPT-4 训练截止日期，其依据不宜当作已证实的去污染保证。[GPT-4 技术报告](https://arxiv.org/abs/2303.08774)描述的是大部分数据截止于2021年9月、另有少量更新数据，不能由一个题目发布日期推出模型绝不可能见过相关信息。这属于外部原始来源支持的证据边界。
+
+## 一个具体例子与五个前置概念
+
+**自构例子，未运行：** 任务是实现闭区间整数求和。首次代码用 `range(a, b)`，测试 `sum_interval(2, 4) == 9` 失败，结果为5。好的反思是“Python 的 range 不含右端点，下次使用 b+1，并检查 a=b”；坏的反思是“需要给所有结果加4”。后者可能修好这一个测试，却破坏其他输入。若测试本身错误地要求结果为8，反思越坚定也可能越偏离真实规格。
+
+理解本文最需要五个概念：**轨迹**是行动与观察的序列；**上下文学习**是在不更新参数时利用输入改变行为；**外部记忆**是跨尝试保留的信息；**oracle反馈**是评测时可获得但部署时未必存在的真实判定；**隐藏测试**是不能被候选生成过程直接利用的最终评估集合。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 重试容易重复错误，完整轨迹又过长 | 评价后生成行动导向的语言反思，写入有限记忆 | 压缩错误原因，让下一次条件输入包含可执行修正 | 图3累计130/134；图4记忆消融；表1 HumanEval增益与 MBPP 退化；表3组件消融 | 多次调用和执行；依赖可靠反馈；无参数更新或单调改进保证 |
+
+## 自测与答案
+
+**1. Reflexion 没有更新权重，为什么仍然能“学到”经验？它和 PPO 的学习一样吗？**
+
+答案：记忆改变了后续生成的条件分布，相同模型读到不同失败经验，可以产生不同动作。这是一种任务内的上下文适应。PPO 则通常通过奖励和梯度更新策略参数；两者变化的存储位置、跨任务持久性和优化机制不同。“语言梯度”只能当作比喻。
+
+**2. HumanEval 的91% pass@1 能否说明一次模型调用有91%概率写对？怎样做公平比较？**
+
+答案：不能。最终只有一个提交，不代表内部只有一次生成；测试、反思和修正都消耗预算。应固定同一模型与最终隐藏测试，比较相同总 token、执行次数或墙钟预算下的 Reflexion、直接多次采样和无反思修正，并把首次成功与最终成功分开报告。
+
+**3. 为什么更详细的反思可能使程序变差？怎样验证问题出在反馈还是反思？**
+
+答案：错误测试会提供错误优化方向，反思还可能把局部错误概括成错误规则。可构造真实测试与自生成测试两种反馈，在相同预算下分别运行有反思、无反思系统；另外检查反思是否忠实解释失败。只有这样才能区分评价器失真、语言归因失真和模型无法执行正确建议三种原因。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "070-reflexion",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

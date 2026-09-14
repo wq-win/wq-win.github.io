@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>066 · BLIP-2：用可训练的查询桥梁连接冻结的视觉与语言模型 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">066 · BLIP-2：用可训练的查询桥梁连接冻结的视觉与语言模型</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 066 · BLIP-2：用可训练的查询桥梁连接冻结的视觉与语言模型
+
+[返回目录](README.md) · [上一篇：Constitutional AI](065-constitutional.md) · [下一篇：Toolformer](067-toolformer.md)
+
+论文：Junnan Li、Dongxu Li、Silvio Savarese、Steven Hoi，*BLIP-2: Bootstrapping Language-Image Pre-training with Frozen Image Encoders and Large Language Models*，ICML 2023。[原始论文](https://arxiv.org/abs/2301.12597) · [v3正文](https://arxiv.org/html/2301.12597v3) · [官方实现](https://github.com/salesforce/LAVIS/tree/main/projects/blip2)。阅读范围为主文架构、两阶段训练、表1—6与限制讨论；未核查全部附录超参数或复现训练。
+
+## 一分钟理解
+
+一个视觉模型擅长提取图片特征，一个语言模型擅长生成文字，但把两者接起来并不意味着语言模型自动读懂视觉向量。BLIP-2在中间加入Q-Former：少量可学习查询从图像里取出与文字相关的信息，再把它们变成语言模型能够使用的连续提示。
+
+视觉编码器和语言模型在多模态预训练时保持冻结。第一阶段先学“哪些视觉信息与文本有关”，第二阶段再学“怎样把这些信息交给语言模型”。因此它主要训练接口，而非重训两个大模型。
+
+在图文理解与生成场景下，通过两阶段查询对齐，改善冻结模型的组合效果并降低可训练参数量；代价是继承基础模型能力边界，而且冻结不等于没有大模型前向和反向传播成本。
+
+## 研究背景：特征空间不是通用插头
+
+CLIP式图像编码器输出的向量适合图文相似性，但语言模型接收的是文字嵌入。两个空间的维度即使相同，坐标含义也不自动一致。只增加一个线性层，可能把视觉信息送进模型，却不保证被正确使用。
+
+BLIP-2把对齐拆成两个问题。先让中间模块学到与文本相关的图像内容，再让这些内容适应冻结语言模型的输入分布。相比在语言模型内部插入大量跨注意力层，它通过输入侧的视觉软提示提供条件。
+
+Q-Former有32个可学习查询，每个768维。查询通过跨注意力读取冻结图像特征，通过自注意力彼此交互，输出固定长度的 $Z\in\mathbb R^{32\times768}$。这些查询不是用户临时写下的32个问题，而是训练得到的参数。
+
+固定长度是一种信息瓶颈。它减少传入语言模型的视觉token，但也要求模型选择信息。查询不一定一一对应“人、桌子、汽车”等可命名对象；把它们想成32个固定类别检测器，会误解注意力表示的分布式性质。
+
+## 第一阶段：三种目标约束同一桥梁
+
+Q-Former包含共享自注意力层的图像与文本分支，并按任务切换注意力掩码。BERT-base用于初始化已有部分，跨注意力部分另行初始化。完整Q-Former为188M参数，不能把它说成只有一个投影矩阵。
+
+**图文对比ITC**让匹配的图像与文字表示接近。图像有多个查询输出，与文本表示分别算相似度后取最大值。为避免答案泄露，查询与文字在此目标下不能互相读取。
+
+**图像条件文本生成ITG**让文字通过查询获取视觉信息。查询可以互看但不能读目标文本；文本可以看全部查询和此前文本。这样图像信息必须穿过查询瓶颈，而不能绕路直接读取视觉特征。
+
+**图文匹配ITM**判断图文是否匹配，允许查询和文本双向交互，并采用有信息量的负例。这里允许交互，因为任务就是融合后判别；不能把ITC禁止交互的规则机械套到所有目标。
+
+用简化符号写，对比目标的一侧为
+
+$$
+\mathcal L_{I\rightarrow T}
+=-\log\frac{\exp(s(I,T)/\tau)}
+{\sum_{T'}\exp(s(I,T')/\tau)},\quad
+s(I,T)=\max_j\mathrm{sim}(z_j,t).
+$$
+
+$z_j$ 是第 $j$ 个查询输出，$t$ 是文本表示，$\tau$ 为温度。正式训练还包含另一方向和其他损失。公式说明它比较的是整批匹配关系，不是只让正例余弦相似度无限增大。
+
+## 第二阶段：把查询输出变成语言模型条件
+
+投影层把 $Z$ 转成语言模型嵌入维度，作为视觉软提示放到文本前面。对于OPT，使用以视觉提示为条件的自回归生成；对于FlanT5，将文本前缀和视觉提示交给编码器，以后缀作为解码目标。
+
+教学化生成损失为
+
+$$
+\mathcal L_{\mathrm{gen}}
+=-\sum_t\log P_{\mathrm{LLM}}
+(y_t\mid y_{<t},W_pQ_\theta(f_{\mathrm{image}}(I))).
+$$
+
+$f_{\mathrm{image}}$ 与LLM权重冻结，$Q_\theta$ 和投影 $W_p$ 更新。梯度仍需经过语言模型传回视觉提示；冻结主要省去大模型参数梯度与优化器状态，并不让其计算凭空消失。
+
+```text
+输入：图文对，冻结图像编码器，冻结LLM，可训练Q-Former
+阶段一：
+    提取图像特征
+    按ITC掩码计算图文对比损失
+    按ITM掩码计算匹配损失
+    按ITG掩码计算文本生成损失
+    联合更新Q-Former
+阶段二：
+    queries = Q-Former(图像特征)
+    visual_prompt = projection(queries)
+    将visual_prompt送入冻结LLM
+    计算文本生成损失，更新Q-Former和投影层
+推理：图片 -> 查询表示 -> 视觉软提示 + 用户问题 -> 文本答案
+```
+
+这里改善的目标包括跨模态表示和生成，而实验指标包括VQA准确率、CIDEr、SPICE及检索召回率。它们分别测不同输出，不能用“对齐损失更低”直接替代下游效果。
+
+## 实验设计与真实成本
+
+| 项目 | 原文设置 |
+|---|---|
+| 数据 | 129M图像，来自COCO、Visual Genome、CC、SBU与LAION子集 |
+| 数据处理 | BLIP生成候选描述，CLIP排序后每图保留两条，训练时随机选择 |
+| 视觉模型 | CLIP ViT-L/14或EVA-CLIP ViT-g/14，取倒数第二层特征 |
+| 语言模型 | OPT或指令训练过的FlanT5；两者训练背景并不相同 |
+| 步数 | 第一阶段250K，第二阶段80K |
+| batch | 第一阶段ViT-L/g为2320/1680；第二阶段OPT/FlanT5为1920/1520 |
+| 资源 | 最大配置在16张40GB A100上，两个阶段分别少于六天、三天 |
+| 零样本VQA | beam宽度5、长度惩罚−1，倾向短答案 |
+| 不确定性 | 主表未提供完整多随机种子置信区间，细小差值不能视为稳定优势 |
+
+这些天数不包括CLIP、EVA、BERT与LLM原有预训练，也不应忽略合成描述及筛选成本。论文展示的是复用既有模型后的多模态增量训练效率。
+
+“冻结”还需要按阶段理解：多模态预训练冻结视觉与LLM；在有监督描述和VQA微调中，视觉编码器与Q-Former会更新，LLM仍冻结；检索使用第一阶段模型，不需要LLM。把所有结果当成同一个始终冻结的模型，会误读表格。
+
+## 五处证据与边界
+
+**证据一：表2，零样本VQA。** ViT-g加FlanT5-XXL的VQAv2 test-dev为65.0，Flamingo80B为56.3，绝对高8.7个百分点。但OK-VQA为45.9，低于Flamingo的50.6；作者将其与语言知识能力联系起来，这是解释性假设，不是单变量证明。
+
+**证据二：表1与表2，参数口径。** 54倍少的说法来自10.2B对188M的可训练参数比较。表2生成配置还列出约108M可训练、12.1B总参数。不同阶段使用的模块不同，不能把108M、188M和总参数混为一谈，更不能声称模型总容量缩小54倍。
+
+**证据三：图5，两阶段是否必要。** 去掉表示学习后，零样本VQA明显下降，支持先对齐表示的作用。正文把OPT表现退化称为灾难性遗忘，但其权重冻结；更准确的机制解释是接口训练后条件生成表现退化，不能据此说冻结参数被更新后遗忘了知识。
+
+**证据四：表6，生成目标帮助检索。** COCO微调加入ITG后，图到文R@1从84.5到85.4，文到图从67.2到68.3。该消融支持查询保留语言相关信息的设计，但对应检索微调，不是对第二阶段大语言模型的独立验证。
+
+**证据五：表5与§4.4，检索收益的计算条件。** 图文检索先取128个候选，再以ITM重排。因此其召回率不能被直接当作纯双编码器一次向量检索的效果；额外融合计算属于系统成本。
+
+## 贡献、局限与连接其他论文
+
+BLIP-2表明，强视觉模型与强语言模型之间可以用相对较小的可训练模块建立有效接口。两阶段训练不是简单叠加两个预训练模型，而是先学习提取信息，再学习传递信息。
+
+与Flamingo相比，BLIP-2更适合展示单图与文本之间的模块化对齐；论文明确指出增加上下文VQA示例没有带来明显改善，并将其归因于预训练样本只有单个图文对。这个归因有合理性，但并未穷尽所有提示、结构和数据因素。
+
+冻结语言模型也意味着其错误知识、偏差和生成习惯会被继承。视觉输入不能自动纠正模型对世界的误解。Q-Former若漏掉决定性细节，LLM可能用先验补全一段流畅但错误的回答。
+
+我的分析是，固定查询数应作为信息带宽来检查。密集文字、多个相似物体、精细空间关系可能需要更丰富的表示。论文没有证明32个查询对所有分辨率与任务都足够，不能把“输出长度独立于分辨率”读成“分辨率提高不需要额外信息”。
+
+## 自构例子与前置概念
+
+想象图片里有一个人拿着蓝色杯子，桌上还有红色碗。用户问杯子颜色。视觉编码器提供局部与整体特征，查询模块需要保留杯子与蓝色的关联，LLM再生成“蓝色”。如果查询只保留“桌上有餐具”，再强的语言模型也不能从缺失信息中可靠恢复杯子颜色。
+
+这个自构例子区分了识别错误、信息压缩错误和语言生成错误。排查系统时，可以固定图片替换问题、固定查询改变语言后端，或检查更高分辨率输入，逐步确定瓶颈，而不是把所有失败都归为“LLM不够大”。
+
+五个前置概念：**跨注意力**让查询读取另一组特征；**软提示**是连续嵌入而非可见文字；**对比学习**拉近匹配、分开不匹配；**注意力掩码**限制信息流；**冻结参数**停止更新权重但不一定停止对输入求梯度。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 冻结视觉与语言模型缺少有效接口，端到端训练昂贵 | Q-Former瓶颈、三目标表示学习、视觉软提示生成学习 | 先提取文本相关视觉信息，再适配LLM输入 | 表2零样本结果、图5阶段消融、表6目标消融 | 基础模型成本仍存在；部分微调解冻视觉，单图数据限制上下文学习 |
+
+## 自测：能够回答，才算理解
+
+**1. 冻结LLM后，Q-Former如何得到训练信号？**
+
+答案：损失仍可对LLM输入求导，再通过投影传到Q-Former。冻结的是LLM权重更新，而不是把LLM从计算图中完全删除。若直接阻断这一梯度，生成损失就无法训练视觉接口。
+
+**2. 为什么三种目标要使用不同注意力掩码？**
+
+答案：ITC需要分别编码，避免匹配文字泄露到图像表示；ITG需要因果生成，让视觉信息通过查询传给文本；ITM则需要融合来判断细粒度匹配。掩码决定任务是否真的迫使模块学到所需信息。
+
+**3. “少54倍可训练参数”能否理解为少54倍总显存或训练时间？**
+
+答案：不能。冻结模型仍需存权重并执行前向，训练接口还可能需要经过LLM的输入梯度；数据处理也有成本。应分别比较总参数、可训练参数、优化器状态、激活、GPU时间和既有预训练成本。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "066-blip2",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

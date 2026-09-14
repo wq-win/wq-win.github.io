@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>008｜Lucas–Kanade：用图像梯度寻找匹配，而不是盲目枚举位移 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人经典基础</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Lucas–Kanade：用图像梯度寻找匹配，而不是盲目枚举位移</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 008｜Lucas–Kanade：用图像梯度寻找匹配，而不是盲目枚举位移
+
+[系列首页](README.md) · [上一篇](007-hybrid-force.md) · [下一篇](009-configuration-space.md)
+
+**原论文**：Bruce D. Lucas、Takeo Kanade，*An Iterative Image Registration Technique with an Application to Stereo Vision*，IJCAI 1981，674–679。[CMU 六页会议原稿](https://publications.ri.cmu.edu/storage/publications/pub_files/pub3/lucas_bruce_d_1981_1/lucas_bruce_d_1981_1.pdf)。同题还有 DARPA 十页版本，本文采用六页会议版，页码与实验对应均不混用。
+
+**阅读范围**：已逐页视觉核对六页原文，涵盖一维推导、多维推广、光度与仿射扩展及立体匹配演示。下文统一符号的正规方程是教学改写；原实验包含人工引导，不是自动稠密光流基准。
+
+## 一、一分钟理解
+
+两张相邻图像里，同一个小窗口移动到了哪里？逐个尝试所有位移十分昂贵。LK利用亮度变化的空间梯度，估计“向哪个方向移动窗口，会让两张图更像”，再反复修正位移。
+
+论文的研究对象是图像配准，包含立体视觉应用；后来的金字塔光流、特征选择和逆组合算法都与它有关，但不应被当成1981年论文一次完成的全部内容。
+
+一句话：在图像具有足够纹理且初始位移较小时，通过局部线性化与迭代更新，减少匹配搜索量，代价是依赖亮度与局部运动模型，容易受大位移、遮挡和退化纹理影响。
+
+## 二、把“图像相似”变成一个可优化问题
+
+令T为模板图像，I为当前图像，W(x;p)为由参数p描述的图像变换。最简单的平移模型只含两个参数。目标为：
+
+$$
+E(p)=\sum_{x\in\Omega}[I(W(x;p))-T(x)]^2.
+$$
+
+这里的状态不是机器人全局位姿，而是图像配准参数。求得像素位移后，还需要相机模型、深度或多视图几何才能变成三维运动。光流并不自动等于真实物体速度。
+
+| 要素 | 配准中的含义 |
+|---|---|
+| 输入 | 两幅图像、窗口、变换模型和初值 |
+| 观测假设 | 对应位置亮度近似一致 |
+| 输出 | 位移或更一般的变换参数 |
+| 数学目标 | 减小窗口内光度残差平方和 |
+| 机器人接口 | 向视觉前端提供跟踪或匹配信息 |
+
+平方损失把所有像素看作同一个模型下的观测。窗口跨越运动边界或包含遮挡时，这个假设会失败，不能指望迭代次数增加就自动解决。
+
+## 三、局部线性化如何给出更新
+
+在当前p附近令参数改变为$\Delta p$，近似：
+
+$$
+I(W(x;p+\Delta p))\approx I(W(x;p))+J_x\Delta p,
+$$
+
+其中$J_x=\nabla I\,\partial W/\partial p$。设$r_x=I(W(x;p))-T(x)$，则求解：
+
+$$
+\left(\sum_xJ_x^\top J_x\right)\Delta p=-\sum_xJ_x^\top r_x.
+$$
+
+梯度提供误差变化方向，正规矩阵汇总各像素对参数的约束。求解得到的是局部修正，不是对所有可能位移的全局证明。
+
+对于纯平移，$J_x=[I_x,I_y]$，正规矩阵为两个方向梯度的二阶统计。若窗口只有竖直边缘，只能可靠看出水平方向变化；沿边缘移动几乎不改变亮度，另一个方向缺少信息。这就是孔径问题的一个具体表现。
+
+```text
+输入：模板T，图像I，窗口Omega，初始参数p
+重复直到收敛或达到预算：
+    按W(x;p)采样当前图像窗口
+    计算光度残差r和空间梯度
+    构造每个像素对变换参数的雅可比J
+    累加H = sum(J转置*J)，b = sum(J转置*r)
+    若H严重退化则拒绝本次估计
+    求解H*delta = -b并更新p
+输出p、残差和可用于判断可靠性的条件信息
+```
+
+这不是逆组合算法的伪代码：梯度、雅可比在哪里计算，以及参数如何组合，是不同LK变体的重要区别。实现时不能只因为都写H，就任意交换模板梯度和当前图像梯度。
+
+## 四、原实验怎样使用迭代配准
+
+| 原文位置 | 具体证据 | 解释边界 |
+|---|---|---|
+| 第 675 页，第 4.1 节，式（1）–（7） | 用空间梯度推导一维位移迭代 | 解释更新为何利用局部图像结构，不能证明任意初始化都收敛 |
+| 第 676 页，第 4.2–4.3 节 | L2 正规方程及正弦例子的收敛范围 | 正弦例子中的 $|h|<\pi$ 不是所有图像的统一捕获范围 |
+| 第 676–677 页，第 4.5–4.6 节 | 多维推广，允许仿射以及亮度、对比变化参数 | 原文已讨论超出纯平移的模型，但参数可观测性仍受图像影响 |
+| 第 678 页，第 5.4 节、Fig. 5–6 | 两个较大区域的粗尺度立体匹配 | 从初始深度 6 得到 6.05 与 5.86，这些是深度结果而非误差或成功率 |
+| 第 679 页，Fig. 7–8 与第 5.5 节 | 更高一 octave 频带下细化五个人工兴趣点 | 支持分尺度匹配演示，不是具有独立真值统计的完整自动系统 |
+
+实验先通过人工选取对应点估计摄像参数，并在匹配过程中使用人工引导。五个细尺度点的初始化来自粗尺度估计，最终列出的深度为 5.96、5.98、5.77、5.78、6.09。没有对应的逐点真值误差表，不能据此自行计算准确率。
+
+论文对平滑的讨论有双面性：平滑可能扩大收敛捕获范围，也会消除细节。第 5.5 节明确承认系统仍需相当程度的人工引导，并将自动初始化、兴趣点选择、深度不连续和外观变化列为进一步研究问题。
+
+| 实验要素 | 已核对设置 |
+|---|---|
+| 任务 | 立体图像区域与兴趣点的迭代匹配 |
+| 输入辅助 | 人工对应点估计摄像参数、人工兴趣点选择 |
+| 对照 | 不同频率层次及匹配前后演示，不是现代算法排行榜 |
+| 指标 | 匹配位置与深度结果；没有统一真值误差、重复次数与置信区间表 |
+| 计算与训练 | 非学习优化；训练预算不适用，不能编造加速倍数 |
+
+这些证据支持迭代配准和多尺度处理可用于真实立体图像，同时限定了自动化程度。后来的金字塔跟踪工程若增加前后向检查、特征筛选和鲁棒损失，需要另行评价这些组件。
+
+## 五、教学例子：有梯度不一定有两个方向的信息
+
+设窗口内所有像素梯度都是$[1,0]$。累加后的H形如$[[N,0],[0,0]]$，第二方向没有约束。即使横向边缘非常清晰，纵向位移仍不可辨认。增加同类像素只让第一个特征值变大，不能补上缺失方向。
+
+若窗口包含一个清晰角点，既有水平也有垂直梯度，H的两个特征值可能都明显大于零。此时两个方向的平移都有光度信息支持。后来的“好特征”研究正是进一步把可跟踪性变成可计算的选择标准。
+
+再设真实位移为20像素，而当前局部线性化只在附近几像素可靠。直接迭代可能落入错误纹理峰值。图像金字塔能把大位移缩小到粗层上的小位移，再逐层细化，但会引入额外实现选择，且不能保证重复纹理中的唯一匹配。
+
+## 六、代价、失败情形与三维联系
+
+光照变化会破坏亮度一致性。自动曝光、阴影、反射和运动模糊都可能让同一个物理点的像素值改变。可以引入光度参数或更鲁棒的残差，但这些属于模型扩展，应通过独立实验验证。
+
+窗口大小存在取舍：更大窗口提供更多梯度，可能更稳定；也更容易跨越不同深度和运动边界，违反同一变换假设。不能简单把“大窗口”视为更高精度设置。
+
+优化残差低仍可能匹配错误。重复栅栏、条纹和纹理相似区域可能形成多个低损失解。视觉里程计通常还需要几何一致性、RANSAC或多帧约束，来区分光度相似与真实对应。
+
+五个前置概念是：图像梯度表示亮度变化；变换模型规定待估参数；线性化只在局部近似；正规矩阵描述信息方向；孔径问题意味着观测无法区分某些运动。
+
+| 原有问题 | 作者改动 | 为什么有效 | 证据类型 | 代价与局限 |
+|---|---|---|---|---|
+| 枚举图像匹配昂贵 | 梯度引导迭代配准 | 利用局部误差结构预测修正 | 原文第 4 节推导与第 5 节立体演示 | 小位移、纹理退化、光照与遮挡 |
+
+## 七、自测与参考答案
+
+**问题1：边缘很清楚，为什么仍不是一个好跟踪窗口？**
+
+参考答案：清楚只说明某个方向梯度大。沿直边方向的位移可能不改变亮度，正规矩阵在该方向缺秩，无法唯一估计二维移动。
+
+**问题2：增加迭代次数为什么未必能处理大位移？**
+
+参考答案：更新基于局部近似，如果初值已在错误吸引域，更多迭代只会更充分收敛到错误解。需要更好的初始化、多尺度或其他匹配机制。
+
+**问题3：得到10像素位移，能否直接说机器人移动了10厘米？**
+
+参考答案：不能。像素运动与相机内参、场景深度、旋转及平移共同相关。需要额外几何和尺度信息，光度配准自身不提供固定的米／像素转换。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "008-lucas-kanade",
+            active: "robot-classic",
+            seriesLabel: "\u673a\u5668\u4eba\u7ecf\u5178\u57fa\u7840",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

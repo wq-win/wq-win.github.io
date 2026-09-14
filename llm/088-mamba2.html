@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>088｜Mamba-2：把递归状态写成结构化矩阵，找到更快的计算方式 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Mamba-2：把递归状态写成结构化矩阵，找到更快的计算方式</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 088｜Mamba-2：把递归状态写成结构化矩阵，找到更快的计算方式
+
+[返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
+
+论文：Tri Dao、Albert Gu，*Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality*，2024，ICML。依据[原文 v1](https://arxiv.org/html/2405.21060v1)的 SSD 推导、分块算法、架构和实验附录；实现见[官方 Mamba 仓库](https://github.com/state-spaces/mamba)。这里解释主要等价关系，未逐项复证全部附录定理，也未独立计时。
+
+## 一分钟理解：同一个函数，换一种计算顺序
+
+Mamba 用固定大小状态压缩历史，自回归生成不必保存不断增长的 KV 缓存。但它的选择性扫描包含大量不适合 GPU 矩阵计算单元的操作，理论复杂度低，实际速度仍可能受限。
+
+Mamba-2 的出发点是：一段递归计算可以展开成一个特殊矩阵乘法；一类注意力也能写成相同矩阵。于是可以在短块内部用类似注意力的并行矩阵乘法，在块之间传递压缩状态，同时利用两种计算形式。
+
+作者将这套联系称为 Structured State-Space Duality，简称 SSD，并围绕它重做 Mamba 块和并行方式。实验支持核心 SSD 算子比原 Mamba 扫描更快，语言建模质量保持竞争力；“核心算子快 2–8 倍”不能直接写成完整模型训练快 2–8 倍。
+
+一句话：在长序列建模中，通过结构化矩阵的分块计算，把递归的线性长度复杂度与矩阵乘法的硬件效率结合起来，代价是状态转移结构受限，以及固定状态容量带来的检索压力。
+
+## 背景：需要分清函数、算法和网络
+
+**函数**回答输入序列怎样映射成输出；**算法**回答以什么顺序计算同一映射；**网络**还包括投影、卷积、门控、归一化、残差和多层组合。
+
+同一个 SSD 函数可以逐步递归，也可以构造全矩阵，还可以分块计算。改变计算顺序不必改变数学输出。可是从 Mamba-1 改成 Mamba-2 不只是换计算顺序：它还将状态转移从一般对角形式限制成标量乘单位矩阵，并调整投影和头结构。因此不能把所有模型差异都归为一个无损内核替换。
+
+这是一篇序列架构与计算方法论文，主训练仍是自回归下一 token 预测，没有策略奖励、环境探索或 actor–critic。状态空间模型的“状态”是压缩历史的隐藏表示，不是机器人世界状态的同义词。
+
+## 方法：从三步递归推到注意力形式
+
+### 1. 展开历史贡献
+
+先考虑一个头，输入 $x_t\in\mathbb R^P$，状态 $H_t\in\mathbb R^{N\times P}$，写入和读出向量 $B_t,C_t\in\mathbb R^N$。简化后的离散递归是：
+
+$$
+H_t=a_t H_{t-1}+B_t x_t^\top,\qquad
+y_t=C_t^\top H_t.
+$$
+
+$a_t$ 是该头的标量衰减，它同样作用于状态的各行。令初始状态为零，展开得：
+
+$$
+y_t=\sum_{s\le t}\left(\prod_{j=s+1}^{t}a_j\right)(C_t^\top B_s)x_s.
+$$
+
+空乘积为 1。旧输入贡献由“写入方向与当前读出方向的匹配”乘以“跨时间保留系数”决定。这个式子直接解释选择性：不同输入生成不同的读写和衰减参数，模型可以决定保留什么。
+
+### 2. 对偶的是特殊注意力，不是任意 softmax
+
+定义下三角矩阵 $L_{ts}=\prod_{j=s+1}^{t}a_j$，上三角为零，则：
+
+$$
+Y=\big[L\odot(CB^\top)\big]X.
+$$
+
+它看起来像注意力：$C$ 对应 query，$B$ 对应 key，$X$ 对应 value，$L$ 是结构化因果掩码。这里没有标准 softmax。不能把任意 $\operatorname{softmax}(QK^\top)$ 直接用相同固定状态精确代替。
+
+§5 的推论 5.1 给出标量单位阵 SSM 与 1-semiseparable masked attention 的对应。更一般的定理讨论特定结构化注意力和有界阶自回归表示，前提不能从标题中省略。
+
+所谓半可分结构，可以先直观理解为：矩阵在对角线下方的适当子块具有低秩结构，历史到未来的信息通过有限维状态传递。整个矩阵并不因此都是低秩，特别是不能把它误读成对整个注意力矩阵做一次普通低秩近似。
+
+### 3. 块内并行，块间传状态
+
+将长度 $T$ 分成若干长度 $Q$ 的块。一个块的输出由两部分组成：块内输入在零初态下产生的输出，以及前面所有块留下的初态贡献。
+
+块内部分用小型矩阵乘法计算；每块还计算自身的终态贡献。块间通过更短的递归合并这些终态，得到各块真实初态，再把初态映射成当前块的输出。最后两部分相加。
+
+```text
+输入：分头的 X、离散衰减 a、写入 B、读出 C、块长 Q
+将序列切块
+并行处理每块:
+    计算块内衰减矩阵 L
+    local_output = (L * (C @ B.T)) @ X
+    local_end_state = 假设初态为零时的块末状态
+    block_decay = 本块所有衰减的乘积
+在块维度做状态扫描:
+    real_end_state = block_decay * previous_state + local_end_state
+并行处理每块:
+    incoming_output = 将块初态衰减到各位置，再由 C 读出
+    output = local_output + incoming_output
+返回所有 output 和最终状态
+```
+
+这是 §6 的原理改写，省略 batch、多头和数值稳定实现。不能在块间全部重置为零，否则模型只剩局部上下文；只有独立样本的边界才应阻断状态传播。
+
+### 4. 网络结构也为并行重新安排
+
+Mamba-2 从块输入直接并行生成数据依赖投影，而不是必须等待中间卷积结果再产生所有参数。这使每个设备可以处理自己的头或组，降低张量并行中的同步需求。额外归一化帮助训练稳定。
+
+训练目标仍是交叉熵。机制变化在序列混合、参数结构和计算图；改善指标则包括困惑度、下游准确率、内核延迟和墙钟训练。理论证明保证对应条件下的映射等价，不能证明任何语料上的泛化成绩。
+
+## 实验怎样验证理论之外的价值
+
+| 实验 | 数据、模型与预算 | 对照和评价 | 主要问题 |
+|---|---|---|---|
+| 多查询关联回忆 MQAR | 长度 256/512/1024；词表 8192；两层小模型；状态维度 16/64/256 等 | Mamba-1、注意力、Based；关联检索准确率 | 更大的可用状态能否记住更多键值关系 |
+| 规模规律 | Pile、GPT-2 tokenizer；约 125M–1.3B；2.5B–26B token | Mamba、Transformer++；困惑度、FLOPs、墙钟 | 同类训练预算下的质量效率关系 |
+| 完整语言模型 | Pile 300B token；GPT-NeoX tokenizer；最大约 2.7B | Pythia、Mamba、RWKV 等；七项零样本准确率 | 架构能否支持自然语言任务 |
+| 混合架构 | 350M/7B token；另有 2.7B/300B token | 相同数据顺序和超参数下混入注意力、MLP | 压缩记忆与显式检索是否互补 |
+| 核心算子计时 | 不同序列长度和状态维度 | Mamba fused scan、FlashAttention-2；图 10 | 矩阵化能否转化成实际内核收益 |
+
+训练细节见附录 D：AdamW、梯度裁剪 1、权重衰减 0.1、无 dropout、预热与余弦衰减；下游模型学习率使用对应 GPT-3 配置的五倍。不同实验的 tokenizer 不同，因此不能跨两套分词直接比较困惑度。
+
+主计时段未提供一个可无条件迁移到所有硬件的倍率；完整实验的多种子置信区间未统一报告。MQAR 附录的样本总数表述也不适合直接据以计算全书统一预算：应以实际课程循环、数据生成和实现配置复现，而不是将近似总数当作经过独立审计的算力账单。
+
+## 证据：理论成立之后，还要看什么
+
+**证据一：§5、图 4，确切等价有结构前提。** 标量转移允许将历史衰减移到匹配分数之外，得到 $L\odot CB^\top$。一般对角矩阵各状态维度衰减不同，不能直接做同样的标量拆分。这是数学推导支持的结论，与下游分数无关。
+
+**证据二：图 10 与 §9.3，核心算子效率提高。** SSD 对较大状态扩展下的 Mamba 扫描给出约 2–8 倍加速，并在约 2K 起超过所比较的 FlashAttention-2。作者紧接着说明：短序列时完整 Mamba-2 未必比 Transformer 更快，因为相同参数预算下，后者包含许多非常高效的 MLP 层。这是不能省略的性能边界。
+
+**证据三：表 1，语言能力总体接近而非逐项统治。** 2.7B Mamba-2 的 Pile 困惑度为 6.09，对比 2.8B Mamba 的 6.22；七任务平均准确率为 60.2% 对 59.9%。但 OpenBookQA 为 38.8% 对 39.6%，并非每个任务更好。该表包含额外任务，平均值也不能与上一代论文不同任务集合的平均分直接连线。
+
+**证据四：表 2–3，混合注意力仍有价值。** 350M 配置中，48 层里加入 6 个注意力块，困惑度从纯 Mamba-2 的 8.60 降至 8.26；全注意力与 MLP 的 Transformer++ 为 8.68。2.7B 混合模型平均准确率 61.0%，纯 Mamba-2 和 Transformer++ 都为 60.2%。这支持互补性，不能证明 10% 是跨规模最优比例。
+
+**证据五：表 4 与图 8，收益不能只归于更大状态。** 相同 SSD 内核下，顺序投影且无额外归一化的困惑度为 11.76，并行投影加归一化为 11.49。MQAR 中即使控制状态维度，Mamba-2 仍更好；作者明确不确定哪项架构变化主导这一差异。这一未知原因应保留，不能替作者补出确定解释。
+
+## 贡献、代价与局限
+
+最重要的贡献是把两类序列模型放到同一个结构化矩阵语言里，并用该语言产生可运行的新算法。它展示了一个研究顺序：先看计算对象有哪些结构，再选择适合硬件的分解，而不是只比较大 O。
+
+固定状态节约长序列生成缓存，但容量有限。增加状态维度提升记忆，也增加每层每头的状态与计算，不能把“相对序列长度为常数”说成“内存几乎为零”。当 $P=N$ 时，一个头的状态有 $N^2$ 个数。
+
+分块内核的浮点累积顺序与逐步递归不同，理论精确等价不等于数值逐位相同。实际实现要核对误差、混合精度、梯度及样本边界，尤其不能让独立文档通过缓存互相泄漏信息。
+
+实测规模最大约 2.7B，尚不能单凭此文推断超大模型的知识、指令跟随、复杂推理或所有长上下文任务。论文提出的注意力核特征变体也并未稳定优于默认设计；统一框架提供候选方向，不保证每个组合都有效。
+
+## 一个可手算的自构例子
+
+令 $N=P=1$，$B=C=1$，每步 $a=0.5$，输入 $[2,4,6]$，初态为零。递归得到 $h_1=2$，$h_2=5$，$h_3=8.5$。对应矩阵为：
+
+$$
+M=\begin{bmatrix}1&0&0\\0.5&1&0\\0.25&0.5&1\end{bmatrix},\qquad
+M\begin{bmatrix}2\\4\\6\end{bmatrix}=\begin{bmatrix}2\\5\\8.5\end{bmatrix}.
+$$
+
+把前两项作为第一块，末状态为 5；第二块自己的局部贡献是 6，来自上一块的是 $0.5\times5=2.5$，相加仍为 8.5。这个例子不是性能实验，只说明分块为什么不需要丢失跨块历史。
+
+五个前置概念：**线性递归**通过状态累积历史；**核注意力**用特征内积构造匹配；**半可分矩阵**将跨区间作用限制为低秩结构；**张量并行**把一层运算分到多个设备；**困惑度**衡量模型对实际文本的平均预测不确定性。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 选择性扫描不充分利用矩阵单元 | SSD 块内矩阵乘法、块间状态扫描 | 结合线性长度复杂度与硬件吞吐 | §6、图 10 | 核心算子加速不等于整模型倍率 |
+| 状态扩大会拖慢原扫描 | 标量转移与更大头维度 | 简化计算，容纳较大状态 | 图 8、图 10 | 转移结构更受限，状态仍占内存 |
+| 压缩历史不利精确检索 | 少量注意力与 SSD 混合 | 显式访问历史补充固定状态 | 表 2–3 | 增加 KV 缓存，最佳比例依任务 |
+
+## 自测：能否说清“对偶”意味着什么
+
+**1. 能否把已经训练好的普通 softmax Transformer 无损换成 Mamba-2？**
+
+不能由本篇结论推出。精确对应的是具有特定结构掩码的核注意力和标量单位阵转移的 SSM。普通 softmax 的归一化与匹配矩阵不自动满足这些固定状态表示条件，网络层和投影也不同。标题概括理论联系，不是通用模型转换工具。
+
+**2. 为什么块内可以用二次计算，整体仍对序列长度线性？**
+
+固定块长 $Q$ 时，每块做 $Q^2$ 规模计算，总共有约 $T/Q$ 块，因此这部分对 $T$ 是线性的；块间还通过固定维状态传递，而不是所有块两两显式注意。若让 $Q$ 随 $T$ 一起增长直到整个序列一块，就会失去这个线性长度优势。
+
+**3. 图 10 内核更快，为什么表 3 还要研究混入 MLP？**
+
+完整网络时间包括投影、门控、归一化、通信和不同类型的层。Transformer 的 MLP 本身高度适合 GPU；相同参数量不意味着相同 SSD 与注意力调用次数。混入 MLP 可能牺牲一点质量换取短序列效率，必须同时查看完整模型质量和墙钟，不能从局部内核推断全局最优。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "088-mamba2",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

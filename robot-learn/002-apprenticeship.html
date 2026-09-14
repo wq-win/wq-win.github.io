@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>002｜学徒学习：从行为恢复任务偏好 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">学徒学习：从行为恢复任务偏好</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 002｜学徒学习：从行为恢复任务偏好
+
+[系列首页](README.md) · [上一篇](001-dmp.md) · [下一篇](003-maxent-irl.md)
+
+**原论文**：*Apprenticeship Learning via Inverse Reinforcement Learning*，Pieter Abbeel、Andrew Y. Ng，ICML 2004。[原文](https://ai.stanford.edu/~ang/papers/icml04-apprentice.pdf)。
+
+## 一、先用一分钟讲明白
+
+一个人可以演示怎样开车，却很难精确写出“碰撞、偏离车道、速度”之间的奖励权重。行为克隆直接学习状态到动作的映射，但没有明确利用“这些选择服务于长期目标”这一结构。学徒学习尝试从示范中恢复足以生成合适行为的奖励描述。
+
+本篇的关键结论比“猜出专家真正的奖励”更谨慎：如果奖励属于已知特征的线性组合，那么让学习策略与专家具有接近的特征期望，就能控制这类奖励下的性能差异。恢复唯一真实奖励并不是必要条件。[原文 §2–4](https://ai.stanford.edu/~ang/papers/icml04-apprentice.pdf)
+
+一句话：在已知特征与可调用规划器的设定下，通过反复寻找区分专家和当前策略的奖励方向，学习者可以接近专家行为统计；代价是仍要设计特征，并反复解决正向控制问题。
+
+## 二、什么是特征期望
+
+设 $\phi(s)$ 是一组状态特征，奖励为 $r(s)=w^\top\phi(s)$。特征可以描述碰撞、所在区域或与其他物体的距离。对策略 $\pi$，定义：
+
+$$
+\mu(\pi)=\mathbb E_\pi\!\left[\sum_{t=0}^{\infty}\gamma^t\phi(s_t)\right].
+$$
+
+它不是某一步的特征，也不是无时间结构的样本计数，而是给定初始分布后整段行为产生的折扣统计。利用线性关系：
+
+$$
+J_w(\pi)=w^\top\mu(\pi).
+$$
+
+这一步把复杂轨迹比较变成向量比较。若两套行为具有相同的 $\mu$，那么在这组线性奖励下它们得到相同回报，即使具体走法并不相同。
+
+| 要素 | 原文设定及意义 |
+|---|---|
+| 场景 | 有专家轨迹、没有显式奖励的序列决策 |
+| 状态与动作 | 依环境定义；网格移动与驾驶模拟分别实例化 |
+| 已知结构 | 特征函数、初始分布及能够求解控制问题的环境接口 |
+| 未知量 | 奖励权重，不是全部状态转移 |
+| 学习输出 | 一组候选策略，或其适当混合 |
+| 理论边界 | 有界特征、奖励范数条件、特征估计与规划精度 |
+
+这不是完全被动地看视频就能学会控制的设定。原文明确使用正向 RL／MDP 求解子程序，网格实验并不靠专家示范去学习转移概率。示范数量少与总计算量少也因此不是同一结论。
+
+## 三、为什么匹配统计能控制性能差异
+
+若 $\|w\|_2\le1$，则：
+
+$$
+|J_w(\pi)-J_w(\pi_E)|
+=|w^\top[\mu(\pi)-\mu_E]|
+\le\|\mu(\pi)-\mu_E\|_2.
+$$
+
+右边来自 Cauchy–Schwarz 不等式。它说明：只要能把特征期望误差压到 $\epsilon$，就能对这个奖励集合控制回报误差。原文从更具体的范数条件推导相应保证，不能把边界省略后解释成“所有真实目标都一样好”。
+
+以机器人搬运为教学类比，若特征只包括路程与耗时，却没有物体掉落，两个策略可以匹配路程和时间，却一个把物体摔坏。数学关系仍成立，但它约束的奖励家族没有包含真正关心的损坏。这是表示遗漏，而非不等式失效。
+
+## 四、算法为何在奖励和策略之间交替
+
+### 1. 找一个最能暴露差距的奖励方向
+
+已有策略产生特征向量 $\mu_0,\ldots,\mu_{i-1}$。算法寻找范数受限的 $w$，让专家相对所有候选策略的最小优势尽量大：
+
+$$
+\max_{\|w\|_2\le1}\min_j w^\top(\mu_E-\mu_j).
+$$
+
+如果还能找到明显差距，说明候选集合尚未解释专家统计。然后使用该 $w$ 作为奖励，调用正向求解器得到新策略。
+
+### 2. 新策略反过来限制奖励猜测
+
+新策略会擅长刚才强调的方向，它被加入集合后，下一轮不能重复用相同薄弱理由区分专家。这样候选策略集合逐渐覆盖专家特征向量附近。原文还给出投影版本，利用几何投影减少优化器需求。
+
+### 3. 为什么可能需要混合策略
+
+专家向量可能位于多个候选向量之间，而不等于其中任何一个。对每个回合先随机选定一个候选策略，可以实现特征期望的凸组合。这里是在回合开始选择策略；每一步随意切换会改变状态分布，不一定得到同一个凸组合。
+
+~~~text
+输入：专家轨迹、特征 phi、正向规划器 SolveMDP
+估计专家的折扣特征期望 mu_E
+生成初始策略 pi_0，估计 mu_0
+循环：
+    找到使专家与候选集合分离最明显的奖励权重 w
+    如果可分离间隔足够小：停止
+    pi_new = SolveMDP(reward = dot(w, phi))
+    估计 pi_new 的特征期望，加入候选集合
+选择合适候选，或求使特征误差最小的策略混合
+输出：可执行策略及其特征统计
+~~~
+
+这份教学伪代码省略了有限轨迹估计与近似规划的误差处理。目标是匹配行为统计，机制是对抗式地寻找奖励方向，实验指标可以是特征距离或已知真实奖励下的回报比。
+
+## 五、实验与证据应怎样阅读
+
+| 原文位置 | 对象与设置 | 主要检验 | 边界 |
+|---|---|---|---|
+| 图 1–2、§3 | 最大间隔与投影的几何过程 | 新策略怎样缩小统计差距 | 图示不是经验性能统计 |
+| 定理 1–2、§4 | 迭代与专家样本条件 | 算法何时终止及近专家保证 | 依赖特征与估计假设 |
+| 图 3、§5.1 | 128×128 网格、64 个区域特征 | 两种更新的收敛行为 | 使用已知环境求解器 |
+| 图 4、§5.1 | 改变专家轨迹数量 | 示范利用效率 | 横轴为轨迹数的对数 |
+| 表 1、§5.2 | 驾驶风格模仿 | 特征统计与行为风格对应 | 未给定真实奖励，不能报真实回报改善 |
+
+网格图 3 为 40 次运行平均、带一个标准误；图 4 为 20 个实例平均。驾驶使用一条两分钟、1200 样本的示范，运行 30 轮后人工检查选策略。这些条件说明证据并非“一个原始视频直接产生自动驾驶系统”。
+
+图 4 中使用已知非零奖励特征的变体获得额外信息，应与完整特征变体区分。对比行为克隆的策略类也有表示限制。原文支持在这些设置中的示范效率优势，不能把差距全部归结成“逆 RL 永远胜过监督学习”。
+
+## 六、一个二维例子
+
+教学构造：用两个归一化特征表示“安全通行”和“路程节省”。专家为 $(0.8,0.6)$，当前策略为 $(0.4,0.9)$。差向量 $(0.4,-0.3)$ 提示当前策略过度追求短路程，牺牲安全。单位化后方向为 $(0.8,-0.6)$，间隔为 0.5。
+
+用这个方向规划后，可能得到 $(0.95,0.2)$。它安全但绕远，下一轮奖励方向会改变。若两个候选的凸组合接近专家，混合就能改善统计匹配。这个例子展示的是方向更新的几何含义，数值不是论文结果。
+
+还可以看到奖励不唯一：对已经匹配的统计，多个 $w$ 都无法区分两套行为。因此从输出权重解释“专家最重视什么”时要格外谨慎；权重在算法中首先是构造策略的工具。
+
+## 七、贡献、代价与理解要点
+
+贡献在于把近专家性能与奖励可辨识性分开：即使无法找到真正奖励，也可以在明确奖励类下给出行为保证。代价是特征工程、正向求解以及策略选择。换一个初始状态分布或新的环境动力学后，旧特征期望关系需要重新核对。
+
+重要的五个前置概念是 MDP、线性奖励、折扣特征期望、最大间隔和凸组合。MDP 描述行动后果；线性奖励规定目标家族；特征期望压缩长期行为；最大间隔寻找尚未解释的差距；凸组合把多种策略统计连接起来。
+
+| 原有问题 | 作者改动 | 为什么有效 | 证据 | 限制 |
+|---|---|---|---|---|
+| 难写奖励，又不想只记住动作 | 匹配专家长期特征统计 | 线性奖励下回报由统计决定 | §3–4、图 3–4、表 1 | 特征遗漏、规划成本、评估分布变化 |
+
+阅读范围为原文方法、定理陈述及网格／驾驶实验；计算资源未逐项确认，本文未独立复现。
+
+## 八、自测题与参考答案
+
+**问题 1：如果学到了与专家完全相同的特征期望，是否就恢复了真实奖励？**
+
+参考答案：没有。相同统计使整个指定线性奖励家族下的回报相同，但许多奖励都可能解释这种行为。算法需要的是性能接近，不是唯一识别专家心理。
+
+**问题 2：为什么“只需要少量示范”不等于“只需要少量总交互或计算”？**
+
+参考答案：每轮还要对新的奖励解决正向控制问题，并估计新策略特征。已知模型时主要付出规划成本，未知环境中还可能付出新交互。示范预算只是成本的一部分。
+
+**问题 3：两个策略的特征各为 $(1,0)$ 和 $(0,1)$，如何得到 $(0.5,0.5)$？每步随机切换是否等价？**
+
+参考答案：在每回合开始以各一半概率选定一个策略，期望统计就是平均。每步切换一般不等价，因为它产生新的状态访问过程；原来两个整段策略的统计不能直接线性拼接。
+
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "002-apprenticeship",
+            active: "robot-learn",
+            seriesLabel: "\u673a\u5668\u4eba\u5b66\u4e60",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

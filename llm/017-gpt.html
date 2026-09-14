@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>017｜GPT：先学习文本生成，再用少量任务接口完成迁移 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">GPT：先学习文本生成，再用少量任务接口完成迁移</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 017｜GPT：先学习文本生成，再用少量任务接口完成迁移
+
+[目录](README.md) · [上一篇](016-elmo.md) · [下一篇](018-bert.md)
+
+**论文**：Alec Radford 等，*Improving Language Understanding by Generative Pre-Training*，2018。[官方原文](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf)。以下讨论最初的生成式预训练与监督微调，不把后来的 GPT-3 上下文学习、聊天对齐或工具能力提前归给它。
+
+## 一分钟理解
+
+很多语言任务的标注数据有限，但无标签文本很多。GPT 先用因果 Transformer 学习预测下一个 token，再把分类、蕴含或选择题转换成适合该模型的输入形式，用任务标签微调。预训练提供较好的语言表示与初始化，减少从零学习的负担。
+
+作者在多个任务上展示迁移效果，也报告失败或不占优的情形。关键思想是生成式自监督与任务微调的两阶段组合；它仍需要下游标签，不是仅给一个自然语言提示就完成所有任务的系统。
+
+## 背景：统一表示如何接入不同任务
+
+分类输入是一句话，蕴含输入是两句话，选择题包含多个候选。若每项任务都设计复杂独立架构，预训练参数很难直接复用。GPT 保留主要 Transformer 结构，只对输入排列与最终读出作较少适配。
+
+预训练使用因果掩码，当前位置只访问此前 token。句对任务通过分隔符和特殊标记连接输入，使末端表示可以汇总此前全部内容。它虽然没有双向地修改每个早期 token 的表示，但最后位置仍可看到完整拼接输入；因此不能简单说“单向模型完全不能理解句对”。
+
+原文训练语料为 BooksCorpus，语料体裁和长连续文本影响学到的信息。预训练收益不是从架构名字自动产生的，还依赖文本、计算和优化。后续比较若使用更大语料，应明确额外资源。
+
+## 方法：两个损失、一个主要骨干
+
+预训练最大化：
+
+$$
+L_{LM}(\theta)=\sum_t\log P_\theta(u_t\mid u_{t-k:t-1}).
+$$
+
+$u_t$ 为文本 token，$k$ 为上下文范围。Transformer 通过位置、因果注意力和前馈层产生隐藏状态。监督微调把选定表示送入任务输出层，最大化标签概率；原文还研究加入辅助语言模型目标：
+
+$$
+L_{fine}=L_{task}+\lambda L_{LM}.
+$$
+
+这两个式子写成最大化形式；若实现最小化损失，应取负号。辅助目标帮助保留语言建模信号，但其收益随任务数据规模变化，并非所有任务都应相同权重。
+
+分类可以读取末端表示；蕴含把前提与假设按顺序拼接；相似度任务可考虑顺序处理；多项选择对各候选构造输入并比较分数。输入转换是方法的一部分，不能将其抹去后声称没有任何任务工程。
+
+```text
+阶段一：
+    从无标签文本取连续 token 片段
+    用因果 Transformer 预测每个下一 token
+    更新骨干与语言输出参数
+阶段二：
+    将任务输入转换为带分隔符的序列
+    读取约定位置的表示并计算任务标签概率
+    联合任务损失与可选语言模型辅助损失
+    微调预训练参数及新增任务输出层
+测试：按相同输入转换与任务评价协议预测
+```
+
+训练目标没有直接最大化“通用理解”；它优化文本预测与具体标签。迁移指标提高说明这些目标学到的结构有用，但不能仅凭总分证明模型采用了人类式推理。
+
+## 实验设计
+
+| 项目 | 原文范围 |
+|---|---|
+| 预训练 | BooksCorpus 上的因果语言建模 |
+| 下游 | 自然语言推断、阅读选择、语义相似与分类等 12 个数据集 |
+| 对照 | 既有任务系统，另做无预训练、LSTM 和辅助目标消融 |
+| 指标 | 准确率、F1、相关系数等；GLUE 汇总需按原协议阅读 |
+| 架构 | 原始 GPT 的 Transformer 配置，不等于后续模型规模 |
+| 数据与调参 | 任务监督仍然使用；开发集决定相关设置 |
+| 不确定性 | 未给出每项结果统一多种子区间，不将最佳结果视为稳定性保证 |
+
+**证据一，方法部分与输入转换图。**说明预训练骨干怎样接入不同任务。统一的是主计算结构，不是所有任务都完全使用同一个输入和读出。
+
+**证据二，表 2—4。**NLI 中 RTE 得到 56.0%，低于所列多任务 BiLSTM 的 61.7%；同时其他任务取得更强结果。保留这项失败证据，有助于避免将“12 项中多数提升”改写成“全面胜出”。
+
+**证据三，第 5 节、图 2 与表 5。**转移层数、辅助目标和架构消融检验预训练机制。辅助语言目标对不同任务作用不同，说明迁移并不是一个无需选择的固定配方。
+
+表 4 的 GLUE 汇总为 72.8，而所列此前比较项为 68.9。这个值属于当时的任务集合和评分方式，不能直接与后来不同版本、不同污染控制的榜单数字拼接成时间曲线。
+
+## 教学例子：预训练与微调分别学什么
+
+构造情感分类。预训练通过大量文本学会“虽然”“但是”等结构如何出现在句子中；微调再用正负标签，学习哪些组合支持哪一类。预训练不必显式见过情感标签，却可以提供更好的表示；微调仍需把表示与任务定义连接起来。
+
+如果标签规则与普通语言习惯相反，例如人为规定包含某个词就是负类，模型也可能在微调中学到该规则。由此可见，迁移效果不是自动“理解真实语义”，而是利用已有表征拟合给定监督。
+
+再考虑小数据 RTE。参数很多、标签很少时，微调不稳定或不适配可能抵消预训练优势。论文中的非最优结果不是对预训练路线的否定，而是提醒任务规模和训练条件决定其效果。
+
+## 与 ELMo 和后续 GPT 的区别
+
+ELMo 常把预训练隐藏层作为额外特征接入现有任务模型；GPT 更强调直接微调主要预训练骨干。前者可以保留复杂任务架构，后者用较统一接口迁移，两者不是仅仅换了 LSTM 与 Transformer。
+
+后来的上下文学习在推理时通过示例改变输出，而不更新参数；原始 GPT 的主要实验则更新任务参数和骨干。理解这一区别，才能正确阅读“few-shot”“fine-tuning”和“in-context”这些后来经常混用的词。
+
+## 贡献与局限
+
+GPT 展示生成式预训练可服务多种理解任务，并以较统一方式微调。限制包括单向 token 表示、任务标签需求、输入长度、领域偏差和微调稳定性。它没有对齐到人类对话偏好，也没有外部知识检索。
+
+五个前置概念是因果语言模型、预训练初始化、任务读出、辅助目标和输入转换。它们分别解释数据怎样提供监督、知识怎样迁移、输出怎样定义以及为什么“同一个模型”仍有任务条件。
+
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 标注数据有限，各语言理解任务难从头学习通用表示 | 先做因果语言模型预训练，再转换任务输入并监督微调 | 无标签文本提供迁移起点，统一骨干减少任务专属设计 | 表2–4任务结果，§5图2与表5消融 | 仍需任务数据与微调选择；RTE等任务有下降，辅助语言目标也非处处有效 |
+
+## 自测与参考答案
+
+**1. 原始 GPT 的迁移是否等于给几个提示例子就不训练？**
+
+不是。主要实验通过监督微调更新参数。上下文示例只在输入中改变条件而不更新权重，是后续需要另行讨论的机制。
+
+**2. 因果模型为什么还能做句对分类？**
+
+把两句话依次拼接后，末端表示可以看到全部此前输入，用于分类。早期 token 不能看到右侧，不意味着末端无法汇总句对；但与深层双向 token 表示仍有差异。
+
+**3. 辅助语言模型目标为何不一定帮助所有任务？**
+
+它提供正则与额外梯度，也可能与小任务监督或分布不匹配。效果取决于数据量和权重，应由消融判断，不能只因预训练有效就认定微调时越多语言目标越好。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "017-gpt",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

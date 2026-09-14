@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>012｜Guided Cost Learning：一起学习代价与策略 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Guided Cost Learning：一起学习代价与策略</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 012｜Guided Cost Learning：一起学习代价与策略
+
+[系列首页](README.md) · [上一篇](011-ddpg.md) · [下一篇](013-naf.md)
+
+**原论文**：*Guided Cost Learning: Deep Inverse Optimal Control via Policy Optimization*，Chelsea Finn、Sergey Levine、Pieter Abbeel，2016。[原文](https://arxiv.org/abs/1603.00448)。
+
+## 一、把“做得好”也交给机器学习
+
+教机械臂放盘子，写“离目标越近越好”似乎够用了。但快速撞进盘架也可能获得很低的位置误差，却打碎盘子。示范展示了人想要的过程，问题是如何把这些过程变成能够指导控制的代价，而不是只能原样回放的轨迹。
+
+Guided Cost Learning，简称 GCL，同时更新两个对象：解释示范的代价函数，以及在真实系统上执行的策略。策略产生新经验，帮助修正代价；新代价再指导策略。这是本文最值得理解的闭环。
+
+作者主张它能处理未知动力学与非线性代价。实验支持在所测模拟任务及 PR2 操作任务上学到有效行为，同时也明确暴露了“当前策略成功，但代价未必可迁移”的差距。概括起来：在机器人示范学习中，通过自适应采样估计最大熵逆控制目标，减少固定样本分布的局限，代价是需要在线交互与较强的局部建模假设。
+
+## 二、问题定义与五个前置概念
+
+输入是专家轨迹 $\tau=(x_1,u_1,\ldots,x_T,u_T)$；$x$ 表示状态，$u$ 表示控制，机械臂任务中包括关节力矩。系统动力学事先未知，但训练可以访问机器人并采集轨迹。它不是纯离线行为克隆，也不是无需示范的强化学习。
+
+五个概念分别是：**逆最优控制**由行为推断代价；**最大熵模型**允许多种较优行为，而非只接受一条最优轨迹；**配分函数**把未归一化分数变为概率；**重要性采样**纠正“样本来自别处分布”的偏差；**局部线性动力学**只在当前轨迹附近近似系统，支持便宜的控制更新。
+
+奖励与代价符号相反：本文最小化代价。没有手工任务奖励，不表示没有设计假设。状态表示、控制器形式、正则项，以及示范本身，都在限定“什么行为值得学”。视觉任务也使用先学习的图像特征，不能说代价已直接从任意原始图像学成。
+
+## 三、方法：采样分布必须跟着代价变化
+
+最大熵轨迹模型写成：
+
+$$
+p_\theta(\tau)=\frac{\exp[-c_\theta(\tau)]}{Z_\theta},
+\qquad c_\theta(\tau)=\sum_t c_\theta(x_t,u_t).
+$$
+
+$Z_\theta$ 是所有可行轨迹的积分，轨迹基础测度与动力学约束隐含在该记法中。专家轨迹代价越低，出现概率越高。问题在于连续机械臂拥有巨大的轨迹空间，无法把所有轨迹列出来归一化。
+
+设背景样本来自 $q(\tau)$，则负对数似然可近似为：
+
+$$
+L(\theta)\approx
+\frac1N\sum_{\tau\in D_E}c_\theta(\tau)
++\log\left[
+\frac1M\sum_{\tau\in D_S}
+\frac{\exp[-c_\theta(\tau)]}{q(\tau)}
+\right].
+$$
+
+第一项降低示范代价，第二项阻止所有轨迹都被赋予随意的低代价。分母 $q$ 修正采样倾向：经常被采到的轨迹不能仅凭出现次数主导估计。多轮策略生成的混合数据需要对应混合分布，不能永远拿最新策略概率作为全部样本的分母。
+
+固定背景分布的问题是：随着代价变化，重要的低代价区域也变了。若那里没有样本，增大同一个无效数据集只能更精确地估计错误的局部信息。GCL 因而交替执行代价拟合与策略优化，让采样逐步靠近当前最大熵目标分布。
+
+策略优化的理想形式是：
+
+$$
+\min_q \mathbb E_q[c_\theta(\tau)]-H(q),
+\quad
+D_{\mathrm{KL}}(q\|\hat q)\leq\epsilon.
+$$
+
+熵项避免分布过早塌缩；KL 约束限制每轮变化，缓和不成熟代价带来的误导。实现采用拟合的时变线性动力学和线性高斯控制器。环境模型在这里服务于局部策略更新，不承担全局世界模型的角色。
+
+### 为什么还需要正则化
+
+神经网络足够灵活，也足够容易“解释”错误规律。原文第5节用时间上的平滑变化和任务进展倾向约束代价。前者可理解为惩罚 $c_{t+1}-2c_t+c_{t-1}$ 的平方；后者给一次性达成目标的轨迹加入进展先验。
+
+这些不是普遍正确的物理规律。开门可能需要先退后再推，绕障也可能暂时远离终点。因而正则化带来的是归纳偏置，不能作为所有技能的正确性定理。具体单调项实现应按原文公式核对，不要只凭“单调”两个字自行替换符号和间隔。
+
+### 教学伪代码
+
+~~~text
+输入专家轨迹
+初始化能覆盖示范附近的随机控制器和非线性代价
+建立历史轨迹及生成分布记录
+重复：
+    用当前控制器在系统上采样
+    保存新轨迹和对应采样分布
+    用混合分布计算重要性权重
+    以最大熵逆控制目标和正则项更新代价
+    在新采样轨迹附近拟合局部动力学
+    在 KL 约束下优化带熵的控制器
+返回学习到的代价和当前控制器
+分别测试：直接执行控制器；固定代价后重新优化新策略
+~~~
+
+最后两种测试回答不同问题。前者验证行为学习，后者才更接近验证代价是否捕捉了可复用的任务偏好。
+
+## 四、实验设置与可比性
+
+| 项目 | 原文信息与含义 |
+|---|---|
+| 模拟任务 | 二维导航、绕障到达、七自由度插销；MuJoCo |
+| 真机任务 | PR2 放盘子与向目标杯倒杏仁 |
+| 示范 | 模拟用已知任务代价生成专家；真机使用拖动示教 |
+| 视觉输入 | 倒物任务利用自编码器学习的特征点及其变化，非端到端原始像素代价 |
+| 主要对照 | 相对熵 IRL、路径积分 IRL；代价表达与正则消融 |
+| 数据预算 | 图2按采样轨迹展示；表1计数不包含重新优化所学代价所需的额外样本 |
+| 统计 | 图2为4个初始条件的4次 IOC 运行平均，不可自动解释成固定条件下4个随机种子 |
+| 实际评价 | 导航真实代价、到达距离、插入误差及操作任务完成指标 |
+
+示范数量存在一个需要保留的原文差异：第6.2节概述写25–30条，附录 D 的盘子任务写20条，倒物写30条。这里按附录分别说明，并保留冲突，不把它悄悄统一成一个看似精确的数字。
+
+表1的“success rate”还要追溯任务定义。倒杏仁在附录 D 中按进入目标杯的杏仁比例计分，因此84.7%不能直接解释成“100次完整任务有84.7次全部成功”。这类指标命名差异往往比小数点后的精度更重要。
+
+## 五、证据与不能跨越的边界
+
+以下定位来自[原始 PDF](https://arxiv.org/pdf/1603.00448)。
+
+| 位置 | 比较与观察 | 支持范围 |
+|---|---|---|
+| 第4节、Algorithms 1–2 | 代价学习使用策略产生的数据和重要性权重 | 明确自适应采样的机制 |
+| 图2、第6.1节 | 自适应与固定采样方法在三种任务上的表现不同 | 支持当前任务的采样效率，不能视为全部计算费用比较 |
+| 表1、第6.2节 | 倒物中当前 GCL 策略84.7%，固定代价重优化34% | 直接说明策略成功与代价泛化不同 |
+| 附录 B | 在已知真分布的例子上检查权重与熵项 | 支持估计机制，不代表复杂真机上全局一致 |
+| 附录 E、图5 | 去掉两类正则项影响任务表现 | 支持归纳偏置价值，但不是所有任务都需要相同先验 |
+
+倒物两项差值为50.7个百分点，是自算的绝对差；不能称“提升50.7%”，也不能把不同训练过程视作同预算算法胜负。盘子任务较好的重优化结果说明泛化有任务依赖性，而非这套方法必然只能记忆。
+
+## 六、贡献、成本与理解边界
+
+真正贡献是把非线性代价、未知动力学与采样式逆控制组合成可在机器人上运作的循环。相比只回归示范动作，它有机会发现“为什么要这样做”；相比每次把前向问题完全求解，又用渐进策略更新节省重复探索。
+
+作者明确指出复杂任务的代价可能只在局部有效。进一步的分析是：若示范总把杯子放在同一块背景前，代价可能误把背景当作目标证据。在线样本能揭露部分错误，但没有覆盖的新背景仍然不可识别。神经网络表达能力并不提供语义唯一性。
+
+样本效率也应计入示范采集、视觉表示学习、机器人复位以及重新优化代价的成本。论文表格对某些费用作了排除，这不是问题本身，但读者必须保持同一会计口径。本文解读覆盖方法、主实验与相关附录，未独立运行代码或复现操作。
+
+## 七、一个自构例子
+
+假设机器人学会把杯子保持竖直直到来到目标杯上方。第一版代价只惩罚离目标太远，策略可能提前翻杯。新采样展示这种低位置误差但坏结果的动作；与专家相比，代价网络需要把姿态和位置的组合纳入评分。
+
+这个例子为教学构造，未运行。它解释了非线性关系：翻转在远处有害，在目标上方却必要，单一“翻转永远不好”的线性偏好可能不够。它也揭示遗漏信息的后果：若状态中完全没有目标位置或可推断它的视觉信息，再复杂的网络也无法区分两种情形。
+
+| 原有问题 | 作者改动 | 可能有效原因 | 证据 | 代价与局限 |
+|---|---|---|---|---|
+| 固定样本难估计复杂代价，奖励难手写 | 交替更新采样策略与神经代价 | 把数据移向当前重要区域 | 图2、表1、附录 B/E | 在线采样、局部模型、代价泛化不足 |
+
+## 八、三个理解问题及答案
+
+**问题1：为什么不能只让示范轨迹的代价越来越低？**
+
+答案：这样无法区分示范与其他行为，常数平移甚至可以无限降低目标。配分函数引入相对比较，使概率归一化；最终有意义的是行为间的偏好，而非孤立代价值。
+
+**问题2：为什么策略成功不能证明学到了正确奖励？**
+
+答案：策略与代价共同适应同一局部区域，策略可能利用了局部有效的评分。只有固定代价、改变条件并重新优化，才能进一步检查它是否仍指导正确行为。表1倒物差距是直接证据。
+
+**问题3：重要性权重能补救完全没有采到的行为吗？**
+
+答案：不能。权重只能调整已有样本贡献，缺失区域没有任何项可供重加权。若采样分布不覆盖重要区域，估计可能高方差甚至失去适用条件；自适应采样的价值正是改善这个覆盖问题。
+
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "012-guided-cost",
+            active: "robot-learn",
+            seriesLabel: "\u673a\u5668\u4eba\u5b66\u4e60",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

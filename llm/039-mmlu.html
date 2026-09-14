@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>039 · MMLU：模型的平均分掩盖了哪些知识盲区 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">039 · MMLU：模型的平均分掩盖了哪些知识盲区</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 039 · MMLU：模型的平均分掩盖了哪些知识盲区
+
+[返回目录](README.md) · [上一篇：BigBird](038-bigbird.md) · [下一篇：Performer](040-performer.md)
+
+论文：Dan Hendrycks 等，*Measuring Massive Multitask Language Understanding*，首次公开2020，ICLR 2021。[原始论文](https://arxiv.org/pdf/2009.03300)。依据§3数据构造、§4评估、表1及图6–8、附录格式与污染分析；未重新调用原始模型接口。
+
+## 一分钟理解
+
+模型能续写流畅文本，是否意味着它掌握了数学、法律、医学和历史？MMLU 用57个学科的选择题评估预训练模型，既看总体水平，也观察每门学科的缺口与回答信心。
+
+它是一篇评测论文，没有新训练算法。贡献是把“语言模型懂多少”变成较容易复查的跨学科问题集，并显示当时的大模型知识与应用能力不均衡。考题分数不能直接当作真实职业能力，更不能替代实际任务验证。
+
+一句话：在文本知识与问题求解评估中，通过跨学科选择题和分学科校准分析，揭示模型的知识盲区，代价是选择题形式、公开题源和标签质量对结论范围的限制。
+
+## 为什么需要新的测试
+
+一些既有任务偏常识或语言现象，大模型可能取得高分，却仍不会应用专业规则。MMLU 希望检验模型能否把预训练文本中的知识用于不同难度和领域的问题，而不为每个学科提供大规模专用训练集。
+
+题目涵盖人文、社会科学、STEM与其他领域，包含高中、大学和专业层次。它们要求的能力并不统一：有些偏事实回忆，有些要求计算，还有些涉及规范或场景判断。总体分数是这些不同能力的混合指标。
+
+原文从公开资料人工收集题目。因此“没有在MMLU上微调”不意味着从没见过题目来源；模型可能在预训练时接触相同考题、解释或改写。知识学习是测试本来想测的东西，逐题记忆则可能夸大迁移，二者需要区分。
+
+## 数据与评价协议
+
+§3报告总共15,908题，少样本开发集每学科5题，验证集1,540题，测试集14,079题。三个分项按文字相加与总数存在细小不一致：$57\times5+1540+14079=15904$。这应记录为原文计数口径疑点；严格复现应以固定版本的数据文件和脚本为准，不能悄悄修改原文数值。
+
+GPT-3评估为每个学科使用固定示例，提示以任务说明、示例、待答选择题和答案前缀组成。模型对A/B/C/D候选token评分，选择最高概率者。UnifiedQA的输出则按与选项的文本重叠转换成选择。这些读出方式不同，比较时需要保留。
+
+设第 $i$ 题正确选项为 $y_i$，候选分数为 $s_{ic}$，则：
+
+$$
+\hat y_i=\arg\max_{c\in\{A,B,C,D\}}s_{ic},\qquad
+Acc=\frac1N\sum_{i=1}^N\mathbf1[\hat y_i=y_i].
+$$
+
+如果按全部题目统计，大题量学科权重更高；如果先算每学科准确率再平均，则各学科等权。论文表1明确写加权准确率，复现不能在不说明时换成另一种平均。
+
+```text
+输入：固定版本题库、学科示例、待评估模型
+对每个学科：
+    取规定的最多5个示例，构造固定提示模板
+    对每道测试题，附加题干与四个选项
+    读取答案候选得分，按规定选项映射得到预测
+    保存预测、正确标签、置信度与提示长度
+计算逐学科和明确加权方式的总准确率
+比较平均置信度与实际正确率，检查错误类型
+输出：分组成绩与校准分析；不使用测试题调参
+```
+
+对于自测式复现，候选概率是否在四个选项内重新归一化、答案前是否带空格、选项是否为单token，都需要记录。否则同一模型可能因为评估实现变化得到不同分数。
+
+## 校准怎样理解
+
+一个系统若给大量回答80%的信心，那么这类回答实际应约有80%正确，才称得上良好校准。它和准确率不同：总是信心十足的模型可以较准却不校准；谨慎但能力弱的模型也可能校准较好。
+
+教学性地，令预测置信度为 $c_i$、正确性为 $a_i$，可把样本分组后比较每组 $\bar c_b$和$\bar a_b$。原论文图8主要比较各学科平均信心与准确率，还报告RMS校准误差。不要把它误读成每个回答的误差都同样大。
+
+## 实验设置表
+
+|项目|原论文设置与要验证的问题|
+|---|---|
+|题库|57学科，四选一，来自公开考试练习和教学资料；随机基线25%|
+|模型|GPT-3四档规模、UnifiedQA，以及附录中的RoBERTa、ALBERT、GPT-2对照|
+|监督条件|GPT-3零/少样本不更新参数；UnifiedQA已在其他问答数据微调，测迁移|
+|预算|主要是模型推理评估，GPT-3最多5个示例；非统一算力预算下重新训练所有模型|
+|指标|加权准确率、逐学科表现、平均信心与校准误差|
+|人类参照|非专业众包与估计专家水平不同；专家89.8%是综合考试资料及部分估计，非同一专家群完整实测|
+|不确定性|固定少样本示例提高协议一致性，但没有覆盖全部提示重采样方差；主表单值不可直接宣称差异显著|
+
+评测论文不适用“算法优化了奖励”这类问题。它的优化对象是测量设计与诊断能力；方法好坏应看覆盖、区分度、可重复性与偏差，而不是是否让模型分数更高。
+
+## 三组重要结果
+
+**证据一：表1，规模并不能独立解释表现。** GPT-3最大模型少样本加权准确率43.9%，小三档约25%；UnifiedQA为48.9%。最大GPT-3超过随机18.9个百分点，却仍落后于有问答迁移训练的UnifiedQA。这里不能由参数差异推出谁的架构天然更好，因为训练目标和监督资源不同。
+
+**证据二：图6–7，能力并不均衡。** GPT-3不同学科跨度很大，计算密集型领域较弱。正文列大学医学47.4%、大学数学35.0%、小学数学29.9%，说明名称上的教育层级不一定对应模型难度。图7能复述运算优先规则却算错的例子支持“知道规则与应用规则有区别”的直觉，但单个例子不是所有推理错误的完整机制证明。
+
+**证据三：图8与图11，信心不可靠。** 零样本某些学科的平均信心与准确率差距达到24个百分点；少样本虽改善，仍存在明显差距。这支持需要校准研究，而非说明只要降低输出语气就能解决。模型概率、自然语言自信表述与真实正确率是不同信号。
+
+附录B.2用题目概率与准确率关系分析精确记忆，作者认为未见强证据支持大量逐题记忆。但这种间接统计不能证明没有污染；公开发布后的后续模型更应使用额外来源审计或新题验证。
+
+## 一个构造例子与改进实验
+
+自构两模型都在100道题答对60道。模型A每题给60%信心，模型B每题给99%。准确率相同，B的概率承诺明显更不可靠。但A是否真正校准，还需检查不同样本子组：它可能在数学全错、历史全对，平均值掩盖了结构性差异。
+
+可做未执行实验，把一组题的选项随机重排并同步重映射标签，比较准确率与答案一致性。如果模型习惯某个字母，重排会暴露偏差。再用不改变知识要求的题干改写，区分格式脆弱性与知识缺口；必须由人工核对改写没有改变答案。
+
+第三个诊断是允许弃答，绘制覆盖率与保留样本错误率的关系。若信心排序有效，少回答一部分题应能降低错误率；若无明显改善，则平均置信度并不足以支持可靠选择。该方案是教学延伸，不是原论文已经给出的部署系统。
+
+## 贡献与局限
+
+MMLU让跨学科知识评估成为标准研究问题，并强调分科与校准。局限包括选择题可猜测、题目含糊或错误、领域代表性有限、公开来源污染，以及分数不能覆盖开放式解释、多模态感知或实际操作能力。
+
+五个前置概念是：基准定义统一测试，few-shot在上下文提供示例，加权平均决定不同题群的影响，校准连接概率与频率，分布偏移改变训练和测试关系。记住这些，比背住某代模型的一个总分更有助于阅读后来的评价论文。
+
+|原有问题|作者改动|为什么可能有效|实验证据|代价与局限|
+|---|---|---|---|---|
+|流畅文本难反映专业知识缺口|57学科选择题与分组报告|可计算且覆盖不同知识要求|表1与图6逐学科表现|选择题范围有限，题源与标签可能有偏差|
+|模型信心被误作正确保证|检查各学科置信度与准确率|揭示能力与概率承诺的差异|图8/11校准|不是逐题可靠性证明，需额外校准验证|
+
+## 自测与参考答案
+
+**1. MMLU高分是否等于获得专业执业能力？**
+
+不等于。它只测给定选择题中的文本知识和求解，真实工作还涉及信息收集、沟通、行动与后果。专业领域题目得分不能直接外推到完整实践能力。
+
+**2. 两模型准确率相同，为什么可靠性仍可能不同？**
+
+它们可能在不同领域犯错，也可能对错误给出不同信心。需要分科、校准和选择性回答分析，不能仅看平均正确率。
+
+**3. 不在MMLU上微调，是否就排除了污染？**
+
+没有。题源可能进入预训练，甚至公开题库本身被读取。微调协议与训练数据重叠是不同问题，间接记忆分析也不能提供完全排除证明。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "039-mmlu",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

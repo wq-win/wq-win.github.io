@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>019｜Transformer-XL：跨片段复用状态，避免每段都从失忆开始 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Transformer-XL：跨片段复用状态，避免每段都从失忆开始</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 019｜Transformer-XL：跨片段复用状态，避免每段都从失忆开始
+
+[目录](README.md) · [上一篇](018-bert.md) · [下一篇](020-adapters.md)
+
+**论文**：Zihang Dai 等，*Transformer-XL: Attentive Language Models Beyond a Fixed-Length Context*，2019。[原文](https://arxiv.org/abs/1901.02860) · [PDF](https://arxiv.org/pdf/1901.02860)。重点是片段级循环与相对位置编码，不把它混同于任意现代 KV cache 或无限上下文记忆。
+
+## 一分钟理解
+
+把长文本切成固定片段训练，每段开头会失去前面的上下文；评价时反复重算重叠前缀也昂贵。Transformer-XL 缓存上一片段的隐藏状态，让当前片段可以读取它们，同时采用适合状态复用的相对位置信息。
+
+缓存旧状态时停止梯度，前向可访问的历史因而长于当前反向传播片段。作者通过困惑度、消融和有效上下文分析验证收益。代价是额外缓存与训练近似；能访问更长历史不等于所有远程事实都被可靠使用。
+
+## 背景：片段边界造成两类问题
+
+第一类是上下文截断：当前 token 可能需要上一片段的信息，却在模型输入中不可见。第二类是片段开头上下文不足，即使任务不需要非常远的依赖，边界也让刚开始几个预测缺少正常前缀。两者都可能提高损失，但原因不同。
+
+论文通过不同数据和消融尝试区分这两种收益。若仅看总体困惑度下降，很容易把边界修复全部解释成长程推理能力。好的研究需要构造不依赖长程信息的数据，观察缓存是否仍帮助边界位置。
+
+第三个问题是位置表示。若每个片段都从位置 1 开始，旧片段位置 1 与当前片段位置 1 会冲突。直接缓存带绝对片段位置的表示，可能让模型无法一致判断距离，因此状态复用需要位置机制配合。
+
+## 方法：旧状态做键值，当前状态做查询
+
+设第 $\tau$ 段第 $n-1$ 层表示为 $h_\tau^{n-1}$，当前片段为 $h_{\tau+1}^{n-1}$：
+
+$$
+\widetilde h_{\tau+1}^{n-1}
+=[\operatorname{SG}(h_\tau^{n-1});h_{\tau+1}^{n-1}],
+$$
+
+其中 SG 表示停止梯度。当前查询来自当前片段，键和值来自拼接后的扩展上下文。这样当前预测可以读取旧表示，但损失不会穿过旧片段继续反向传播。
+
+停止梯度减少训练图和内存需求，也引入近似：旧表示不是在当前损失下重新计算并更新的完整长图。前向信息跨度、直接注意力窗口与反向传播长度因此是三个不同概念，不能只写“上下文长度”一个数字。
+
+相对位置编码把注意力中的位置关系写为查询与键之间的距离等项，使缓存移动到更远历史时仍有一致语义。原论文对内容项和位置项作分解，不能仅把绝对位置编号改成负数就假定复现了方法。
+
+```text
+输入：按顺序排列的文本片段、各层记忆缓存
+对当前片段：
+    对每一层 n：
+        extended ← concat(stop_gradient(memory[n]), current_hidden)
+        Q ← 当前片段投影
+        K,V ← extended 投影
+        按相对位置关系计算因果注意力
+        得到当前层新表示
+    计算当前片段下一词损失并更新参数
+    将允许长度的历史表示写入各层缓存
+文档边界按协议重置缓存，避免不合法跨文档信息
+输出：可复用记忆的语言模型
+```
+
+目标仍是语言建模似然；机制是跨片段状态复用与相对位置；指标包括 PPL、bpc、评价速度和上下文利用。缓存不能自动成为外部事实数据库，也不会独立验证存储内容。
+
+## 实验设计与证据
+
+| 项目 | 原文范围 |
+|---|---|
+| 数据 | WikiText-103、enwik8、text8、One Billion Word、PTB |
+| 指标 | 词级困惑度与字符/字节单位 bpc，不能直接跨单位比较 |
+| 长度 | 训练反传长度、缓存长度和评价注意力长度分别设置 |
+| 消融 | 有无循环、不同位置方案、full/half loss 与内存控制 |
+| 速度 | 对特定重复计算基线的评价速度比较，不等于所有现代缓存实现 |
+| 统计 | 表格为具体配置，缺少统一多种子置信区间时不声称稳定性已证 |
+
+**证据一，第 3.2—3.3 节与图 2。**明确旧状态冻结、层间复用和位置一致性。这是区分 Transformer-XL 与简单延长输入的关键。
+
+**证据二，表 1—2。**WikiText-103 大模型困惑度为 18.3；enwik8 用 bpc 报告。不同数据、模型大小和正则配置不能合并成单一“降低百分比”。主结果支持系统质量，机制归因还需看消融。
+
+**证据三，表 6—8。**表 6 分析循环与位置方案，表 7 在不依赖长程关系的 One Billion Word 上仍观察去循环后的退化，支持片段边界修复；表 8 的 RECL 比较进一步研究长上下文利用。三项回答不同问题，不能相互替代。
+
+论文强调某些评价设置下极大速度收益，但该比值依赖基线是否反复重算前缀。与已经使用高效 KV 缓存的现代系统比较，不能照抄这个倍数。速度结论应保留算法和执行协议。
+
+## 教学例子：可见历史不等于可训练历史
+
+构造片段一包含“主角叫林”，片段二出现“他回到家”。当前段可以读取上一段表示，因而改善代词相关预测。但若损失发现片段一没有保存角色信息，停止梯度意味着这次更新不能直接穿过上一段重新教它编码早期 token。
+
+模型仍能在其他训练位置逐渐学会形成有用表示，所以停止梯度不等于旧表示永远学不到；只是当前一次训练图的路径有限。这个区别与循环网络截断 BPTT 类似，却在缓存多个位置与层间连接上有自己的结构。
+
+再把文档边界放在两个完全不相关故事之间。若缓存不重置，模型可能错误带入上一篇角色。更长上下文并不总是更相关，边界管理是训练和评价合法性的一部分。
+
+## 长上下文应该怎样测
+
+可以固定当前预测片段，逐渐增加可见历史，观察损失下降是否达到预设阈值。若新增内容没有改善预测，仅说明在这个任务和模型上没有提供可用收益，不等于模型完全无法访问这些位置。
+
+也应使用远处关键事实被替换、删除和放入干扰内容的测试，区分有用检索与一般主题适配。PPL 对常见局部词很敏感，少数长程事实错误可能被平均掩盖。有效上下文指标与准确事实检索最好共同报告。
+
+## 贡献与局限
+
+Transformer-XL 把状态复用与相对位置一起设计，改善片段边界和评价重算问题。限制包括缓存内存、状态陈旧、反向路径截断、远程干扰与文档边界。它提供更长信息路径，不保证无限记忆或完美检索。
+
+五个前置概念是缓存、停止梯度、相对位置、上下文碎片化和有效上下文长度。理解这几项便能区分“名义窗口”“实际可利用跨度”和“训练信号传播范围”，避免把它们都写成同一个长度。
+
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 固定片段切断上下文，直接复用隐藏状态又产生位置歧义 | 跨片段复用停止梯度的历史表示，并采用相对位置机制 | 当前片段可读取更早信息，同时保持位置关系一致 | 表1–2语言建模，表6–8循环/位置/上下文分析 | 保存历史需要资源，梯度不穿过旧片段；可见历史变长不等于所有远程信息都被利用 |
+
+## 自测与参考答案
+
+**1. 为什么旧状态停止梯度后仍然能帮助当前预测？**
+
+前向计算仍可读取其数值，停止的是反向更新路径。信息可用与参数是否通过该路径获得梯度是两件事，因此长前向上下文可以配合短反向图。
+
+**2. 为什么没有长程依赖的数据也可能受益？**
+
+缓存修复每段开头缺少正常前缀的问题，这属于边界碎片化，而非真正利用很远信息。论文专门用相应数据区分了这类收益。
+
+**3. 为什么不能把论文的最大加速倍数直接用于现代服务系统？**
+
+原比值依赖特定基线重算、窗口和实现。现代系统若已高效缓存，成本结构不同。必须在相同输入、硬件与缓存策略下重新测量。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "019-transformer-xl",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

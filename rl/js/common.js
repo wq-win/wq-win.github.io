@@ -20,13 +20,13 @@
                 ${navLink(root + 'index.html#contact', 'Contact')}
                 <div class="relative group">
                     <button class="text-primary font-medium flex items-center focus:outline-none">
-                        RL <i class="fa fa-caret-down ml-1 text-xs"></i>
+                        精读 <i class="fa fa-caret-down ml-1 text-xs"></i>
                     </button>
-                    <div class="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-50">
-                        <a href="${root}rl/index.html" class="block px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-800">系列首页</a>
-                        <a href="${root}rl/00-timeline.html" class="block px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-800">发展时间线</a>
-                        <a href="${root}rl/01-actor-critic.html" class="block px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-800">从第 1 天开始</a>
-                        <a href="${root}rl/61-epilogue.html" class="block px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-800">系列收尾</a>
+                    <div class="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-50">
+                        <a href="${root}rl/index.html" class="block px-4 py-2 text-sm text-primary font-medium hover:bg-indigo-50">强化学习 60 篇</a>
+                        <a href="${root}llm/index.html" class="block px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-800">大语言模型 100 篇</a>
+                        <a href="${root}robot-learn/index.html" class="block px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-800">机器人学习 100 篇</a>
+                        <a href="${root}robot-classic/index.html" class="block px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-800">机器人经典基础 100 篇</a>
                     </div>
                 </div>
                 <div class="relative group">
@@ -57,8 +57,10 @@
                 <a href="${root}index.html#about" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">About</a>
                 <a href="${root}index.html#articles-section" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">Articles</a>
                 <a href="${root}index.html#contact" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">Contact</a>
-                <a href="${root}rl/index.html" class="text-primary font-medium py-2 border-b border-gray-100">强化学习系列</a>
-                <a href="${root}rl/00-timeline.html" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">发展时间线</a>
+                <a href="${root}rl/index.html" class="text-primary font-medium py-2 border-b border-gray-100">强化学习 60 篇</a>
+                <a href="${root}llm/index.html" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">大语言模型 100 篇</a>
+                <a href="${root}robot-learn/index.html" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">机器人学习 100 篇</a>
+                <a href="${root}robot-classic/index.html" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">机器人经典基础 100 篇</a>
                 <a href="${root}game/sudoku.html" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">Sudoku</a>
                 <a href="${root}game/jianghu-slay.html" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">江湖 Slay</a>
             </div>

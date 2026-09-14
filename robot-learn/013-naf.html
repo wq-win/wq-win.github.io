@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>013｜NAF：让连续 Q 的最大化可以解析求解 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">NAF：让连续 Q 的最大化可以解析求解</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 013｜NAF：让连续 Q 的最大化可以解析求解
+
+[系列首页](README.md) · [上一篇](012-guided-cost.md) · [下一篇](014-hand-eye.md)
+
+**原论文**：*Continuous Deep Q-Learning with Model-based Acceleration*，Shixiang Gu 等，2016。[原文](https://arxiv.org/abs/1603.00748)。
+
+## 一、连续动作还有另一条路
+
+DDPG 用 Actor 近似寻找高价值动作。NAF 则问：能不能把价值函数设计成一种特殊形状，让最优动作直接读出来？答案是可以，但需要牺牲一部分表达能力。
+
+可以把每个状态下的动作价值想成一座倒扣的碗。碗顶对应最好动作，弯曲程度描述偏离最佳动作有多糟。神经网络预测碗顶、碗的高度和形状，就能同时给出动作与价值，不必另训练一个采用策略梯度的 Actor。
+
+作者进一步加入动力学模型生成的想象经验，提高部分任务的数据效率。实验支持的是模拟连续控制中的表现，尤其部分精细操作任务；它不支持“二次价值函数普遍胜过 Actor–Critic”。一句话总结：通过限制动作价值的形状换取解析最大化，再用局部模型补充经验，简化连续 Q 学习，代价是单峰动作假设与模型偏差。
+
+## 二、问题设定与概念准备
+
+本文在线与模拟环境交互，基础算法是无模型、离策略 Q 学习；增加想象轨迹的版本属于混合模型学习方案。两种版本必须分别描述，不能因为题目出现 model-based 就把 NAF 本身说成依赖动力学。
+
+状态 $x$ 为关节角度、位置等低维变量，动作 $u$ 为连续控制。奖励由各控制任务定义。第6节明确其政策输入是状态，因而这里的实验不是从摄像头端到端学习抓取。
+
+五个前置概念是：**Q 学习**用下一状态最优价值构造监督；**优势函数**表示动作相对状态基准的好坏；**正定矩阵**使非零偏移产生正的二次量；**Cholesky 型分解**通过三角矩阵构造正定矩阵；**Dyna**把真实经验训练出的模型再用于生成学习样本。
+
+优势函数中的“normalized”并非把回报缩放到零均值单位方差，而是令最佳动作处优势为零，使 $V$ 与 $A$ 的分解具有确定的参照。
+
+## 三、核心公式：最优动作藏在参数化里
+
+NAF 写成：
+
+$$
+Q_\theta(x,u)=V_\theta(x)+A_\theta(x,u),
+$$
+
+$$
+A_\theta(x,u)=
+-\frac12[u-\mu_\theta(x)]^\top
+P_\theta(x)[u-\mu_\theta(x)].
+$$
+
+其中 $V$ 是碗顶高度，$\mu$ 是碗顶位置，$P$ 控制曲率。令 $P=LL^\top$，并将下三角矩阵 $L$ 的对角元素指数化，可保证正定。因此 $A\leq0$，当且仅当 $u=\mu(x)$ 时为零：
+
+$$
+\arg\max_u Q_\theta(x,u)=\mu_\theta(x),
+\qquad
+\max_u Q_\theta(x,u)=V_\theta(x).
+$$
+
+这是代数性质，不是从实验推断出来的。若动作受到硬边界约束，需要保证 $\mu$ 落在可行动作域，或另外处理受限最大化；不能忽略约束后仍声称无条件解析成立。
+
+于是 TD 目标简化为：
+
+$$
+y=r+\gamma(1-d)V_{\bar\theta}(x'),\qquad
+L=\mathbb E[(Q_\theta(x,u)-y)^2].
+$$
+
+$\bar\theta$ 是缓慢更新的目标参数，$d$ 是教学表达中显式加入的终止标记。所有输出头，包括 $\mu$，都从同一个 TD 损失获得梯度。外观上存在一个输出动作的网络头，但它不是 DDPG 那种另有策略梯度目标的 Actor。
+
+### 对角曲率为什么不够直观
+
+若两关节必须同时转动才能保持末端稳定，单独改变任何一个都可能有害，但协调改变却可接受。$P$ 的非对角项能表达这种动作耦合。它仍然只有一座碗，却可以是倾斜的椭圆碗。
+
+当任务需要从障碍左边或右边绕过时，动作价值可能有两个分离的高峰，中间动作反而碰撞。单个负二次函数无法表达这种双峰。增加神经网络深度只能使不同状态的碗变化更复杂，不能消除同一状态下动作二次形状的限制。
+
+### 想象经验如何加入
+
+第二部分从真实轨迹附近拟合时变线性高斯动力学，令模型从真实访问过的状态出发，运行当前策略生成短轨迹。这些“如果当时采取另一动作会怎样”的数据补入 Q 学习。
+
+为什么不只给算法最好的专家动作？因为学习动作之间的价值差异需要比较，只有一条成功路线可能缺乏坏动作信息。这里是作者结合实验给出的解释，不是关于所有离策略算法的普遍不可能性定理。
+
+~~~text
+初始化 V、mu、L 输出头与目标网络，建立真实回放池
+重复与环境交互：
+    动作 = mu(状态) + 探索噪声
+    执行并保存转移
+    从回放池采样
+    构造 P = L L转置
+    用奖励加目标 V 构造 TD 目标
+    更新整个 Q 网络，软更新目标网络
+可选模型加速：
+    每若干回合，在新真实轨迹附近重新拟合时变线性模型
+    从真实状态出发，用当前策略在模型中短程展开
+    将生成转移放入独立想象池，补充 TD 更新
+    模型偏差限制性能后停止想象更新，继续真实数据学习
+~~~
+
+伪代码是 Algorithms 1–2 的教学归纳，没有声称提供可直接复现的超参数实现。
+
+## 四、实验设计与预算
+
+| 项目 | 原文设置与解释 |
+|---|---|
+| 环境 | MuJoCo 操作和运动控制，包含到达、插销、抓取与行走 |
+| 观测 | 低维状态；角度有时转为正弦余弦编码 |
+| 主对照 | 重新实现的 DDPG，模拟器细节与前论文存在差异 |
+| 网络 | 对照采用两层各200个 ReLU 单元的网络 |
+| 更新量 | NAF 每交互步5次更新，DDPG 同样给5次价值及策略更新 |
+| 调参 | 搜索学习率、探索噪声及批归一化，报告各任务最佳表现 |
+| 模型实验 | 先用真实动力学隔离建模误差，再测试学习的局部模型 |
+| 模型范围 | 短程想象主要考察单目标到达与抓取，初始分布较集中 |
+| 统计边界 | 表1是最佳测试回报与达到其5%以内所需回合；不是统一阈值成功率 |
+
+匹配更新次数比只匹配环境步更公平，但仍不表示端到端算力完全相同。模型拟合与额外想象更新也要消耗计算。阅读学习曲线时，应把真实采样成本、梯度更新成本和规划成本分开。
+
+## 五、五处关键证据
+
+定位根据[论文全文](https://arxiv.org/html/1603.00748)。
+
+| 原文位置 | 观察 | 可以支持与不能支持 |
+|---|---|---|
+| 第4节、Algorithm 1 | Q 的二次结构给出解析最优动作 | 支持算法简化，不是全局最优控制保证 |
+| 图1 | 精细到达与插销对比展示稳定性和收敛差异 | 支持所测操作任务，不能替代真机精度测试 |
+| 表1 | Peg 的最佳分数 NAF -0.438、DDPG -0.950；对应回合130与690 | 两者各自最佳值不同，回合数不是达到同一目标的速度比 |
+| 图2(a) | 真实模型下比较规划采样与想象展开 | 分离“如何用模型”与“模型是否学准” |
+| 图2(b,c)、第6.3节 | 学习模型的收益与模型类型、展开长度相关 | 支持局部加速，不能推广到任意广泛初始分布 |
+
+论文也有明确反例：DDPG 在 cheetah 的学习速度更好，在 walker2d 获得更高策略表现。这与单峰价值限制的讨论相呼应，但不能单凭结果就确定失败唯一由多峰造成，还需要专门消融。
+
+原文报告局部模型在所测试的相关任务带来约2–5倍数据效率改善。这里保持作者限定范围，不把它写为所有机器人学习平均提升。抓取中后期关闭想象经验的做法尤其重要：模型不是越多用越好。
+
+## 六、新意与局限
+
+NAF 体现了机器人算法中常见的交换：把物理或几何结构写进函数形式，以减少优化困难。相较完全自由的 Q 网络，结构化表示更容易取最大值，也更容易解释局部动作敏感性。
+
+代价首先是表达限制。其次，正定曲率可能很尖，探索噪声稍大就进入低价值区域；若曲率估计错误，也可能错误惩罚必要动作。这些是由参数化得到的分析，不是论文已逐项验证的故障报告。
+
+模型加速还要求局部数据足以拟合动力学。接触切换、宽初始分布或多种物体动力学，会使单个时变线性近似失效。作者提出可通过聚类建立多个模型的方向，但不能把建议当作已完成的通用方案。本文的直接实验范围为模拟控制，未独立复现。
+
+## 七、一个可计算的例子
+
+自构例子，未运行：单动作情况下令 $V=5$、$\mu=0.2$、$P=4$。取 $u=0.7$ 时，优势为 $-\frac12\times4\times0.5^2=-0.5$，故 $Q=4.5$；取 $u=0.2$ 时 $Q=5$。无需动作搜索就能确定最大点。
+
+若真实任务在 $u=-1$ 和 $u=1$ 都安全，而 $u=0$ 危险，一个二次碗不能同时精确表示两个好动作与坏中间点。这个例子解释为什么 NAF 的简洁对局部精细修正很自然，对多种离散行为模式则可能不合适。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 连续 Q 最大化昂贵，真实数据有限 | 二次优势解析取最大，局部模型补充短经验 | 简化优化并增加附近动作比较 | 图1–2、表1 | 单峰限制、模型误差、集中初始分布 |
+
+## 八、三个问题及答案
+
+**问题1：既然有 $\mu(x)$，为什么还说它不是 DDPG？**
+
+答案：关键是更新目标。NAF 的动作头属于 Q 参数化，由 TD 误差联合训练；DDPG 则通过 Critic 的动作梯度优化单独的策略目标。网络外观不能决定算法类别。
+
+**问题2：把状态网络扩大十倍，能表示固定状态下两个独立价值峰吗？**
+
+答案：不能，只要动作仍通过同一个负二次优势进入 Q，该状态的函数形状就只有一个峰。扩大状态网络可以改善状态依赖，不能改变动作方向的函数族。
+
+**问题3：130回合与690回合可以直接得出5.3倍更快吗？**
+
+答案：不能。表1回合数按各自最佳分数的5%邻域定义，两种算法终点不同。若要比较共同目标速度，应先选同一个分数阈值，再读两条曲线达到阈值的交互量并报告重复运行不确定性。
+
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "013-naf",
+            active: "robot-learn",
+            seriesLabel: "\u673a\u5668\u4eba\u5b66\u4e60",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

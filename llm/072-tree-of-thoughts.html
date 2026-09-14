@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>072｜Tree of Thoughts：让语言模型保留岔路，而不是一路写到底 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Tree of Thoughts：让语言模型保留岔路，而不是一路写到底</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 072｜Tree of Thoughts：让语言模型保留岔路，而不是一路写到底
+
+[返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
+
+论文：Shunyu Yao 等，*Tree of Thoughts: Deliberate Problem Solving with Large Language Models*，2023。[论文](https://arxiv.org/abs/2305.10601)、[正文 v2](https://arxiv.org/html/2305.10601v2)、[官方代码与提示](https://github.com/princeton-nlp/tree-of-thought-llm)。本文核对方法、三项主实验及附录B；没有独立运行历史 GPT-4 实验。以下 ToT 指外部控制的搜索过程，不是仅在提示词里写一句“请使用思维树”。
+
+## 一分钟理解：错误的第一步，可能让后面全白写
+
+做24点时，先算哪两个数非常重要。某条路线走不通，继续写更详细的解释也无法得到正确答案。普通思维链通常顺着已经生成的文字继续；多条独立思维链虽然能覆盖不同路线，却很少在中间状态主动比较、剪枝和回退。
+
+ToT 把一个中间解当作树节点，让语言模型提出几种后续想法，再评价哪些值得继续。搜索控制器负责保留分支或回到父节点。模型负责生成与启发式判断，经典搜索算法负责组织尝试。
+
+表2中，较难24点题的 CoT 平均成功率4%，宽度5的 ToT 为74%。这个差异伴随多次生成与评价，不能理解为增加几个提示词就在相同调用预算下提高70个百分点。更有力的比较还包括100次 CoT 采样配合正确答案 oracle 的49%。
+
+一句话总结：在可拆解且中间状态能够被有效评价的任务中，通过对多个想法进行启发式搜索，改善最终解题表现，代价是额外推理预算、任务设计和错误剪枝风险。
+
+## 背景与问题定义：搜索什么，不搜索什么？
+
+ToT 使用固定的预训练语言模型，没有新增训练数据和参数优化。它适用于推理时搜索，不应归类为一项新的策略梯度训练算法。
+
+论文有三种状态表示。24点的状态包含剩余数字与已执行算式，动作是再组合两个数字，成功要求每个输入恰好使用一次且结果为24。创意写作的状态包含计划或候选文章，目标是在四个段落末尾分别放入指定句子并保持连贯。填字游戏的状态是部分填好的网格，动作是填入一个符合线索的词，目标同时满足横向与纵向约束。
+
+这种表示不是免费的。想法过小，就退回 token 搜索，评价难以判断意义；想法过大，一次错误会覆盖太多决策，失去局部修正机会。作者将“想法粒度、候选生成、状态评价、搜索策略”作为四个独立设计问题。
+
+与 Self-Consistency 的主要区别在于选择位置：后者通常在完整答案间投票，ToT 可以在中间状态间选择。与 Reflexion 的区别是，ToT 显式保留和探索不同部分解，而 Reflexion 主要把一次尝试的反馈压缩成下一次尝试的记忆；实际系统可以组合这两种机制。
+
+## 方法：生成器、评价器与搜索控制器
+
+设输入为 $x$，前 $t$ 个想法为 $z_{1:t}$，状态为 $s_t=[x,z_{1:t}]$。生成器 $G$ 产生下一步候选；评价器 $V$ 对状态的前景给分。宽度限制为 $b$ 的层次搜索可写成：
+
+$$
+S'_t=\{s\oplus z:s\in S_{t-1},z\in G(s)\},\qquad
+S_t=\operatorname{TopB}_{s\in S'_t}V(s).
+$$
+
+$S_t$ 是保留的前沿，$\oplus$ 是追加想法。这里的 $V$ 是模型提示产生的启发式评分，不是经过 Bellman 训练的价值函数，也没有可采纳启发式所需的误差保证。论文称其 BFS，但加入宽度裁剪后，不是遍历所有同层节点的完整广度优先搜索。
+
+候选有两种生成方式：开放写作可以独立采样多个计划；24点这类受约束任务可以在一次上下文中顺序列出多个后续算式，减少重复。评价也有两类：逐项判断有希望与否，或者比较候选并投票。
+
+```text
+输入：任务 x、生成器 G、评价器 V、最大深度 T、宽度 b
+frontier = [initial_state(x)]
+for depth in 1..T:
+    candidates = []
+    for state in frontier:
+        candidates += expand(state, G(state))
+    if candidates is empty:
+        return failure_under_budget
+    scores = evaluate_with_optional_repeated_votes(V, candidates)
+    frontier = retain_top_b(candidates, scores)
+return render_and_select_final_answer(frontier)
+```
+
+这是教学版层次搜索。填字实验改用深度优先：先探索最有希望的词，遇到后续线索不可满足时剪枝并回溯。真正执行时，还必须保留总调用与 token 预算；深度不大也可能产生很多候选评价。
+
+论文没有新的可微损失函数。它优化的是推理过程中的候选选择，实测目标是解题正确率或文本连贯性。为什么可能有效？中间检查可以阻止把所有预算消耗在明显错误的前缀上；但若评价器误判，剪枝同样会阻止找到正确答案。这是经验支持的机制，不是最优性证明。
+
+## 实验设计：三类任务，三种成功口径
+
+| 项目 | 设置与验证目的 |
+|---|---|
+| 模型 | 主实验为2023年5月5—16日期间的 GPT-4 Chat Completion，通常温度0.7；不应默认等同于后来的同名服务 |
+| 24点数据 | 1362题中按人类解题时间排序的第901—1000题，共100道较难题 |
+| 24点预算 | 3步想法；ToT保留1或5个状态；每候选评价采样3次；CoT、直接回答各采样100次形成比较 |
+| 写作 | 100组输入，各含4句指定段末句；每阶段5个候选和5次投票；自动连贯性评分与人类盲评 |
+| 填字 | 156个5×5游戏中间隔选择20个测试、另5个作提示；最多100个 DFS 搜索步骤 |
+| 填字指标 | 字母、词和整盘正确率分别计算；整盘率不能由字母率替代 |
+| 人类评价 | 部分作者进行100对文章的随机顺序盲评；不是独立的大规模普通读者调查 |
+| 成本 | 附录B.3记录历史 API token 与费用；并非当前价格，且节点数、token数和墙钟时间不等价 |
+| 泛化 | 附录B包含100道 GSM8K 测试题和100道 StrategyQA 开发题的补充实验，以及 GPT-3.5 替换 |
+
+24点可以用程序检查最终等式，因此最佳样本 oracle 是可构造的。写作没有唯一答案，评价更依赖偏好与评分器。用同一个“成功”概念描述这两者，会遮蔽证据强度的差别。
+
+## 五处结果：搜索有效，但不是万能扩展器
+
+**证据一：表2，24点。** ToT 宽度1为45%，宽度5为74%；CoT-SC 的100样本多数选择为9%，正确性 oracle 从100条 CoT 中挑选为49%。它支持中间搜索优于这组完整轨迹采样方案，同时说明答案多数票与“至少出现过正确解”相差很大。74%是100道题上的系统结果，不是统计上精确的总体成功概率。
+
+**证据二：图3，失败位置。** 作者观察到约60%的 CoT 轨迹第一步之后已经不能完成任务。这个分析解释了为什么前缀选择值得改进；它没有证明所有推理任务都在第一步损失最多，也没有把错误都归因于解码算法，模型的候选质量同样参与。
+
+**证据三：图5，写作与自修正。** 自动评分 ToT 为7.56，CoT 为6.93，直接回答6.19；人工比较41对偏好 ToT，21对偏好 CoT，38对相近。直接回答加迭代修正达到7.67，高于不加修正的 ToT；ToT 加修正为7.91。因此更准确的结论是多种推理程序可以互补，不能说树搜索在所有比较中最好。
+
+**证据四：表3，填字搜索与答案选择。** ToT 词正确率60%、整盘20%，即4/20；oracle 选择已访问过的最佳状态可达到35%，即7/20。省去剪枝或回溯时整盘率均为5%，但这些消融并非完全相同的轨迹和控制流程。正文还记录正确生僻词被误判后剪去：搜索曾经找到正确状态，不等于最终系统能够认出并输出它。
+
+**证据五：附录B，能力与预算边界。** GSM8K 的 CoT/ToT 为86/90，StrategyQA 为82/83，增益远小于24点。24点中 GPT-4 生成、GPT-3.5 评价为64%；反过来为31%，提示这组实验的候选生成是重要瓶颈。表7记录 ToT 历史费用每题0.74美元，对比 CoT best-of-100 的0.47美元，准确率比较并非同费用实验。
+
+费用表中的汇总 token 与费用不宜重新套用今日单价反算；其统计口径并未足够细化为统一部署成本模型。可以采用它们作为“搜索额外消耗显著”的原文记录，但若要估算自己的任务，需要重新测量每次输入、输出、缓存和串行等待。
+
+## 贡献、局限与迁移到实际任务的条件
+
+ToT 的价值在于把语言模型作为候选生成器与语义启发式，接入清晰的搜索框架。经典 BFS、DFS 本身不是新发明；创新集中在想法粒度、语言自评和模块组合，并用可控任务展示效果。
+
+作者承认任务范围较窄、额外推理成本较高，已有模型擅长的简单题可能不值得搜索。进一步分析还包括：相同模型的生成和评价可能共享偏差；知识缺失不能单靠增加分支补足；高分不一定是高正确率；候选越多，越有可能出现迎合评价器的错误答案。
+
+在真实交互任务中，回溯也不一定可行。删除一个文本分支很容易，撤销一个已经作用到外部环境的动作却可能需要额外机制。因此要先区分“在纸上搜索方案”和“执行动作后回退环境”，不能把论文的纯推理实验直接等同于机器人行动可靠性。
+
+## 自构例子与五个概念
+
+**自构例子，未运行：** 用3、3、8、8凑24，解之一是 $8/(3-8/3)=24$。如果评价器用“先算出分数不太合理”这样的经验剪枝，就可能删除正确路线。保留更多分支只有在这条路线仍有机会存活时才有效；将分数运算规则交给确定性的检查器，可能比单纯增加自然语言评价次数更有价值。
+
+五个概念：**搜索状态**保存当前部分解；**分支宽度**限制同时保留的候选数；**启发式**估计状态是否值得继续而非保证正确；**回溯**撤销部分决策后探索替代路线；**oracle选择**借助真实答案挑选候选，通常只是能力上界而非部署策略。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 单条推理链无法主动比较岔路，错误前缀持续消耗预算 | 显式拆分想法，由模型生成和评价，再用BFS/DFS组织分支 | 及早筛选部分解，保留替代路线并允许回退 | 表2的74%与49%；图3早期错误；图5写作盲评；表3剪枝与回溯消融 | 更多调用；需任务适配；错误剪枝；答案选择与知识缺失仍是瓶颈 |
+
+## 自测与答案
+
+**1. 在提示词中写“请提出三个想法并选最好的”，是否就实现了论文的 ToT？**
+
+答案：它可以是很浅的特例，但不自动具有显式状态、逐层扩展、预算控制和回溯。论文的核心是可执行的搜索过程；必须看控制器实际保存了哪些候选、何时评价、怎样继续，不能只看输出是否画成树形。
+
+**2. 为什么 best-of-100 与100次多数投票的24点成绩差这么多？**
+
+答案：best-of-100 利用正确性检查，只需100个答案中有一个正确；多数投票要求正确答案出现得足够集中。不同正确等式还可能分散票数。前者衡量生成覆盖加理想选择，后者衡量实际聚合规则，不能当作同一指标。
+
+**3. 如果增加搜索宽度没有改善，该优先检查什么？**
+
+答案：检查生成器是否产生正确方向、评价器是否误剪正确前缀，以及最终选择器是否丢掉已经找到的解。可以记录 oracle 候选覆盖率、剪枝后的覆盖率与最终准确率逐级定位，再比较同 token 预算的独立采样。只有这样才能知道问题出在探索不足还是选择失真。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "072-tree-of-thoughts",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

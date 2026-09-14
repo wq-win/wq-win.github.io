@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>059 · FlashAttention：少搬运数据，让精确注意力更快 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">059 · FlashAttention：少搬运数据，让精确注意力更快</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 059 · FlashAttention：少搬运数据，让精确注意力更快
+
+[返回目录](README.md) · [上一篇：Flamingo](058-flamingo.md) · [下一篇：ReAct](060-react.md)
+
+论文：Tri Dao等，*FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness*，2022。[原始论文](https://arxiv.org/abs/2205.14135) · [全文](https://arxiv.org/pdf/2205.14135) · [官方代码](https://github.com/HazyResearch/flash-attention)。阅读范围为算法1、定理1—2与对应证明思路、主实验和附录训练说明；未编译或测速内核。本文讨论初代论文，不能把后来版本的硬件支持和速度直接移植过来。
+
+## 一分钟理解
+
+标准注意力慢，不只因为乘法多，还因为巨大中间矩阵不断在显存和计算单元之间搬运。FlashAttention把计算切块，在更快但更小的片上存储里完成局部计算，及时合并结果，不把完整注意力矩阵写入显存。
+
+它保留精确注意力的数学定义，甚至在反向传播中多做一些重计算，却因为减少数据搬运而更快。性能收益来自算法与硬件存储层级的配合，不是删掉某些注意力连接。
+
+一句话：在GPU上的密集注意力训练中，通过分块、在线softmax和反向重计算减少显存读写，改善速度和内存占用，代价是复杂内核工程，而计算量仍随序列长度平方增长。
+
+## 背景：FLOPs少不等于墙钟快
+
+设输入$Q,K,V\in\mathbb R^{N\times d}$，$N$为序列长度，$d$为单头维度。标准注意力为
+
+$$
+O=\operatorname{softmax}(QK^\top/\sqrt d)V.
+$$
+
+普通实现依次产生分数矩阵、遮罩后矩阵、softmax概率和dropout结果。许多操作不是大规模矩阵乘法，而是逐元素或归约计算，容易受显存带宽限制。完整$N\times N$矩阵既占空间，又会被多次读写。
+
+GPU的HBM容量大，但片上SRAM更快且小。FlashAttention围绕这一级差异设计。与Linformer、Performer等近似方法相比，它没有改变密集注意力公式；与一般激活检查点相比，它还把重计算与片上融合结合起来，避免重算后仍大量落回显存。
+
+这是一篇系统算法论文，不是新的强化学习策略或损失。输入输出仍是注意力张量，成功指标是正确性、峰值内存、内核延迟及达到同等任务质量的训练时间。
+
+## 方法：如何不保存整行也计算softmax
+
+对一行分数$s_j$，稳定softmax需要减去最大值。分块处理时维护三个量：已处理分数最大值$m$、指数和$\ell$、未归一化加权输出$u$。
+
+遇到新块$s^{new},V^{new}$，令
+
+$$
+m'=\max(m,\max s^{new}),\quad
+\ell'=e^{m-m'}\ell+\sum_j e^{s_j^{new}-m'},
+$$
+
+$$
+u'=e^{m-m'}u+\sum_j e^{s_j^{new}-m'}V_j^{new},\qquad O=u'/\ell'.
+$$
+
+旧的累计值乘上$e^{m-m'}$，使新旧块拥有同一个指数基准。若直接把各块独立softmax后的输出平均，分母不同会得到错误结果。上式为单行教学表达，论文算法1实际按矩阵块保存归一化输出与行统计。
+
+```text
+输入：HBM中的 Q,K,V，片上可用容量
+根据容量选择Q块与KV块大小
+为每行初始化最大值m、指数和l、输出O
+对每个KV块：
+    加载K、V到片上存储
+    对每个Q块：
+        加载Q块、对应输出与统计量
+        计算当前分数块，应用缩放与因果/填充遮罩
+        求局部最大值与指数和
+        重新缩放旧累计量，合并新块加权输出
+        写回输出与行统计，不写完整注意力矩阵
+反向传播：利用输入与保存的行统计在片上重算所需概率块
+```
+
+反向传播需要注意力概率，但不必一直保存它。论文选择存储较小统计量，反向再计算局部概率与梯度。额外FLOPs换取更少HBM读写，是本篇最重要的系统思路。
+
+“精确”表示没有低秩或稀疏近似地改变注意力算子。浮点计算顺序改变仍可能带来舍入差异，因此不是保证每个bit与任何实现完全一致。正确验证应比较数值误差、梯度以及训练曲线，而非只看程序有没有报错。
+
+## 理论保证与适用范围
+
+**定理1**说明算法返回标准注意力输出，FLOPs为$O(N^2d)$，除输入输出外额外保存$O(N)$统计量。总输入输出内存仍为$O(Nd)$，不能只引用$O(N)$说整个模型只占线性常数空间。
+
+**定理2**在$d\le M\le Nd$的片上容量设定下给出HBM访问量$\Theta(N^2d^2/M)$，标准实现为$\Theta(Nd+N^2)$。$M$按其计算模型中的存储容量理解。它证明数据搬运减少，未把密集注意力FLOPs变成线性。
+
+论文还提出块稀疏版本，跳过指定零块。这时注意力连接本身改变，属于另一种近似/稀疏算法。密集FlashAttention的精确性与块稀疏版本的更长序列成绩必须分别表述。
+
+## 实验如何验证
+
+| 项目 | 原文设置与证据用途 |
+|---|---|
+| 内核分析 | A100，序列1024、头维64、16头、批量64；记录FLOPs、HBM读写和前反向时间 |
+| BERT | 8×A100，同MLPerf初始化与数据划分，达到72%掩码语言建模目标；十次运行 |
+| GPT-2 | small/medium，OpenWebText，8×A100；与HuggingFace和Megatron实现比较 |
+| LRA | 序列1024—4096；比较准确率、吞吐与训练时间，包含近似和稀疏对照 |
+| 长上下文 | GPT-2从1K到4K；长文分类与Path-X/Path-256验证可行性 |
+| 算子设置 | 内核基准包含dropout与padding mask；显存/时间依长度分别绘制 |
+| 重复范围 | BERT明确十次；不能把它推广为所有训练都报告同样重复统计 |
+| 可比边界 | 内核速度、端到端训练速度、更长上下文带来的质量收益是三种不同结论 |
+
+## 五组关键证据
+
+**证据一：图2直接检验IO假说。** 指定GPT-2 medium注意力配置下，FLOPs从66.6增加到75.2 GFLOPs，HBM读写从40.3GB降到4.4GB，时间41.7ms降到7.3ms。按数值计算约5.7倍加速，同时运算量增加。它直接反驳“FLOPs更多一定更慢”，但不是整模型的5.7倍加速。
+
+**证据二：表1的同质量BERT。** 达到同一72%目标，20.0±1.5分钟变为17.4±1.4分钟。耗时减少13%，吞吐比约1.15倍，这解释原文“15% faster”的口径。不能写成时间减少15%，也不能把它描述成从随机初始化完成全部BERT预训练只需17分钟。
+
+**证据三：表2的GPT-2。** small模型困惑度都为18.2，HuggingFace9.5天、Megatron4.7天、FlashAttention2.7天；medium分别21.0、11.5、6.9天，困惑度14.2/14.3/14.3。对small的9.5/2.7约3.5倍，是表格中的具体配置，摘要的约3倍只是概括。质量近似一致支持算子等价实现的用途。
+
+**证据四：表4区分算子与上下文收益。** GPT-2 small在1K上下文为18.2困惑度、2.7天，4K为17.5、3.6天；Megatron1K为18.2、4.7天。0.7困惑度改善来自可负担的更长上下文，不是同一个注意力数学表达突然提高模型能力。
+
+**证据五：表5/表6的长序列边界。** MIMIC微F1从512长度52.8提高到16K的57.1；ECtHR在8K为80.7，16K反降至79.2，说明上下文越长并非每次更好。Path-X的61.4使用密集版本，Path-256的63.1使用块稀疏版本，且有Path-64预训练迁移，不能忽略辅助训练。
+
+## 贡献、成本与局限
+
+贡献不是某个新的注意力权重公式，而是把分块softmax、反向重计算和GPU内核融合组织成高效的精确算子，并提供IO复杂度分析。它使“更好的实现”成为扩展上下文的重要手段。
+
+工程代价是低层CUDA开发、块大小与寄存器/共享内存安排、不同硬件架构适配，以及新遮罩或注意力变体需要额外实现。原论文§5明确强调可移植性与开发成本。理论IO优势也不保证所有小张量和设备上的相同比例收益。
+
+密集版本仍需处理所有合法查询键组合，极长序列的平方计算会成为瓶颈。对自回归单token解码，形状、KV缓存与瓶颈不同，不能仅凭训练前反向基准推断其服务性能。后续系统优化需要针对真实工作负载重新测量。
+
+## 一个在线softmax小例子
+
+以下为自构例子：分数为0与$\log3$，值为2与10。正确权重为1/4与3/4，结果8。若分两块，各块独立softmax都为1，然后平均得到6，显然错误。
+
+在线方法保留指数和并统一最大值，最终仍得到$(1\times2+3\times10)/(1+3)=8$，无需保存两块的完整概率。真实矩阵计算把这个规律用于每一行，片上块处理则决定是否真的加速。
+
+五个前置概念：**HBM**是GPU大容量显存；**SRAM**是快速片上存储；**内核融合**减少中间结果往返；**在线归约**逐块合并统计量；**重计算**以额外运算换取保存空间和带宽。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 完整注意力矩阵占显存并反复搬运 | 分块、在线softmax、片上重计算与融合 | 保持同一算子，减少慢存储访问 | 定理1/2；图2 IO40.3→4.4GB；表1同目标时间；表2/4训练与长上下文 | 仍平方计算；低层工程与硬件依赖；块稀疏成绩不能算作密集精确结果 |
+
+## 自测与参考答案
+
+**1. 为什么多做重计算反而更快？**
+
+答案：当带宽是瓶颈时，重新计算一块概率可能比从HBM读取保存矩阵更便宜。是否值得取决于计算速度、数据复用、块大小和内存层级，不能把它推广为所有计算都应重算。
+
+**2. FlashAttention是否把注意力复杂度从平方降成线性？**
+
+答案：密集版本的FLOPs仍为$O(N^2d)$。主要减少中间矩阵存储及HBM访问，内存占用可随序列线性增长。块稀疏版本进一步跳过连接，但改变算子，是另一个前提。
+
+**3. 如何设计一个能检验真实收益的对照？**
+
+答案：先固定QKV、精度、遮罩与dropout，核对输出和梯度；再固定模型、数据、训练目标和硬件，比较达到同质量的时间与峰值显存。最后单独改变上下文长度测任务收益，避免把结构或预算变化混入纯实现加速。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "059-flashattention",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

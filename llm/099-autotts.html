@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>099｜AutoTTS：让 Agent 搜索怎样分配推理计算 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">AutoTTS：让 Agent 搜索怎样分配推理计算</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 099｜AutoTTS：让 Agent 搜索怎样分配推理计算
+
+[返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
+
+**论文**：Zheng 等，*LLMs Improving LLMs: Agentic Discovery for Test-Time Scaling*，2026。[原文](https://arxiv.org/abs/2605.08083) · [正文 v1](https://arxiv.org/html/2605.08083v1) · [作者代码入口](https://github.com/zhengkid/AutoTTS)。本文核对主文、控制器机制与局限，解释其离线回放实验；没有执行作者控制器或在线复现，文中伪代码是机制整理而非完整代码转录。
+
+## 一、一分钟理解
+
+当模型有十份计算预算，应该生成十条短思路，还是把一条思路想十倍长？答案往往取决于当前候选是否一致、某条路径是否还在取得进展。以往这些规则大多由研究者手工写出。
+
+AutoTTS 让编码 Agent 提出控制程序，再放进可快速回放的实验环境中比较准确率与计算消耗。它搜索的是何时分支、继续、探测、剪枝和停止，不是训练基础模型的新参数。作者预先生成推理轨迹，因而搜索过程中不必为每个候选程序重复调用解题模型。
+
+一句话总结：在固定轨迹池覆盖的推理分配空间中，通过代码搜索与细粒度执行反馈，发现有竞争力的控制策略，代价是轨迹预采集、回放假设和在线成本仍需进一步验证。
+
+## 二、问题定义：搜索控制规则，而非重新训练模型
+
+设一条推理分支按固定长度切成多个片段。控制器知道已创建哪些分支、各自到多深、哪些探针答案已经被观察，以及剩余预算。尚未探测的答案不在其可见状态中，正确标签只用于评估控制器结果，不能供控制器作弊选择答案。
+
+动作有五类：BRANCH 新建分支，CONTINUE 延长某条分支，PROBE 读取当前位置的暂定答案，PRUNE 放弃分支，ANSWER 聚合已见信号并提交。新分支从原问题开始，并非自动在任意中间前缀长出搜索树。因此作者的宽度—深度空间覆盖若干常见方法，但没有涵盖所有工具调用或树搜索。
+
+程序发现可以表达成策略搜索，环境也有状态和动作，却不意味着本文使用 PPO 或 GRPO 训练这个控制器。实际方法是编码 Agent 改代码、运行评估、读历史、继续改代码。
+
+## 三、方法：怎样让搜索既便宜又不失真
+
+### 回放环境
+
+每个模型与问题组合预先生成 128 条推理轨迹，按 500 token 间隔获取探针信号。候选控制器采取动作时，只读取已经存储的对应片段或答案。相同数据与动作路径可以重复评估，便于比较程序变化。
+
+成本模型是：
+
+$$
+C(s)=\sum_{i=1}^{m}\ell_i+\kappa_{probe}|\Omega|.
+$$
+
+$\ell_i$ 是第 $i$ 条分支已消耗的片段数，$\Omega$ 是已读取探针的集合，$\kappa_{probe}$ 表示一次探针的相对成本。被剪掉的分支已经生成的片段仍须计入，不能事后抹掉沉没成本。回放实例中读取预存探针不触发新的生成；在线系统获取探针的费用需要另算。
+
+### 单参数控制搜索复杂度
+
+每个程序只向外暴露一个 $\beta$，内部阈值由编码 Agent 写出的函数映射得到。作者要求更大的 $\beta$ 对应更大的预算倾向，防止候选程序出现十几个任意可调参数，使有限搜索轮次难以比较。
+
+这是一种限制搜索空间的设计，并不能在数学上消灭过拟合。程序结构和映射函数本身仍然复杂，单个标量的存在也不自动保证实际路径消耗严格单调。
+
+论文的概括目标为：
+
+$$
+\max_{\pi,\beta}\mathbb E[\mathbf1\{\hat y_{\pi,\beta}=y\}-\gamma C_{\pi,\beta}].
+$$
+
+$\pi$ 是代码控制器，$\gamma$ 表示成本偏好。要区分目标阐述与实际选择：§3.2、§4 明确说最终按搜索集最高准确率选择控制器，再展示预算曲线，不应把它说成已经求出了该拉格朗日目标的全局最优解。
+
+```text
+输入：预采样轨迹与探针、搜索任务、保留评估任务
+初始化候选历史 H
+重复五轮：
+    编码 Agent 阅读候选代码、准确率/成本与执行轨迹
+    提出只暴露一个 beta 的新控制程序
+    对若干 beta 在搜索环境回放
+    记录分支、继续、探测、剪枝、停止的具体路径
+    将评估结果与失败轨迹加入 H
+依据搜索集选择控制器并冻结代码
+在未参与搜索的任务环境评估准确率与总 token
+输出：一个推理控制程序及其预算曲线
+```
+
+### 发现出的控制器做了什么
+
+附录 D 描述 Confidence Momentum Controller：它追踪候选池置信度的指数滑动平均，不只看当前瞬时值；只有平均水平高且趋势没有恶化时才考虑停止。若信心持续改善，减少新增分支；若停滞或下降，倾向拓宽搜索。
+
+与当前共识一致的分支获得更多延长机会，持续偏离的分支经过耐心窗口才放弃，并至少保留两条活跃分支。其直觉是兼顾已有证据与异议，但共识本身可能错误，不能把分支一致性当成外部验证。
+
+## 四、实验设置
+
+| 项目 | 原文配置及含义 |
+|---|---|
+| 主要基础模型 | Qwen3 0.6B、1.7B、4B、8B；基础模型参数不在搜索中更新 |
+| 轨迹池 | 每模型每题 128 条，温度 0.7，探针间隔 500 token |
+| 重复评估 | 从固定池随机抽子集，控制器评估 64 次取平均；不是 64 次独立生成全新池 |
+| 搜索数据 | AIME24，联合四个模型环境；这些模型规模均参与了搜索 |
+| 保留数据 | AIME25 与 HMMT25 未参与发现和选择 |
+| 发现过程 | Claude Code 编码 Agent，五轮；原文没有在该配置描述中明确底层模型精确版本 |
+| 对照 | SC@64、ASC、ESC、Parallel-Probe，比较总 token 与准确率 |
+| 额外泛化 | R1-Distill-Llama-8B 的 HMMT25、Qwen3-1.7B 的 GPQA Diamond |
+| 发现费用 | 作者报告约 39.9 美元、160 分钟；属于已有回放环境上的发现开销 |
+| 证据限制 | 实验全部采用离线回放，未提供充分在线吞吐、工具延迟或完整预采集费用对照 |
+
+## 五、结果：不要只看相对 SC@64 的节省
+
+**证据 1：表 1，1.7B 的明显收益。** 两个保留任务平均，SC@64 为 34.3、1093.5K token；AutoTTS 在 $\beta=0.5$ 时为 38.6、343.5K，在 $\beta=1$ 时为 40.6、646.1K。它在这一设置下同时改善质量和 token 消耗，支持控制规则比固定全预算投票更有效。
+
+**证据 2：表 1，8B 的反例。** 保留任务平均，ASC 为 62.8、485.7K；AutoTTS 的 $\beta=1$ 为 62.7、710.8K，质量略低而 token 更多。较低预算的 AutoTTS 为 61.1、379.0K。由此不能说自动发现程序在所有模型上支配所有人工规则；选择何种基线会改变结论。
+
+**证据 3：表 2，跨模型和任务。** Llama 系蒸馏模型 HMMT25，SC@64 为 26.7、985.7K，AutoTTS $\beta=1$ 为 27.2、533.9K；GPQA 上低预算 AutoTTS 为 41.6、151.0K，对照 ASC 为 41.0、186.3K。它提供额外迁移实例，但任务与模型组合仍很少，不能概括所有领域。
+
+**证据 4：表 3，搜索约束与反馈。** 完整方法表中平均准确率 53.1、575.5K token；无单参数约束为 49.0、93.3K；无执行轨迹反馈为 51.6、824.3K。第一组是大幅省计算同时降分，不能只凭降分证明过拟合；应进一步做预算配平。表的平均包括搜索集 AIME24，正文将 53.1→49.0 称为保留集结果并不准确，引用时保留表格范围。
+
+**证据 5：图 4、§5.5，发现过程。** 候选程序先过度省 token，随后提高预算恢复正确率，再寻找折中；并非每轮都同时提高两项指标。39.9 美元、160 分钟说明固定回放上的搜索可负担，不证明搭建整个实验只花这个数。首次生成 128 条轨迹及探针的成本没有凭空消失。
+
+## 六、贡献与局限
+
+论文将研究对象从一条手写启发式提升为可重复使用的控制空间与反馈环境。执行轨迹比单一总分更能告诉编码 Agent 何时剪枝过早、何时延长无效，这是可迁移的工程思路。
+
+作者承认当前动作空间有限，也依赖强编码 Agent。本文进一步分析：离线回放的可信度依赖控制器动作不改变原轨迹后续生成分布。若未来动作会加入新提示、交换分支信息或调用工具，预先录好的路径就未必代表真实在线行为。
+
+四种 Qwen 规模全部参与搜索，因此主表是跨保留任务泛化，不是这四种规模均从未见过。64 次抽样也共享同一 128 轨迹池，不能当成对所有可能随机生成的无界保证。实际部署前需要测试新轨迹、真实探针成本与不同提示版本。
+
+## 七、建立理解
+
+**自构例子。** 三条轨迹暂时给出答案 A、A、B。普通投票立即选 A；控制器发现 A 的信心正在下降，而 B 仍在快速取得新信息，可能继续观察而非剪掉 B。若三条路径都共享同一错误公式，任何内部共识规则都可能失败，必须另引入验证信号。
+
+五个前置概念：**控制器合成** 搜索执行决策的程序；**离线回放** 用预存路径模拟行动结果；**探针** 查询当前前缀的暂定答案；**Pareto 前沿** 表示没有另一方案同时更准又更省；**指数滑动平均** 平滑信号并保留近期变化。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 推理宽度、深度与停止规则依赖手调 | 回放环境中的编码 Agent 搜索、单参数预算与轨迹反馈 | 快速比较候选并定位资源分配错误 | 表 1—3 与图 4 | 8B 上有人工规则更优；离线探针成本与在线不同；预采集成本和泛化范围有限 |
+
+## 八、自测与答案
+
+**1. AutoTTS 是在训练一个新语言模型吗？**
+
+答：主要不是。基础模型提供预生成轨迹，编码 Agent 修改推理控制程序。搜索改变何时使用哪些计算，语言模型权重保持不变；它与使用策略梯度更新基础模型的 RL 是不同路径。
+
+**2. 为什么预存了所有探针，不应允许控制器随便读取？**
+
+答：在线系统只有采取探测动作后才获得相应信息。若回放直接泄漏未来答案或正确标签，就给予部署时不存在的特权，测到的是作弊选择而非可实现的控制策略。
+
+**3. 单个 beta 是否足以证明控制器不会过拟合？**
+
+答：不能。程序逻辑和 beta 到阈值的映射仍可能非常复杂，也可能针对搜索题特征设计。必须冻结程序后在未参与搜索的新题、新轨迹和模型上评估，且使用完整预算口径。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "099-autotts",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

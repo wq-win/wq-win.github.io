@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>025｜SAC：把动作随机性写进控制目标 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">SAC：把动作随机性写进控制目标</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 025｜SAC：把动作随机性写进控制目标
+
+[系列首页](README.md) · [上一篇](024-dynamics-randomization.md) · [下一篇](026-td3.md)
+
+**原论文**：*Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor*，Tuomas Haarnoja 等，2018。[论文](https://arxiv.org/abs/1801.01290)。
+
+## 一、一分钟理解：保留多个好动作，而不是过早押注
+
+机器人学习中，一条关节动作看起来回报最高，可能只是价值网络暂时高估了它。若策略迅速变成确定性输出，之后的数据又围绕这个动作产生，错误就可能自我强化。SAC 让策略同时追求任务回报和动作分布的熵：在相近的好选择之间保留随机性，而不是立即收缩到单一动作。
+
+它把经验回放、随机 Actor、软价值函数和双 Q 结合起来。机器人领域看重的不只是能否跑起来，更是一次采样能否反复利用，以及换个随机种子是否仍能学会。
+
+作者声称 SAC 同时改善样本效率和稳定性。原文图 1、图 2 支持的是六个连续控制仿真基准上的比较，尤其是较难的人形任务；这篇原始论文没有展示真实机器人训练。不要把之后 SAC 的真机应用直接记到本篇实验名下。
+
+一句话：在连续控制学习中，通过把熵纳入价值评价与策略优化，改善经验复用条件下的学习表现和跨种子稳定性，代价是额外网络、概率密度计算与奖励尺度选择。
+
+## 二、背景：动作噪声为什么还不够
+
+DDPG 的执行动作可以加噪声，但它优化的核心策略仍然指向单一动作。噪声只是收集数据的工具，不一定成为价值函数愿意长期保留的行为多样性。SAC 则改变优化目标：
+
+$$
+J(\pi)=\sum_t\mathbb E[r(s_t,a_t)+\alpha\mathcal H(\pi(\cdot|s_t))].
+$$
+
+$\mathcal H$ 是条件动作分布的熵，$\alpha$ 是温度。温度大，策略更重视保留选择；温度小，策略更接近只追逐任务奖励。原文后续推导把温度吸收到奖励缩放中，因此很多公式没有显式写出 $\alpha$。
+
+设定是单智能体、无模型、在线收集与离策略更新、连续状态动作。基准包括 Hopper、Walker2d、HalfCheetah、Ant 以及两个不同实现的 Humanoid。状态主要是仿真本体状态，动作是连续控制输入；各环境自己的运动、存活和控制成本构成奖励。终止规则及完整奖励系数应随环境版本核对，不能用今天同名环境默认值替代原实验。
+
+SAC 的目标不是专门解决稀疏抓取奖励、视觉遮挡或安全探索。它首先解决“如何更可靠地训练连续策略”。这使其成为机器人学习的重要基础算法，但使用它仍要定义任务、观测、动作接口和复位流程。
+
+## 三、方法：软评价与软改进如何配合
+
+### 1. 熵必须进入未来价值
+
+标准 Q 值只计算未来奖励；软 Q 还通过后续状态价值考虑未来的动作选择空间：
+
+$$
+V^\pi(s)=\mathbb E_{a\sim\pi}
+[Q^\pi(s,a)-\alpha\log\pi(a|s)],
+$$
+
+$$
+Q^\pi(s,a)=r(s,a)+\gamma\mathbb E_{s'}V^\pi(s').
+$$
+
+因为 $\mathcal H(\pi)=\mathbb E[-\log\pi]$，第二项就是熵贡献。这意味着通往未来仍有多个可行选择的状态，也可能获得较高软价值。它不是简单在当前动作上加一个随机扰动。
+
+### 2. Actor 学习近似一个偏好好动作的分布
+
+理想软改进得到的动作分布与 $\exp(Q(s,a)/\alpha)$ 成正比。高价值动作更常出现，低价值动作仍可能出现但概率更低。连续空间中归一化积分难算，SAC 用可计算密度的参数化策略逼近这个分布，最小化相应 KL，化为：
+
+$$
+L_\pi=\mathbb E_{s\sim D,\epsilon}
+[\alpha\log\pi_\phi(a|s)-\min_i Q_{\theta_i}(s,a)],
+\quad a=f_\phi(\epsilon;s).
+$$
+
+$D$ 为经验池，$\epsilon$ 是固定分布的随机噪声。重参数化让动作对网络参数可微，梯度可穿过 Q 网络传回 Actor。关键是状态来自旧经验，但用于 Actor 更新的动作由当前策略重新采样；不是对回放池里的旧动作做行为克隆。
+
+### 3. 原始版本有独立 V 网络
+
+本文采用原始论文的 2018 年修订版本：两套 Q、一个 V、V 的目标网络和随机策略。不能把后来常见的“没有 V 网络、自动温度调整”的实现当成这篇算法原样。
+
+将 $Q_{\min}=\min(Q_1,Q_2)$，主要目标可概括为：
+
+$$
+L_V=\tfrac12\mathbb E[(V_\psi(s)-
+\operatorname{stopgrad}(Q_{\min}(s,a)-\alpha\log\pi(a|s)))^2],
+$$
+
+$$
+L_{Q_i}=\tfrac12\mathbb E[
+(Q_{\theta_i}(s,a)-(r+\gamma(1-d)V_{\bar\psi}(s')))^2].
+$$
+
+$d$ 表示真正的任务终止。将有限采样截断混为终止会改变学习目标，部署复现时必须检查。V 把当前策略的软价值压缩成状态函数；双 Q 的较小值减轻高估；目标 V 缓慢变化，使 TD 拟合不必追赶过快移动的标签。
+
+### 4. 有界动作还需要修正密度
+
+策略通常先采样高斯变量 $u$，再令 $a=\tanh(u)$。这能满足动作范围，却改变了概率密度：
+
+$$
+\log\pi(a|s)=\log p(u|s)
+-\sum_j\log(1-\tanh^2(u_j)).
+$$
+
+遗漏雅可比修正，就会算错熵与 Actor 损失。概率密度可以大于一，连续分布的微分熵也可以为负，所以不能拿离散事件概率的直觉检查每一个对数值。
+
+教学伪代码：
+
+~~~text
+初始化随机策略、Q1、Q2、V、目标 V 与经验池
+重复：
+    从当前策略采样有界动作，与环境交互并保存转移
+    从经验池抽取一批状态、旧动作、奖励和下一状态
+    用目标 V 构造两个 Q 的 TD 标签，更新 Q1 和 Q2
+    在这些状态用当前策略重新采样动作
+    使用 tanh 修正后的 log 概率，更新软状态价值 V
+    最小化 alpha * log概率 - min(Q1,Q2)，更新策略
+    缓慢移动目标 V 参数
+评估：
+    按论文评估规则使用策略均值动作
+    记录环境回报，不把熵奖励混进成绩
+~~~
+
+## 四、实验如何检验效率与稳定性
+
+| 维度 | 原文设置与判读 |
+|---|---|
+| 任务 | 六个连续控制基准，两个 Humanoid 分别有 17 与 21 维动作 |
+| 基线 | DDPG、PPO、SQL、TD3，附录另有 Trust-PCL 与算法变体 |
+| 数据 | 每种算法在线收集自己的仿真交互；SAC 经验池容量一百万 |
+| 更新 | 主 SAC 每次交互后一次梯度更新，批量 256，隐藏层为两层各 256 |
+| 其他参数 | 学习率 $3\times10^{-4}$，折扣 0.99，目标平滑系数 0.005 |
+| 重复 | 五个随机种子，每 1000 环境步进行一次评估回合 |
+| 曲线阴影 | 五次运行的最小值到最大值，不是标准误或置信区间 |
+| 指标 | 环境累计奖励；学习横轴是环境步数，不是秒数 |
+| 奖励尺度 | 前四任务为 5，Gym Humanoid 为 20，rllab Humanoid 为 10 |
+
+以上预算与参数来自第 5 节及附录 D。各任务总训练步数需从图轴逐项读取，本文不把所有环境写成同一个预算；具体硬件与等算力调参预算没有逐项确认。
+
+公平性还有一个细节：SAC 评估用均值动作，SQL 保留其随机采样方式，DDPG 和 PPO 的探索噪声关闭。图上比较的是这些评估协议下的环境回报，不是所有方法都以相同随机性执行。基线 SQL 还加入了双 Q，因此不是机械照抄更早论文的最简版本。
+
+## 五、结果：稳定并不意味着不需要调参
+
+| 证据位置 | 观察与含义 | 结论边界 |
+|---|---|---|
+| 图 1 | 难任务上 SAC 学得更快、最终回报较高，简单任务与基线接近 | 支持所测环境的样本效率，不能推出所有控制任务占优 |
+| 图 2 | rllab Humanoid 上确定性变体种子间波动更大 | 支持随机策略与熵方案的稳定性价值，不是单一模块的纯数学因果证明 |
+| 图 3(a) | 使用均值动作评估常得到更高环境回报 | 训练目标与报告指标不同，随机性在训练有用不等于评估越随机越好 |
+| 图 3(b)(c) | 奖励尺度太小或太大都可能变差，目标更新过快也不稳 | 反驳“完全免调参”，支持适当温度与目标平滑 |
+| 定理 1、附录 B | 精确软策略迭代在规定条件下得到策略类内最优 | 不能直接给神经网络、连续动作、有限 SGD 更新提供全局收敛保证 |
+
+这里不从曲线像素猜测精确终值。明确的数值证据主要是五种子协议、网络与训练参数、动作维数和奖励尺度。判断效果大小时，应使用原始图和可复现评估数据，而不是把视觉上大约一倍的曲线写成精确百分比。
+
+图 2 的确定性消融也不是“只关掉一个随机数生成器”：它与随机版本在价值构造和探索方式上有相关改变。作者将结果解释为随机性与熵带来稳定性是合理的经验结论，若要精确区分每个因素，还需设计更细的对照。
+
+## 六、贡献、代价和机器人使用边界
+
+SAC 的重要贡献是给离策略最大熵学习一个简洁可训练的 Actor–Critic 实现，并连接软策略迭代理论与高维控制实验。双 Q、回放和随机策略各有前史，创新在目标、推导及实用组合，而不是任何单个组件都首次出现。
+
+理论边界值得认真记住：原证明使用有限动作及精确评价改进等条件；工程算法使用神经网络和不完全更新。理论为设计提供理由，实验为近似实现提供证据，两者不能互相替代。
+
+本文的机器人视角分析是：熵鼓励探索，却不自动区分安全与危险动作。若奖励无法表达碰撞、夹持力或设备损耗，最大熵只会在当前目标下寻找策略。视觉编码、接触约束、稀疏奖励和自动复位仍需单独处理。原论文也没有离线数据分布约束，因此“能用回放”不等于“能安全地只用任意固定数据训练”。
+
+## 七、一个能算清楚的例子
+
+自构例子，未运行：某状态只有两个离散动作，其软改进 Q 值为 3 和 2。温度为 1 时，第一个动作概率为 $e^3/(e^3+e^2)\approx0.731$；温度为 0.1 时约为 0.99995。高温保留次优选择，低温几乎只选最大值。这只是解释温度的离散教学例子，实际 SAC 在连续动作中用参数化分布近似。
+
+五个前置概念：**熵**衡量分布的不确定性；**软 Bellman 评价**把未来熵纳入价值；**重参数化**把随机采样写成可微变换；**经验回放**复用过去交互；**目标网络**用缓慢变化的网络提供训练标签。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 证据 | 代价与局限 |
+|---|---|---|---|---|
+| 确定性策略过早收缩 | 最大熵随机 Actor | 保留高价值附近的选择 | 图 2 | 温度影响表现 |
+| 在线策略数据复用少 | 离策略价值学习 | 旧经验继续训练 | 图 1 | 仍需足量环境探索 |
+| Q 高估影响改进 | 双 Q 取较小值 | 减少利用虚假高峰 | 4.2 节 | 多一套评价网络 |
+| 连续动作边界 | tanh 与密度修正 | 同时有界且概率计算一致 | 附录 C | 数值实现需仔细 |
+
+阅读范围：核对[原文正文、证明、动作边界及参数附录](https://arxiv.org/html/1801.01290)，未独立复现；本文讲解带独立 V 网络的原始 SAC，不把后续温度自适应版本混入。
+
+## 八、三个问题及答案
+
+**问题1：为什么不能只在 Actor 损失里加熵，而让 Critic 完全沿用普通回报？**
+
+答案：那样优化的是另一种局部正则化方案。SAC 的软价值还要考虑未来状态允许的策略熵，否则 Actor 当前选择如何影响后续多样性不会进入评价。其推导要求评价与改进使用一致目标。
+
+**问题2：SAC 使用旧状态，为什么 Actor 更新时仍重新采样动作？**
+
+答案：旧状态提供训练位置，Actor 需要判断当前策略在那里将做什么。若直接用回放动作计算策略梯度，就可能变成提高过去行为似然的更新。重新采样使损失里的价值与熵对应当前策略。
+
+**问题3：奖励全部乘以十，最优策略一定不变吗？**
+
+答案：普通纯回报目标在正比例缩放下通常保留排序；固定熵系数的 SAC 不一样，因为奖励与熵的比例变了。乘十相当于降低相对温度，策略更确定，所以既可能改善利用，也可能过早收缩。原文图 3 的奖励尺度实验正是在检验这个问题。
+
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "025-sac",
+            active: "robot-learn",
+            seriesLabel: "\u673a\u5668\u4eba\u5b66\u4e60",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

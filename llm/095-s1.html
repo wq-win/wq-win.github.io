@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>095｜s1：少量示范与一个停止按钮，怎样改变推理预算 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">s1：少量示范与一个停止按钮，怎样改变推理预算</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 095｜s1：少量示范与一个停止按钮，怎样改变推理预算
+
+[返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
+
+**论文**：Muennighoff 等，*s1: Simple Test-Time Scaling*，2025。[原文](https://arxiv.org/abs/2501.19393) · [正文 v1](https://arxiv.org/html/2501.19393v1) · [官方代码与数据](https://github.com/simplescaling/s1)。本文依据 v1 方法、结果、消融和附录 A—D 的相关设置，讨论最初 s1-32B，避免混入后续训练版本。没有独立运行论文实验。
+
+## 一、一分钟理解
+
+一个模型已经会解题，却可能过早停止，也可能陷入长篇重复。s1 把问题拆成两部分：先用少量精心选择的长推理示范，让现有指令模型学会更完整的解题方式；再在生成时直接控制何时结束推理。
+
+所谓 budget forcing，可以在预算到顶时强制进入最终答案，也可以在模型打算停止时插入 Wait，让它再检查一轮。它不需要训练奖励模型，也没有在测试时更新权重。表 1 中，s1 无预算干预的 AIME 2024 得分为 50.0，加入干预后为 56.7；这也只是 30 道题上的两题差异。
+
+一句话总结：在已经具备较强基础能力的语言模型上，通过精选长推理 SFT 与解码停止控制，改善少样本后训练和推理预算利用，代价是教师数据筛选、串行生成延迟与收益容易饱和。
+
+## 二、研究背景与问题定义
+
+研究对象是 Qwen2.5-32B-Instruct，而不是随机初始化模型。基础模型已经完成大规模预训练和指令训练，因此 1000 条样本的意义是最后一段适配所需的数据规模。将其解读成“从零训练大模型只需要千条数据”，会抹掉最大的知识来源。
+
+作者关注数学与科学推理，包括 AIME、MATH-500 和 GPQA Diamond。输入是题目，输出由推理文本与最终答案两段构成；测试时的额外控制发生在两段之间。这里没有在线环境奖励训练，也不应因为提到“反思”就把它划为强化学习算法。
+
+核心假设是：强模型已经有不少可调用的解题能力，示范能够调整它表达和使用这些能力的方式；延长已有轨迹有时能修正错误。但额外生成也可能只是重复，控制长度只保证资源可控，不能保证新增内容有价值。
+
+## 三、方法：数据选择与解码控制各做什么
+
+### s1K 如何选出来
+
+候选池包含 59,029 道题，来自 16 个来源。作者用 Gemini Flash Thinking 生成推理与答案，并检查与评估题的 8-gram 重叠。随后排除 API 错误、格式损坏等样本，再根据难度与领域覆盖选择最终 1000 条，涉及 50 个领域。
+
+难度使用两个信号：Qwen2.5-7B/32B-Instruct 能否答对，以及教师推理长度；Claude 负责部分正确性评价与领域分类。偏向当前基础模型不会做的题，确实可能提高适配效率，但该数据排序不一定适合另一种基础模型。长推理也可能来自低效尝试，不能当作题目难度的无误测量。
+
+微调使用普通监督交叉熵：
+
+$$
+\mathcal L(\theta)=-\sum_{(q,y)\in D}\sum_{t\in\mathrm{reasoning+answer}}
+\log p_\theta(y_t\mid q,y_{<t}).
+$$
+
+$q$ 是问题，$y$ 是教师推理与答案；不对问题部分计算损失。它教模型模仿整段示范，不能逐条保证教师中间步骤的逻辑正确。
+
+### Budget forcing 如何运行
+
+```text
+输入：问题、微调后的模型、最大思考预算 B、允许延长次数 K
+进入思考段，逐 token 生成
+如果思考 token 达到 B：
+    写入思考结束分隔符与答案提示，开始输出最终答案
+否则，如果模型试图结束思考且延长次数不足 K：
+    阻止这次结束，向当前轨迹追加 Wait
+    在已有轨迹上继续生成，延长计数加一
+否则，允许正常进入最终答案
+记录思考 token、答案 token、实际延迟与最终正确性
+输出：一条完整回答；推理时不修改模型权重
+```
+
+最大预算是硬控制，提示模型“最多想 2000 token”则只是软指令。后者要求模型自己准确计数，不一定可靠。延长是在同一轨迹上继续，因此属于串行扩展；多数投票同时生成多条独立轨迹，属于并行扩展。
+
+论文评估三个维度：预算合规率、准确率随计算增加的平均斜率、测试预算中达到的最高准确率。若 $f(b)$ 是预算 $b$ 下的准确率，平均成对斜率可写为：
+
+$$
+S=\frac{1}{\binom m2}\sum_{i<j}\frac{f(b_j)-f(b_i)}{b_j-b_i}.
+$$
+
+正斜率说明所测区间总体有收益，不等于每道题或每个相邻预算都变好。更不能由某段曲线单调增长，推导它最终必然达到 100%；单调函数也可以收敛到更低的平台。
+
+## 四、实验如何验证
+
+| 项目 | 设置及对应问题 |
+|---|---|
+| 训练 | 5 轮、批次 16、315 次梯度更新；AdamW，学习率 $10^{-5}$，BF16；问题部分不算损失 |
+| 计算资源 | 16 张 H100，26 分钟，约 7 GPU 小时；不包含基础训练、候选生成和筛选 |
+| 长度 | 主要使用 32768 的训练长度，避免截去推理后面的答案；附录另比 4096 |
+| 数据对照 | 随机 1K、领域多样 1K、最长推理 1K、完整 59K，与联合筛选 s1K 比较 |
+| 评估集 | AIME 2024 共 30 题，MATH-500 共 500 题，GPQA Diamond 共 198 题 |
+| 解码对照 | 硬预算、token/步骤/类别提示控制、按长度拒绝采样；另比较基础模型多数投票 |
+| 统计 | 表 2 给出 95% Wilson 区间，反映有限评估题的统计不确定性；不是完整训练种子方差 |
+| 数值复现 | 附录 A 记录批次大小、张量并行和续写接口会影响长生成，即使采用贪心和相同种子 |
+| 跨模型比较 | 多数其他模型数值取各自报告；Gemini 的 AIME 经网页界面评估，不能称所有结果完全统一平台 |
+
+论文主要以思考 token 衡量计算。对同一模型，这是有用的代理；真实部署还需算输入预填充、答案生成、重试和延迟。按长度拒绝采样会丢掉很多已付费生成，不能只数留下来的短回答。
+
+## 五、结果与证据
+
+**证据 1：表 1，基础适配与预算干预。** Qwen2.5-32B-Instruct 的 AIME 为 26.7，s1 无 BF 为 50.0，有 BF 为 56.7。数学能力变化的大部分发生在 SFT 前后，不能全部归于 Wait。相对 o1-preview 的 44.6，56.7 是约 27.1% 的相对增长，绝对差为 12.1 个百分点；也不能替换成对所有 o1 版本的胜利。
+
+**证据 2：表 2，数据选择。** AIME 随机 1K 为 36.7、最多样 1K 为 26.7、最长 1K 为 33.3、s1K 为 50.0；完整 59K 为 53.3。表中 s1K 区间标为 ±16.8，显示小测试集不确定性很大。完整数据训练约 394 H100 GPU 小时，s1K 约 7 小时，支持最终微调的高样本效率，不能证明筛选成本为零。
+
+**证据 3：表 3、表 4，硬控制与触发词。** BF 的预算合规率为 100%，token 提示控制为 40%；仅忽略停止两次时 MATH 从 93.0 降到 90.2，插入 Wait 则保持 93.0。额外生成本身并不稳定有益；控制策略和生成内容共同决定结果。
+
+**证据 4：图 4，扩展的尽头。** 延长 2/4/6 次形成若干更高预算点，但收益在六次附近趋平，论文报告过度阻止结束可能引发重复。并行比较使用的是基础 Qwen，串行比较使用经过 s1K 微调的模型，因此图中差异不能单独证明串行计算普遍优于并行计算。
+
+**证据 5：附录表 7，训练截断。** 4096 长度截去 74% 的训练样本，AIME 为 30.0，平均思考 20721 token；32768 长度不截断，AIME 为 50.0、平均 6984 token。更短的训练样本反而可能教出更长的测试轨迹，因为模型较少看到完整答案段。该实验使用其自身设置，不能把数字直接替换进主表。
+
+## 六、贡献与局限
+
+主要贡献是提出一个容易检查的最小实验：固定成熟基础模型，精选少量示范，再把停止策略作为独立变量。它为推理模型研究提供了低成本入口，但没有证明千条样本总能补足任意模型的能力。
+
+教师、领域分类器和基础模型共同影响选出的数据。8-gram 去重减少直接重合，不能保证没有语义改写或基础模型预训练污染。AIME 仅 30 题，单题变化就是约 3.33 个百分点，报告一个最优预算容易放大选择效应。
+
+本文的分析是：停止策略值得研究，但应与“额外 token 是否真的改变决策”分开验证。更稳妥的对照是在同一个模型上同时比较不干预、串行延长、多数投票和验证器选择，并统一总 token 与延迟，而不是把不同后训练模型的曲线视作控制策略的纯消融。
+
+## 七、建立理解
+
+**自构例子。** 模型把 $17\times 19$ 错写成 313，正准备提交。插入 Wait 后，它改用 $17\times(20-1)=340-17=323$，成功纠错；另一道已经答对的题却可能被反复质疑后改错。我们应记录“错变对”和“对变错”两个方向，不能只展示一个漂亮纠错案例。
+
+五个前置概念：**SFT** 模仿监督回答；**解码策略** 决定如何从概率分布生成文本；**停止分隔符** 标记推理与答案阶段切换；**串行扩展** 让后续计算依赖已有轨迹；**Wilson 区间** 描述有限二项样本下准确率的不确定性。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 长推理适配昂贵、停止时机难控制 | 精选 s1K，SFT 后以分隔符和 Wait 干预 | 示范改变行为，续写提供纠错机会，硬截断控制上限 | 表 1—4 与附录表 7 | 教师筛选并非免费；小评估集方差大；延长可能重复或改错；串并行比较有模型差异 |
+
+## 八、自测与答案
+
+**1. 1000 条训练样本为什么不等于只用 1000 条数据就获得全部推理知识？**
+
+答：模型已经预训练和指令微调，示范又来自强教师，并从约 5.9 万候选中筛选。千条是最终 SFT 子集的规模，不能替代对知识来源和研发计算的核算。
+
+**2. Budget forcing 与在提示里写“多想一会儿”有什么本质区别？**
+
+答：前者由外部程序直接处理结束符和 token 预算，能施加硬边界；后者仍让模型自行解释并遵守长度要求。硬控制保证可控性，至于延长后的内容是否有用仍需实验。
+
+**3. 为什么更短的训练上下文可能导致更长的测试推理？**
+
+答：截断往往留下推理开头却删去答案和结束阶段。模型因而更少学习如何完成回答，可能持续生成思考文本。应检查训练样本完成率与停止行为，而非假设短训练必然产生短答案。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "095-s1",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

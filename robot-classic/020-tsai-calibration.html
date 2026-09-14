@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>020｜Tsai 标定：先找不受畸变影响的约束 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人经典基础</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Tsai 标定：先找不受畸变影响的约束</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 020｜Tsai 标定：先找不受畸变影响的约束
+
+[总览](00-发展时间线总览.md) · [目录](README.md) · [上一篇](019-adaptive-control.md) · [下一篇](021-horn.md)
+
+**论文**：Roger Y. Tsai，*A Versatile Camera Calibration Technique for High-Accuracy 3D Machine Vision Metrology Using Off-the-Shelf TV Cameras and Lenses*，1987，IEEE JRA 3(4):323–344。[DOI](https://doi.org/10.1109/JRA.1987.1087109) · [大学课程托管的原始全文](https://www.cs.auckland.ac.nz/courses/compsci773s1c/lectures/A%20versatile%20camera%20calibration%20technique%20for%20high-accuracy%203D%20machine%20vision%20metrology%20using%20off-the-shelf%20TV%20cameras%20and%20lenses.pdf)。
+
+**阅读范围**：22 页原文，核对相机模型、径向对齐约束、单平面与多平面流程、误差定义、实验及附录位置。本文讲解核心两阶段思想，不逐式复刻全部参数恢复分支。1986 CVPR 前身与这篇 1987 期刊版区分引用。
+
+## 一分钟理解：不必一开始就同时猜所有参数
+
+像素坐标不是空间坐标。相机焦距、位置、姿态、镜头畸变和扫描尺度共同决定物体落在哪个像素。若把所有参数一次放入非线性优化，求解会依赖初始化，也容易被参数耦合困扰。
+
+Tsai 找到一个关键不变量：理想径向畸变改变点离图像中心的距离，却不改变其径向方向。焦距和深度的共同缩放也不改变这个方向。先利用方向关系恢复一部分参数，再处理剩余焦距、深度和畸变，就能降低非线性求解的维数。
+
+论文以实际标定与独立测试点检查三维测量误差。单平面实验报告平均歧义半径 0.7 mil，不能把这个值说成所有相机的通用精度。
+
+一句话：**在符合透视及主要径向畸变模型的相机标定中，通过径向对齐约束分阶段估计参数，减少高维非线性搜索，代价是成像假设、标定几何和部分预知参数必须满足要求。**
+
+## 标定究竟输出什么
+
+输入是若干已知三维点 $P_w$ 及对应图像坐标。外参 $R,t$ 把点变到相机坐标 $P_c=RP_w+t$；内参决定焦距、像素尺度等；畸变描述实际镜头偏离理想投影的部分。
+
+机器人使用这些量把图像特征反投影为空间射线，进而做测量、视觉定位或操作。单幅图像的一点通常只确定一条射线，不直接给出深度；需要已知平面、多视图或其他几何条件。
+
+本文不能与手眼标定混淆。相机内外参标定解决成像模型与参考坐标关系；手眼标定还要确定相机与机械臂末端之间的固定变换。前者误差会影响后者，但二者不是同一算法。
+
+## 两阶段方法的几何直觉
+
+令相机点为 $(X_c,Y_c,Z_c)$，理想成像 $x_u=fX_c/Z_c$、$y_u=fY_c/Z_c$。用适配原文方向约定的低阶径向模型写成
+
+$$x_u=x_d(1+\kappa r_d^2),\quad y_u=y_d(1+\kappa r_d^2),\quad r_d^2=x_d^2+y_d^2.$$
+
+这里 $x_d,y_d$ 是以图像中心为原点、经过物理像素尺度换算的畸变坐标；不同库对畸变正反方向的定义不同，不能只比较系数正负。
+
+消去共同缩放，得到 $x_dY_c-y_dX_c=0$。把 $P_c=RP_w+t$ 代入，形成关于部分旋转、横向平移及尺度组合的线性关系。它不包含同样方式影响两轴的焦距与轴向深度，也不需要先知道径向畸变系数。
+
+第一阶段解这些方向约束，再利用旋转矩阵正交性和正确深度符号恢复相应外参。第二阶段使用完整投影关系估计剩余参数并处理径向畸变。这里“线性”针对中间未知组合，而不是说整个相机标定都变成无条件线性问题。
+
+```text
+输入：已知标定点三维坐标、检测到的像素坐标、相机扫描参数
+将像素转换为以选定图像中心为原点的物理图像坐标
+阶段一：
+    为每个点建立径向对齐约束
+    解超定线性方程，得到旋转和平移的组合量
+    由正交性、符号及可见性恢复对应外参
+阶段二：
+    用透视关系初始化焦距和轴向平移
+    对剩余焦距、深度与径向畸变进行低维求解
+使用独立测试点，反投影并计算空间测量误差
+输出：标定参数、适用条件及测试误差
+```
+
+优化层面需要区分线性中间残差与最终几何误差。线性方程拟合好，不代表每个三维测试点都准确。论文因此单独定义测量层的精度指标，避免只用参数方程内部残差评价效果。
+
+单平面版本还有重要限制：原文第 II-F 节说明它不标定横向尺度因子 $s_x$，需要相应先验条件；图像中心也未纳入当时基本求解参数。不能把该版本描述为“任意一张棋盘图就估计全部现代内参”。
+
+## 五处关键证据
+
+| 原文位置 | 对比或验证 | 结论与范围 |
+|---|---|---|
+| 第 II-E 节，图 3；附录 I | 径向畸变前后方向 | 提供参数分离的几何约束 |
+| 第 II-F 节，图 4、式 (10) | 单平面约束与参数恢复 | 线性阶段有明确几何及先验条件 |
+| 第 III-A 节，图 5 | 反投影射线与已知测试平面的交点 | 歧义半径是空间误差，不是像素残差 |
+| 第 IV-A 节，图 10、11 | 实物点提取和畸变修正 | 成像误差需要显式建模 |
+| 第 IV-A2 节，第 337 页 | 60 标定点与 60 测试点 | 平均 0.7 mil、最大 1.3 mil 的 Type II 结果 |
+
+1 mil 为 0.001 英寸，因此上述两个值分别约 0.0178 毫米与 0.0330 毫米。这是单位换算，不是另外一次实验。测试点与标定点分开使用，比只报告拟合样本的重投影残差更有说服力。
+
+同页报告当时基于 68000 的 MASSCOMP 计算机完成两阶段约需 1.5 秒。后文还讨论其他点数与实现优化；这些条件不同的速度不能混合成单一算法加速比。原稿没有给出可直接映射到现代 CPU 或 GPU 的性能预测。
+
+实验依赖精密物体几何和亚像素提取，不是仅换一条求解公式就能复制精度。随机种子不适用于这里的实物标定流程；重复标定次数及完整不确定性区间在已核对段落中未确认。
+
+## 自构例子：为什么“方向”能绕开畸变
+
+某理想图像点为 $(2,1)$，径向畸变把它放大到 $(2.2,1.1)$。它离中心的距离改变，但斜率仍为 $1/2$。焦距加倍同样改变两坐标的共同尺度，不改变这个比值。
+
+若出现切向畸变，把点改成 $(2.2,1.3)$，方向就不再保持。此时仅用径向对齐建立的方程会包含系统性误差。增加更多同类点不一定消除这个偏差，因为错误来自模型类别而不是独立噪声。
+
+再考虑所有标定点都集中在图像中心。它们可能足以拟合局部投影，却不足以可靠估计边缘径向畸变。一个应有的自构验证是：用中心区域标定、边缘区域测试，看误差是否明显增大。这个实验方案不是原文已有结果。
+
+## 贡献、成本与边界
+
+新意是利用成像几何的不变量，先解决与若干未知参数无关的子问题，再完成低维非线性估计。它展示一种普遍研究思路：面对耦合参数，先找能够消去部分未知量的关系。
+
+代价包括准确已知的标定点、足够丰富的几何布局及成像假设。相机中心选择、扫描尺度和点检测误差都会进入结果。图像整体重投影很好，也未必代表三维深度在所有工作距离都准确。
+
+论文关于唯一性和误差的分析具有相应条件。实际点退化、姿态几乎正对平面或模型不匹配时，不能仅凭点数足够就认定可靠。现代相机可能需要更丰富畸变模型；这些扩展不应伪装成原始 Tsai 流程已经包含的组件。
+
+五个前置概念：**内参**描述相机内部成像尺度；**外参**描述相机与世界坐标关系；**径向畸变**沿图像中心射线改变距离；**可辨识性**讨论数据能否唯一约束参数；**独立测试**检验拟合以外的几何准确度。
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 多参数耦合使全量非线性标定复杂 | 径向对齐与两阶段求解 | 先消去共同缩放和畸变影响 | 第 IV 节实物标定与测试点测量 | 几何、尺度先验、检测和成像模型限制 |
+
+## 自测与参考答案
+
+**1．径向畸变未知，为什么仍能先求一部分外参？**
+
+理想径向畸变只乘共同径向尺度，不改变图像点方向。方向对齐方程因此能够消去该尺度，保留对部分旋转与横向平移的约束。
+
+**2．0.7 mil 是否表示图像检测误差只有 0.7 个像素？**
+
+不是。它是已知测试平面上反投影交点与真实点之间的空间距离，单位为千分之一英寸。像素误差与空间误差的转换还依赖焦距和距离。
+
+**3．单张平面图是否可以不依赖任何先验地恢复所有相机参数？**
+
+这不是本篇单平面版本的结论。原文固定或预先确定了部分量，如图像中心和相应扫描尺度条件。去掉这些先验后，需要重新分析可辨识性，不能直接沿用原有解法保证。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "020-tsai-calibration",
+            active: "robot-classic",
+            seriesLabel: "\u673a\u5668\u4eba\u7ecf\u5178\u57fa\u7840",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

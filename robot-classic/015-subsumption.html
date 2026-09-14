@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>015｜包容架构：先让机器人活着，再增加本领 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人经典基础</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">包容架构：先让机器人活着，再增加本领</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 015｜包容架构：先让机器人活着，再增加本领
+
+[总览](00-发展时间线总览.md) · [目录](README.md) · [上一篇](014-potential-field.md) · [下一篇](016-damped-ik.md)
+
+**论文**：Rodney A. Brooks，*A Robust Layered Control System for a Mobile Robot*，IEEE Journal of Robotics and Automation，1986，2(1):14–23。[DOI](https://doi.org/10.1109/JRA.1986.1087032) · [大学课程托管的期刊原稿](https://www.robolabo.etsit.upm.es/asignaturas/lari/papers/Brooks86RobustLayeredControl.pdf)。
+
+**版本与阅读范围**：已阅读可检索的期刊原稿摘要、行为层结构、性能与结论段落，直接 PDF 获取超时。作者保存的 [1985 AIM-864 技报](https://people.csail.mit.edu/brooks/papers/AIM-864.pdf)是较早版本，其结尾明确说缺少实物演示；1986 期刊版第 V 节则包括实体机器人。下面据期刊版讨论性能，不把两个版本混为一份实验记录。
+
+## 一分钟理解：不用等所有模块都准备好
+
+一种常见系统架构是感知、建模、规划、执行依次工作。这样分工很清楚，但如果世界模型尚未完成或规划耗时，机器人可能连眼前的障碍都来不及躲。Brooks 提议按完整行为能力拆系统：先实现不碰撞，再加漫游，最后加有目的探索。
+
+高层行为能够替代某些低层消息，但低层模块继续运行。这使新能力的加入不必重写整个控制链，也使高层暂时没有输出时仍保留基础行为。它是手工设计的控制架构，不是多智能体强化学习。
+
+期刊展示支持的是这种分层系统能运行于仿真和实体移动机器人。文章没有据此证明所有长期智能任务都不需要地图或集中规划。
+
+一句话：**在噪声感知与动态环境中的移动任务里，通过异步行为模块及有限范围的消息抑制逐层增加能力，提高系统可增量构建性，代价是模块交互和全局任务保证更难分析。**
+
+## 背景：功能分解与行为分解的区别
+
+“感知模块”只产出世界信息，本身不会完成一个任务；“避开障碍”则贯穿传感、判断和动作。行为分解把后者作为基本组织单位。同一传感输入可以服务多个行为，不必先融合为唯一完整世界表示。
+
+论文的低层目标包含避免接触、无目的漫游和探索。它们既有层次，也有冲突：漫游想前进，近处障碍要求停下；探索想沿走廊走，漫游的随机方向就应暂时让位。
+
+状态分布在模块中，包括有限状态、局部变量和输入缓冲。观测来自声呐等传感器，动作是转向、前进或停止。没有统一奖励函数和策略梯度；“更高层”指行为能力扩展，不是高层回报更高。
+
+关键假设是任务能够拆成相对简单的异步部件，并且通过固定通信拓扑组合出有用行为。该假设是否适合复杂装配、语言指令或长期规划，需要独立检验。
+
+## 机制：谁可以覆盖哪条消息
+
+模块可抽象成带数据的有限状态机：$s_i^{+}=f_i(s_i,m_i)$，输出 $o_i=g_i(s_i,m_i)$。这里 $m_i$ 是当前收到的局部消息，$s_i$ 包含本模块记忆。异步意味着不是所有模块都等一个全局时钟完成同一轮计算。
+
+抑制与替代作用于具体通信连接。用教学记号，某输入线可以写成
+
+$$m(t)=\begin{cases}m_H(t),&\text{高层替代在有效期内},\\m_L(t),&\text{否则}.\end{cases}$$
+
+这不是论文中的优化公式，而是对消息选择机制的形式化解释。输出抑制则让某条消息暂时不传播。两者都不同于把所有行为输出做平均，也不等于整个低层程序被关闭。
+
+如果简单平均“向左躲”和“向右探索”的方向，可能得到直接撞向障碍的前进指令。显式接线与选择关系使设计者能决定哪类冲突如何解决。但保证仍来自具体网络，不是“分层”这个名字。
+
+```text
+教学示例：不同模块独立更新，消息带有效期
+声呐模块：发布局部障碍信息
+碰撞模块：发现正前方近障碍时发布停止消息
+漫游模块：周期性产生候选行进方向
+探索模块：有局部目标时发布替代方向，否则不替代
+避障模块：读取当前有效方向及障碍信息，输出可行方向
+运动模块：若有效停止消息存在则停止，否则执行方向
+高层消息过期后，输入线恢复接受漫游模块的消息
+```
+
+该流程保留原文的行为组织思想，但不是原线路图的逐线翻译。真实实现还需指定消息丢失、过期、模块复位与执行延迟的语义。将异步程序写成一个巨大同步 if-else 循环可以做教学模拟，却不应再宣称保留了全部原始实现特征。
+
+## 实验与证据：关注模块组合而非单一准确率
+
+| 原文位置 | 环境或设定 | 能支持什么 | 尚不能支持什么 |
+|---|---|---|---|
+| 图 5–7 的层级接线讨论 | 逐层加入模块 | 基础行为可被扩展而不整体删除 | 任意新增模块都保持安全 |
+| 第 V-A 节，图 8 | 仿真声呐含反射及不返回情况 | 验证并非理想无噪声输入 | 与所有实物声呐误差完全相同 |
+| 第 V-A 节，图 9 | 低层漫游轨迹 | 示例中能够绕开障碍 | 对任意环境无碰撞的证明 |
+| 第 V-A 节，图 10 | 局部目标覆盖漫游，避障继续工作 | 行为选择与避障能够同时存在 | 完整视觉探索已被验证 |
+| 第 V-B 节，图 11 | 实体移动机器人，主要处理在机外 | 架构能够驱动实物运行 | 全部计算都已在机器人上完成 |
+
+图 10 的走廊描述由场景特定模块提供，不能当成通用视觉理解结果。期刊第 21 页还明确区分实际移动与里程积分的目标判断：轮滑等误差可能让机器人“认为到达”而实际存在偏差。
+
+这些演示没有形成现代统一基准及置信区间比较。种子数、统计显著性与完整运行时长在所核对段落中未确认。文章证明了构建方式可行，关于普遍鲁棒性和可扩展性的更广主张仍需更多任务覆盖。
+
+## 自构例子：探索模块突然停顿
+
+设机器人沿走廊前进，探索模块每隔一段时间发送方向命令，同时低层避障持续接收声呐。探索计算卡住后，它的方向替代过期，漫游可以重新提供方向；若前方突然出现箱子，碰撞模块仍能要求停止。
+
+这个例子显示分布式职责的潜在收益：高层故障不必使所有行为同时停止。但如果最后一条高层命令永不过期，或运动模块无视停止线，系统依然危险。故障隔离依赖超时和接线，不能由架构图自动获得。
+
+再考虑一个死胡同。局部避障可能让机器人长期来回转向，既不碰撞也无法离开。局部生存与全局进展是两个不同指标。若实验只报告无碰撞时间，就无法说明完成导航任务的能力。
+
+## 贡献、代价和思想边界
+
+主要贡献是系统组织方式：按任务行为增量构建，允许低带宽模块直接参与动作，减少对单一完整世界模型的依赖。这为后来的行为式机器人与混合架构提供了重要思想。
+
+成本首先是交互分析。模块数增加后，单个模块都“正确”仍可能出现循环覆盖、行为饥饿或频繁切换。局部调试容易，整体可证明性质未必容易。设计者需要记录每条消息的生产者、消费者、优先级和有效期。
+
+另一个边界是表达能力。无地图漫游可以很有效，但“先去办公室取钥匙，再返回开门”需要记忆、顺序与目标关系。可以在架构中加入这些能力，却不能用早期漫游演示证明它们已被解决。
+
+本文的分析建议是把它与规划架构互补使用：慢速模块决定长期意图，快速模块处理局部反馈。具体混合方案属于后续系统设计，不是对原作者原样结论的复述。
+
+五个前置概念：**有限状态机**用有限模式组织逻辑；**异步通信**不要求模块同时完成；**消息替代**改变某条输入来源；**输出抑制**阻止消息传播；**行为分解**把能完成任务的感知动作链作为单位。
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 证据 | 代价与局限 |
+|---|---|---|---|---|
+| 串行模块依赖影响反应与增量开发 | 行为层与异步消息网络 | 基础能力保持运行，高层有限覆盖 | 期刊图 8–11 的仿真和实物演示 | 全局任务、复杂交互和故障语义需额外设计 |
+
+## 自测与参考答案
+
+**1．高层覆盖低层，为什么低层仍可能参与控制？**
+
+因为覆盖针对指定消息线，而不是删除整个低层。探索方向可以替换随机方向，局部避障仍修改该方向，碰撞模块仍可影响停止指令。是否保留这些作用取决于接线。
+
+**2．没有统一世界模型是否等于没有任何内部状态？**
+
+不是。有限状态机、局部变量及运动积分都构成内部状态。拒绝唯一集中表示，不代表机器人完全无记忆。
+
+**3．为什么不能用技报末尾的“缺少实物演示”评价期刊版也没有实验？**
+
+因为版本之间有新增内容。1985 技报反映较早进度，1986 期刊第 V-B 节报告实体机器人。阅读证据必须绑定具体版本，既不能提前归功，也不能忽略后来的实测。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "015-subsumption",
+            active: "robot-classic",
+            seriesLabel: "\u673a\u5668\u4eba\u7ecf\u5178\u57fa\u7840",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

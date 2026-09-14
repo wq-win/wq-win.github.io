@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>006｜DAgger：修复模仿中的分布偏移 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">DAgger：修复模仿中的分布偏移</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 006｜DAgger：修复模仿中的分布偏移
+
+[系列首页](README.md) · [上一篇](005-pi2.md) · [下一篇](007-pilco.md)
+
+**原论文**：*A Reduction of Imitation Learning and Structured Prediction to No-Regret Online Learning*，Ross、Gordon、Bagnell，AISTATS 2011。[原文](https://proceedings.mlr.press/v15/ross11a.html)。
+
+## 一、模仿学习最棘手的错误，往往来自训练中没见过的状态
+
+专家开车总在车道中央，因此示范里很少出现“已经偏到路边，应该怎样回正”。一个监督模型即使在专家数据上预测准确，执行时只要稍有偏差，就可能进入陌生状态，再做出更大错误。
+
+DAgger 的回答是改变数据收集位置：让当前学习策略运行，在它访问的状态上询问专家应该怎样行动，再把这些标注加入已有数据。专家不只是演示完美行为，还为学习者实际遇到的局面提供纠正。[原文 §2、算法 3](https://proceedings.mlr.press/v15/ross11a/ross11a.pdf)
+
+一句话：通过在学习者分布上聚合专家标签，训练与执行状态更接近；代价是需要可查询的专家以及允许学习者试错的环境。
+
+## 二、为什么单步误差会变成长期问题
+
+设监督策略在专家状态分布上的错误率为 $\epsilon$，任务长度为 $T$。一旦某步偏离专家轨迹，后面可能持续访问未训练状态。在最坏情况下，早期一次错误影响许多后续步骤，累积损失可以出现 $T^2\epsilon$ 量级。
+
+这个量级是说明分布偏移可能多严重的界，不是说每个机器人任务的损失必然二次增长。若环境自动恢复、专家数据覆盖广，或错误不会改变后续状态，实际累积可以小得多。
+
+| 要素 | DAgger 中的角色 |
+|---|---|
+| 场景 | 交互式模仿学习 |
+| 学习信号 | 专家在给定状态上的动作标签 |
+| 奖励 | 算法可不依赖显式环境奖励 |
+| 数据来源 | 专家示范与学习者运行时访问的状态 |
+| 输出 | 经过多轮聚合训练的策略 |
+| 核心假设 | 专家能对查询状态提供有意义标签 |
+
+在机械臂上，专家可能是遥操作员、优化器或已知控制程序。专家如何获知状态，学习者执行时又能看到什么，必须分别说明。若专家依赖学习者不可见的信息，同一观察可能对应不同正确动作，单步监督问题本身就有歧义。
+
+## 三、算法每轮真正改变了什么
+
+令 $\hat\pi_i$ 为当前学习策略，$\pi_E$ 为专家。采样时可使用混合策略：
+
+$$
+\pi_i=\beta_i\pi_E+(1-\beta_i)\hat\pi_i.
+$$
+
+早期较多依赖专家，后期逐渐让学习者控制。这里的混合描述行动选择，不是简单平均两个网络参数。
+
+在访问状态 $s$ 上，收集标签 $\pi_E(s)$，得到新数据 $D_i$，然后：
+
+$$
+D\leftarrow D\cup D_i,\qquad
+\hat\pi_{i+1}\leftarrow\operatorname{Train}(D).
+$$
+
+保留旧数据是关键。如果只训练最近一轮，策略可能忘掉之前学过的恢复场景，产生来回摆动。数据聚合让每轮新策略也需要兼顾过去造成过问题的分布。
+
+理论上，训练器对应一个无遗憾在线学习过程。每轮损失定义在该轮访问分布上，平均遗憾小使算法能够找到在自身相关状态上损失较小的策略。它不是把任意深度网络训练几轮，就自动获得原文全部保证。
+
+## 四、教学伪代码
+
+~~~text
+输入：可查询专家 Expert、初始策略、训练器
+D = 空集合
+对第 i 轮：
+    设置专家混合概率 beta_i
+    在环境运行当前混合策略
+    对每个访问状态 s：
+        询问专家动作 a_E
+        将 (s, a_E) 加入新数据
+    D = D 与新数据的并集
+    在 D 上训练下一轮学习策略
+在独立运行中评价候选策略
+输出：选定的策略
+~~~
+
+在真实机器人中，这份伪代码还没有定义如何处理危险状态与专家响应延迟。把专家动作询问写在循环里，不代表人能够在毫秒级完成标注。离线回放标注、暂停环境、共享控制会改变数据收集过程，需要视具体系统设计。
+
+## 五、一个恢复场景
+
+教学构造：机器人推方块向目标移动。专家每次都准确接触方块中心，示范只覆盖居中推动。学习者偶尔接触偏左，方块发生转动；继续照着“向前推”的监督规则，方块可能越来越歪。
+
+DAgger 让专家在这个歪斜状态给出动作，例如先调整接触点，再继续推动。下一轮训练就新增了“如何恢复”的例子。注意标签不是原先理想轨迹同一时刻的动作，而是当前实际状态下的专家行动。
+
+若方块已经掉到机器人够不到的桌外，专家也无法恢复。DAgger 不能逆转物理不可达状态，只能在收集与任务边界允许的区域获得更合适标签。因此它解决分布偏移，不能被解释成对任何失败都能自我纠正。
+
+## 六、实验如何检验分布问题
+
+| 原文位置 | 设置 | 检验假设 | 阅读边界 |
+|---|---|---|---|
+| 前文误差界与无遗憾分析 | 时序预测问题 | 专家分布损失不足以保证自身分布表现 | 理论条件需与训练器对应 |
+| 算法 3 | 交互聚合过程 | 学习者访问状态可形成新的监督数据 | 查询专家并非免费 |
+| 图 2 | Super Tux Kart 平均每圈跌落 | 增加专家原分布数据与交互数据的差别 | 使用固定游戏赛道与视觉特征 |
+| 图 4 | Super Mario 每关行进距离 | 恢复状态数据有助于解除卡住情形 | 非真实机器人安全证明 |
+| 图 4相关设置 | 不同专家混合衰减 | 专家占比影响学习者状态覆盖 | 参数选择与预算应一同考虑 |
+
+Mario 实验使用每轮 5000 个数据点、20 轮；图 4 给出 95% 置信区间。专家拥有游戏内部状态和精确规划能力，学习器采用图像特征。因此实验检验的是利用强专家训练受限观察策略，而不是让两个信息完全相同的策略直接比赛。
+
+学习曲线横轴是训练数据数量，不能直接理解为人工耗时或真实交互时长。论文观察到只增加完美专家轨迹，无法解决贴近障碍后卡住的问题；交互方法会访问这些局面并获得恢复标签。这是对分布偏移机制的具体证据。
+
+## 七、从损失、机制到真实指标
+
+数学上最小化的是专家动作的代理损失，例如分类或回归误差。机制上改变的是数据由谁产生以及是否长期保留。任务指标则是跌落、距离或机器人成功率。代理损失较小不一定改善所有任务指标：某些极少出现的危险动作在平均误差里权重很小，却可能造成巨大任务成本。
+
+原文的策略性能界还涉及一步动作偏差对未来成本的影响。如果专家无法恢复，或错误代价极大，较低单步误差也需要更谨慎解读。这也是为何机器人应用常将 DAgger 与约束、接管或局部恢复机制结合，但这些后续工程手段不能冒充原始算法自带功能。
+
+五个前置概念是协变量偏移、占用分布、数据聚合、在线遗憾和专家查询。它们分别解释训练执行差别、状态访问、旧数据保留、理论收敛视角与新增监督成本。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 证据 | 代价与局限 |
+|---|---|---|---|---|
+| 执行偏差进入未见状态 | 在学习者访问状态查询专家并聚合 | 训练覆盖实际错误与恢复局面 | 算法 3、图 2、图 4 | 专家可查询性、危险状态、部分可观测歧义 |
+
+阅读范围涵盖算法、主要无遗憾论述与游戏实验；计算预算未逐项确认，本文未独立复现。
+
+## 八、自测题与参考答案
+
+**问题 1：为什么再收集十倍完美示范，也可能不如少量交互纠正有效？**
+
+参考答案：更多同分布示范主要改善专家常到状态的估计，学习者犯错后访问的状态仍可能缺失。交互纠正把标注放在真正需要恢复的位置。若原示范已充分覆盖这些状态，差距则可能缩小。
+
+**问题 2：DAgger 是否在强化学习中优化奖励？**
+
+参考答案：它通常用专家动作代理损失训练，属于交互式模仿学习。环境运行负责产生状态，专家负责监督标签。可以用回报评价结果，但评价指标是回报不等于训练信号就是 RL 奖励。
+
+**问题 3：为什么必须保留旧数据，而不能只学最新一轮？**
+
+参考答案：每轮策略产生不同访问分布。只拟合最新一轮可能忘掉过去的错误，导致旧问题复发；聚合让训练持续覆盖历轮分布，也是原文在线学习归约的重要部分。
+
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "006-dagger",
+            active: "robot-learn",
+            seriesLabel: "\u673a\u5668\u4eba\u5b66\u4e60",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

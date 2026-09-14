@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>016｜ELMo：一个词的表示，应由它在当前句子中的用法决定 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">ELMo：一个词的表示，应由它在当前句子中的用法决定</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 016｜ELMo：一个词的表示，应由它在当前句子中的用法决定
+
+[目录](README.md) · [上一篇](015-transformer.md) · [下一篇](017-gpt.md)
+
+**论文**：Matthew E. Peters 等，*Deep Contextualized Word Representations*，NAACL 2018。[原文](https://arxiv.org/abs/1802.05365) · [PDF](https://arxiv.org/pdf/1802.05365)。重点是双向语言模型的分层上下文化特征与下游加权组合，不把它写成 BERT 式掩码预训练。
+
+## 一分钟理解
+
+“银行”出现在金融句子和河流句子里，静态词向量通常相同。ELMo 用预训练双向语言模型为每个具体位置生成表示，让同一个词随着上下文变化。下游任务还能学习不同层的组合，而不是只能拿最后一层。
+
+作者在六类 NLP 任务上评价，并通过层次分析研究不同表示包含的信息。贡献是把上下文和深层特征引入通用词表示接口；代价是执行预训练模型的计算，以及特征与下游任务、领域之间的适配需求。
+
+## 背景：静态表示难以区分用法
+
+word2vec、GloVe 和子词向量主要给词项一个固定向量。子词可以改善稀有词共享，却不能仅靠拼写判断当前语义。ELMo 的输入不仅是词身份，还包括整句上下文，表示因出现位置而变化。
+
+预训练使用前向和后向语言建模。前向模型根据左边预测，后向模型根据右边预测；把两者隐藏状态结合，得到位置的双向信息。这与单个网络在同一层同时读取所有左右词的 BERT 机制不同，不能因为都叫双向就忽略计算方式。
+
+下游系统仍有自己的结构和监督数据。把 ELMo 特征加入问答模型，不等于 ELMo 单独解决问答；任务头、交互层和训练标注仍然贡献性能。论文的比较常以原下游基线与加入特征后的模型为单位。
+
+## 方法：多个层次，由任务决定怎么组合
+
+对位置 $k$，预训练模型提供从输入表示到多层隐藏状态的集合 $R_k=\{h_{k,j}\}_{j=0}^{L}$。下游任务使用：
+
+$$
+\operatorname{ELMo}_k^{task}
+=\gamma^{task}\sum_{j=0}^{L}s_j^{task}h_{k,j}.
+$$
+
+$s_j$ 通常经 softmax 归一化，表示层权重；$\gamma$ 调整整体尺度。不同任务可以强调不同层，避免假定最深层总是最佳特征。这里学习的是任务级层混合，并非每个词都由一个自由路由器选择完全不同层权重。
+
+语言模型使用字符层输入表示与双向循环层，使形态信息和上下文共同参与。预训练目标仍是两个方向的语言似然，不直接使用每个下游任务标签。论文还涉及领域相关语言模型适配，所以“完全冻结一个通用模型、所有任务直接使用”并不能概括所有实验。
+
+下游通常将 ELMo 拼接到已有表示的某些位置，再训练任务网络及层混合权重。加入位置本身是实验变量：靠近输入或较深层可能作用不同。预训练参数是否领域适配、是否冻结，应按具体实验区分。
+
+```text
+预训练：
+    用无标签文本训练前向与后向语言模型
+    保留字符输入层和各层上下文状态
+下游训练：
+    对每个句子计算各位置的多层表示
+    用任务可学习权重混合各层，并学习尺度 gamma
+    将混合特征加入原任务网络的指定位置
+    用下游监督损失训练任务参数与混合参数
+评价：使用相同任务与数据划分比较加入前后表现
+```
+
+数学目标分成预训练语言建模与下游任务损失；机制是上下文化分层特征迁移；指标依任务而异。不能把六个不同任务的 F1、准确率和相关量简单平均成一个没有定义的“理解率”。
+
+## 实验与证据
+
+| 项目 | 原文范围 |
+|---|---|
+| 任务 | 问答、蕴含、语义角色标注、共指、实体识别、情感分类 |
+| 对照 | 任务基线与加入 ELMo 的对应模型，另比较既有系统 |
+| 预训练来源 | 双向语言模型；部分任务使用领域适配版本 |
+| 指标 | SQuAD/SRL/NER 等 F1、SNLI/SST 准确率、共指平均 F1 |
+| 消融 | 层混合、特征加入位置及预训练层信息分析 |
+| 重复 | 表 1 对 NER、SST-5 给出五次随机运行均值与标准差；不能扩展成所有列均同协议 |
+
+**证据一，第 3 节方法。**层加权式说明“深层表示”如何成为任务接口。作者没有要求下游只读取最后一层，这正是与更早单层特征方案的重要区别。
+
+**证据二，表 1。**语义角色标注的相应基线 F1 从 81.4 到 84.6，共指从 67.2 到 70.4。数值属于具体任务模型的加入前后对照，不是 ELMo 单独预测的成绩。
+
+**证据三，第 5.1 节及后续层分析。**比较使用全部层与只用末层，检验层组合必要性；分析揭示不同层在句法与语义信息上的差异。探针发现可解码信息，不等于证明下游真正以同样方式使用这些信息。
+
+还应注意领域适配带来的额外数据访问。如果语言模型在任务相关文本上再训练，收益可能同时来自领域分布接近与特征形式。阅读附录设置能避免把这部分归因遗漏。
+
+## 教学例子：同词不同向量
+
+构造英文词 bank 在“在银行存钱”和“沿河岸行走”对应英文语境中的两次出现，即使目标词拼写相同，左右词不同，循环状态也不同。ELMo 可以产生不同位置向量；静态查表则给出相同词项参数，除非后续另有上下文网络。中文“银行”本身不具有英文 bank 的河岸义，因此教学例子应保留英文词，避免把翻译歧义错当作中文一词多义。
+
+更准确地说，ELMo 并没有为词典里每种词义分配一个固定编号。表示是连续函数，语境变化会连续影响它。含糊句子仍可能无法消歧，错误或稀有用法也可能导致不稳定表示。
+
+层混合的教学类比是使用不同抽象层次的特征。实体边界可能更依赖局部形态，长程角色关系可能需要更深上下文；但这只是直觉，不能预先把每层钉死为某一功能。论文通过任务实验与分析来检验，而不是仅靠命名。
+
+## 为什么上下文化不是全部答案
+
+一个模型看见上下文，不代表它忠实理解否定、数量或实体关系。它可能利用数据中的关联捷径。要验证语义，应构造保持词汇但交换关系的对照，而不是仅查看近邻是否按主题聚类。
+
+上下文化还增加每条输入的计算；静态向量可以直接查表，ELMo 需要运行循环模型。多任务共享预训练参数节省知识学习，但执行成本仍在。任务性能与延迟、缓存和批量策略应分别比较。
+
+## 贡献与局限
+
+ELMo 展示了预训练模型的内部层可以作为可迁移特征，帮助多种任务，推动从静态词向量走向上下文表示。局限包括循环顺序成本、领域依赖、下游结构复杂以及预训练目标与语义任务间的距离。
+
+五个前置概念是双向语言建模、上下文化、层混合、特征迁移和领域适配。它们分别回答表示来自哪里、何时变化、怎样选择、如何接入任务以及额外数据怎样影响结果。
+
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 静态词向量不随语境变化，下游难获得不同层次的语言信息 | 预训练双向语言模型，并学习任务特定的层表示组合 | 同一个词可根据上下文得到不同表示，下游可选择有用层次 | 表1多任务加入前后对照，§5.1层组合分析 | 额外语言模型计算与存储；探针可解码的信息不一定就是下游实际使用的信息 |
+
+## 自测与参考答案
+
+**1. ELMo 的双向与 BERT 的双向为何不同？**
+
+ELMo 组合分别按两个方向训练的循环语言模型状态；BERT 的掩码编码器让位置在同一网络中交互左右信息。两者都提供双向上下文，但训练目标和信息融合路径不同。
+
+**2. 为什么不直接取最深层？**
+
+不同层可能保留不同类型信息，最适合语言预测的末层未必最适合所有任务。任务学习混合权重能够利用多个层次；是否获益要通过消融检验。
+
+**3. 表 1 提升是否意味着只加入向量就无需标注？**
+
+不是。下游模型仍在任务标注上训练，ELMo 提供额外预训练特征。应把无标签预训练、领域适配和任务监督的数据来源分别说明。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "016-elmo",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

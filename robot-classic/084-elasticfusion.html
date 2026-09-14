@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>084｜ElasticFusion：直接修正稠密地图，而不只修正相机轨迹 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人经典基础</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">ElasticFusion：直接修正稠密地图，而不只修正相机轨迹</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 084｜ElasticFusion：直接修正稠密地图，而不只修正相机轨迹
+
+[返回总览](00-发展时间线总览.md) · [上一篇：IMU 预积分](083-imu-preintegration.md) · [下一篇：DSO](085-dso.md)
+
+**论文**：Thomas Whelan、Stefan Leutenegger、Renato F. Salas-Moreno、Ben Glocker、Andrew J. Davison，*ElasticFusion: Dense SLAM Without a Pose Graph*，RSS 2015。[会议原文](https://www.roboticsproceedings.org/rss11/p01.pdf) · [官方代码](https://github.com/mp3guy/ElasticFusion)。
+
+**阅读范围**：会议正文第 II–VII 节、算法 1、表 I–IV 和图 2–6；代码入口用于确认实现来源，未运行程序。本文讨论原始 RGB-D 系统，不把后续动态场景重建方法的能力归入本论文。
+
+## 一、一分钟讲明白
+
+拿深度相机绕着房间扫描，第二次看到同一张桌子时，地图里可能已经出现两张略微错开的桌面。常见处理是先优化历史相机位姿，再想办法修复融合后的地图。ElasticFusion 换了着力点：把地图当成可以局部形变的表面，发现新旧表面对应后，直接让它们对齐。
+
+核心是三件事一起工作：当前帧对已融合模型跟踪；近期与较早表面分开管理；利用局部和全局回环约束驱动形变。这里“非刚性”描述的是纠正地图误差的数学操作，**并不表示论文已经解决运动人物、衣服或柔性物体的动态重建**。
+
+作者提出无需位姿图优化的稠密 SLAM 系统。实验支持房间尺度重建与所测轨迹精度，但题目里的“没有位姿图”不等于没有图：系统明确维护形变图。
+
+一句话：**在 RGB-D 房间扫描中，通过表面级回环和形变优化改善稠密地图一致性，代价是 GPU 计算、地图增长及回环关联的可靠性要求。**
+
+## 二、背景与问题定义
+
+输入是连续彩色图像与深度图，输出是相机轨迹和带颜色的稠密表面地图。这是在线几何估计，不涉及强化学习状态—动作—奖励定义，也没有训练数据或策略更新。
+
+地图元素是 surfel，可理解为带位置、法向、颜色、半径、置信度和时间信息的小圆片。与只存几何点相比，surfel 更适合渲染可见表面并融合重复观测；与规则体素相比，它围绕已有表面分配表示。但它不是天然 watertight 的网格，也不自动提供物体类别。
+
+问题出现在长时间反复绕行时：局部误差不断积累，而已经融合的表面难以简单撤销。若把重复看到的偏移表面直接融合，地图可能变厚或出现重影；如果只修正相机轨迹而不改地图，已经固化的几何错误仍然存在。
+
+本文把近期观测部分称为 active，较久未见部分称为 inactive。它们是**时间与融合状态的划分**，不是“动态物体/静态物体”的语义分割。旧地图也没有删除：它等待与当前表面建立回环对应，随后重新参与融合。
+
+## 三、方法：跟踪、融合、变形各优化什么
+
+### 1. 当前帧对模型，而非只对上一帧
+
+系统渲染当前模型的预测深度和颜色，再把新 RGB-D 帧与预测对齐。跟踪目标为：
+
+$$E_{track}=E_{icp}+w_{rgb}E_{rgb}.$$
+
+几何项测量点到对应表面的距离，颜色项测量投影后亮度差；论文第 III 节使用 $w_{rgb}=0.1$，以粗到细的 Gauss–Newton 迭代求位姿。这个权重依赖残差尺度，不是“视觉信息只占百分之十”的概率解释。
+
+模型融合可以平滑单帧噪声，但也会让错误位姿污染未来跟踪目标。因此融合置信度、可见性判断和回环修正共同影响稳定性。增加像素数量不自动消除系统性的错误对应。
+
+### 2. 为什么形变图需要时间信息
+
+若两次扫描同一面墙形成了两层接近的表面，只用空间最近邻连接形变节点，可能提前把两层绑死，反而不容易纠正漂移。第 IV 节按初始化时间建立图连接，并在选择作用节点时结合时间与空间邻近。
+
+一个表面点的形变可写成：
+
+$$\phi(p)=\sum_{k\in\mathcal N(p)}\bar w_k\{R_k(p-g_k)+g_k+t_k\},\qquad\sum_k\bar w_k=1.$$
+
+$g_k$ 是图节点位置，$R_k,t_k$ 是其局部变换，$\bar w_k$ 是归一化影响权重。论文算法 1 显式计算权重和再归一化；只照抄未归一化的距离权重会改变映射。
+
+这里节点矩阵通过代价鼓励接近旋转，不应把整个形变宣称为一个全局刚体运动。邻近节点协同变化，使大地图能分布式吸收累计误差。
+
+### 3. 形变不是任意拉扯
+
+第 IV-C 节的能量有四部分：接近刚性、相邻节点变换平滑、对应点对齐、旧表面锚定。解释性表达为：
+
+$$E_{def}=\lambda_rE_{rigid}+\lambda_sE_{smooth}+\lambda_cE_{match}+\lambda_pE_{pin}.$$
+
+对齐项推动新旧表面重合；平滑和刚性项避免随意折叠；锚定项保留参照。权重改变会影响“愿意变形多少”。优化器降低这一能量，不能保证得到真实物理形状，因为错误对应也可能形成低残差解。
+
+### 4. 局部与全局回环
+
+局部回环在当前位姿附近注册 active 与 inactive 的模型预测，适合漂移尚小的重复访问。全局回环利用随机 fern 编码寻找较远历史视图，再做配准与几何质量检验，适合更大漂移。
+
+外观检索只提出候选。论文还检查残差、内点数量和近似不确定性，并检查形变后的代价。全局回环之后不立即用简单规则重划所有活动状态，后续局部回环再处理表面重新激活。这些步骤说明系统不是“识别到同一房间就强制合并”。
+
+### 5. 伪代码
+
+```text
+输入：标定好的 RGB-D 流
+初始化 surfel 地图、时间戳、fern 历史视图数据库
+对每帧：
+    由近期活动模型渲染预测深度与颜色
+    联合最小化几何和光度误差，估计当前相机位姿
+    融合相容的新观测，更新 surfel 属性及时间
+    将久未观测的区域设为 inactive
+    检索全局回环候选，并进行几何验证
+    若没有可接受全局回环，尝试活动与非活动模型的局部配准
+    若配准及不确定性检查通过：
+        构造表面对应约束与时间相关的形变图
+        优化刚性、平滑、对应与锚定代价
+        验证后把节点变换应用于地图
+        按回环类型更新位姿及地图活动状态
+输出：持续修正的相机轨迹和稠密 surfel 地图
+```
+
+这是解释性流程，省略 GPU 缓冲、可见性和详细阈值。两个目标分别服务于位姿与地图修正；实验指标则是轨迹 ATE、表面距离和运行耗时，不能互相替代。
+
+## 四、实验设计与公平性
+
+| 项目 | 设置与用途 |
+|---|---|
+| 真实轨迹 | TUM RGB-D 的四条选定序列，运动捕捉真值；表 I 测 ATE RMSE |
+| 合成轨迹与表面 | ICL-NUIM living room 四条轨迹，包含合成噪声；表 II 测轨迹，表 III 测到真值表面的距离 |
+| 基线 | DVO SLAM、RGB-D SLAM、MRSMap、Kintinuous；另有关闭形变的 frame-to-model 对照 |
+| 定性规模 | Copy、Lab、Hotel、Office；表 IV 列帧数、surfel 数、图节点、局部与全局回环数量 |
+| 计算资源 | i7-4930K 3.4 GHz、32 GB RAM、GTX 780 Ti 3 GB；图 6 为 Hotel 耗时随地图增长 |
+| 不确定性 | 表格没有报告跨随机种子的均值与置信区间；统一调参、统一硬件重跑全部基线的预算未报告 |
+
+数据集不同不等于泛化到任意机器人。这里主要考查室内深度相机扫描；反光、透明、极强日光和大量移动物体并未形成系统性压力测试。
+
+## 五、结果：表面更好不代表每条轨迹都第一
+
+**表 I，真实轨迹。** fr3/office 的 ATE 为 0.017 m，对照 frame-to-model 为 0.025 m；fr2/xyz 本方法 0.011 m，而 RGB-D SLAM 为 0.008 m。因此不能说四条序列全部领先。前者按舍入数字算下降 32%，仅适用于该序列与该对照。
+
+**表 II 与表 III，别混指标。** kt0 的 ATE 从无形变的 0.497 m 降为 0.009 m；对应表面平均距离从 0.098 m 降为 0.007 m。两者单位都为米，却回答不同问题。kt1 没有重访，ElasticFusion 与 frame-to-model 相同，支持收益与回环机会有关，而非额外模块无条件改善。
+
+**局部/全局回环消融。** kt3 只开局部或只开全局回环时，ATE 为 0.234/0.236 m，完整系统为 0.106 m；表面误差为 0.099/0.103 m，完整系统为 0.028 m。它支持这条序列中两者互补，不是所有场景都必须同时触发的证明。Office 定性序列甚至没有全局回环。
+
+**图 4，重建热图。** 图注明确移除了距离真值超过 0.1 m 的点以便显示。读者不能把图上“看不到严重错误”当成所有输出点都准确的证据。表 III 的最近表面距离也不独立度量地图完整度：漏掉难重建区域可能改变平均值。
+
+**图 6，实时性。** 报告整体平均约 31 ms，每帧平均耗时峰值约 45 ms。地图增长后变慢，不能把平均值包装成始终满足 30 Hz 的硬实时保证，更不能当作最坏执行时间的形式证明。参见[原文第 VII 节](https://www.roboticsproceedings.org/rss11/p01.pdf)。
+
+## 六、贡献、代价与局限
+
+贡献是以地图为中心组织稠密 SLAM，让频繁的小回环与较大的全局回环共同修正已经融合的表面。已有的 surfel、配准、fern 和形变思想被组织为完整系统；不能把其中每项都写成首次发明。
+
+作者把超出房间尺度的可扩展性和长期运行列为未来方向。本文的分析是：地图越大，存储、渲染和形变应用的成本越高；错误回环可能造成几何扭曲，而仅靠低残差无法排除重复结构的歧义。该系统并不输出一套经过严格联合后验推导的任意长期地图不确定性保证。
+
+原文提到可借 fern 数据库在跟踪失败后重定位，但所评估数据没有遇到该情况。因此“存在重定位机制”与“已量化验证失效恢复率”应分开。复现还要固定官方代码版本和旧 GPU 依赖，不能用现代移植结果倒填论文的性能表。
+
+## 七、教学例子与前置概念
+
+**自构例子，未运行。** 第一次扫桌面时把它放在高度 1.00 m；绕房间回来，漂移使第二次表面落在 1.03 m。直接平均可能得到厚或模糊的几何。ElasticFusion 的思路是先保留新旧观测的可区分关系，验证两层对应后，用平滑形变让它们对齐再继续融合。这里的 3 cm 是人为设定，不能当作论文测试。
+
+五个前置概念：
+
+1. **Surfel**：有面积与法向信息的小表面元素。
+2. **Frame-to-model**：把当前传感器帧注册到累计模型的预测视图。
+3. **回环**：识别并约束对已访问地点的重复观测。
+4. **正则化**：通过附加代价限制不合理或过度自由的解。
+5. **ATE 与表面误差**：前者评估轨迹，后者评估重建几何，不能合并成同一精度。
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 融合后地图难以修正 | 直接优化形变图 | 把回环误差分布到表面 | 表 III | 错对应可能扭曲地图 |
+| 重访产生局部重影 | 活动/非活动模型局部配准 | 及时吸收小漂移 | 回环消融 | 需要足够重叠与可观测几何 |
+| 漂移超出局部捕获范围 | fern 候选与几何验证 | 提供较远历史参照 | kt3 等实验 | 未证明任意漂移都可恢复 |
+| 稠密计算昂贵 | GPU 跟踪、渲染和地图操作 | 并行处理大量表面元素 | 图 6 | 耗时随规模增长 |
+
+## 八、理解检查：问题与答案
+
+**问题 1：没有位姿图，是否就没有全局优化？**
+
+**答案：** 不是。全局回环可产生作用于整张地图的形变约束，系统优化形变图节点的参数。区别在优化变量和约束组织方式，不在于有没有“全局”操作。
+
+**问题 2：为什么不能将活动地图理解为运动物体？**
+
+**答案：** 活动由最近观测时间决定。一面静止墙刚被看到时是 active，久未看到就变为 inactive；这是防止错误重复融合并支持回环的管理机制，不是物体运动估计。
+
+**问题 3：若表面平均距离下降，怎样排除“只留下容易重建的点”？**
+
+**答案：** 还要报告完整度、覆盖率、被剔除点比例和同区域双向距离，并固定可见性与过滤规则。图 4 的显示剔除尤其提醒我们，漂亮热图和低单向平均距离不足以证明完整且准确的重建。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "084-elasticfusion",
+            active: "robot-classic",
+            seriesLabel: "\u673a\u5668\u4eba\u7ecf\u5178\u57fa\u7840",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>082｜Self-RAG：学会决定何时检索，再检查证据是否支持回答 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Self-RAG：学会决定何时检索，再检查证据是否支持回答</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 082｜Self-RAG：学会决定何时检索，再检查证据是否支持回答
+
+[返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
+
+论文：Akari Asai 等，*Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection*，2023，ICLR 2024。本文依据[首版正文](https://arxiv.org/html/2310.11511v1)的算法、实验和训练/推理附录；结果数值保留该版口径。部分特殊 token 在 HTML 中渲染不完整，以下以其语义名称解释，避免复制损坏的排版。项目与代码见[官方页面](https://selfrag.github.io/)。
+
+## 一分钟理解：查到了材料，不代表回答有了依据
+
+普通 RAG 常常先检索几段文字，再让模型回答。这里至少存在三种失败：问题本来不需要查资料，却被无关段落干扰；检索到的内容不相关；内容相关，但回答额外编造了材料没有支持的结论。
+
+Self-RAG 将这些判断变成模型可以生成的特殊 token：是否检索、材料是否相关、回答是否受支持、回答是否有用。训练时用经过标注的序列教会模型这些判断；推理时根据它们控制检索，并对不同证据下的候选回答进行选择。
+
+作者主张提高事实性和可控性。实验支持多项问答与引用指标的改善，同时保留明显取舍：更严格的支持度偏好可能降低输出的流畅分布指标，13B 也不在所有指标上优于 7B。
+
+一句话：在知识问答与有依据的长文本生成中，通过学习检索和细粒度自评，并在推理时选择候选，改善事实与引用表现，代价是标注、检索、分支生成，以及自评仍可能错误。
+
+## 问题定义：四个判断不能混成一个“好回答”分数
+
+给定输入 $x$，回答被切成片段 $y_1,\ldots,y_T$；论文实验以句子为片段。检索器返回段落 $d$，生成器决定接下来写什么。这里是监督训练加可控推理，不是 PPO，也没有用测试奖励做策略梯度。
+
+四种反思信息分别回答不同问题：
+
+| 信号 | 所依赖的信息 | 含义 |
+|---|---|---|
+| Retrieve | 问题及已有回答 | 需要新证据、无需检索，或继续使用已有材料 |
+| IsRel | 问题与段落 | 这段文字是否对解决问题有用 |
+| IsSup | 问题、段落与生成片段 | 片段中的可核查陈述是否被段落完整或部分支持 |
+| IsUse | 问题与回答 | 回答整体对用户是否有用 |
+
+“相关”不意味着“蕴含”。一篇介绍某人的文章与出生年份问题相关，但若文章没有出生年份，就不能支持任意年份。支持度也不是世界真实性：若检索材料本身有误，忠实转述依然可能错误。效用则可能要求补充解释，不能完全等同于引用精度。
+
+## 方法：把评审能力离线写进训练序列
+
+### 第一阶段：训练标注用 critic
+
+作者先用 GPT-4 生成不同类型的反思标签，再训练一个基于 Llama 2 7B 的 critic。critic 的任务是给定相关条件预测标签，而不是生成完整答案。它降低了给大量训练实例逐一调用外部模型的成本。
+
+这个 critic 与 Actor–Critic 中估计长期回报的 value critic 不同。名称相同，学习目标并不相同。它也不是训练过程中始终在线给策略打分的奖励模型：主要用于离线加工数据。
+
+### 第二阶段：训练生成器同时输出内容与反思
+
+对原始指令回答，离线调用检索器和 critic，插入检索段落以及反思 token。然后训练生成器预测回答与反思：
+
+$$
+L_{\mathrm{gen}}=-\sum_{t\in\mathcal A}\log p_\theta(z_t\mid x,z_{<t}),
+$$
+
+$z$ 是包含内容、证据和反思的扩展序列，$\mathcal A$ 只包含应学习生成的位置。检索段落的 token 不计入损失，因为它们是外部输入，不是要求模型背出来的目标。反思 token 则参与训练，使模型学会在正确时机预测这些信号。
+
+这一区别解释了为什么只在普通 RAG 提示末尾加一句“请反思”不等价：Self-RAG 改了词表、训练数据格式与推理控制协议。训练之后，生成器自己输出反思，不需同时部署那个离线 critic；但外部检索器和语料库仍然存在。
+
+### 第三阶段：按需检索与片段级搜索
+
+检索可由模型生成的离散标签触发，也可由归一化检索概率超过阈值 $\delta$ 触发。较低阈值鼓励检索，较高阈值节省调用；这是推理配置，不是重新训练参数。
+
+当触发检索时，不是将所有段落毫无区分地拼成一大块。模型针对不同段落并行生成候选片段，并利用反思概率对候选排序。反思加权部分可写作
+
+$$
+S_t=w_{\mathrm{rel}}s_{\mathrm{rel},t}
++w_{\mathrm{sup}}s_{\mathrm{sup},t}
++w_{\mathrm{use}}s_{\mathrm{use},t}.
+$$
+
+$s$ 来自相应 token 组归一化后的概率或等级加权值，$w$ 是用户指定的控制权重。完整片段选择还结合生成概率，并在多个片段间保持有限 beam。上式只是解释反思评分部分，不能把它当作已经重新训练的奖励目标或严格校准的概率。
+
+```text
+训练：
+    用外部教师标注反思类型，训练离线 critic
+    对指令回答检索材料，由 critic 插入反思标签
+    微调生成器预测回答与反思，屏蔽检索文本损失
+推理输入：问题、已生成片段、检索语料与控制权重
+直到回答结束：
+    预测是否需要检索
+    若不需要，则直接生成下一片段
+    若需要，则获取 K 个候选段落
+    对每个段落预测相关性，生成片段并预测支持度、效用
+    结合生成分数与反思分数，保留 B 条片段级路径
+    继续扩展保留路径，并保存对应证据来源
+输出：选择的回答、引用及可供核查的反思信息
+```
+
+优化目标、机制和指标分别是：监督交叉熵；检索门控与候选搜索；答案准确性、事实支持和引用指标。三者相关，但不能互相替代。
+
+## 实验设置：证据来源也占预算
+
+| 项目 | 原文设置与范围 |
+|---|---|
+| 模型 | 生成器 Llama 2 7B/13B，离线 critic 基于 7B |
+| 训练数据 | 正文约称 150K；附录 A.2 列出的精确合计为 145,619，包含指令、知识问答和 ASQA 等任务数据 |
+| 训练预算 | 附录 B.1：4 张 A100 80GB、3 epoch、批量 128、峰值学习率 $2\times10^{-5}$、3% warmup；7B 长度 2,048、13B 1,524 |
+| 检索 | 默认 Contriever-MS MARCO 的前 5 段；人物传记和开放问答额外用网页搜索的 5 段；ASQA 各基线使用统一提供的 GTR-XXL 前 5 段 |
+| 推理 | token 级贪心，片段 beam 宽度 2；常用检索阈值 0.2，要求引用的 ALCE 为 0 |
+| 测试集 | PopQA 的 1,399 个稀有实体问题；TriviaQA 11,313 问；另有 PubHealth、ARC、人物传记、ASQA |
+| 指标 | 短答以包含标准答案为准，并非严格全文精确匹配；长答采用 FactScore、str-em、ROUGE、MAUVE 和引用精度/召回 |
+| 消融与重复 | 关键消融只用 50K 训练实例，ASQA 抽 150 实例；未报告全部设置的多随机种子训练区间 |
+
+因此主表不是所有模型严格同数据、同算力比较。更有诊断价值的是同训练对的 Llama2-FT，以及移除检索或 critic 的消融。另一方面，网页搜索和 Wikipedia 版本会变化；PopQA 使用较新的 Wikipedia 是为了改善新实体覆盖，重跑时必须固定语料版本。
+
+“零样本评价”指测试提示没有附示范，不意味着训练数据完全没有相同任务类型。ASQA 出现在训练混合中，不能把其结果写成从未见过这一任务的泛化证明。
+
+## 四组证据与反例
+
+**证据一｜表 2：同训练对基线提供了更有意义的对照。** 7B Self-RAG 与检索增强 Llama2-FT 的 PopQA 分数为 54.9 对 48.7，PubHealth 为 72.4 对 64.3；说明改进不只是额外指令数据。但是 Self-RAG 还结合反思、检索训练与搜索，主表无法单独归因给其中一个模块。
+
+**证据二｜表 2：引用精度提高不等于全面占优。** 13B 的 ASQA 引用精度为 70.3，检索增强 ChatGPT 为 65.1；引用召回则是 71.3 对 76.6，str-em 为 31.7 对 40.7。前者更强的一个维度，伴随其他维度的差距。传记 FactScore 的 7B 为 81.2，13B 为 80.2，也不能简单画成参数越多事实性必然越好。
+
+**证据三｜图 3(a)：检索价值随任务变化。** 50K 消融中，完整模型 PopQA 为 45.5，推理禁用检索后 24.7；PubHealth 则从 73.5 到 73.0。它支持稀有实体知识对外部资料更敏感。ASQA 中，无 critic 的训练配置从完整模型 32.1 降为 18.1；但该配置同时改变了数据组织，不能解释为某一个特殊 token 的孤立因果效果。
+
+**证据四｜图 3(b)(c) 与图 4(d)：控制是真实的，保证不是。** 增大支持度权重时引用精度上升、MAUVE 下降；提高检索阈值后检索频率降低，PopQA 比 PubHealth 更容易掉分。小规模人工检查的 S&P 为 PopQA 92.5、传记 70.0，但评估排除了模型自己判为无关或无支持的实例，不能当作所有输出的无条件可靠率。
+
+这几组证据共同支持把 RAG 拆成检索、利用、归因和效用来研究。它们没有证明自评 token 是诚实而完备的内部信念，也没有保证带引用回答就不再产生幻觉。
+
+## 贡献、限制与教学例子
+
+新意在于把细粒度评审蒸馏为生成器的可控输出接口，再通过推理权重调节行为。它与 RLAIF 一样利用教师评价，但不必执行在线强化学习；它与普通检索重排也不同，因为还检查生成后的论断是否被证据支持。
+
+成本包括 GPT-4 标签、critic 训练与离线数据加工、检索索引以及多个候选片段。减少检索次数并不等于总延迟一定下降，片段分支和搜索还会耗费计算。模型自评错误、文档过时和教师标签偏差可能沿着整条流程传播。
+
+**自构例子。** 问“某研究者在哪一年加入大学？”段落 A 说“2018 年获得博士”，段落 B 说“2020 年加入该校”。两段都相关，但把 A 的 2018 当成任职年份不受支持。Self-RAG 理想情况下会给 A 所生成答案较低支持度，选择 B。若问题是“把这句话改得礼貌一些”，则通常无需外部检索。这个例子展示判断职责，不代表系统每次都能正确区分日期。
+
+五个前置概念：**检索增强**从参数之外引入证据；**知识蒸馏**学习教师的标签行为；**损失掩码**控制哪些位置参与训练；**片段级 beam search**保留多条回答续写路径；**引用支持度**判断来源是否蕴含对应陈述。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 固定检索引入干扰，相关材料也未必支持生成内容 | 学习检索/相关/支持/效用 token，离线标注训练与片段搜索 | 显式拆分是否查、查到什么、是否用对，并允许推理控制 | 表 2 多指标；图 3 消融及取舍；图 4 人工条件性检查 | 教师与自评会错；检索与分支有成本；提高引用精度可能降低覆盖，语料版本影响复现 |
+
+## 自测：能否拆开三个“可信”
+
+**1. 为什么“文档相关”不足以支持回答？**
+
+答案：相关只说明文档谈到所问主题，支持则要求其中的信息足以推出具体陈述。人物传记可能相关却没有目标日期；模型填入自己猜的日期仍属无支持。即使来源支持，来源自身也可能错误，所以支持度不等于世界真实性。
+
+**2. Self-RAG 的 critic 与 RL 的价值 critic 是否相同？**
+
+答案：不同。这里的 critic 学习预测反思标签并离线标注训练数据；最终生成器以监督目标学习回答和标签。它不通过 Bellman 回报估计指导策略梯度。推理时生成器可自己输出这些标签，但仍要调用检索系统。
+
+**3. 如果提高支持度权重后引用精度上升，能否宣称系统更好？**
+
+答案：需要同时看正确性、信息覆盖、引用召回、可读性和成本。系统可能通过少说或避免困难陈述提高精度。论文展示了与 MAUVE 的取舍，所以权重选择应依据任务需求，并用多指标或人工任务完成评价确认，而不能只优化一个引用数字。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "082-self-rag",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

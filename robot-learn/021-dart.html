@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>021｜DART：在专家示范中注入恢复机会 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">DART：在专家示范中注入恢复机会</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 021｜DART：在专家示范中注入恢复机会
+
+[系列首页](README.md) · [上一篇](020-dexnet2.md) · [下一篇](022-her.md)
+
+**原论文**：*DART: Noise Injection for Robust Imitation Learning*，Michael Laskey 等，2017。[原文](https://arxiv.org/abs/1703.09327)。
+
+## 一、为什么好示范也需要一点偏差
+
+一条完美示范可能没有教机器人如何恢复。夹爪偏左一点时，人会顺手修正；如果所有训练轨迹都毫无偏差，学习者真正执行时反而不知道怎样回到正确路线。
+
+DART 在专家控制信号上加入经过估计的扰动，让专家在演示过程中自然展示恢复动作。它与 DAgger 的区别是：主要让专家继续控制，在专家附近制造适度偏差，而非让当前学习者长时间自主运行后再索要标签。
+
+作者报告这种方式在模拟控制和真机清障任务上改善模仿。实验支持特定扰动模型与任务中的数据覆盖收益，不意味着噪声越大越好。一句话概括：通过模拟学习者可能犯的动作误差，扩展示范到恢复状态，代价是扰动水平估计与专家对噪声的适应。
+
+## 二、设定与五个前置概念
+
+状态 $x$ 可以是模拟机器人状态或视觉观测；专家输出 $u^\star=\pi^\star(x)$。实际执行带噪动作，让下一状态产生偏差，再由专家给出纠正控制。学习者训练目标仍是模仿专家意图，而不是学习随机扰动本身。
+
+五个概念包括：**协变量偏移**指训练与执行状态分布不同；**误差累积**指动作误差改变未来输入；**噪声协方差**描述扰动大小及各动作维度关联；**经验风险最小化**用监督损失训练策略；**留出数据**用于评估拟合误差而非重复测训练集。
+
+这属于示范收集策略的改变，没有另学环境模型或奖励函数。论文将其称为 off-policy imitation，因为学习者不直接主导采样分布；不要把这个术语自动等同于离线RL中的固定历史数据，因为DART仍分轮收集新示范。
+
+## 三、方法：扰动应接近学习者误差
+
+令专家受扰动动作分布为：
+
+$$
+u\sim\mathcal N(\pi^\star(x),\Sigma).
+$$
+
+各向同性噪声 $\Sigma=\sigma^2I$ 对所有动作维度一视同仁，但机器人可能主要在某些关节上犯错，也可能存在耦合偏差。因此 DART 根据当前学习者相对专家的误差估计协方差：
+
+$$
+e_t=\pi_{\hat\theta}(x_t)-\pi^\star(x_t),\qquad
+\hat\Sigma=\frac1T\mathbb E\sum_{t=0}^{T-1}e_te_t^\top.
+$$
+
+对角元素反映各维误差能量，非对角元素反映同时偏移方向。它不是对真实执行轨迹分布的精确复制，而是通过易估计的动作误差构造近似扰动。
+
+若希望每条轨迹总扰动平方量约为 $\alpha$，可缩放：
+
+$$
+\Sigma^\alpha=
+\frac{\alpha}{T\,\mathrm{tr}(\hat\Sigma)}\hat\Sigma.
+$$
+
+因为零均值高斯噪声的每步期望平方范数等于协方差的迹。这里的 $\alpha$ 是对最终误差规模的先验选择，并不是自动发现的唯一正确值。估计为零或数值退化时需要处理，教学公式未覆盖所有工程保护。
+
+### 监督标签究竟是哪一个动作
+
+执行动作带有扰动，专家原本希望执行的控制则提供模仿标签。这样机器人学到的是“在受扰动到达的状态，该怎样正确控制”。若把扰动动作也当作理想标签，目标会被噪声污染，无法得到同样解释。
+
+专家要继续闭环观察并纠正，所以这不是在收集完的数据文件里随手给动作列加随机数。后处理动作噪声不会改变真实访问状态，也就不会生成真实恢复经验。这个区别是DART思想的中心。
+
+### 理论到底说了什么
+
+第4.2节分析带高斯噪声专家分布与学习者轨迹分布的距离，并以确定性专家且学习者存在误差的设定说明加噪可改善相应分布差异界。理论假设专家自身不因噪声而改变判断机制。
+
+对真人，这个假设并非总成立：扰动太大可能让人紧张、延迟或采取不同策略。因此理论连接提供方向，不能作为物理安全证明，也不保证每一种扰动都提高任务成功率。
+
+~~~text
+采集一小批专家示范
+训练初始模仿策略
+在留出示范状态上比较学习者输出与专家标签
+估计动作误差协方差，并按目标总误差缩放
+重复后续采集轮次：
+    专家根据当前状态给出控制意图
+    在执行信号中加入估计扰动
+    保存当前状态与专家原始控制标签
+    专家观察偏差并继续恢复
+合并示范，重新训练学习者
+必要时重新估计扰动，独立评估无专家介入的策略
+~~~
+
+优化对象是监督模仿损失，机制改变是示范状态覆盖，实验指标是独立策略回报或任务达成。训练时带噪专家仍表现良好，不等于最终策略已经学好，两者需要分别测量。
+
+## 四、实验设计与预算
+
+| 项目 | 原文设定及解读 |
+|---|---|
+| 模拟任务 | Walker、Hopper、Half-Cheetah、Humanoid |
+| 模拟专家 | TRPO策略的确定性均值，学习者采用相同两层64单元网络规模 |
+| 数据采样 | 每轨迹下采样50组状态控制，增加有限数据难度 |
+| 对照 | BC、DAgger、低频重训DAgger-B、各向同性噪声与DART |
+| 计算指标 | 比较重训耗时，另外报告采集期间回报和最终回报 |
+| 真机 | Toyota HSR，为固定目标芥末瓶清理遮挡 |
+| 人类研究 | 4名有机器人经验的示教者，同一人比较各方法，顺序有平衡 |
+| 真机数据 | 先10条，再各方法30条，最终40条；噪声只在早期更新一次 |
+| 指标边界 | 真机学习策略的成功条件是识别目标且清出夹爪通路，之后接开环抓取计划 |
+
+最后一行很重要：不能把图3所有统计直接宣传为完整末端到末端取物成功率。原文评估定义关注清障并到达可抓取条件，系统还连接了后续计划。
+
+相机描述在正文中出现眼在手与图3头部RGBD表述的差异，这里不据未经核对的统一视角做推论。读取视觉输入不改变本篇关于收集恢复状态的主旨。
+
+## 五、证据与反例
+
+依据[原文全文及附录](https://arxiv.org/html/1703.09327)。
+
+| 位置 | 观察 | 支持与限制 |
+|---|---|---|
+| 第4.1节公式、Algorithm 1 | 用学习者误差定向设置扰动 | 不等于随意数据增广 |
+| Proposition 4.1 | 特定假设下的轨迹分布比较 | 不是人类适应或安全性定理 |
+| 图2 | DART与DAgger最终表现接近，但训练计算与采集回报不同 | 加速依赖本文重训频率和实现 |
+| 图3 | 较小噪声设置79%，BC49%，更大噪声72% | 直接反驳噪声越大越好 |
+| 附录图4–5 | 分布损失差距缩小；合适随机协方差也可有好效果 | 优化噪声有实用价值，但并非唯一有效矩阵 |
+
+79%相对49%的绝对差为30个百分点；按这两个已四舍五入数字计算相对改善约61.2%。作者给出的约62%应理解为其原始统计的概括，不应把“62%”写为增加62个百分点。
+
+附录还显示噪声尺度合适时，一些随机协方差也表现不错。这说明DART的重要价值包括帮助选择扰动规模，不能把全部增益都归因于学习精确相关结构。
+
+## 六、贡献与适用边界
+
+DART把模仿问题的关注点从“更强网络”转向“更有用示范”。专家本来就会恢复，通过适度扰动把潜在能力变成可观察数据。这对真机数据收集很有启发：流畅并不是示范质量的唯一指标。
+
+代价是仍需专家在线演示，且模型误差估计来自有限数据。如果学习者部署会犯系统性的、状态依赖的错误，单个固定高斯协方差可能近似不足。比如只在反光时向右偏，全局噪声会在无关状态浪费扰动。
+
+收集期间较高回报是一个实际优点，但不能取代安全约束。原文比较在任务分布内进行，稀有不可恢复偏差并未因此被排除。本文未独立复现实验；理论、作者解释与上述分析应分开阅读。
+
+## 七、一个自构例子
+
+未运行的教学例子：专家把夹爪移动到瓶子前，系统轻微向左偏。专家下一步向右修正，于是数据多了“偏左时应向右”的状态标签。普通干净示范可能永远没有这种状态。
+
+若扰动把夹爪推到瓶后完全遮挡处，专家也无法可靠判断，数据质量反而下降。适度扰动不是故意把任务搞坏，而是在学习者可能偏离的范围内观察恢复动作。范围如何估计正是算法要解决的问题。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 完美示范缺少恢复状态，DAgger采集代价高 | 在专家执行时注入估计误差噪声 | 保持专家主导并扩展边界状态 | 图2–5、理论分析 | 人类受扰动影响、尺度选择、恢复范围有限 |
+
+## 八、三个问题及答案
+
+**问题1：为什么离线给动作标签加噪声不等价？**
+
+答案：它不会改变环境访问状态，也就不会记录专家如何从新状态恢复。DART扰动的是采集时的实际执行，并保留专家控制意图作为标签。
+
+**问题2：低训练误差是否意味着可以不注入噪声？**
+
+答案：训练误差可能乐观，部署分布下误差更大。应在留出数据估计，并考虑状态分布差异；如果确实能完美表示专家且覆盖充分，原文也承认额外噪声未必有益。
+
+**问题3：为何比较计算速度要包括DAgger-B？**
+
+答案：普通DAgger在本文实现中频繁重训，耗时差可能来自更新日程。DAgger-B降低重训频率，使读者观察节省计算与性能之间的交换，避免把工程日程差全部当作算法定理。
+
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "021-dart",
+            active: "robot-learn",
+            seriesLabel: "\u673a\u5668\u4eba\u5b66\u4e60",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

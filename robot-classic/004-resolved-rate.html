@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>004｜Resolved Motion Rate：让操作者直接指定手的运动方向 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人经典基础</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Resolved Motion Rate：让操作者直接指定手的运动方向</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 004｜Resolved Motion Rate：让操作者直接指定手的运动方向
+
+[系列首页](README.md) · [上一篇](003-astar.md) · [下一篇](005-newton-euler.md)
+
+**原论文**：D. E. Whitney，*Resolved Motion Rate Control of Manipulators and Human Prostheses*，1969，IEEE Transactions on Man-Machine Systems 10(2):47–53。[原始出版记录](https://doi.org/10.1109/TMMS.1969.299896)。
+
+**证据范围**：已核对原始题名、年份与摘要；出版页面的正文访问受到限制，尚未取得可可靠核对的原版完整实验。下面以明确标注的现代微分运动学推导解释思想，不将阻尼逆解、零空间优化等后续扩展归为1969年论文贡献。
+
+## 一、一分钟理解
+
+操作者希望夹爪向右移动，但机械臂可能需要肩、肘和腕同时转动。逐关节发指令把协调负担交给人。Resolved-rate思想则接收任务空间的速度意图，再根据当前构型计算各关节速度，让人直接控制有意义的手部运动。
+
+原摘要讨论遥操作机械臂与假肢，目标是沿与任务有关的坐标轴指定运动。这个贡献是控制接口与运动协调方式的变化，不是通过学习数据训练出的策略，也不是全局路径规划器。
+
+一句话：在已知局部运动学的机械臂中，通过任务速度到关节速度的映射，简化协调运动，限制是奇异构型、模型误差和积分漂移必须另行处理。
+
+## 二、从位置关系到速度关系
+
+若正向运动学写为 $x=f(q)$，在适当局部坐标下求导可得：
+
+$$
+\dot x=J(q)\dot q.
+$$
+
+J是雅可比矩阵。它的第i列表示仅让第i个关节运动时，对末端速度产生什么贡献。任务坐标中的线速度与角速度需要使用一致的表示；欧拉角导数并不总等于物理角速度。
+
+| 要素 | 具体含义 |
+|---|---|
+| 输入 | 操作者的任务速度命令、当前关节构型、几何模型 |
+| 中间量 | 当前雅可比以及适当的速度映射 |
+| 输出 | 各关节的速度命令 |
+| 目标 | 使实际末端速度接近期望速度 |
+| 隐含条件 | 低层驱动能跟踪命令，传感器与模型坐标一致 |
+
+这里没有环境奖励、回合终止或策略网络。任务停止时速度命令可以变为零，但零速度并不自动纠正已经累积的位置误差。
+
+## 三、逆映射及其实际含义
+
+当J为方阵且可逆，$\dot q=J^{-1}\dot x_d$。这不是把非线性正向运动学全局求逆，而是在当前构型附近求一个线性的瞬时速度关系。每个控制周期都要重新计算，因为构型改变后J也会变化。
+
+当关节数多于任务维数，可用现代教学形式的伪逆给出最小二范数解：
+
+$$
+\dot q=J^\dagger\dot x_d+(I-J^\dagger J)z.
+$$
+
+第一项完成主任务，第二项位于局部零空间，可用于其他运动。这里把它作为理解冗余的扩展公式，而非声称原文已经包含后来的所有任务优先级方法。零空间只保证当前线性化下不影响主任务，有限步积分和模型误差仍会改变末端行为。
+
+```text
+输入：任务坐标下的期望速度v，当前关节q，运动学模型
+每个控制周期：
+    读取q并检查时间戳
+    计算J(q)，确认v与J使用同一任务坐标
+    求解 J*dq = v 的适当解
+    检查关节速度与位置边界以及数值条件
+    把可执行的dq发送给低层速度控制器
+    下一周期使用新测量重新计算
+输出：实际关节运动以及由模型估计的末端速度
+```
+
+限速会改变任务速度。例如逐关节简单裁剪后，J乘裁剪速度不再等于原命令。若任务要求方向尽量不变，可以缩放整组速度或求带约束的优化问题，但这些选择应作为工程扩展明示。
+
+## 四、教学例子：两连杆如何配合向上走
+
+两根长度为1的平面连杆，位置为 $x=\cos q_1+\cos(q_1+q_2)$、$y=\sin q_1+\sin(q_1+q_2)$。因此：
+
+$$
+J=\begin{bmatrix}
+-\sin q_1-\sin(q_1+q_2)&-\sin(q_1+q_2)\\
+\cos q_1+\cos(q_1+q_2)&\cos(q_1+q_2)
+\end{bmatrix}.
+$$
+
+在 $q_1=0,q_2=90^\circ$ 时，J为 $[[-1,-1],[1,0]]$。要求末端以 $(0,0.1)$ 米每秒运动，可以得到 $\dot q_1=0.1$、$\dot q_2=-0.1$ 弧度每秒。一个关节正转，另一个反转，横向贡献抵消而纵向贡献保留。
+
+这是一阶瞬时关系。不能直接让两个速度保持一分钟并期待末端仍沿同一直线，因为运动中的雅可比发生了变化。控制循环中的反复更新是方法的组成部分，而不是可选的数值优化。
+
+## 五、证据能支持到哪里
+
+| 原始可核对内容或教学检查 | 支持的判断 | 尚不能证明 |
+|---|---|---|
+| 原摘要的遥操作与假肢设定 | 方法面向人机协调的运动接口 | 对所有机械臂都更易操作 |
+| 原摘要的任务轴速度描述 | 输入从关节量转向任务相关量 | 自动解决全部任务约束 |
+| 原题名及期刊47—53页记录 | 文献对象与年代清晰 | 未核实原图的参数和曲线数值 |
+| 教学雅可比计算 | 局部速度协调可以直接验证 | 硬件动力学和接触稳定性 |
+
+若设计复现实验，应保持同一机械臂与低层控制，比较关节命令接口和任务速度接口的路径误差、任务时间及用户协调负担。需要分别报告自由空间、接近奇异点和关节限位的表现。原论文的具体试次与误差统计在当前证据范围中尚未核实，不能补写为现代对比表。
+
+## 六、为什么后来需要奇异鲁棒逆解
+
+当机械臂完全伸直，某个方向的瞬时运动可能无法由有限关节速度实现。在线性代数上表现为J失去秩，或最小奇异值接近零。此时直接求逆可能产生极大关节命令。
+
+阻尼最小二乘以任务误差换取速度有界，是后续研究对这一问题的处理。它不消除物理奇异性，而是避免控制器为了不可实现的命令产生数值灾难。真正需要跨越不可达区域时，还要重新规划姿态或路径。
+
+另一类问题来自积分。速度跟踪存在小偏差时，位置误差会随时间积累。现代闭环逆运动学常在速度命令中加入位置误差反馈，但姿态误差应使用合适的旋转表示。把三个欧拉角逐项相减在跨越表示边界时可能产生错误大转动。
+
+五个前置概念是：雅可比描述局部敏感性；奇异值刻画可运动方向；伪逆提供最小范数解；零空间表达冗余；速度闭环与位置闭环分别针对不同误差。
+
+| 原有问题 | 作者改动 | 有效原因 | 证据类型 | 代价与局限 |
+|---|---|---|---|---|
+| 人要协调多个关节实现手部运动 | 接收任务轴速度并映射到关节 | 使用机构的局部几何关系 | 原摘要与微分运动学 | 奇异性、限位、速度跟踪与积分漂移 |
+
+## 七、自测与参考答案
+
+**问题1：为什么任务速度保持不变，关节速度通常仍要变化？**
+
+参考答案：J取决于构型。机械臂移动后，同一个关节对末端的速度贡献改变，所以要重新分配关节速度。固定逆矩阵只在很小运动范围内近似成立。
+
+**问题2：指令速度归零，为什么末端未必到达准确目标？**
+
+参考答案：速度控制只要求停止继续移动，不必消除此前累积的位置偏差。需要位置反馈或其他校正机制才能持续纠正该偏差。
+
+**问题3：伪逆求解成功是否意味着速度可安全执行？**
+
+参考答案：不意味着。数值解可能超出关节限速、接近机械限位或导致中间连杆碰撞。局部末端速度关系不包含这些约束，需要在控制或规划层显式处理。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "004-resolved-rate",
+            active: "robot-classic",
+            seriesLabel: "\u673a\u5668\u4eba\u7ecf\u5178\u57fa\u7840",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

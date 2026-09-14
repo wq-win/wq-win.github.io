@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>030｜REALM：让语言模型在预训练时学会检索外部知识 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">REALM：让语言模型在预训练时学会检索外部知识</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 030｜REALM：让语言模型在预训练时学会检索外部知识
+
+[目录](README.md) · [上一篇](029-scaling-laws.md) · [下一篇](031-electra.md)
+
+**论文**：Kelvin Guu 等，*REALM: Retrieval-Augmented Language Model Pre-Training*，ICML 2020。[原文](https://arxiv.org/abs/2002.08909) · [PDF](https://arxiv.org/pdf/2002.08909)。本文聚焦潜在文档检索、掩码预训练和索引刷新，不把它简化成部署时手工加一次搜索。
+
+## 一分钟理解
+
+事实都写进参数，需要大容量且更新困难。REALM 给语言模型外部文本库，并让检索器学习哪些文档能帮助恢复被遮盖内容。检索不是只有人工标注的匹配任务，而可从最终词预测是否改善获得训练信号。
+
+作者在开放域问答上验证预训练检索的价值。核心是把文档作为潜变量，并通过任务似然训练检索选择；代价是索引维护、近似搜索、知识库质量和训练稳定性。检索到文档不等于生成或抽取结果自动真实。
+
+## 背景：知识存在哪里
+
+参数化模型从训练文本压缩信息，更新一个事实通常需要再训练或其他编辑。外部文档库则可以直接替换内容，但模型需要找到相关材料，并正确利用它。知识存储与推理因此被拆成检索和阅读两个环节。
+
+如果检索器只用词面匹配，问题与答案文档的表达差异可能导致漏检。若检索器独立训练，它优化的相关性未必等于阅读器真正需要的信息。REALM 希望让“帮助预测目标”成为检索学习的依据。
+
+不过，训练信号可能稀疏：一开始检索不准，阅读器看不到有用信息，检索器也难知道该改哪里。初始化、掩码选择和检索近似因此是方法关键，而不是无关工程细节。
+
+## 方法：对潜在文档边缘化
+
+设输入为 $x$、目标为 $y$、检索文档为 $z$：
+
+$$
+P(y\mid x)=\sum_zP_\eta(z\mid x)P_\theta(y\mid x,z).
+$$
+
+检索器参数为 $\eta$，知识增强编码器参数为 $\theta$。文档得分通常由查询与文档嵌入内积构成，再归一化成检索概率。实际无法遍历全库，使用最大内积近似检索找到较少候选进行计算。
+
+若某文档使正确目标概率高于当前总体水平，其检索权重可获得正向学习信号；没有帮助的文档则相对被压低。直觉上，阅读成功为检索提供弱监督，但这是通过概率目标而非显式“这篇文档相关”标签实现。
+
+文档编码器更新后，索引中的旧向量可能过时。论文通过异步刷新等机制减轻陈旧问题。梯度训练文档表示不等于每次更新后整个大型索引瞬间完全一致，这个系统近似影响训练质量。
+
+```text
+输入：无标签文本、外部文档库、初始化检索与阅读模型
+选择有信息的遮盖目标，构造查询输入
+用查询嵌入在当前文档索引中检索top-k候选
+对每候选文档计算检索概率与目标恢复概率
+对候选边缘化，最大化正确目标似然
+更新检索器与知识增强编码器
+周期或异步重编码文档并刷新索引
+下游开放问答微调时继续使用检索与阅读接口
+```
+
+数学目标是潜变量似然，机制是可学习外部知识访问，指标是问答准确率及检索相关分析。它不是仅把搜索结果拼到固定模型前，也不等同于后续 RAG 的所有生成形式。
+
+## 实验与证据
+
+| 项目 | 原文范围 |
+|---|---|
+| 预训练数据 | 分别使用 Wikipedia 或 CC-News；检索知识库均为 Wikipedia，不能混合两种配置的最好成绩 |
+| 知识库规模 | 2018-12-20 英文 Wikipedia 快照，按最多 288 个 BERT wordpiece 切块，超过 1300 万个候选 |
+| 训练预算 | 200k 步，batch size 512，学习率 $3\times10^{-5}$，使用 64 个 Google Cloud TPU；文档嵌入另在 16 个 TPU 上并行计算 |
+| 候选与更新 | 预训练对 8 个候选边缘化，包含空文档；微调及推理考虑 top-5，索引约每 500 步刷新 |
+| 下游数据 | 表 1 列 NQ 约 79k/4k、WQ 约 3k/2k、CT 约 1k/1k 训练/测试样本 |
+| 最直接对照 | ORQA；作者保持微调设置、超参数和训练数据一致，比较预训练机制 |
+| 指标 | 最终答案 exact match（EM），以及消融中的零样本检索 Recall@5；两者评价的模块不同 |
+| 资源边界 | 330M 参数之外还有外部知识库、索引和重编码；单机 12GB GPU 可执行不等于整个训练只用这些资源 |
+
+这些设置来自[原文 §4.3、§4.5 与表 1](https://arxiv.org/html/2002.08909)。独立随机种子次数及统一置信区间在这里未逐项确认，因此下面按原表的点估计解释结果。
+
+**证据一，方法中的潜变量定义与检索梯度。**它说明最终预测怎样监督检索。候选近似和索引陈旧意味着实现不是精确全库求和。
+
+**证据二，表 1 的开放问答测试结果。**ORQA 的 NQ/WQ/CT EM 为 33.3/36.4/30.1；Wikipedia 预训练的 REALM 为 39.2/40.2/46.8，CC-News 预训练版本为 40.4/40.7/42.9。以 NQ 为例，CC-News 版本比 ORQA 高 7.1 个百分点；但它在 CT 上低于 Wikipedia 版本 3.9 个百分点。数据配方没有在所有任务上同方向改善，不能拼接各列最优值，创造一个并不存在的统一模型结果。[原文表 1](https://arxiv.org/html/2002.08909)
+
+**证据三，表 2 的 NQ 开发集消融。**完整 REALM 的 EM 为 38.2；换回基线检索器后为 35.3；索引陈旧程度增加 30 倍时为 28.7。最后一项比完整模型低 9.5 个百分点，直接支持刷新机制在该训练设置中的重要性。这里是开发集，不能与表 1 的测试分数直接相减；消融也没有证明任何系统都应固定每 500 步刷新。[原文表 2、§4.5](https://arxiv.org/html/2002.08909)
+
+**证据四，表 3 的遮盖词例子。**相关文档使正确词的条件概率明显提高，但对候选边缘化后的概率仍取决于检索权重。这个例子展示训练机制如何起作用，不能替代全体查询的统计，也没有测量答案对来源的普遍忠实程度。[原文表 3](https://arxiv.org/html/2002.08909)
+
+文档库可能包含答案与相近表述，这是检索任务允许的知识来源；但评价问题或标注格式直接泄露进训练又是另一问题。应区分合法知识访问与测试污染，不能把所有答案出现在文档中都称为污染，也不能完全不检查来源。
+
+## 教学例子：怎样产生检索梯度
+
+构造问题“某定理由谁提出”，两篇候选分别是相关数学史与无关旅游文章。若相关文档使正确名字概率更高，边缘似然倾向提高它的检索权重。检索器因此可以从预测收益学习，不需要每个问题单独标注文档ID。
+
+如果阅读器已经靠参数记住答案，所有文档给出类似概率，检索学习信号可能较弱。反过来，如果检索完全漏掉有用材料，阅读器无法从候选中发现正确证据。这说明两模块训练存在相互依赖，并非联合目标自动解决冷启动。
+
+再把知识库文档更新为新事实，但索引向量仍是旧版本。检索可能找不到新内容，或得分不再匹配实际文本。知识可编辑不等于系统即时完成一致更新，文本、向量和缓存都需要版本管理。
+
+## 评价不能只看最终答案
+
+应分别检查检索召回、阅读条件准确率和最终EM。最终答对可能来自参数记忆，检索正确也可能被阅读器误用；拆开指标才能定位失败。还可以替换相关文档为反事实版本，观察模型是否依赖提供材料，但这种测试不等于真实事实校验。
+
+费用也需要包含建索引与刷新。若只报告一次查询延迟，忽略大规模文档重编码，就低估训练或知识更新成本。检索增加外部资源使用，是性能机制的一部分，应透明记录。
+
+## 贡献与局限
+
+REALM 把外部知识访问纳入预训练，展示任务信号可以学习检索。限制包括候选漏检、索引陈旧、知识库错误、模块耦合和计算。它提供更灵活知识来源，不保证答案有可追踪引用或不会忽略证据。
+
+五个前置概念是潜变量、边缘似然、稠密检索、最大内积搜索和索引刷新。掌握它们，后续读 DPR、RAG 与 Self-RAG 时就能辨别哪些部分在训练、哪些只是部署接口。
+
+可以构造四格诊断：相关文档被检索且答案正确、检索正确但答案错误、未检索到相关材料却答对、两者都失败。前两格区分阅读能力，第三格提示参数知识或猜测，第四格需要进一步定位。再限制阅读器只能使用候选证据，并与原模型比较，能够更清楚检验外部知识贡献。所有这些都是教学实验方案，未执行前不能报告比例；其价值是把一个最终EM分数拆成能够行动的误差来源，而不是增加另一项模糊总分。
+
+知识库可更新是一种系统能力；若新文档没有进入索引，或者查询编码器无法召回它，参数之外的最新事实仍无法帮助回答。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 事实知识主要压在模型参数里，检索器难从无标签预训练中获得任务监督 | 把文档作为潜变量，对检索与遮盖预测联合训练并刷新索引 | 让有助于恢复目标的文档获得学习信号，外部库提供额外信息 | 表 1 的开放问答，表 2 的检索器与陈旧索引消融 | 候选漏检、索引重编码成本、外部知识质量；答对不等于忠实使用证据 |
+
+## 自测与参考答案
+
+**1. 没有文档相关标签，检索器怎样学习？**
+
+通过正确目标的边缘似然。能让阅读器更好预测的文档得到相对更有利的梯度，形成任务驱动的弱监督，但候选必须包含有用信息。
+
+**2. 文档编码器更新后，为什么索引会成为问题？**
+
+索引保存旧向量，与当前模型不一致，可能改变检索排序和训练信号。全库重编码昂贵，因此需要刷新策略并接受一定近似。
+
+**3. 最终EM高，是否证明模型忠实使用检索证据？**
+
+不能。模型可能靠参数记忆答对，也可能偶然猜中。需要检索与阅读分解、证据替换等额外分析，才能判断实际信息来源。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "030-realm",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

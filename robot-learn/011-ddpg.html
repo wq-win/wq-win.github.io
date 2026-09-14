@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>011｜DDPG：在连续动作上直接优化价值 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">DDPG：在连续动作上直接优化价值</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 011｜DDPG：在连续动作上直接优化价值
+
+[系列首页](README.md) · [上一篇](010-visuomotor.md) · [下一篇](012-guided-cost.md)
+
+**原论文**：*Continuous Control with Deep Reinforcement Learning*，Timothy P. Lillicrap 等，2015 年首次公开。[原文](https://arxiv.org/abs/1509.02971)。
+
+## 一、先把连续控制的问题说清楚
+
+机械臂的电机力矩不是“左、右、停”三个按钮，而是一组实数。若把每个关节切成十档，七个关节就有一千万种组合。DQN 的逐个动作比较因此难以直接搬到机器人上。DDPG 的办法是让一个网络直接提出动作，再让另一个网络评价这个动作；评价网络还告诉提议网络，动作朝哪个方向改变可能更好。
+
+这篇论文将确定性策略梯度与深度网络、经验回放、缓慢更新的目标网络结合起来。它是无模型、在线交互、离策略的 Actor–Critic 方法。这里“无模型”指不学习环境动力学，并不是没有评价模型。
+
+作者声称这一组合可以应对多种连续控制任务。实验支持的是模拟物理环境中的学习表现及组件消融，不能据此认定真实机器人已经拥有安全、廉价的学习方案。一句话概括：在连续动作控制中，通过可微价值函数指导确定性策略，获得可扩展的动作优化方式，代价是价值误差、探索成本与训练不稳定性仍然重要。
+
+## 二、机器人设定与前置概念
+
+状态 $s$ 可以包括关节角度、速度及任务变量；视觉版本使用连续图像提供运动信息。动作 $a$ 是实值控制向量。奖励和回合结束规则随任务变化，不能为整篇论文填一个统一“成功奖励”。论文的主体是模拟实验，而非真机力矩控制。
+
+理解方法需要五个概念。**动作价值**评价先采取一个动作、随后继续执行策略的长期收益。**确定性策略**在给定状态输出一个动作。**离策略学习**允许使用其他行为策略收集的数据。**自举**用估计值构造另一个估计值的监督目标。**目标网络**用变化更慢的参数缓解目标漂移。
+
+对机器人而言，确定性不等于运动一定精确：环境有噪声，观测有误差，同一动作也可能造成不同结果。策略是否有足够信息区分这些情形，比输出分布是否随机更基本。
+
+## 三、方法：让价值函数的斜率成为动作老师
+
+设 Actor 为 $\mu_\theta(s)$，Critic 为 $Q_\phi(s,a)$。Actor 输出动作；Critic 接收状态与动作，并预测长期回报。它们都不预测下一张图像或下一时刻的关节状态。
+
+Critic 的教学形式为：
+
+$$
+y=r+\gamma(1-d)Q_{\bar\phi}(s',\mu_{\bar\theta}(s')),
+\qquad
+L_Q=\mathbb E_{\mathcal B}\left[(Q_\phi(s,a)-y)^2\right].
+$$
+
+$\gamma$ 是折扣，$\mathcal B$ 是回放数据，横线表示目标参数，$d$ 表示真正终止。这里显式加入终止掩码便于实现；截断回合是否应清零需根据任务定义判断，不能把时间限制自动当成物理终止。构造 $y$ 时停止梯度，避免预测网络追着自己移动。
+
+Actor 的更新依赖链式法则：
+
+$$
+\nabla_\theta J \approx
+\mathbb E_{s\sim\mathcal B}
+\left[
+\nabla_a Q_\phi(s,a)|_{a=\mu_\theta(s)}
+\nabla_\theta\mu_\theta(s)
+\right].
+$$
+
+第一项说“动作改变一点，价值如何改变”；第二项说“参数改变一点，动作如何改变”。它无需对真实环境求导。这是方法能用于未知动力学的关键，也意味着 Critic 的错误斜率会成为错误教师。最小化 $L_\mu=-\mathbb E Q_\phi(s,\mu_\theta(s))$ 是常见的等价实现表达。
+
+目标网络采用软更新：
+
+$$
+\bar\phi\leftarrow\tau\phi+(1-\tau)\bar\phi,\qquad
+\bar\theta\leftarrow\tau\theta+(1-\tau)\bar\theta.
+$$
+
+小 $\tau$ 让监督目标变化缓慢，但也让新信息传播滞后。经验回放则重用旧交互，并削弱连续样本相关性；它不能保证所有动作区域都有数据。
+
+训练行为采用 $a=\mu_\theta(s)+\epsilon$。原文使用具有时间相关性的 OU 噪声，意图适应惯性系统。这里应区分机制与必需条件：论文采用 OU，并不能推出所有机器人任务都必须使用它。批归一化用于处理输入和中间表示的尺度问题，同样属于本文系统设计的一部分。
+
+### 教学伪代码
+
+以下保留 Algorithm 1 的核心关系，省略网络结构和优化器细节。
+
+~~~text
+初始化 Actor、Critic，并复制各自的目标网络
+建立空回放池
+重复每个回合：
+    重置环境和探索噪声过程
+    每个控制步：
+        用 Actor(状态) 加探索噪声得到动作
+        执行动作，将转移存入回放池
+        随机采样一批历史转移
+        用目标 Actor 提议下一动作
+        用目标 Critic 计算停止梯度的 TD 目标
+        最小化 Critic 的平方误差
+        固定 Critic 参数，沿动作梯度更新 Actor
+        软更新两个目标网络
+定期关闭探索噪声，在独立评估回合测量回报
+~~~
+
+数学目标是估计并提高折扣回报；算法改动是稳定深度确定性策略梯度的训练；实验指标则是任务回报与归一化分数。三者不能缩写成“损失下降，所以机器人更可靠”。
+
+## 四、实验如何检验这套组合
+
+| 项目 | 原文设定与阅读要点 |
+|---|---|
+| 环境 | 第4节的 MuJoCo 控制任务，另讨论驾驶任务；不要归纳成统一真机实验 |
+| 观测 | 低维状态与像素两种设置；像素输入为连续三次渲染形成的9通道、64×64图像 |
+| 数据 | 策略在线探索生成转移，再经回放重用；没有专家示范训练 Actor |
+| 基线 | 随机动作策略和访问真实模型及导数的 iLQG；另有组件移除比较 |
+| 预算 | 各任务学习曲线对应各自交互量；第6节称大部分所考察问题在250万步内求解 |
+| 统计 | 表1将5个重复实验的结果汇总；不应将最佳单次等同于均值 |
+| 指标 | 随机策略均分归一化为0，iLQG均分为1；不是成功率 |
+| 核心假设 | 回放、目标网络和归一化能否使深度 DPG 在多种任务中有效学习 |
+
+iLQG 获得额外物理信息，因此它提供的是有意义的控制参照，并不是同信息量的学习算法竞赛。像素设置还包含动作重复：相同的一个“智能体步”可能消耗多个模拟步。比较样本效率时，必须先统一横轴单位。
+
+## 五、四处证据应该怎样读
+
+以下定位依据[论文全文](https://arxiv.org/html/1509.02971)。
+
+| 原文位置 | 观察与支持 | 不能证明 |
+|---|---|---|
+| 第3节、Algorithm 1 | 给出 Actor、Critic、回放与双目标网络更新 | 算法形式本身不是收敛证明 |
+| 图2 | 完整方法与去掉组件的曲线不同，支持这些设计在所测任务中的实用价值 | 不能认定某组件对所有任务都必要 |
+| 表1 | 归一化结果覆盖多种任务，并汇总重复实验 | 大于1表示超过所用 iLQG，不表示超过全局最优 |
+| 第4节像素实验 | 部分视觉任务也能学到控制行为 | 不证明任意相机变化下泛化或真机视觉鲁棒 |
+| 第6节讨论 | 作者明确承认非线性逼近取消一般收敛保证，且仍需大量交互 | 不能用“稳定”一词消除失败可能 |
+
+一个容易误读的数量是“相对 DQN 更少交互”。两个算法面对不同任务，奖励密度、动作重复和终止方式都不同，因此不能把这个跨领域比值当成严格算法效率提升。论文的机制价值并不需要靠这个比值成立。
+
+## 六、贡献与代价
+
+DDPG 的新意是把已有确定性策略梯度扩展为可训练的深度连续控制系统，而不是发明所有 Actor–Critic 思想。它把动作空间的显式搜索转化为网络学习，推理时通常只需一次 Actor 前向传播。相比每一步内循环寻找动作，这对实时控制很有吸引力。
+
+但计算方便不等于数据便宜。Critic 在低覆盖区域可能高估价值，Actor 又主动寻找高价值区域，两者可能形成自我强化的误差循环。这是对算法结构的分析，并非本文已系统验证的全部失败机制。后续 TD3 与 SAC 可以沿这一问题继续阅读。
+
+真机还涉及接触力、速度限制、复位与损坏风险。本文没有把这些工程条件完整纳入算法保证。因此迁移时应首先明确动作接口和约束，而不是直接把网络输出接到电机上。这个局限来自实验范围，不意味着方法没有机器人价值。
+
+## 七、一个可手算的例子
+
+以下为自构例子，未运行实验。假设单关节状态固定，Critic 学到 $Q(a)=-(a-0.4)^2$，当前 Actor 输出 $a=0$。则动作梯度为 $0.8$，更新会把动作向正方向移动。若 Actor 就是一个标量参数，学习率为0.1，一步得到 $a=0.08$。
+
+如果 Critic 错学为 $Q(a)=-(a-1.5)^2$，同样的链式法则会把策略推向错误目标。这说明确定性策略梯度解决的是“如何使用当前价值估计改动作”，没有自动解决“价值估计是否可信”。
+
+还可将目标网络看作一位缓慢调整评分标准的老师：标准稳定时学生较容易拟合，但老师若长期错误，缓慢更新也不会把错误变成真理。
+
+| 原有问题 | 作者改动 | 可能有效原因 | 证据 | 代价与局限 |
+|---|---|---|---|---|
+| 连续动作难以枚举，深度价值更新不稳 | Actor 提议动作，Critic 求动作梯度，回放与软目标 | 避免逐步穷举并减缓目标漂移 | 图2、表1与第4节 | 依赖价值斜率、探索覆盖和大量交互 |
+
+## 八、读懂之后的三个问题
+
+**问题1：Actor 更新时为什么要固定 Critic 参数，却允许梯度穿过 Critic？**
+
+答案：我们需要的是 $Q$ 对动作的导数，再由动作传回 Actor 参数。若把 Critic 也一起朝增大预测值更新，它可以只提高自己的输出而不改善动作；若完全切断 Critic 计算图，Actor 又收不到方向。固定参数与停止所有输入梯度不是一回事。
+
+**问题2：确定性策略为什么仍能收集多样数据？**
+
+答案：训练行为策略在 Actor 输出上加入噪声，目标策略本身仍确定。离策略估计允许二者不同，但若噪声始终探索不到关键状态，回放池也无从补救。离策略是可重用数据的条件，不是探索成功的保证。
+
+**问题3：归一化分数1.2能解释成成功率120%吗？**
+
+答案：不能。其参考零点是随机策略，单位由 iLQG 与随机策略的回报差决定。1.2只表示超过这个参照间隔；要谈成功率，需要另外定义二元成功事件并统计评估次数。
+
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "011-ddpg",
+            active: "robot-learn",
+            seriesLabel: "\u673a\u5668\u4eba\u5b66\u4e60",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

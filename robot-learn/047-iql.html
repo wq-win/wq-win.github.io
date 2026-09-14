@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>047｜IQL：在数据内完成价值改进 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">IQL：在数据内完成价值改进</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 047｜IQL：在数据内完成价值改进
+
+[系列首页](README.md) · [上一篇](046-clipport.md) · [下一篇](048-calvin.md)
+
+**原论文**：*Offline Reinforcement Learning with Implicit Q-Learning*，Ilya Kostrikov、Ashvin Nair、Sergey Levine，2021。[论文](https://arxiv.org/abs/2110.06169)。
+
+## 一、一分钟理解：只评价数据里的动作，也能把好片段接起来
+
+离线机器人数据可能包含很多“差一点成功”的轨迹。一条轨迹把物体带到中间位置，另一条从附近完成放置；只复制整条行为未必能组合两者。Q-learning可以向前传播好结果，却容易对数据外动作产生虚高估计。
+
+IQL选择另一条路：价值学习时只查询数据里的状态动作对，用偏向较好动作的expectile回归学状态价值，再用普通TD更新把这个价值往前传播。最后用优势加权行为克隆提取可执行策略。
+
+这不是完全消除了泛化误差，而是避开一个重要误差来源：在备份目标里直接最大化未经观察动作的Q值。**在固定离线数据包含可连接好片段的场景下，通过状态条件上expectile与多轮价值传播，改善了数据支持内的策略学习，代价是仍受覆盖、价值误差和策略提取质量限制。**
+
+## 二、问题定义：机器人需要优于平均示范，却不能随意相信外推
+
+数据为 $D=\{(s,a,r,s',d)\}$。普通离线TD目标包含 $\max_{a'}Q(s',a')$；连续动作最大化可能找到一个模型认为很好、但数据没有支持的动作。CQL显式压低这种动作的估值，行为约束方法限制策略偏离数据；IQL让价值备份本身不查询这些候选动作。
+
+它属于无模型离线RL，可继续在线微调。原始论文主要实验是低维状态仿真控制，包括MuJoCo行走、AntMaze导航、Kitchen与Adroit操作，没有本文算法直接驱动真实硬件的实验。将它纳入机器人学习，是因为它提供了利用固定操作数据的核心工具，而不是因为原文已解决真实视觉操作部署。
+
+AntMaze奖励稀疏，关键在于连接分段轨迹；Kitchen衡量子任务完成；Adroit数据来自人类示范或克隆策略。这些数据分布与奖励含义不同，不能把全部分数解释为同一成功率。
+
+必要假设包括状态足够支持决策、奖励标签可用、数据对有价值动作提供一定覆盖。相近观测不一定是相同物理状态：例如夹爪中物体是否已稳定抓牢若不可见，所谓“轨迹拼接”可能物理上根本不可行。
+
+## 三、方法：为什么同时需要V和Q
+
+### 1. Expectile不是分位数
+
+定义残差 $u=Q(s,a)-V(s)$，非对称平方损失为
+
+$$
+\ell_\tau(u)=|\tau-\mathbf1[u<0]|u^2.
+$$
+
+$\tau=0.5$ 相当于普通均方回归；$\tau>0.5$ 时，低估高Q动作受到更大惩罚，使 $V$ 向较好的动作价值偏移。它仍受到误差大小影响，不能把 $\tau=0.9$ 直接读作“第90百分位动作”。
+
+价值损失为
+
+$$
+L_V=\mathbb E_{(s,a)\sim D}
+\ell_\tau(\bar Q(s,a)-V(s)),
+$$
+
+其中 $\bar Q$ 来自目标Q网络，实践中使用两个Q的较小值。状态价值没有动作输入，却通过跨样本学习估计该状态附近数据动作的上侧统计。
+
+### 2. 对动作乐观，对环境随机性仍取平均
+
+Q更新采用普通平方误差：
+
+$$
+L_Q=\mathbb E_D
+\left[Q(s,a)-\left(r+\gamma(1-d)V(s')\right)\right]^2.
+$$
+
+为什么不直接把TD误差也改成expectile？因为同一个动作有时会幸运地得到好后果，若对所有转移结果取上侧统计，会把运气当成可主动选择的好动作。IQL先在 $Q(s,a)$ 层面平均环境随机结果，再对同状态下不同动作的价值取上expectile。原文§4.2明确讨论了这一分离。
+
+$V$与Q交替更新，较好的后继动作价值会反复往前传播。因此它不是只估计行为策略价值后做一次改进，也不是只筛选完整高回报轨迹。
+
+### 3. 用加权模仿把价值变成策略
+
+定义优势 $A(s,a)=\bar Q(s,a)-V(s)$：
+
+$$
+L_\pi=-\mathbb E_D\left[
+\min\{e^{\beta A(s,a)},100\}\log\pi(a|s)\right].
+$$
+
+$\beta$ 是逆温度，越大越集中模仿高优势动作；指数权重截断避免极端样本主导。这里沿用可最小化的负对数似然形式：v1式（7）印成正的加权log概率，但算法描述使用梯度下降；[官方actor实现](https://github.com/ikostrikov/implicit_q_learning/blob/master/actor.py)明确使用负号。
+
+策略提取时只拟合数据动作，不把当前策略采样动作重新送进Q网络构造价值目标。价值学习可以先完成，也可以与策略拟合同时进行；后者并不意味着actor反过来控制TD目标。
+
+~~~text
+输入：离线转移D、expectile τ、逆温度β
+初始化两个Q、目标Q、状态价值V、策略π
+重复：
+    从D采样(s,a,r,s',终止标记)
+    q = 两个目标Q(s,a)的较小值
+    使用非对称平方误差(q - V(s))更新V
+    y = r + γ * 非终止掩码 * V(s')
+    使用普通平方误差更新两个Q，使其接近停止梯度的y
+    软更新目标Q
+    计算停止梯度的优势A = q - V(s)
+    w = min(exp(β*A), 100)
+    最小化 -w*log π(a|s)，提取策略
+可选在线阶段：
+    策略与环境交互，把新转移加入回放
+    沿用以上更新，不再称为纯离线评估
+~~~
+
+数学目标、机制和指标分别是expectile/TD/加权似然、数据内价值传播、最终回报或成功指标。IQL中的implicit与IBC的能量搜索无关，部署策略可以直接输出高斯动作。
+
+## 四、实验怎样验证“拼接”而不是只挑好轨迹
+
+| 项目 | 原文配置与意义 |
+|---|---|
+| 玩具迷宫 | 1条最优轨迹加99条随机轨迹；25%概率随机转移，目标奖励10 |
+| 主基准 | D4RL MuJoCo-v2、AntMaze-v0，另含Kitchen/Adroit-v0 |
+| 基线 | BC、前10%轨迹BC、DT、AWAC、单步RL、TD3+BC、CQL |
+| 参数 | AntMaze $\tau=0.9,\beta=10$；行走0.7与3；操作另用0.7与0.5 |
+| 网络 | 两层256宽MLP，高斯策略；部分小规模操作数据对策略用dropout |
+| 奖励处理 | 行走按数据回报跨度缩放；AntMaze奖励减1 |
+| 重复评估 | 行走10种子，每次10轨迹；AntMaze每次100评估轨迹 |
+| 运行时间 | GTX1080上100万更新少于20分钟，使用JAX实现 |
+| 在线微调 | 100万新增环境步；一般先100万离线更新，灵巧手设置为25000步 |
+
+不能仅凭“相同原始数据集”认定目标完全相同：奖励缩放直接影响优势指数权重，因此 $\beta$ 与奖励尺度应一起报告。轨迹终止与超时掩码也会影响长期价值。
+
+论文注意到有的早期基线误混用D4RL版本，重新统一行走-v2口径。新读者也应保留表中的环境后缀，而不是把任何年代同名任务分数放在一起。
+
+## 五、五组证据：最强结论在长程迷宫，操作并非全面领先
+
+**图2：随机数据会稀释行为价值。** 玩具迷宫中，单步评估的价值远离奖励后迅速衰减，IQL更接近最优价值。它展示多轮改善传播的机制，但小型离散问题并不直接证明高维连续函数近似的收敛。
+
+**表1：复杂AntMaze收益显著。** large-diverse中IQL47.5、CQL14.9，差32.6归一化分；large-play为39.6对15.8。相反，umaze-diverse中IQL62.2低于CQL84.0。不能将汇总优势改写为所有迷宫任务全胜。
+
+**图3与定理3：expectile强度影响传播。** 较大 $\tau$ 对迷宫任务很重要。定理是在理想求解与数据支持约束下，$\tau\to1$ 接近支持内最优值；不是有限数据神经网络在 $\tau=0.999$ 必然最好，原文也指出优化变难。
+
+**附录表3：机器人操作的细分结果。** Kitchen-complete中IQL62.5低于BC65.0；Kitchen-partial为46.3低于CQL49.8。pen-human中IQL71.5较强，而door-human4.3低于CQL9.9。操作汇总改善不代表每种接触任务都更好，也不是所有数值都是完整操作成功率。
+
+**表2及附录C：在线提高需要额外交互。** AntMaze-medium-play从72.0到95.0，灵巧手relocate从0到31.0；pen-binary最终IQL60.7低于AWAC70.3。该表灵巧手报告的是归一化平均回报，作者明确说不同于AWAC原论文末时刻成功率。CQL在线实验的离线初始化也低于其已发表结果，不能忽略这项复现限制。
+
+结果与证据定位见[原文及附录](https://arxiv.org/html/2110.06169)。本文未逐项确认AntMaze与操作所有表格的训练种子数，主表未给完整误差条，不能自行补上标准差。不同来源基线与重实现时间也并非严格同一软件条件。
+
+## 六、贡献与局限：不查询数据外动作，不等于不会执行数据外动作
+
+最关键创新是通过状态条件expectile实现隐式动作改进，并保留多轮动态规划。它减少了数据外Q查询，也省掉行为密度模型和复杂动作采样，因而简单且高效。
+
+然而最终策略是函数近似器，在新状态可能输出不受数据严格支持的动作。加权似然是软约束，不是硬件安全屏障。“训练不查询”描述的是计算路径，不能扩大成“部署绝不会偏离数据”。
+
+另一个限制是覆盖。数据没有连接两个阶段所需的抓持状态，价值传播不能创造真实桥梁。过高expectile可能更依赖少量高估样本，过低又更接近平均行为；这仍然是偏差、覆盖与优化之间的选择。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 数据外动作Q过估计 | TD目标只使用V，Q只查询数据动作 | 避开显式OOD最大化 | 多基准与算法结构 | 函数泛化误差仍存在 |
+| 平均行为价值无法拼接 | 上expectile与多轮TD传播 | 强化支持内较好后继 | 图2、图3、AntMaze | 需要可连接覆盖 |
+| 连续策略提取复杂 | 优势加权行为克隆 | 模仿数据中更优动作 | 离线及微调结果 | 权重和策略容量敏感 |
+
+阅读范围为v1正文、实验附录与官方actor损失实现；未独立复现。数学定理用于解释理想机制，未被当作真实机器人安全或收敛保证。
+
+## 七、一个小计算与五个前置概念
+
+自构例子，未运行：某状态两种数据动作的Q值为0和10，各占一半。普通均值为5。对 $\tau=0.9$，若 $V$ 位于两者之间，最优条件是 $0.1V=0.9(10-V)$，得到 $V=9$。它偏向好动作，却没有新造一个Q值为20的数据外动作。
+
+五个概念：**数据支持**指行为分布可能产生的状态动作；**expectile**通过非对称平方误差得到偏向一侧的统计量；**TD备份**把后继价值传播到当前；**优势加权模仿**提高较好数据动作的拟合权重；**轨迹拼接**用多个局部经验组成更优长程决策。
+
+## 八、三个问题及答案
+
+**问题1：为什么不能直接对随机TD目标取高expectile？**
+
+答案：那会同时对动作选择和环境运气乐观。一个低均值动作若偶尔幸运到达好状态，会被过度奖励。IQL以普通Q回归平均后继随机性，再用V的expectile选择不同动作之间的较好价值。
+
+**问题2：每个连续状态在数据中只出现一次，还怎么比较不同动作？**
+
+答案：网络通过邻近状态及共享表示泛化估计条件统计，而非必须为完全相同状态存一整张动作表。这也是方法能扩展的原因，同时带来近似风险；相近观察若实际隐藏状态不同，条件估计可能错误。
+
+**问题3：IQL训练没有查询数据外动作，能否保证真实机器人不越界？**
+
+答案：不能。策略拟合和新状态泛化仍可能生成新动作，真实执行还受延迟、噪声和覆盖影响。数据内训练减少一类价值外推问题，物理约束、状态估计与部署验证仍是独立问题。
+
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "047-iql",
+            active: "robot-learn",
+            seriesLabel: "\u673a\u5668\u4eba\u5b66\u4e60",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>024｜Megatron-LM：按矩阵结构切分 Transformer，减少模型并行通信 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Megatron-LM：按矩阵结构切分 Transformer，减少模型并行通信</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 024｜Megatron-LM：按矩阵结构切分 Transformer，减少模型并行通信
+
+[目录](README.md) · [上一篇](023-roberta.md) · [下一篇](025-albert.md)
+
+**论文**：Mohammad Shoeybi 等，*Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism*，2019。[原文](https://arxiv.org/abs/1909.08053) · [PDF](https://arxiv.org/pdf/1909.08053)。本文讨论早期张量模型并行，不把后续流水线、序列并行或整个现代 Megatron 生态当作原文已实现内容。
+
+## 一分钟理解
+
+当一份模型放不进单张 GPU，普通数据并行无法解决，因为每张卡仍需完整模型。Megatron 按 Transformer 矩阵计算的结构切分参数与运算，使多卡共同处理一个样本，同时尽量减少必须交换中间结果的次数。
+
+贡献在于把线性代数和硬件通信一起设计。作者展示多十亿参数训练与扩展效率；它没有减少模型本身的数学复杂度，也不保证设备数量增加就线性加速。互联、矩阵尺寸和混合并行布局都是结果条件。
+
+## 背景：并行方式解决不同瓶颈
+
+数据并行把不同 batch 分给不同设备，各自计算完整模型再同步梯度，适合扩大样本吞吐。模型并行则把同一模型拆开，解决容量与单样本计算分布。两者可以结合，但通信内容与时间点不同。
+
+如果随意沿任意维度切矩阵，每个非线性或投影之间都可能需要全量通信，节省显存却损失速度。Megatron 利用前馈层两次矩阵乘和注意力头之间的结构，选择能在本地继续计算的切分方向。
+
+系统论文的正确目标不是只展示“用了很多卡”，而是说明更多设备带来了多少有效工作，以及与足够强的单卡基线相比损失多少效率。理论峰值、实际吞吐和端到端训练进度必须分别测量。
+
+## 方法：相邻矩阵用互补切分
+
+考虑前馈层 $Y=f(XA)B$。先把 $A$ 按列切成 $A_1,A_2$，各设备可独立计算 $f(XA_i)$；再把 $B$ 按行切成对应块 $B_i$：
+
+$$
+Y=\sum_i f(XA_i)B_i.
+$$
+
+因为非线性作用于各自输出块，不必在两次乘法之间先拼回完整隐藏向量。最后再求和形成输出。若第一层按不合适方向切分，非线性前可能就需要同步，通信更多。
+
+注意力头也能分组放在不同设备，各自完成相应头计算，再在输出投影处组合。原论文用成对的通信算子安排前向与反向的 all-reduce：一个前向恒等、反向同步，另一个前向同步、反向恒等。
+
+这些算子不是新的学习损失，而是保证分布式计算与原数学图对应的执行机制。数值精度与浮点求和顺序可能造成微小差异，但不能允许因切分漏掉某个梯度项。
+
+```text
+将一个模型并行组中的设备分配给矩阵块和注意力头
+前馈子层：
+    各卡计算列分片第一投影及本地非线性
+    各卡计算对应行分片第二投影的部分结果
+    all-reduce 求和得到完整输出
+注意力子层：
+    各卡处理自己的头与相关投影
+    在输出组合处同步需要的量
+反向按共轭通信规则汇总输入梯度
+多个模型并行组再以数据并行同步参数梯度
+```
+
+数学目标保持语言建模或 BERT 任务目标，机制是计算分片，指标是吞吐、扩展效率和最终模型质量。系统优化不直接证明模型能力来自某种新表示学习规则。
+
+## 实验与证据
+
+| 项目 | 原文范围 |
+|---|---|
+| 硬件 | V100 等明确互联配置，模型并行与数据并行组合 |
+| 规模 | 约 1.2B 到 8.3B 的扩展研究配置 |
+| 口径 | 弱扩展随模型规模增长，不是固定模型的纯强扩展 |
+| 指标 | 实际 FLOPs/s、扩展效率、训练时间与语言任务表现 |
+| 质量任务 | GPT 类语言建模与 BERT 类任务，具体配置不同 |
+| 复现条件 | 卡间互联、每头维度、精度和batch均影响结果 |
+
+**证据一，图 3 与 Code 1。**矩阵分片和前反向通信算子给出核心实现。它说明减少通信的逻辑，不只是报告最终速度。
+
+**证据二，表 1 与图 5。**模型从约 1.2B 到 8.3B、设备增加，检验弱扩展。论文报告最高约 76% 扩展效率，必须绑定其单卡基线与设备配置，不能说 512 卡对任何任务都达到同一效率。
+
+**证据三，表 3。**8.3B 模型在对应零样本设置下 WikiText-103 PPL 为 10.81、LAMBADA 准确率 66.51%。它证明系统能训练出有效大模型，但与更小模型的差异同时包含容量和训练资源，不能归因于并行本身提高语义能力。
+
+论文指出扩展实验与最终质量模型的部分头数配置不同。读者不应把两个表所有字段拼成一个不存在的模型。系统数据与质量数据各自准确，合并时仍需核对配置身份。
+
+## 教学例子：为什么切分方向重要
+
+假设第一层输出四个通道，两张卡各算两个，再各自应用 GELU，彼此无需交流。第二层的输出是这些中间通道贡献的和，各卡算部分贡献后相加即可。这个局部独立结构正适合减少一次中间通信。
+
+若先把输入通道拆开，两张卡各得到第一层的部分和，必须先合并才能正确计算 GELU，因为 $f(a+b)$ 一般不等于 $f(a)+f(b)$。这说明并行设计受非线性位置约束，不能仅靠“矩阵可切”推断任意切法等价。
+
+再假设网络互联很慢，最终 all-reduce 仍可能成为主要瓶颈。方法减少通信次数，却没有消除通信。更强互联和更大本地矩阵能够改善计算通信比，这也是迁移硬件时必须重新测量的原因。
+
+## 系统实验应该怎样报告
+
+强扩展固定模型和总工作量，观察增加设备能否缩短时间；弱扩展增加设备时也增加工作量，观察效率保持。两者回答不同问题。把弱扩展曲线称为“同一模型加速 512 倍”是不正确的。
+
+还应报告端到端吞吐，包含优化器和通信，而不是只计最快矩阵核。若只用理论峰值估 FLOPs，可能忽略数据等待和同步。质量达到相同阈值所需时间，也比单步最快更接近训练目标。
+
+## 贡献与局限
+
+Megatron 展示了少量针对 Transformer 结构的切分，能够训练超出单卡容量的大模型。局限包括同步通信、设备布局依赖、小矩阵效率和总训练成本。它与 ZeRO 分片优化器状态解决的瓶颈不同，后续可以组合而非相互替代。
+
+五个前置概念是数据并行、张量并行、all-reduce、强弱扩展和非线性可分性。理解它们，才能从一张训练速度表判断方法究竟扩展了什么。
+
+另一个自构正确性检查是把同一小矩阵分别按单卡和两卡分片计算，比较前向结果、输入梯度及两个权重梯度。只检查最终loss相近可能遗漏梯度缩放错误；在数据并行与模型并行同时存在时，还要确认没有重复除以组大小。系统优化的数值语义应先验证，再扩大设备数。
+
+通信拓扑也会影响这里的结果。
+
+|原有问题|作者改动|为什么可能有效|实验证据|代价与局限|
+|---|---|---|---|---|
+|大模型无法装入单卡且通信昂贵|按注意力头和MLP维度分片|让局部矩阵计算与少量归约配合|图3与Code1、表1扩展、表3质量|跨卡通信与拓扑约束，非语义算法改进|
+
+## 自测与参考答案
+
+**1. 为什么数据并行不能让放不进单卡的模型直接训练？**
+
+典型数据并行仍在每卡保存完整模型，只分样本。模型并行或状态分片才改变单设备需要保存或计算的模型部分。
+
+**2. 为什么前馈第一矩阵按列切能减少中间通信？**
+
+输出通道块可以独立做逐元素非线性，再通过第二矩阵对应行块计算贡献，最后求和。若非线性前只有部分和，则必须先通信恢复正确输入。
+
+**3. 扩展效率 76% 是否等于 GPU 达到 76% 理论峰值？**
+
+不是。它相对于选定扩展基线衡量效率保持；硬件峰值利用率是另一分母。两者应分别报告，不能混用百分比。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "024-megatron",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

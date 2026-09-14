@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>054 · InstructGPT：让语言模型学习人更愿意接受的回答 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">054 · InstructGPT：让语言模型学习人更愿意接受的回答</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 054 · InstructGPT：让语言模型学习人更愿意接受的回答
+
+[返回目录](README.md) · [上一篇：思维链提示](053-cot.md) · [下一篇：STaR](055-star.md)
+
+论文：Long Ouyang等，*Training language models to follow instructions with human feedback*，2022。[原始论文](https://arxiv.org/abs/2203.02155) · [全文](https://arxiv.org/pdf/2203.02155)。阅读范围为主文方法与结果、附录A数据、C训练以及相关评估说明；未审计全部人工标注样例，未独立复现。本文讨论论文中的模型与流程，不以此推断后续产品的内部实现。
+
+## 一分钟理解
+
+一个模型很会续写网页，不代表它会按要求解释、摘要或克制地承认不知道。预训练教会了语言规律，但“像互联网文本”与“完成用户请求”是不同目标。
+
+InstructGPT先学习人工示范，再学习人对多个回答的排序，最后用PPO提高奖励模型认可的回答概率，同时限制偏离原模型并混入预训练学习。它把语言生成与强化学习连接成一个可操作的训练流程。
+
+实验中1.3B模型的回答能在人类偏好评价中胜过175B GPT-3，说明目标与数据分布的适配可以比单纯加大参数更重要。这不是小模型在所有知识和推理能力上超过大模型。一句话：在以英文API指令为主的任务中，通过示范、偏好建模和受约束的策略优化改善回答偏好与指令遵循，代价是人工反馈和复杂训练，并仍受奖励代理误差与价值选择限制。
+
+## 研究背景：到底向谁对齐
+
+输入是客户指令，输出是一整段文本，任务包含开放生成、摘要、问答、改写等。作者明确说，对齐对象是参与研究的标注者与研究者所表达的偏好，不是已经解决所有人的价值观问题。数据超过96%为英文，标注者约40人，筛选与指导规则都会影响训练目标。
+
+在序列建模视角下，状态是题目及已生成前缀，动作是下一个token，结束标记或生成终止构成回合结束。论文从任务层面称其为上下文赌博机：给定提示，完成整段回答，得到一个最终奖励，没有长期外部环境交互。PPO实现仍需处理token级概率与价值估计。
+
+与FLAN/T0的主要区别不是有没有自然语言指令，而是反馈形式和分布。SFT拟合人写的好回答，奖励模型学习相对排序，PPO则在当前策略会生成的回答上优化。它依赖一个关键假设：学到的排序信号在策略更新后仍能代表人的评价。这个假设只近似成立，正是KL约束和独立人工评估不可少的原因。
+
+## 方法：三个阶段与四个模型角色
+
+### 示范学习与偏好学习
+
+第一阶段用人工示范做最大似然训练，得到SFT策略。第二阶段对同一提示收集4—9份回答的排序，把优选回答$y_w$与较差回答$y_l$组成比较。奖励模型输出标量$r_\theta(x,y)$，核心损失为
+
+$$
+\mathcal L_{RM}=-\mathbb E\log\sigma(r_\theta(x,y_w)-r_\theta(x,y_l)).
+$$
+
+$\sigma$为sigmoid，分数差决定人偏好前者的预测概率。奖励的绝对零点不能由这种损失确定；两份回答同时加常数不改变排序。因此高分不是经过校准的事实正确率，也不等于人类满意度百分数。
+
+同一提示产生的多对比较高度相关。作者把该提示下全部比较放在一个批次元素内处理，避免将重复回答当作独立新数据反复更新。这既减少前向计算，也缓解过拟合。
+
+### PPO、KL与预训练混合
+
+设当前策略为$\pi_\phi$，固定参考为$\pi_{SFT}$，PPO-ptx追求的目标可写作
+
+$$
+J(\phi)=\mathbb E_{x,y\sim\pi_\phi}\left[r_\theta(x,y)-\beta\log\frac{\pi_\phi(y\mid x)}{\pi_{SFT}(y\mid x)}\right]
++\gamma\mathbb E_{z\sim D_{pre}}\log\pi_\phi(z).
+$$
+
+第一项提高奖励，第二项的期望构成对参考策略的KL惩罚，第三项继续拟合预训练文本。$\beta$控制偏移，$\gamma$控制预训练保持。普通PPO变体令$\gamma=0$，文中默认InstructGPT通常指PPO-ptx。
+
+策略负责生成；固定参考模型给出KL基准；固定奖励模型评价完整回答；价值模型预测回报以构造优势、降低策略梯度方差。奖励模型和价值模型不是一个持续共享所有参数的角色：价值模型从奖励模型初始化后参与PPO训练，奖励模型保持作为反馈函数。
+
+PPO的裁剪限制一次更新中相对于采样策略的概率比变化，KL项限制相对于SFT参考的偏移，二者不能混为同一约束。这里没有声称KL能够证明模型绝不钻奖励漏洞。
+
+```text
+输入：预训练模型、人工示范、同题回答排序、未标注指令
+SFT策略 ← 拟合示范回答
+奖励模型 ← 用成对排序损失训练
+当前策略、固定参考 ← SFT初始化
+价值模型 ← 奖励模型初始化
+重复PPO更新：
+    从指令池抽取提示，用当前策略生成回答
+    计算最终奖励和每token相对参考的KL惩罚
+    用价值模型估计优势
+    对策略执行裁剪PPO更新，对价值模型回归回报
+    PPO-ptx同时累积预训练语言建模梯度
+在留出客户提示上收集独立人类偏好评价
+```
+
+## 数据、预算与实验目的
+
+| 项目 | 原文设置及含义 |
+|---|---|
+| SFT数据 | 表6：11,295条标注者提示、1,430条客户提示，共12,725；不是所有数据都直接来自客户 |
+| 偏好数据 | 6,623加26,584，共33,207个提示；每题4—9回答，比较对数大于提示数 |
+| PPO提示 | 31,144个训练提示，无逐条人工目标回答；奖励由已训练RM产生 |
+| 模型规模 | 策略1.3B、6B、175B；各策略使用6B奖励模型及6B价值模型 |
+| SFT配置区别 | 报告的SFT基线训练16轮；PPO初始化模型按附录C.3训练两轮并混入10%预训练数据，不能合并成一个检查点 |
+| RM训练 | 附录C.2：一轮，64个提示/批，学习率9e-6；多轮容易过拟合 |
+| PPO预算 | 附录C.4：256K回合，512回合/批、64小批、一次内部轮；温度1，裁剪0.2，KL系数0.02 |
+| PPO-ptx | 使用比RL回合多八倍的预训练样本，梯度系数27.8；增加训练工作量 |
+| 评价与区间 | 留出客户提示、人类偏好、指令约束、TruthfulQA及公开NLP指标；论文误差条为95%置信区间 |
+
+客户划分降低同一用户提示跨训练测试的泄漏；留出标注者检验部分评价迁移，但仍来自相同供应商，不能代表全球用户群。训练与最终评价对帮助性、真实性、无害性的优先级也不完全相同，需保留原文§3.4的这一设计边界。
+
+## 五组证据：偏好提升不等于所有能力提升
+
+**证据一：图1与§4.1的直接偏好。** 175B InstructGPT相对175B GPT-3获偏好85±3%，相对经过少样本提示的GPT-3为71±4%。这些是同一提示上成对评价的胜率，不是回答正确率。图1常用175B SFT作为统一对手，不能把图上纵轴与85%的直接比较混用。
+
+**证据二：图4的行为指标。** 封闭领域任务中，编造输入未给信息的比例约从41%降到21%，降低20个百分点，按原值计算相对下降约49%。图4汇总不同模型规模，且“幻觉”限定于摘要、闭域问答等场景，不能宣称所有开放知识问答幻觉减半。
+
+**证据三：图3及§4.1的评价者迁移。** 留出评价者仍偏好InstructGPT；五折评价者划分中的奖励模型，在留出组预测准确率69.6±0.9%，训练来源组为72.4±0.4%。这支持有限群体迁移，同时说明偏好预测远非完美。它不能排除更大文化、语言或专业群体上的分歧。
+
+**证据四：图5与附录C.5的数据分布对照。** 直接比较时InstructGPT对作者训练的FLAN数据模型胜率78±4%，对T0数据模型79±4%。这些对照是用相关数据微调175B GPT-3的版本，并非原论文所有模型和训练预算。结果支持API任务分布适配的重要性，不能概括为偏好学习普遍优于多任务训练。
+
+**证据五：§4.2的能力代价与负结果。** PPO在SQuAD、DROP等公开任务出现退化，混合预训练梯度可缓解；TruthfulQA整体有改善，但1.3B PPO-ptx是例外。Winogender、CrowS-Pairs未显示显著改善。它说明行为对齐具有多目标权衡，而非一个总分提高就自动修复偏见、知识和可靠性。
+
+## 贡献与局限
+
+本文把已有的偏好学习、奖励建模和PPO应用到广泛自然语言指令，并展示真实使用分布上的人工评价收益。创新主要是系统化的数据和训练组合、跨规模证据以及对能力退化的处理，不是发明PPO本身。
+
+主要代价包括示范与排序标注、同时维护策略/参考/奖励/价值模型、额外预训练梯度，以及奖励模型被策略过度优化的可能性。输出更合评价者口味，也可能意味着更会迎合风格；如果评价者未能识别错误，错误信号就会被放大。
+
+公开论文披露了关键流程和预算，但完整客户数据、私有检查点与标注条件并不等同于可完整重建的公开实验。作者明确承认模型仍会编造、误解指令、给简单问题冗长回答及未识别错误前提。这里的安全性是有限评估结果，而非形式保证。
+
+## 用例子理解三个阶段
+
+以下为自构例子：要求“将这段通知压缩为两句话，不增加信息”。SFT展示一份合格摘要；偏好数据把准确两句话排在流畅但添加日期的回答前面；奖励模型学到这种区别；PPO提高生成前者的倾向。
+
+如果奖励模型只学到“两句话看起来很整齐”，可能给内容错误的两句话高分。因此应该另测事实保持、字数约束和人类整体偏好，不能只看奖励曲线。这个例子说明代理指标与真实任务之间的缝隙，不是论文中的真实样例。
+
+五个前置概念：**SFT**用正确回答做监督学习；**偏好模型**预测两个回答谁更受欢迎；**策略梯度**提高高回报动作概率；**KL散度**衡量分布偏移；**优势估计**比较实际回报与价值基线，减少梯度噪声。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 续写目标不等于完成指令，纯PPO又可能损伤能力 | 示范学习、排序奖励、PPO与KL、预训练梯度混合 | 用人类比较调整生成倾向，约束偏移并保持通用分布 | 图1/§4.1偏好85±3%；图4闭域幻觉41→21；图3留出评价者；§4.2能力权衡 | 人工与多模型成本；群体偏好有限；奖励误差；偏见指标未普遍改善 |
+
+## 自测与参考答案
+
+**1. 奖励模型和价值模型有什么区别？**
+
+答案：奖励模型预测完整回答获得的偏好分数，在PPO中充当固定反馈函数；价值模型预测从当前前缀继续生成的回报，用于优势估计并随训练更新。相同初始化不意味着职责相同，也不意味着价值预测就是人的偏好标签。
+
+**2. 为什么PPO裁剪之外还需要相对SFT的KL项？**
+
+答案：裁剪关注当前更新相对产生样本的旧策略，连续很多小步仍可能走得很远。KL项持续参照固定SFT分布，约束累计偏移。二者都不能保证奖励真实，只能缓解更新与分布偏离方面的问题。
+
+**3. 85%的偏好胜率能否解释为85%的回答正确？**
+
+答案：不能。它表示在所测提示与评价者条件下，一份回答比对手更受偏好。两个回答都错时也可能分出高下；偏好还包含格式和有用性。应分别报告事实核查、任务成功、拒答或遗漏以及不同人群评价，明确比较对象。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "054-instructgpt",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

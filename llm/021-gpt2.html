@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>021｜GPT-2：网页里的自然任务示例，能否转化为零样本能力 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">GPT-2：网页里的自然任务示例，能否转化为零样本能力</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 021｜GPT-2：网页里的自然任务示例，能否转化为零样本能力
+
+[目录](README.md) · [上一篇](020-adapters.md) · [下一篇](022-xlnet.md)
+
+**论文**：Alec Radford 等，*Language Models are Unsupervised Multitask Learners*，2019。[官方原文](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)。本篇讨论 WebText 语言建模与不更新参数的任务迁移；不把后续指令微调和 RLHF 写进 GPT-2 的训练过程。
+
+## 一分钟理解
+
+网页里自然包含问答、翻译、摘要和各种说明。若模型足够善于预测这些文本，它是否也会在相应前缀后继续完成任务？GPT-2 扩大生成式语言模型和较多样的网页语料，在不为每个任务微调参数的条件下检验迁移。
+
+作者发现多个任务随模型规模改善，但效果从弱到强不等。论文的核心推进是把任务执行看成条件文本续写，展示自然文本可提供隐式监督；限制是提示敏感、任务能力不均、数据重叠和缺乏可靠指令遵循。
+
+## 背景：没有专门标注，不等于没有任务示例
+
+一个网页可能写“法语词……的英文是……”，形式上已经含翻译配对。语言模型训练没有为这段内容额外指定“翻译损失”，但预测后半段仍会受到类似监督。论文的“unsupervised”应理解为没有逐任务标注训练流程，而不是数据中绝无任何答案示范。
+
+任务可以表示为 $P(output\mid input,task)$，而任务条件也能写成文本。模型仍只训练下一 token，却可能利用文本格式判断接下来应该是什么。这种潜力不保证模型总能识别任务，也不保证长提示中的要求得到遵循。
+
+WebText 使用带有人类平台筛选信号的网页来源和启发式清洗。语料不是从互联网完全均匀抽样，质量、体裁与社会偏差都进入训练分布。因此“自然文本”也有明确采集策略，应计入方法而非当作无限免费资源。
+
+## 方法：规模、数据与文本条件
+
+基本训练目标依旧是：
+
+$$
+L=-\sum_t\log P_\theta(x_t\mid x_{<t}).
+$$
+
+模型采用因果 Transformer，并在归一化位置、初始化等方面调整。原文还使用 byte-level BPE，以有限基础字节集合支持更广字符串覆盖。它与早期字符级 BPE 不是完全相同接口，预处理规则决定序列长度和可比较概率。
+
+任务执行主要通过前缀格式、候选评分或生成完成。例如给定文档和问题，模型继续生成答案；某些任务可以比较多个候选续写的概率。没有参数更新不表示没有提示设计、答案截取和评价规则。
+
+大型号的参数和数据利用率是论文比较的重要变量。规模增长同时增加训练与推理成本，不能只把任务分数变化解释为“涌现”而不报告预算。若小模型还未充分拟合语料，曲线也可能反映优化与容量共同变化。
+
+```text
+训练：
+    收集并清洗WebText，按固定byte-level BPE编码
+    对连续片段进行因果下一token预测
+    训练多个规模的同类模型
+零样本任务：
+    将任务输入写成约定文本格式
+    不更新参数，生成续写或给候选答案打分
+    按任务规则提取答案并计算指标
+    检查训练与评价内容重叠
+输出：不同规模下的任务表现及语言建模结果
+```
+
+数学上没有额外任务损失；机制是自然文本预训练和条件化调用；评价却覆盖多种任务。零样本指未用该任务训练集更新参数，不自动表示模型从未在网页中见过相似任务或内容。
+
+## 实验与证据
+
+| 项目 | 原文范围 |
+|---|---|
+| 数据 | 清洗去重后约 800 万网页、40GB 文本的 WebText 版本 |
+| 模型 | 多个规模，最大约 1.5B 参数 |
+| 任务 | 语言建模、阅读理解、摘要、翻译、问答等 |
+| 迁移 | 不进行任务专门参数微调，具体提示和评分方式因任务而异 |
+| 指标 | PPL、F1、BLEU、ROUGE或任务准确率，不可直接混成同一尺度 |
+| 重叠控制 | 原文单独分析数据重叠；清洗不能保证绝无污染 |
+| 重复 | 规模曲线不是多随机种子稳定性区间 |
+
+**证据一，表 1 与第 2.1 节。**网页中的自然翻译示例和语料采集说明，为隐式任务学习提供合理来源。示例证明数据可能包含任务结构，不量化模型到底依赖了多少此类内容。
+
+**证据二，图 1 与第 3 节各任务结果。**不同任务随规模变化，CoQA 约 55 F1 是一个代表结果。任务表现差异很大，不能把最强任务的水平扩展到摘要或翻译全部场景。
+
+**证据三，数据重叠分析与语言建模比较。**跨数据集测试检验分布迁移，同时检查内容重复。零样本与去污染是不同维度：没有微调仍可能包含训练文本重叠。
+
+如果一个任务采用候选答案似然而另一个采用自由生成，两者难度和错误来源也不同。候选列表已经提供答案空间，不能把候选评分成功直接称为开放问答生成成功。
+
+## 教学例子：续写怎样像在执行任务
+
+构造前缀“问题：水在标准气压下多少度沸腾？答案：”。模型可能继续一个常见答案，因为训练中见过类似文本规律。若改成“以下是错误答案示例”，相同问题可能诱导不同续写，说明行为依赖整个文本条件，而非有一个稳定任务执行开关。
+
+这既展示了文本接口的灵活性，也解释提示敏感性。模型可能续写评论、模仿错误示例或产生看似合理但不真实内容。下一词概率高与满足用户目标不是同一个优化对象，这正是后续指令训练和偏好对齐需要解决的问题。
+
+再构造一个从未存在过的虚构实体问题。语言模型可能生成符合常见格式的答案，却没有事实来源。更大的模型可以改善知识覆盖，但不会因规模自动获得可验证引用或拒答机制。
+
+## 怎样辨别零样本证据强弱
+
+应固定提示开发过程，区分使用开发集调格式与完全预先设定；记录生成长度、温度和答案提取；对污染样本与未污染样本分组。若尝试许多提示后只展示最好者，提示搜索成本也参与了系统能力。
+
+模型规模曲线还应匹配训练充分程度和数据量。如果某一模型训练更久或使用不同过滤数据，不能只用参数数解释差异。论文展示了一条有潜力的扩展路线，而严格的资源规律还需要后续 scaling-law 工作。
+
+## 贡献与局限
+
+GPT-2 推动从“预训练后每任务微调”向“文本条件直接调用”的认识转变。局限是任务不均、提示与解码敏感、事实错误、数据不可完全复原以及执行成本增长。它不是今天经过多阶段对齐的对话模型。
+
+五个前置概念是条件续写、零样本、隐式监督、数据污染和解码协议。区分这些，才能同时理解为何自然文本训练有迁移价值，以及为什么零样本分数仍需要严格实验条件。
+
+一个值得单独控制的因素是答案概率的长度归一化。比较候选时，直接相加对数概率通常偏向较短字符串；按token平均则又改变目标。两种规则都需要预先声明，否则同一个模型可以因为评分规则变化而得到不同所谓零样本能力。
+
+|原有问题|作者改动|为什么可能有效|实验证据|代价与局限|
+|---|---|---|---|---|
+|任务接口依赖专门监督|扩大自回归模型与网页预训练|从文本中的任务结构学习续写模式|图1规模趋势、第3节任务、重叠分析|任务表现不均，零样本不等于无污染|
+
+## 自测与参考答案
+
+**1. 无监督多任务是否意味着训练文本没有问答或翻译答案？**
+
+不是。自然网页可包含这些结构，只是没有为每项任务单独组织监督流程。任务知识可能通过普通下一词预测进入参数。
+
+**2. 不更新权重，为什么仍可能过度适配评价集？**
+
+可以通过反复选择提示、解码和答案提取规则来适配评价结果。参数冻结只排除一种适配方式，不排除系统层面的调优或数据重叠。
+
+**3. 为什么 GPT-2 的文本续写不等于可靠指令遵循？**
+
+它训练的是文本概率，可能模仿格式、语气或错误示例，而非稳定完成用户意图。指令数据与偏好优化提供不同监督，不能由因果架构名称自动推出。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "021-gpt2",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

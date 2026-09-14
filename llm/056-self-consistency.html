@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>056 · 自一致性：对多条推导的最终答案投票 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">056 · 自一致性：对多条推导的最终答案投票</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 056 · 自一致性：对多条推导的最终答案投票
+
+[返回目录](README.md) · [上一篇：STaR](055-star.md) · [下一篇：Chinchilla](057-chinchilla.md)
+
+论文：Xuezhi Wang等，*Self-Consistency Improves Chain of Thought Reasoning in Language Models*，2022年公开，ICLR 2023。[原始论文](https://arxiv.org/abs/2203.11171) · [v4全文](https://arxiv.org/html/2203.11171v4)。阅读范围为方法、主实验与附录A的资源和消融，不包含全部提示逐项审计；未独立复现。
+
+## 一分钟理解
+
+同一道数学题可以有不同解法。模型一次生成可能走错路，但若多次生成得到不同推导，而其中多数汇聚到同一个答案，这个答案可能比单次贪心输出更可靠。
+
+自一致性保持模型和提示不变，采样多份解答，提取最终答案并计票。不训练验证器，不让模型在推理后更新权重，也不是让多个独立训练的模型讨论。改动很小，却让论文中的PaLM 540B在GSM8K从56.5%提高到74.4%。
+
+一句话：在答案能够归并和计票的推理任务中，通过同一模型的多路径采样与答案聚合改善准确率，代价是重复生成，并且一致错误仍会被投票放大。
+
+## 从生成最像的序列到聚合答案
+
+标准思维链通常贪心生成一条文本。它每一步选择概率最大的token，但最可能的一条完整推导不一定导向总概率最高的答案：正确答案的概率质量可能分散在很多不同表达和解法上。
+
+设问题为$x$，推导为$r$，答案为$a$。希望比较的答案概率是
+
+$$
+p(a\mid x)=\sum_r p(r,a\mid x).
+$$
+
+这里对推导求和体现“不同过程可以支持同一结论”。实际无法枚举所有推导，作者从解码分布抽取$m$条$(r_i,a_i)$，选择
+
+$$
+\hat a=\arg\max_a\sum_{i=1}^m\mathbf1(a_i=a).
+$$
+
+这通常称为多数投票，但严格说是取票数最多的答案，不要求超过50%。数值答案可能有很多种，正确选项只要比每个错误选项更集中，就可能胜出。
+
+如果采样采用温度或top-k，计票近似的是被这些操作改变后的采样分布，不是严格恢复原始模型未修改概率。这个细节不会否定经验收益，却提醒我们不要把有限采样加启发式解码描述为精确贝叶斯推断。
+
+## 算法：多样性与答案归并同样重要
+
+```text
+输入：冻结语言模型 M、思维链示例、问题 x、采样数 m
+候选答案列表 A ← 空集
+重复 m 次：
+    从 M 随机生成一份推导与最终答案
+    按任务规则解析最终答案
+    规范化等价形式，加入 A
+统计每种答案出现次数
+返回出现次数最多的答案
+若要展示解释，从获胜答案对应候选中另选一条并检查
+```
+
+最后一行是教学性输出处理建议，原论文核心评价针对最终答案，不保证展示的某条推导最可信。答案归并也必须预先定义：例如“0.5”和“1/2”是否等价，单位是否一致，选择题标签如何提取。作者按任务解析“The answer is”之后的数值或文本，而不是对任意长文都能直接投票。
+
+这不是GSM8K验证器的同义词。验证器依靠额外训练模型对完整候选排序；自一致性只依赖候选答案频率。它也不同于STaR：STaR把筛选结果写回权重，自一致性只在当前测试题增加计算。
+
+论文还比较按序列概率加权。未归一化概率是许多token概率的乘积，会显著受长度影响；长度归一化后近似几何平均，但那已不是完整序列概率。对已经按模型分布抽取的样本再次按概率加权，也会改变估计量。作者最终采用简单计票，是基于实验效果和实现便利，并非证明所有加权方案都没有价值。
+
+## 实验设置与预算
+
+| 项目 | 原文设置与检查内容 |
+|---|---|
+| 算术任务 | AddSub、MultiArith、ASDiv、AQuA、SVAMP、GSM8K |
+| 常识与符号 | CommonsenseQA、StrategyQA、ARC、末字母拼接、硬币翻转 |
+| 数据划分 | 可得标签时默认测试集；CommonsenseQA开发集，StrategyQA采用BIG-bench问题集 |
+| 模型 | UL2 20B、LaMDA 137B、PaLM 540B，以及code-davinci-001/002端点；保留端点避免混淆模型版本 |
+| 采样 | 主结果每次40条，重复十次；UL2/LaMDA温度0.5、top-k40，PaLM温度0.7、top-k40，API温度0.7 |
+| 提示与训练 | 少量手写思维链示例；无微调、无额外奖励模型；AQuA具体示例以附录为准 |
+| 资源 | 附录A.2报告TPU或API；约千题任务UL2/LaMDA多数1—4小时，PaLM多数2—12小时，部分更长 |
+| 统计 | 主表自一致性为十次均值，标准差通常不超过0.5个百分点；不同采样数另画均值与标准差 |
+
+API实验的最大生成长度为128token，不能把它的结果与不限长度的后续系统直接当作同预算比较。40条采样可并行降低墙钟延迟，但总生成量仍增加；同样的候选数也不意味着束搜索与独立采样的硬件时间严格相同。
+
+## 五组证据与结论边界
+
+**证据一：表2的算术成绩。** PaLM GSM8K从56.5%到74.4%，增加17.9个百分点，相对提升约31.7%；code-davinci-002从60.1%到78.0%，也是17.9个百分点。本文应使用这篇论文自己的基线，不能直接减去上一篇思维链版本中的56.9%，因为评估设置和版本不完全相同。
+
+**证据二：表1的聚合消融。** PaLM GSM8K简单计票74.4±0.1，长度归一化加权和74.1，未归一化加权和59.9，归一化加权平均22.1。将同答案支持数量除掉会损失关键的集中性信息。这支持该组任务上的计票设计，不能推广为任意候选评分任务都应无条件忽略置信度。
+
+**证据三：表5修复思维链退化。** PaLM在RTE的标准提示为84.8%，单条思维链79.1%，自一致性86.3%；e-SNLI为85.8、81.0、88.4。它表明多路径聚合能够抵消部分单条推导错误，但并非每个任务都值得花40倍级别生成量。部署仍需准确率与成本共同决策。
+
+**证据四：图3与表6的搜索比较。** 图3在相同采样数下优于按生成概率排序。表6中UL2的AQuA在40条随机路径计票下为26.9±0.5，而取束搜索最高序列为10.2，束内计票24.2±0.5。它支持候选多样性的价值；相同候选条数并未严格控制总token、共享前缀和硬件效率。
+
+**证据五：表3的无效场景与表9提示稳健性。** UL2四字母拼接从0.0到0.0，LaMDA同任务8.2到8.2，说明缺少可用能力时投票可能毫无帮助。另一方面PaLM三套GSM8K提示分别由56.5/54.6/54.0提高到74.4/72.1/70.4，收益跨提示存在，但提示之间的差距仍保留。
+
+## 为什么可能有效，为什么可能失败
+
+一种直觉是，错误路径可能分散到许多答案，而正确路径共享唯一答案。投票把分散的正确过程汇聚起来。这个假设比“每条采样超过50%正确”更弱，却仍要求正确答案是采样分布中较强的众数。
+
+如果模型系统性误解“增加了20%”与“增加到20%”，多数路径可能复制同一种概念错误。采样随机性不等于知识来源独立性，四十次同模型生成不能当作四十位独立专家。增加样本最终可能更稳定地选出错误众数，而非逼近真理。
+
+论文附录表13本身提供很好的阅读提醒：有些得到正确季节选项的生成解释仍把原因归为地球距太阳更近。作者展示的是修复最终答案，不是逐条科学解释已经正确。判断投票效果时，最终答案与过程有效性必须分别计量。
+
+原创性在于把推导看成待边缘化的中间路径，并以简单采样聚合展示广泛效果。没有新增网络结构、损失或参数学习。主要代价是推理成本和任务特定答案解析，开放写作或多种合法答案任务需要更复杂的语义归并，原方法不能直接照搬。
+
+## 一个自构例子
+
+问题是“原有20颗糖，送出5颗，再买入3颗，剩多少”。五次采样给出18、18、15、18、23。三条正确路径可能分别先减后加、算净变化或列方程，计票选18。无需选出概率最大的那一句完整文字。
+
+如果把问题中的“再买入”误读成“再送出”，模型可能多数回答12。此时一致性很高但事实错误。可设计反事实措辞对照，记录每题的票数集中度与正确性，研究高一致错误；这是一项未运行的教学实验。
+
+五个前置概念：**蒙特卡洛估计**用样本近似分布统计量；**边缘化**汇总不关心的中间变量；**温度采样**改变概率集中程度；**众数**是概率或票数最高的取值；**校准**研究置信度是否对应真实正确率。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 单条高概率推导容易出错 | 多路径采样后按最终答案计票 | 不同正确过程的概率质量汇聚到同一答案 | 表2 GSM8K56.5→74.4；表1聚合消融；表5退化修复；表6搜索对照 | 更多生成成本；需要答案归并；相关错误与错误众数不会自动消失 |
+
+## 自测与参考答案
+
+**1. 最高概率推导与最高概率答案为何可能不同？**
+
+答案：一个答案可以对应很多推导。错误答案可能有一条特别常见的表达，正确答案则由许多不同路径共同支持。选择单条最大值忽略了这些路径的总质量，答案聚合试图保留它。
+
+**2. 投票是否要求单条正确率超过50%？**
+
+答案：二元答案的简单多数通常需要正确类超过一半才能随样本增加稳定获胜。多类答案下只需正确答案概率高于每一个错误答案，未必超过50%。有限样本、相关生成与解析错误仍会影响实际结果。
+
+**3. 40条解答完全一致，是否可以不再验证？**
+
+答案：不能。一致性衡量模型分布内的共识，不是独立事实证据。训练偏差或共同误解能产生高一致错误。应结合外部计算、可执行测试、来源核对或独立评估，并用高一致错误比例检查这种风险。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "056-self-consistency",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

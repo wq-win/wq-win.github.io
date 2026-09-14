@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>034 · RAG：让生成模型在参数记忆之外查阅证据 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">034 · RAG：让生成模型在参数记忆之外查阅证据</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 034 · RAG：让生成模型在参数记忆之外查阅证据
+
+[返回目录](README.md) · [上一篇：Longformer](033-longformer.md) · [下一篇：GPT-3](035-gpt3.md)
+
+论文：Patrick Lewis 等，*Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks*，NeurIPS 2020。[原始论文](https://arxiv.org/pdf/2005.11401)。阅读范围包括§2模型、§3–4实验与附录的训练解码设置；没有独立复现全量检索库。
+
+## 一分钟理解
+
+生成模型可以把大量知识记在参数里，但更新事实需要训练，而且很难知道答案来自哪里。RAG 组合了一个检索器和一个生成器：先找可能有用的段落，再让生成器在问题和段落条件下预测答案，并用最终答案训练检索选择。
+
+这篇论文中的 RAG 是一个具体概率模型，不是今天所有“搜索后把材料放进提示词”的系统统称。它把检索文档作为潜变量，对多个文档条件下的生成概率进行边缘化，还区分整段答案共用文档与每个词可依赖不同文档两种形式。
+
+一句话：在知识密集型任务中，通过外部文档检索与生成概率联合训练，改善问答和部分生成事实性表现，并允许更换知识索引，代价是检索存储、额外推理计算和证据不一定被忠实使用。
+
+## 从 DPR 到可生成答案
+
+DPR 的检索器能够从大量段落选出候选，典型阅读器则抽取一个文本跨度。抽取要求答案以合适形式存在于材料中。生成器能改写、组合线索和输出分类标签，但也有自由编造内容的空间。
+
+RAG 把 BART 的参数称为参数记忆，把外部向量索引称为非参数记忆。这并不意味着外部系统没有参数：文档编码器当然是神经网络；“非参数”强调事实内容存储在可替换文档集合中，而不是全部压进生成器权重。
+
+输入为问题或其他任务文本 $x$，目标输出序列为 $y$，外部候选文档为 $z$。训练数据通常提供输入—输出对，而当前任务训练不要求标注应检索哪篇文档。不过检索器由有监督 DPR 初始化，因此“无需当前任务证据标签”不能改写为“从未使用检索监督”。
+
+## 两种边缘化机制
+
+检索器 $p_\eta(z\mid x)$ 根据问题向量与文档向量的内积评分。生成器 $p_\theta(y_i\mid x,z,y_{<i})$ 读取问题、一个文档和已有答案前缀。RAG-Sequence 的近似概率为：
+
+$$
+p(y\mid x)\approx\sum_{z\in\mathrm{top}\text{-}k}p_\eta(z\mid x)\prod_i p_\theta(y_i\mid x,z,y_{<i}).
+$$
+
+这里先对每篇文档计算整段答案的概率，再加权求和。RAG-Token 则把求和放到乘积内部：
+
+$$
+p(y\mid x)\approx\prod_i\sum_{z\in\mathrm{top}\text{-}k}p_\eta(z\mid x)p_\theta(y_i\mid x,z,y_{<i}).
+$$
+
+区别是潜在文档能否随输出位置变化，不是每生成一个词都必须重新向外部搜索引擎发请求。原方法基于输入检索候选，再在这些候选上组合词概率。求和与乘积一般不能交换，所以两者不是等价实现。
+
+训练最小化正确输出的负对数边缘似然。如果某段落能帮助生成正确答案，它得到更有利的学习信号。但候选截断及近似搜索不等于对整个离散检索过程完整求导，检索遗漏仍可能让有用文档得不到机会。
+
+```text
+输入：任务(x,y)、DPR查询编码器、固定文档索引、BART生成器
+每次更新：
+    编码x，从索引检索top-k文档
+    计算候选文档的归一化检索权重
+    对每篇文档分别计算条件生成概率
+    按Sequence或Token定义边缘化
+    计算正确答案负对数似然
+    更新查询编码器和生成器；保持文档编码器与索引固定
+推理：
+    检索候选，采用相应概率组合与解码近似输出答案
+输出：生成答案；引用忠实性需要另外评价
+```
+
+固定文档侧避免了训练时反复为全库重编码，这也是它与 REALM 部分训练机制的重要区别。Sequence 解码需处理跨文档的完整候选序列分数，论文给出 Thorough 与 Fast 两种近似；Token 形式更容易接入逐词解码。
+
+## 实验资源与公平性
+
+|项目|原文设置与含义|
+|---|---|
+|知识库|2018年12月维基百科，约2100万个不重叠100词段落；FAISS近似内积索引|
+|模型|DPR检索器初始化，BART-large约400M参数生成器；训练查询端与生成器|
+|任务|NQ、TriviaQA、WebQuestions、CuratedTREC开放域问答，MS-MARCO生成问答、Jeopardy出题、FEVER分类|
+|训练预算|附录C使用8张32GB V100，混合精度；候选数5或10，任务分别微调，不能用单个统一步数描述全部任务|
+|推理预算|附录A开放域测试Token检索15篇、Sequence检索50篇；生成任务用10篇与beam4|
+|指标|问答EM，生成BLEU/ROUGE及人工事实性，FEVER标签准确率；不同指标不可互换|
+|不确定性|人工评价有452对生成样本；主任务表没有统一的跨种子置信区间，人工协议见附录B|
+
+模型参数较少不等于系统资源较少。外部索引需要内存、磁盘和构建成本，多文档生成要重复条件计算。闭卷模型与开卷模型获取的信息不同；两者比较回答的是系统方案能力，不是隔离参数数量的纯粹实验。
+
+## 结果：优势与尚未解决的问题
+
+**证据一：表1，开放域问答。** NQ上DPR系统EM41.5，RAG-Token为44.1，RAG-Sequence为44.5。改善说明生成式读取与检索组合有价值，但两种RAG测试文档数不同，不能把0.4分差值直接解释为Sequence机制更优。TriviaQA还含两种测试口径，引用数值必须说明是哪一列。
+
+**证据二：表6，检索是否需要学习。** NQ开发集RAG-Token固定检索器为37.8，可训练检索器为43.5；Sequence为41.2与44.0。这支持让任务目标调整查询表示。FEVER上BM25方案反而更强，显示实体密集型词项匹配有优势，不能把稠密检索视为所有知识任务的默认胜者。
+
+**证据三：表4与附录B，事实性需要人工评价。** Jeopardy生成比较中，人工判断RAG更事实准确的比例42.7%，BART更好的比例7.1%。这是成对偏好比例，不是RAG的绝对事实正确率。表中还存在双方都差与无多数意见，不能把42.7%直接当作错误减少率。
+
+**证据四：§4.5索引替换与图3。** 作者用82个发生变化的领导人职位问题，比较2016和2018索引，展示替换外部记忆能改变回答。该结果支持知识更新的可能性，不证明所有新事实都能可靠覆盖参数记忆。图3也显示增加文档并非对每种模型和指标都单调有益：更多候选既增加信息，也增加噪声与成本。
+
+原文§4.3文字中“双方事实正确”的比例与表4出现不一致：表4是11.7%，邻近正文写17%。讨论该项时应明确依据版本与表格，不能把矛盾悄悄合并为一个确定数字。上述主要结论使用两处一致的42.7%与7.1%。
+
+## 一个构造例子与系统诊断
+
+自构问题：“某研究者在哪一年获得奖项？”文档A描述研究者身份，文档B给出奖项年份。Token边缘化允许不同输出位置依赖不同候选，但并不显式维护可验证的推理链，也不自动生成对应引用。
+
+如果参数记忆记着旧年份而检索给出新年份，最终答案可能仍采用旧知识。一个未执行实验可以构造可控的虚构人物事实，分别设置正确证据、过时证据、矛盾证据和无证据四种条件；测准确率、证据依赖率、错误自信以及延迟。使用虚构实体有助于减少预训练记忆干扰，但其结果仍不能完全代替真实世界测试。
+
+还应分别测“检索命中但答错”和“未命中却答对”。后一类可能来自参数知识，不应自动计为检索的成功；前一类则提示阅读或整合问题。单看最终EM无法定位改进应该发生在检索器还是生成器。
+
+## 贡献与局限
+
+论文以统一的生成概率框架连接多种知识任务，并证明训练检索与替换索引可以改善系统能力。它仍受知识库覆盖、索引陈旧、文档可信度、生成幻觉和推理预算限制。外部证据为核验提供了条件，却不构成自动的事实保证。
+
+五个前置概念是：潜变量代表未直接标注文档，边缘化对可能证据求和，DPR提供可索引检索，编码器—解码器生成条件文本，参数记忆与外部记忆划分知识存储位置。理解这些后，再读FiD可以看清“概率层面融合”与“表示层面融合”为什么不同。
+
+|原有问题|作者改动|为什么可能有效|实验证据|代价与局限|
+|---|---|---|---|---|
+|参数知识难更新、抽取输出受限|DPR与BART组合并对文档边缘化|外部证据补充生成条件|表1问答、表6检索消融|索引与多文档计算，仍有幻觉|
+|训练权重难随事实变化更新|保持模型并替换外部索引|改变可访问知识来源|§4.5的82个职位问题|小范围演示，无法保证忠实使用|
+
+## 自测与参考答案
+
+**1. RAG-Token是否每个词都重新检索？**
+
+原定义不要求如此。候选由输入检索，逐词变化的是候选文档条件下的概率组合与后验依赖。把它等同实时逐词网络搜索会误读算法成本。
+
+**2. 为什么不能宣称RAG完全没有检索监督？**
+
+当前任务联合训练可仅用输入—输出对，但初始化的DPR已经使用问答相关性监督。应该区分初始化资源与当前微调所需标签。
+
+**3. 给答案附上一篇检索文档，就能保证引用忠实吗？**
+
+不能。模型可能未依赖该文档，文档也可能不支持具体句子。需要逐项证据核验、引用准确率或证据替换实验，不能用检索存在代替支持关系。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "034-rag",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

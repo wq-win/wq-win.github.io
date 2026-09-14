@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>087｜GPMP2：把轨迹规划写成因子图推断 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人经典基础</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">GPMP2：把轨迹规划写成因子图推断</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 087｜GPMP2：把轨迹规划写成因子图推断
+
+[返回总览](00-发展时间线总览.md) · [上一篇：EuRoC](086-euRoC.md) · [下一篇：COLMAP](088-colmap.md)
+
+**论文**：Jing Dong、Mustafa Mukadam、Frank Dellaert、Byron Boots，*Motion Planning as Probabilistic Inference Using Gaussian Processes and Factor Graphs*，RSS 2016。[原文](https://www.roboticsproceedings.org/rss12/p01.pdf) · [官方实现](https://github.com/gtrll/gpmp2)。
+
+**阅读范围**：会议正文第 II–VI 节、算法 1、表 I–II、实现和局限；未执行代码或机器人实验。下文将 GPMP2 与增量版 iGPMP2 分开，也不把概率建模解释为经过校准的实际碰撞概率。
+
+## 一、一分钟理解
+
+机械臂绕障碍物移动时，轨迹既要平滑，又不能碰东西。如果每隔很短时间都建立一个独立状态，优化问题会很大；如果只保留少数点，点与点之间又可能穿过障碍物。
+
+GPMP2 的办法是：用少量支持状态定义连续时间高斯过程轨迹，通过插值在中间位置计算障碍代价，再把这些约束回传到支持状态。由于选用具有 Markov 结构的先验，优化可写成稀疏因子图，借用 SLAM 中成熟的求解器。
+
+目标变化时，iGPMP2 尝试复用原来的轨迹和分解结果。实验显示它可以很快，但成功率也会下降，尤其不能把毫秒级成功案例耗时写成所有请求的可靠完成时间。
+
+一句话：**在已知环境中的机械臂轨迹优化中，通过结构化 GP、插值和稀疏推断降低求解成本，代价是局部极小、软约束和增量更新的成功率取舍。**
+
+## 二、问题定义与前人瓶颈
+
+输入是起点、目标、机器人几何与环境距离场，输出是关节空间随时间变化的轨迹。这是基于模型的规划，不是强化学习训练。本文状态包含关节位置和速度；没有从交互奖励学习策略。
+
+CHOMP、STOMP、TrajOpt 等已经能优化轨迹。本文不是首次让轨迹平滑，也不是首次使用高斯过程；其参照之一就是 GPMP。关键差别在于把问题系统地组织成非线性最小二乘和稀疏因子图，利用高效分解及增量更新。
+
+“常速度先验”容易误读为机械臂必须匀速。实际是先验偏好小加速度，优化仍可偏离均值绕障碍。它也不是完整刚体动力学模型：关节轨迹光滑不自动保证电机力矩、接触力、负载和带宽限制全部满足。
+
+## 三、方法：概率只是表达方式，优化对象仍是一条轨迹
+
+### 1. 为什么状态要包含速度
+
+第 IV 节采用白噪声加速度模型：
+
+$$\ddot q(t)=w(t),\qquad\theta(t)=[q(t)^T,\dot q(t)^T]^T.$$
+
+只知道位置通常不足以用一阶 Markov 模型预测下一时刻；加入速度后，相邻状态之间可以建立局部转移因子。这个结构使精度矩阵 $K^{-1}$ 呈块三对角形式。不是所有任意 GP 核都有这种稀疏性，也不是协方差 $K$ 本身必然稀疏。
+
+### 2. MAP 目标包含什么
+
+论文第 II 节把目标写成：
+
+$$\theta^*=\arg\min_\theta\frac12(\theta-\mu)^TK^{-1}(\theta-\mu)
++\frac12h(\theta)^T\Sigma_{obs}^{-1}h(\theta).$$
+
+第一项偏好符合先验的平滑轨迹，第二项惩罚靠近或进入障碍的状态。$μ$ 是先验均值，$h$ 是障碍残差，$\Sigma_{obs}$ 控制代价强度。这里似然是人为构造的规划偏好，并未通过大量碰撞频率校准；不能把其数值解释成真实世界的安全概率。
+
+当 $\Sigma_{obs}$ 变大，其逆矩阵变小，障碍代价反而变弱。因此“协方差参数更大，所以避障力度更大”方向是反的。论文图 6 正好展示参数过大时的失败。
+
+### 3. 障碍距离怎样进入关节空间
+
+机器人用一组球近似，正运动学把球心映射到工作空间。距离场给出球心到障碍的有符号距离，再减半径得到近似表面间隔。低于安全余量时产生 hinge 残差，远离障碍时为零。
+
+这个链条也暴露了误差源：球体覆盖不充分、距离场分辨率太低、地图有误差，都可能让代价低估碰撞。几何代价精确求解与真实机器人绝对不碰撞之间，还隔着模型质量。
+
+### 4. 支持状态少，检查位置可以多
+
+对 $t_i<\tau<t_{i+1}$，插值状态可由邻接支持状态表达：
+
+$$\theta(\tau)=\mu(\tau)+\Lambda(\tau)(\theta_i-\mu_i)+\Psi(\tau)(\theta_{i+1}-\mu_{i+1}).$$
+
+中间时刻的障碍残差因此只连接两个支持状态，保留局部稀疏结构。图 2 区分优化支持点、碰撞检查点和执行输出点：它们无需具有相同密度。
+
+连续时间表示不意味着检查了无限多个时刻。论文通过有限插值点评价障碍，不能据此宣称对任意薄障碍都具有形式化连续碰撞保证。输出进一步加密也不能修复已经漏掉的碰撞。
+
+### 5. 增量推断与伪代码
+
+```text
+输入：起终状态、机器人球体模型、已构建距离场
+以少量支持状态初始化一条轨迹
+加入起终状态先验与相邻 GP 平滑因子
+在支持点及插值点加入障碍因子
+重复：
+    计算残差和雅可比
+    求解稀疏、带阻尼的线性化系统并更新支持状态
+    达到迭代或相对改进阈值后停止
+独立检查所得轨迹是否满足可行性要求
+若目标或当前状态变化：
+    替换相关因子，复用原轨迹及 Bayes Tree
+    用 iSAM2 更新受影响部分，再次检查结果
+输出：可行轨迹，或明确失败
+```
+
+这是教学流程；批量版用 Levenberg–Marquardt，增量实现不具有完全相同的阻尼策略。起终状态在论文中以很小协方差软约束实现，作者认为实验误差可忽略，不是数学上严格零误差的硬等式。
+
+## 四、实验怎么比较
+
+| 项目 | 原文设置 |
+|---|---|
+| 问题规模 | WAM 七自由度机械臂 24 个规划问题；PR2 右臂七自由度 90 个问题，含书架和工业场景 |
+| 平台 | GTSAM 实现，OpenRAVE 仿真；单线程 3.4 GHz i7；另把成功轨迹在真实 WAM 上验证 |
+| 离散化 | WAM 通常 101 状态；插值版用 11 支持状态、每间隔九个插值点；PR2 对应 51 检查状态 |
+| 对照 | GPMP、CHOMP、STOMP、TrajOpt，以及有/无插值的 GPMP2 |
+| 预算 | GPMP2 最多 100 次迭代或相对改进低于 $10^{-4}$；部分基线最多 250 次，终止规则不同 |
+| 初始化与调参 | 多数以常速度直线初始化，GPMP 例外；每个数据集调到接近默认且表现较好的参数，预算未量化 |
+| 增量测试 | WAM 32、PR2 28 个目标改变重规划问题；不等于动态障碍预测的全面评测 |
+| 统计边界 | 时间表只统计成功运行；未报告统一随机种子置信区间，不能忽略失败者后只比较平均速度 |
+
+## 五、四组关键证据
+
+**表 I.A：速度与成功率要一起读。** WAM 插值版成功率 95.8%，平均成功耗时 0.068 s；无插值版 91.7%、0.120 s。条件平均耗时下降约 43.3%，计算为 $(0.120-0.068)/0.120$。TrajOpt-11 更快，0.027 s，但成功率只有 20.8%；不能只取最快数字宣布它最适合任务。
+
+**表 I.B：不同场景收益不同。** PR2 插值版 94.4%、0.033 s，TrajOpt-51 为 93.3%、0.860 s。约 26.1 倍是两者成功样本平均耗时之比，包含实现、参数和成功子集差异；不是 GP 插值这一模块单独产生的倍数。
+
+**表 II：增量加速付出了代价。** WAM 重规划从 30.21 ms 降到 2.38 ms，但成功率从 100% 降至 90.6%；PR2 从 26.70 ms 降至 4.27 ms，成功率从 96.4% 降至 75.0%，下降 **21.4 个百分点**。作者正文称损失较小，但在需要可靠执行的应用中，后一差异不能轻描淡写。
+
+**图 6 与失败分析。** 障碍参数过大可产生不可行解。作者把所测失败归因于不可行局部极小，并指出随机重启未实现。它直接限制“优化完成就规划成功”的说法。起点变化、目标大幅移动时旧轨迹可能是坏初值，iGPMP2 不能只依靠复用保证成功。
+
+证据见[原文第 V–VI 节及表 I–II](https://www.roboticsproceedings.org/rss12/p01.pdf)。机械臂真实演示验证的是选出的成功轨迹；没有报告每个仿真问题在硬件上重复试验的统一成功率。
+
+## 六、贡献、代价与局限
+
+贡献是把规划与估计共享的稀疏求解结构用起来，同时分离轨迹参数密度和碰撞检查密度。作者明确承认没有全局最优保证，处理一般非线性不等式约束的能力有限。
+
+我的分析是，系统总延迟还包括感知、距离场构建、碰撞验证和执行接口；论文规划内核耗时不直接等于闭环机器人反应时间。软障碍代价也不等于安全证明。若要在未知环境执行，应把距离场更新、地图误差与轨迹跟踪误差一起纳入验证。
+
+## 七、例子与五个前置概念
+
+**自构例子，未运行。** 用起点、中点、终点三个支持状态表示一条路径。三个状态都在障碍外，但两段之间可能穿过一个小盒子。插值点发现盒子后，其梯度会同时影响相邻支持状态，让整段弯开；如果检查点恰好都绕过很薄的障碍，仍可能漏检。这个例子解释计算节省与安全覆盖是两个问题。
+
+1. **高斯过程**：用均值和协方差描述连续函数的一族概率模型。
+2. **Markov 状态**：包含预测下一状态所需的信息，使局部条件关系成立。
+3. **精度矩阵**：协方差的逆，其稀疏性可以揭示条件独立关系。
+4. **有符号距离场**：空间位置到障碍表面的距离及内外符号。
+5. **Bayes Tree**：保存变量消元结构，便于增量更新部分计算。
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 轨迹变量过多 | 少量 GP 支持状态和插值因子 | 检查密度可高于变量密度 | 表 I 有/无插值 | 有限检查不是连续安全证明 |
+| 优化计算重复 | 稀疏因子图最小二乘 | 利用局部结构分解 | 批量基准 | 局部求解仍可能失败 |
+| 目标变化要重算 | iSAM2 复用轨迹与分解 | 只更新受影响部分 | 表 II | PR2 成功率明显下降 |
+| 平滑与避障冲突 | 先验与障碍似然加权 | 显式表达折中 | 图 6 | 权重错误可产生碰撞解 |
+
+## 八、理解检查：问题与答案
+
+**问题 1：为什么使用 GP 不意味着要从示范数据训练一个模型？**
+
+**答案：** 本文 GP 是根据运动平滑偏好设计的轨迹先验，核来自选定随机微分方程；优化求的是满足任务的轨迹，而非从示范学习策略或未知动力学。
+
+**问题 2：$\sigma_{obs}$ 增大时，为何可能更容易碰撞？**
+
+**答案：** 它进入障碍项的协方差，代价用逆协方差加权。协方差越大，障碍残差权重越小，优化器更愿意用靠近或穿过障碍换取平滑。名称不能代替读公式。
+
+**问题 3：iGPMP2 平均只需几毫秒，为什么还不能保证快速完成任务？**
+
+**答案：** 时间只对成功运行统计，失败还需恢复或重规划；增量结果成功率低于批量版，而且感知和执行耗时未包含在这个数字里。实际应用应同时评估截止时间内成功率、失败恢复成本和最终执行可行性。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "087-gpmp2",
+            active: "robot-classic",
+            seriesLabel: "\u673a\u5668\u4eba\u7ecf\u5178\u57fa\u7840",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

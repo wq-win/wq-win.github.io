@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>022｜HER：失败轨迹中的新目标 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">HER：失败轨迹中的新目标</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 022｜HER：失败轨迹中的新目标
+
+[系列首页](README.md) · [上一篇](021-dart.md) · [下一篇](023-dapg.md)
+
+**原论文**：*Hindsight Experience Replay*，Marcin Andrychowicz 等，2017。[原文](https://arxiv.org/abs/1707.01495)。
+
+## 一、失败也可以回答另一个问题
+
+机械臂原本想把方块推到桌角，却只推到了桌子中央。对原目标它失败了，但这段经验仍告诉我们：执行这些动作能够到达中央。HER 在回放时更换目标、重新计算奖励，把经验变成对另一个真实可达目标的学习数据。
+
+它没有伪造物理轨迹，也没有把原任务的失败算成成功。实际状态转移不变，改变的是“如果当时想去的是这里，这些动作意味着什么”。
+
+作者通过多目标机器人控制证明这种回放设计能帮助稀疏奖励学习。实验支持指定任务、目标结构与底层离策略算法中的收益。一句话总结：通过重标记已达到目标，改善失败经验的信息利用，代价是需要目标可重算、动力学不依赖目标，且仍需要基本探索覆盖。
+
+## 二、设定与五个概念
+
+策略为 $\pi(a|s,g)$，价值为 $Q(s,a,g)$。$g$ 是目标，$m(s)$ 从状态提取已实现目标，例如物体位置。训练时给定期望位置，动作依然作用于同一个物理环境。
+
+五个概念是：**目标条件策略**把目标作为输入；**通用价值函数**跨目标共享价值参数；**离策略学习**利用其他行为策略数据；**经验回放**重复使用历史转移；**奖励重标记**根据新目标重新评价同一转移。
+
+HER要求能够判断一个状态是否达到某个目标。若任务目标是“让人满意”，但没有可重算的评价函数，就无法直接照搬位置目标形式。它也不负责从原始图像发现所有目标语义，本文的机器人训练主要使用结构化状态。
+
+## 三、方法：物理转移不变，任务条件改变
+
+原始转移为 $(s,a,s',g,r)$。选择新的 $g'$ 后：
+
+$$
+r'=r(s,a,g'),\qquad
+(s,a,s',g',r')
+$$
+
+成为新的回放样本。对以下一状态位置判断成功的任务，可写：
+
+$$
+r(s,a,g')=-\mathbf1[\|m(s')-g'\|>\epsilon].
+$$
+
+失败为-1，达到容差为0，不是成功+1。两种奖励有时只差常数，但在终止和有限时域设置下仍要核对，不能随意改变后宣称完全复现原文。
+
+若用DDPG，教学TD目标为：
+
+$$
+y=r'+\gamma Q_{\bar\phi}
+(s',\mu_{\bar\theta}(s',g'),g').
+$$
+
+论文机器人任务采用固定长度回合，成功不必立即终止。若移植到目标达成即终止的环境，重标记时应同步重新判断终止逻辑；只改奖励而保留原目标终止位可能产生不一致。
+
+### 为什么可以换目标
+
+关键条件是环境转移满足 $p(s'|s,a,g)=p(s'|s,a)$。目标改变策略意图，却不改变执行同一动作后的物理机制。于是对目标 $g$ 采到的转移仍能用于目标 $g'$ 的离策略学习。
+
+如果目标同时决定障碍布局或重力，简单替换条件就不成立。也不能把随机环境里偶然达到的结果一律看成可控能力；选择已实现结果会带来条件选择效应，原论文的简单重标记并没有给所有随机系统提供无偏保证。这是适用边界分析。
+
+### 选哪个新目标
+
+原文比较四种思路：终点目标final；同回合任意时刻episode；同回合之后时刻future；全部历史随机状态random。future更有希望提供从当前状态真正容易到达的目标。
+
+超参数 $k$ 决定额外目标数。太大将降低原始目标数据的比例，训练可能更擅长自己碰巧做到的事情，却忽略真正关心的目标。HER保留原目标样本，绝非全部数据都改成成功。
+
+~~~text
+初始化目标条件离策略算法与回放池
+每个回合：
+    采样原目标，执行探索策略，保存完整轨迹
+    对每个转移：
+        存入原目标与原奖励
+        从同回合未来状态抽取若干已实现目标
+        对每个新目标：
+            保持状态、动作、下一状态不变
+            重算奖励，必要时重算目标相关终止
+            保存重标记样本
+    随机采样回放批次，更新价值与策略
+独立评估原始目标分布上的任务成功率
+~~~
+
+HER改变的是数据组织方式，底层策略与价值更新可以沿用已有算法。它不是一个新的环境模型，也不是额外的探索奖励。
+
+## 四、机器人实验的关键条件
+
+| 项目 | 原文设置与解读 |
+|---|---|
+| 任务 | Fetch推动、滑动、抓取放置，训练在MuJoCo |
+| 动作 | 三维末端相对位移加夹爪开度，旋转固定 |
+| 奖励 | 目标容差内0，否则-1 |
+| 观测 | Actor用位置和夹爪信息，Critic额外得到速度等信息 |
+| 训练预算 | 图3每epoch为800回合、每回合50步，不能把epoch当梯度次数 |
+| 重复 | 5个随机种子，阴影为一个标准差 |
+| 对照 | DDPG、计数探索、final与future等HER配置 |
+| 成功容差 | 推动和抓放7厘米，滑动20厘米 |
+| 探索辅助 | 抓放任务一半训练回合从已抓住方块的示范状态开始 |
+| 真机验证 | 抓放策略部署，物体定位另用训练好的CNN |
+
+示范状态这一项必须写出。HER能从达到的状态学习，但若机器人永远没有抓起物体，重标记不会凭空生成空中目标经验。原文脚注提到另一种目标采样安排后来可免除此技巧，但主实验条件不能因此抹去。
+
+Critic使用更多模拟信息也是训练特权。部署只用Actor，额外信息帮助价值学习，并不要求真机获得全部模拟速度。这是明确的系统设计，不能宣传为所有组件都只看到相同输入。
+
+## 五、证据强度与限制
+
+依据[原始PDF](https://arxiv.org/pdf/1707.01495)。
+
+| 原文位置 | 观察 | 支持范围 |
+|---|---|---|
+| Algorithm 1、第3.3节 | 保留原目标并添加重标记 | 明确HER的数据操作 |
+| 图3 | 稀疏奖励中HER明显帮助三类多目标任务 | 不是所有稀疏奖励任务都可解决 |
+| 图4 | 只关心一个目标时，多目标回放仍有帮助 | 支持共享结构带来的训练收益 |
+| 图5–6 | 简单稠密奖励不佳；future的数量与来源影响表现 | 不代表所有奖励塑形都无效 |
+| 第4.6节、图7 | 真机初始2/5，模拟中加观测噪声重训后5/5 | 小规模可行性验证，不是高置信部署可靠性 |
+
+真机第二次结果依赖重新在模拟训练并加入1厘米标准差的观测噪声。所谓“无需真机微调”不应误解成首次策略直接达到5/5，或完全无需根据部署误差改进训练。
+
+图6同时报告训练过程中最高成功率与跨epoch平均成功率，二者回答不同问题。最高点反映曾达到的峰值，平均值还受到学习速度与稳定性影响，不能挑一个更好看的数字代替全部曲线。
+
+## 六、贡献与代价
+
+HER最重要的思想是把目标语义带入数据复用。失败数据不再仅提供统一负信号，而能揭示“如何达到别处”。多个相关目标共享参数，形成由已达结果构成的隐式学习课程。
+
+但它不改变已经采到的数据覆盖。如果行为只会在原地抖动，重标记主要教会原地附近目标。稀疏奖励包含“缺乏有用反馈”和“根本没有触及相关行为”两种困难，HER主要补救前者，并借共享结构间接帮助后者。
+
+机器人目标还可能包括不碰倒旁边物体、保持方向和控制力。只把目标写成末端物体位置会忽略这些要求。问题不能归咎于HER伪造成功，而应检查目标定义是否完整。本文未独立复现训练与真机部署。
+
+## 七、一个自构计算例子
+
+未运行的例子：目标位置10，物体轨迹从0到1再到2，容差0.1。原目标下两步奖励都是-1。将目标改成2，第一步仍为-1，第二步变为0。于是价值学习可以把“从1推到2”的可达信息传播回去。
+
+若目标改成1，第二步可能再次离开目标。固定时域任务与到达即终止任务会有不同解释，这提醒我们重标记不只有修改一列目标值，奖励、终止、目标条件输入必须保持语义一致。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 稀疏失败数据缺少区分信号 | 用已达位置重标记目标并回放 | 共享相关目标的可达信息 | 图3–6、真机小试验 | 重算条件、探索覆盖、目标与动力学假设 |
+
+## 八、三个问题及答案
+
+**问题1：HER是不是把失败偷偷算成成功？**
+
+答案：原任务评价没有改变。它只在训练中另问一个目标，并用真实转移回答；最后仍在原目标分布评估。混淆发生在把重标记训练成功率当成部署成绩时。
+
+**问题2：为什么future往往比全历史random更有用？**
+
+答案：未来同轨迹目标与当前转移在可达性和局部上下文上相关，全历史目标可能完全遥远，重算后仍全是失败。这个解释与原文消融一致，但不是任何环境下future必优的定理。
+
+**问题3：抓放任务的示范初始状态暴露了什么限制？**
+
+答案：HER重用已经发生的结果，不能生成从未发生的抓起动作。探索要先接触有意义的状态；初始状态课程提供这一入口，之后HER才能有效学习不同放置目标。
+
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "022-her",
+            active: "robot-learn",
+            seriesLabel: "\u673a\u5668\u4eba\u5b66\u4e60",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

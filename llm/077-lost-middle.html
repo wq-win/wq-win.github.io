@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>077｜Lost in the Middle：上下文装得下，不代表每个位置都用得好 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Lost in the Middle：上下文装得下，不代表每个位置都用得好</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 077｜Lost in the Middle：上下文装得下，不代表每个位置都用得好
+
+[返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
+
+论文：Nelson F. Liu 等，*Lost in the Middle: How Language Models Use Long Contexts*，首次公开于2023年。[论文](https://arxiv.org/abs/2307.03172)、[正文 v3](https://arxiv.org/html/2307.03172v3)、[作者项目](https://nelsonliu.me/papers/lost-in-the-middle/)。本文核对正文及歧义、干扰项、模型补充、token统计和完整问答结果附录；没有独立重跑历史API。它是一篇诊断与评测论文，不提出一个已经解决长上下文问题的新训练算法。
+
+## 一分钟理解：把同一条证据搬到中间，再问一次
+
+模型支持16K或100K输入，说明接口和实现可以容纳这么长的序列。它是否能同样可靠地使用开头、中间、末尾的信息，需要另做实验。
+
+作者把包含正确答案的文档与一批干扰文档放在一起，保持问题和答案不变，只移动正确文档的位置。多个模型在开头和末尾更好，中间更差。附录表6里，20篇文档的 GPT-3.5-Turbo 在第一篇放答案时75.8%，第十篇时53.8%，最后一篇时63.2%。
+
+核心贡献不是给模型贴上“记忆差”的标签，而是提供一个可控制的实验轴：相关证据位置。它让我们能够区分“检索到了答案”“答案进入窗口”“模型实际使用答案”三个环节。
+
+一句话总结：在长上下文问答与检索任务中，通过固定内容、改变证据位置和干扰量，揭示模型的信息利用不均匀；代价与限制是实验主要测试特定模型和单证据任务，不能当作所有模型永远遵循的定律。
+
+## 背景：长度、位置和相关性要分别控制
+
+普通问答基准给出一个平均成绩，却很少关心证据放在哪里。若检索器总把最相关结果放第一，模型可能看起来很会使用多篇文档，实际上主要依赖开头。
+
+论文使用 NaturalQuestions-Open 的2655个问题，选择长答案是段落的样本。每组上下文包含一个来自标注的答案段落和若干不含标注答案的检索段落。干扰项由在 MS-MARCO 上微调的 Contriever 检索，因此比随机无关文本更难。
+
+这不是多跳问答：设计目标是让一个文档足以提供答案，其他文档增加查找和筛选难度。模型不需要环境动作、奖励或参数更新；输入是文档与问题，输出是文本答案，实验测量在固定生成策略下的正确率。
+
+作者还构造随机 UUID 的键值查找。模型看到JSON后，返回指定key对应的value。UUID减少常识和语言语义的影响，便于研究基本复制检索；但自然问答还涉及语义匹配，因此通过键值测试不等于通过长文档理解。
+
+## 方法：这里的“算法”是评测程序
+
+用教学记号定义 $A(k,p)$：总文档数为 $k$、正确文档位于 $p$ 时的准确率。可以构造位置差：
+
+$$
+A(k,p)=\frac1N\sum_{i=1}^N\mathbf1[\text{输出包含标注答案}],\qquad
+\Delta_{pos}(k)=\max_p A(k,p)-\min_p A(k,p).
+$$
+
+这是便于理解的指标表达，不是论文训练损失。理想的位置稳健性意味着 $\Delta_{pos}$ 小，但还必须看绝对准确率；所有位置都答错也有很小的位置差。
+
+```text
+输入：带答案问题、固定模型、文档数列表 K、位置列表 P
+for each question:
+    relevant = annotated_answer_paragraph(question)
+    distractors = retrieve_passages_excluding_annotated_answers(question)
+    for k in K:
+        selected_distractors = fixed_top_k_minus_1(distractors)
+        for position in valid_positions(P, k):
+            context = insert(relevant, selected_distractors, position)
+            assert full_prompt_fits_model_context
+            prediction = greedy_generate(context, question)
+            score = contains_any_annotated_answer(prediction)
+            record(question, k, position, token_count, score)
+report accuracy curves and best/worst positions
+```
+
+需要固定同一问题的干扰项，再移动正确段落，否则内容差异会混入位置效应。扩大 $k$ 时增加干扰，不改变答案。位置用文档序号控制，真实token距离仍受段落长度影响，因此作者另给token统计。
+
+数学目标没有改变，机制是控制输入排列，改善的是我们测量与解释模型的能力。论文讨论重排序与裁剪作为潜在改进方向，但没有交付一个在所有应用上验证过的最佳排列规则。
+
+## 实验设计：包含什么，不包含什么？
+
+| 维度 | 原文设定 |
+|---|---|
+| 主问答 | 2655个NaturalQuestions问题；10、20、30篇文档；一个答案段落，其余检索干扰 |
+| 对照 | closed-book不提供文档；oracle仅提供正确段落；两者帮助识别上下文的净影响 |
+| 主模型 | MPT30B-Instruct、LongChat13B16K、GPT-3.5-Turbo0613及16K版、Claude1.3及100K版 |
+| 生成 | 贪心解码；没有把采样多次取最好作为默认 |
+| 键值任务 | 75、140、300对随机唯一UUID，设置各500样本；只评可容纳长度的模型配置 |
+| 架构分析 | Flan-T5-XXL与Flan-UL2，比较训练长度内外的位置效果 |
+| 查询位置 | 原默认问题在材料后；实验把问题放到材料前后，检查查询感知表示 |
+| 补充 | GPT-4的20文档500题子集；Llama2评测因token长度丢弃20题，保留2635题 |
+| 准确率定义 | 输出包含任一标注答案，不是严格完整答案exact match，也不是人工判定所有断言真实 |
+| 不确定性与成本 | 样本量明确，但未对所有位置提供完整重复API调用区间；不能把token长度标准差当准确率置信区间 |
+
+20篇文档对 GPT-3.5 分词平均约2946.2token，最大3920；30篇平均4419.2，超出4K版本容量。因此30文档表使用16K版本，不能把超过窗口造成的截断和窗口内部利用失败混为一谈。
+
+干扰文档“不含标注答案”也不绝对等于“没有任何合理答案”。时效性与问句歧义可能使检索文档包含另一个合理答案。附录A用无歧义子集重复分析，结论相近；这个检查提高了可信度，但不会令标注变成无误差真值。
+
+## 五处证据：U形是观察，不是不可改变的规律
+
+**证据一：附录表6与主图5，位置改变导致下降。** GPT-3.5在20文档中第一位75.8%、第十位53.8%、末位63.2%，最佳到最低差22.0个百分点，由表值相减。closed-book为56.1%，所以中间条件甚至比不提供文档低2.3个百分点。它支持干扰与位置可能损害使用证据的能力，不证明相关文档没有任何贡献，因为模型也可能被其他材料误导。
+
+**证据二：表1和附录表6，扩容不自动提升利用。** GPT-3.5原版与16K版在20文档首位分别75.8/75.7，中间53.8/54.1；oracle分别88.3/88.6。可容纳相同输入时曲线非常接近。证据范围是这对模型和这些输入，不是所有长上下文训练方法都无效。
+
+**证据三：图7、图9与§4.2，简单检索和自然问答不同。** 把查询放到材料前后，GPT-3.5-16K在300键值对任务达到完美表现，而原设置最低45.6%；自然问答的位置趋势却没有显著解决。它排除了“前面重复问题总能修好长文档理解”的过度结论，也说明模型需要在何时知道查找目标会影响行为。
+
+**证据四：图8、图10与附录E，成因不唯一。** Flan-UL2在2048训练长度内最佳与最差差1.9个百分点，超出后开始出现中部下降；MPT基础模型和指令模型都有相关趋势。Llama2-7B主要偏向结尾，13B和70B才呈明显两端优势。因此不能把现象只归因于指令微调，也不能声称所有模型曲线必然严格U形。
+
+**证据五：图11，更多检索不等于更多正确答案。** 检索召回随文档数增加，但读者成绩先趋于饱和；从20增至50篇，GPT-3.5仅约提高1.5个百分点，Claude约1个百分点。它说明端到端收益受读者限制，不能只追求Recall@k。不过新增材料也可能对特定问题很有价值，平均饱和不意味着应对每道题都硬性只取20篇。
+
+附录B/C还将干扰改成随机文档、打乱排序并告知顺序随机，仍观察到位置问题。这削弱了“只是检索结果默认排序先验”的单一解释，但没有直接定位到哪层注意力或哪种位置编码。
+
+## 贡献与局限：如何从诊断走向改进？
+
+这篇论文的主要贡献是一个评测视角：报告容量之外，还要报告位置敏感性，以及相关信息是否真正被使用。它特别适合检验RAG读者，因为检索召回高并不保证生成器读取可靠。
+
+作者提供的是初步机制分析，没有证明人类记忆与Transformer有同样成因。U形曲线与心理学序列位置效应相似，只是现象类比。架构差异也伴随训练差异，不能据此把双向编码器视为唯一解决方案。
+
+进一步分析包括：答案包含指标可能奖励同时列出多个候选；UUID测试忽略语义综合；单证据问答不覆盖跨段推理；贪心解码不代表所有预算策略；更换当前模型后需要重新测量，而不是沿用历史百分比。
+
+若要改善系统，可以比较检索重排序、相关片段压缩和按问题动态选文档数，但压缩可能丢失关键限定，重排序也可能把错误证据放到显眼位置。必须同时测答案、引用和证据覆盖，不能只看最终流畅度。
+
+## 自构例子与五个前置概念
+
+**自构例子，未运行：** 一套设备记录中只有一条写着“B型阀门最大温度为120°C”，其余记录多次出现A型阀门的180°C。问题问B型上限。把正确记录从开头移到中间，内容与答案没有变化；若输出变成180°C，就说明模型利用发生了变化。这个实验还应加入型号交换和随机数字版本，减少模型凭熟悉数字猜测的可能。
+
+五个概念：**上下文窗口**是可输入容量；**位置敏感性**是内容不变时排列导致的表现变化；**检索召回**衡量所取文档是否包含答案；**读者准确率**衡量模型是否输出答案；**困难负例**是与问题相关却不提供目标答案的干扰材料。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 平均成绩和窗口长度掩盖证据位置问题 | 控制相关段落位置、文档数，辅以UUID检索和架构分析 | 把容量、检索覆盖与信息使用拆开测量 | 图5/表6位置下降；图7/9查询位置；图8架构；图11召回饱和 | 诊断而非通用修复；历史模型、单证据与答案包含指标有限 |
+
+## 自测与答案
+
+**1. 为什么“所有位置准确率都一样”仍不足以证明长上下文能力强？**
+
+答案：可能所有位置都答错。需要同时看绝对准确率、位置差、oracle单文档成绩以及无文档成绩；位置稳定性只是可靠使用上下文的必要检查之一。
+
+**2. 为什么相关材料已经检索到，最终问答还可能不提高？**
+
+答案：读者可能没有定位到它、被相似干扰误导，或者找到证据后仍解释错误。检索召回只保证候选集合覆盖，不保证选择、理解和输出。增加k同时提高覆盖与干扰，需要测两者的净影响。
+
+**3. 重复问题修好了UUID检索，为什么不能宣称已经解决“中间遗失”？**
+
+答案：UUID任务主要是精确匹配和复制，自然问答还涉及语义对应、歧义与证据选择。原文同一改动对自然问答帮助有限。必须在目标任务上测试，并保留位置、长度和干扰复杂度等维度。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "077-lost-middle",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

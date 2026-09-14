@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>041 · The Pile：训练语料的组成也是模型设计 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">041 · The Pile：训练语料的组成也是模型设计</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 041 · The Pile：训练语料的组成也是模型设计
+
+[返回目录](README.md) · [上一篇：Performer](040-performer.md) · [下一篇：Switch Transformer](042-switch.md)
+
+论文：Leo Gao 等，*The Pile: An 800GB Dataset of Diverse Text for Language Modeling*，2020年12月公开。[原始论文](https://arxiv.org/pdf/2101.00027)。依据§2构造、§3–4评价、§5–6统计与数据分析，以及表1–4；没有重新下载和处理全部语料。
+
+## 一分钟理解
+
+一个只读普通网页的模型，未必熟悉论文公式、代码、判例或专业交流。The Pile把22类来源组合成较大文本语料，并公开构造细节，研究多样化数据能否改善不同领域的语言建模。
+
+它不是新的神经网络结构。主要改动发生在训练分布：加入不同领域、选择抽取与清理方法、设定混合权重、记录数据特征。作者用相同架构和受控数据规模做比较，展示数据组成的作用，同时也提供未明显改善的指标。
+
+一句话：在通用语言模型预训练中，通过混合网页、学术、代码及其他专业文本，改善多个领域的预测损失，代价是复杂的数据处理、分布选择与来源管理，而且损失改善不等于专业任务能力已被验证。
+
+## 数据问题为什么不能只用GB回答
+
+语料容量说明能存多少文本，不说明内容是否重复、领域是否集中、抽取是否保留结构，或者模型实际会读多少次。两个同样40GB的数据集，可能一个充满重复导航，一个包含不同风格的专业材料。
+
+The Pile报告原始规模825.18 GiB，但按组件重复采样后的有效规模为1254.20 GiB。这里的“原始”是表中混合采样前的构建后组件规模，不是原始网页抓取文件大小。不能把两个总数当作论文相互矛盾，也不能把有效规模称为新增独特内容。
+
+语料以英语为主，但不是每个字节都是英语。§5的语言识别给出估计，并说明稀有语言识别困难。对模型适用语言的判断应基于实际覆盖，而不是仅根据数据集标题。
+
+## 构造流程与数学描述
+
+设第 $j$ 个组件有 $B_j$ 字节，重复权重或等效遍数为 $e_j$，则按字节定义的有效混合权重可写为：
+
+$$
+w_j=\frac{e_jB_j}{\sum_k e_kB_k}.
+$$
+
+训练过程大致优化混合分布上的语言模型损失：
+
+$$
+L(\theta)=\sum_jw_j\mathbb E_{x\sim D_j}\left[-\sum_t\log p_\theta(x_t\mid x_{<t})\right].
+$$
+
+这是教学性分布表达。实际按文档、字节或token采样会产生不同权重，必须与实现口径对齐；表1的权重明确基于字节。代码、公式和自然语言的每字节token数不同，相同字节比例并不保证相同token比例。
+
+```text
+输入：各来源原始材料、抽取规则、组件权重
+逐来源处理：
+    抽取正文或结构化文本，记录转换失败与过滤条件
+    标记来源，保留可追踪组件信息
+    按相应规则清理并划分保留集
+构造训练混合：
+    根据组件规模和权重分配采样量
+    去除与评价集检测到的重叠，建立可复查版本
+控制模型比较：
+    从各待比语料取相同规模样本
+    使用相同模型架构训练，分领域评价预测损失
+输出：语料、构造文档及受控比较结果
+```
+
+各来源处理并不完全相同。论文例如为网页选择正文抽取方式，为论文转换源文件，为代码设置文件大小或处理限制。这些步骤决定哪些内容被保留，可能引入系统性偏差。预处理既是工程步骤，也是训练分布选择。
+
+## 如何跨分词器比较损失
+
+同一文本被分成更多token时，每token困惑度可能变化，直接跨分词器比较容易误导。论文使用每UTF-8字节比特数：
+
+$$
+BPB=\frac{L_T}{L_B}\frac{\ell}{\ln2},
+$$
+
+$L_T$是token数，$L_B$是UTF-8字节数，$\ell$是以自然对数计算的平均token负对数似然。它把编码长度口径统一到字节，越低表示对同一数据的压缩预测更好。
+
+但BPB仍不能把不同领域的固有难度完全消除：代码、公式和自然文本本来就有不同可预测性。要说模型在哪个领域相对薄弱，应看与相应基线的差距，不能只比较一个模型在两个组件的绝对BPB。
+
+## 实验设计
+
+|项目|原文设置及证据边界|
+|---|---|
+|组件|22个来源，包含网页、学术论文、代码、书籍、问答和其他专业文本；表1逐项记录|
+|受控模型|§4使用架构相同的1.3B参数语言模型，分别在Pile、CC-100英语、原始英语CC上训练|
+|规模控制|各语料抽样约40GB，使用13-gram重叠过滤评价污染；不是用完整825GiB对比40GB|
+|已有模型评价|GPT-2与GPT-3各档，对多数组件测试集的十分之一逐文档评价；与受控训练是两组实验|
+|指标|Pile整体和分组件BPB、WikiText PPL、LAMBADA PPL与准确率|
+|训练预算边界|正文明确架构与数据规模控制；所引表没有完整列出统一墙钟、更新次数和调参成本，不能凭40GB推算|
+|不确定性|主比较表未报告统一多种子区间；文档统计误差条不是模型训练种子方差|
+
+Pile保留集与训练混合共享领域来源，因此改善这些组件预测主要说明域内及混合领域泛化，不等于已经验证任意全新领域。数据去重减少明显泄漏，也不保证排除语义改写或源文件变体。
+
+## 三组结果如何读
+
+**证据一：表1，混合权重改变实际训练分布。** Wikipedia英语原始6.38 GiB，按3遍形成19.13 GiB有效量；PubMed Central约90.27 GiB，2遍约180.55 GiB。它说明数据设计不只是拼接文件。权重由设计者选择，表本身没有证明这些比率是计算最优或对所有任务最优。
+
+**证据二：表3，相同规模比较的收益与例外。** Pile训练模型在Pile测试BPB为0.9433，CC-100为1.3293，原始CC为1.1275；WikiText PPL为5.59、8.27、11.75。但LAMBADA PPL中Pile12.78差于CC-100的11.78，准确率50.1与49.7又很接近。不能把整体改善写成每项指标都提升。
+
+**证据三：表4与图4，领域差异。** ArXiv组件BPB，Pile模型0.7945，CC-100模型1.8159；GitHub为0.5597与1.6509。它支持专业文本预测分布得到改善，但代码BPB降低不能直接证明程序执行正确率提高，数学文本BPB降低也不能替代解题评价。
+
+§3.3还用GPT-2-Pile与GPT-3的相对差值构造领域相似性的代理。作者明确提醒该代理可能受领域缩放效应混淆。因此“GPT-3如果读Pile会提高多少”并没有通过重新训练GPT-3直接验证，只能视为研究假设。
+
+## 一个构造例子与数据消融
+
+自构场景：网页里频繁出现“函数”，代码里也频繁出现这个词，但模型需要预测的后续分布完全不同。增加代码可能帮助补全语法与API模式，同时让某些普通文本上的有限容量分配发生变化。多样性收益来自内容和权重，不能仅凭来源数量判断。
+
+可以做未执行实验，固定训练token、模型与计算预算，比较纯网页、网页加学术、网页加代码、完整混合四组。既测分域BPB，也测代码单元测试通过率与数学答案准确率。若只改善BPB，说明文本分布适应成立，但目标能力还未得到验证。
+
+再固定混合领域比例，比较宽松与严格过滤。若严格过滤使WikiText更好、专业域更差，可能丢失了与参考语料不同但有用的文本。需要抽样人工检查被删内容，避免把“低困惑度”不加条件地当作高质量的定义。
+
+## 贡献、代价与范围
+
+The Pile的重要贡献是可讨论、可追踪的数据组成与跨域评价，使数据工程成为可比较研究。限制包括来源偏差、重复、文本抽取误差、潜在敏感内容，以及不同组件的使用条件不能被一个总名称覆盖。这里描述论文当年的组成，不据此断言每个组件现在都可自由获取或用于任意场景。
+
+五个前置概念是：混合分布定义来源权重，去重减少重复内容，去污染处理评价重叠，BPB按字节统一损失，领域泛化检验不同内容分布。理解这些之后，读Chinchilla和后续数据配方论文时，就能把数据数量与数据组成分开。
+
+|原有问题|作者改动|为什么可能有效|实验证据|代价与局限|
+|---|---|---|---|---|
+|网页语料覆盖专业文本不足|混合22类来源并设定重复权重|增加不同文本结构与领域统计|表1构成、表3受控比较、表4分域BPB|权重非最优证明，来源与处理复杂|
+|总PPL难揭示领域差异|逐组件BPB与数据文档|按统一单位查看相对预测缺口|§3代理分析、§5–6统计|BPB不等于实际专业任务能力|
+
+## 自测与参考答案
+
+**1. 825.18 GiB与1254.20 GiB为什么可以同时成立？**
+
+前者是组件采样前规模，后者考虑部分组件重复读取后的有效量。重复提高训练权重，没有创造同等数量的新内容。
+
+**2. 相同40GB就等于相同训练计算吗？**
+
+不一定。不同文本的token密度、序列组织和训练遍数会改变工作量。相同字节规模隔离一部分数据量差异，完整计算比较还需token和更新预算。
+
+**3. GitHub文本BPB下降，能否直接说编程能力提高？**
+
+不能。它表示代码文本预测更好，实际编程需要程序语义、执行与测试。应补充功能正确性评价，才能连接到编程任务能力。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "041-pile",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

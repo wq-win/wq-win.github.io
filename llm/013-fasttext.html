@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>013｜fastText 子词表示：让稀有词共享拼写片段的统计 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">fastText 子词表示：让稀有词共享拼写片段的统计</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 013｜fastText 子词表示：让稀有词共享拼写片段的统计
+
+[目录](README.md) · [上一篇](012-layernorm.md) · [下一篇](014-sparse-moe.md)
+
+**论文**：Piotr Bojanowski 等，*Enriching Word Vectors with Subword Information*，2016 年预印本、TACL 2017。[原文](https://arxiv.org/abs/1607.04606) · [PDF](https://arxiv.org/pdf/1607.04606)。本篇讨论字符 n-gram 词向量；fastText 名称下的其他分类方法不等同于这篇论文。
+
+## 一分钟理解
+
+“walk”“walked”“walking”共享拼写和部分含义，为什么每个词都要从零学习一个完全独立向量？本文把一个词表示为多个字符片段向量的组合，让不同词通过共享片段交换统计信息。即便某个完整词没有出现在训练中，也可能从已学片段构造表示。
+
+作者在多语言相似度与其他任务上评价，形态变化丰富的语言和稀有词是重要场景。核心改动是词的参数化，而不是将模型变成上下文化编码器。能够组成向量不意味着该词的每种语义都被正确理解，拼写相似也可能造成不必要的语义混合。
+
+## 背景：稀有词和词表外词不是同一个问题
+
+稀有词在训练中出现过，但更新次数少；词表外词没有完整词项参数。普通 Skip-gram 对前者估计不稳，对后者通常无法直接给出训练过的词向量。若语言有丰富词形变化，同一个词根的数据会被分散到许多形式中。
+
+字符片段提供共享通道。过去对“walking”的学习可以影响“walked”中的共享 n-gram，即使两者完整词项不同。这个共享假设在形态结构明显时有价值，但对碰巧拼写接近却含义不同的词，可能引入偏差。
+
+这里与 BPE 的关系需要分清：BPE 将文本切成一条较短符号序列；本文通常为同一个词收集相互重叠的字符 n-gram，并组合成词表示。它们都利用子词，但基本计算单位和输出接口不同。
+
+## 方法：词向量由片段组成
+
+设 $G_w$ 是词 $w$ 的字符片段集合，片段向量为 $z_g$，上下文词向量为 $v_c$。词对得分写成：
+
+$$
+s(w,c)=\sum_{g\in G_w}z_g^Tv_c.
+$$
+
+模型沿用局部词预测和负采样思想，只是把中心词的表示改为片段求和。完整词本身也可以作为特殊项保留，使模型既共享子词信息，也有能力学习不能由拼写简单推断的整体含义。
+
+词边界标记区分词首、词尾和内部片段。例如同样字符出现在词尾和中间，可能承担不同作用。实现还可用哈希桶限制片段参数规模，这节省存储但允许碰撞：不同片段可能共享一个桶，因此空间节约并非没有信息代价。
+
+对未见完整词，只要能提取相关片段，就可以将其向量组合起来。若片段本身没有得到有效训练，或者词属于不同字母体系，所得向量仍可能质量很差。所谓 OOV 表示可计算，与 OOV 语义准确是不同承诺。
+
+```text
+输入：词序列、字符 n-gram 长度范围、词边界规则
+为每个词提取重叠字符片段，保留完整词特殊项
+将片段映射到参数索引或哈希桶
+遍历中心词及邻词训练对：
+    representation ← sum(片段向量)
+    抽取负上下文词
+    用 representation 与上下文向量计算正负样本损失
+    更新参与的片段参数与上下文参数
+推理：对任意词按相同规则提取片段并组合向量
+```
+
+数学目标仍是代理预测，机制是片段级参数共享，指标包括相似度等评价。它没有直接优化词素分割准确率，也没有给每个片段一个人工语义定义。片段长度范围应作为超参数，而不是语言学真理。
+
+## 实验设计与证据
+
+| 项目 | 原文范围 |
+|---|---|
+| 语料 | 多语言标准化 Wikipedia 文本，按语言分别训练 |
+| 基线 | CBOW、Skip-gram，与加入子词信息的表示 |
+| OOV 协议 | 分别比较未见词用零向量与用片段组合，避免隐藏覆盖优势 |
+| 指标 | 人工相似度与向量相似度的相关、词关系及语言建模实验 |
+| 关键变量 | 字符片段、词频、语言形态、训练数据量 |
+| 重复 | 统一覆盖所有语言的多种子区间未报告，不能把单表结果当作稳定性证明 |
+
+**证据一，方法部分的得分定义。**真实改动发生在词表示由哪些参数构成。这说明不同词可以共享训练信息，但没有证明所有共享都正确。
+
+**证据二，表 1。**英文 Rare Words 相关分数从 Skip-gram 的 43 到子词方法的 47，而英文 WS353 中并非同样提升，表中子词为 71、CBOW 为 73。实验支持某些场景获益，也清楚提供了非普遍优势的例子。
+
+**证据三，表 1 的 sisg- 与 sisg 对照及随后分析。**把 OOV 处理单独列出，有助于区分已见词表示改善与覆盖范围增加。论文关于阿拉伯语、德语、俄语的讨论把效果与形态结构联系起来，但因语言语料不同，这仍不是完全隔离语言形态的因果实验。
+
+阅读词相似度表时还需注意，相关系数通常按百分数显示，不是分类准确率。一个分数从 43 到 47，表示相应秩或相关指标的变化，不能说“多答对 4% 的词”。评价单位必须保持清楚。
+
+## 教学例子：共享从哪里来
+
+构造两个词“unhelpful”和“helpful”。某些字符片段共享，使模型能利用共同上下文；但前缀改变意义，表示不应完全相同。完整词项和非共享片段可以表达差别，但若数据不足，模型可能过度靠近二者。
+
+这说明子词方法对反义、否定和细微拼写差异仍有风险。只要共享机制存在，就同时存在有益迁移与负迁移。不能把“字符信息”当成语义总是保真的编码。
+
+再构造新词“hyperhelpful”。模型可以提取部分已见片段并形成向量，但其真实用法是否与片段组合一致，要靠新上下文验证。这个例子展示计算覆盖，不是模型已经掌握新造词含义的证据。
+
+## 怎样设计有说服力的子词消融
+
+可以固定训练语料与负采样预算，比较完整词向量、完整词加片段、仅片段三组。按训练词频分桶，再单独测从训练词表删除的词。这样可以判断收益来自稀有词共享，还是额外参数和更多更新。
+
+还应增加拼写相似但语义不近的对照，检验是否过度依赖字形。若只用形态规律特别明显的词，会高估整体效果。哈希桶大小也值得比较，因为碰撞会改变共享关系，而不仅是内存占用。
+
+以上是教学实验建议，不是原文额外报告结果。它们体现一个通用原则：当方法改变参数共享结构时，实验应测试共享在哪些样本之间发生，以及错误共享是否带来代价。
+
+## 贡献与局限
+
+该工作把词内部结构纳入可扩展词向量训练，让稀有词和新词有更好的统计接口。局限是静态词义、形态假设、片段覆盖和哈希碰撞。它不等同于完整字符语言模型，也不会因能处理 OOV 就自动解决跨语言理解。
+
+五个前置概念是字符 n-gram、参数共享、负采样、词表外组合和相关指标。理解这些即可进一步比较“切分后逐 token 编码”和“片段求和成词向量”两种不同的子词路线。
+
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 罕见词训练信号少，普通整词向量不能表示未登录词 | 用字符n-gram等子词参数组合词表示 | 拼写片段在不同词之间共享，使低频词与未见词也能获得表示 | 表1的相似度与sisg-/sisg比较 | 拼写相似不保证语义相近；语言、任务与词表覆盖改变收益，并非所有指标都优于基线 |
+
+## 自测与参考答案
+
+**1. fastText 子词与 BPE 为什么不是同一个操作？**
+
+BPE 产生按顺序排列的分割单位，本文为同一词提取可重叠片段并组合成一个表示。两者共享子词思想，但训练对、序列长度和参数共享方式不同。
+
+**2. 未见词能生成非零向量，是否就有可靠语义？**
+
+不一定。向量依赖片段是否被有效训练，以及新词含义是否可由字形组合推断。随机专名或语义不透明词可以被计算，却仍可能表示错误。
+
+**3. 为什么需要同时报告 sisg- 与 sisg？**
+
+二者区分 OOV 处理的收益。若只比较能表示新词的方法与给新词零向量的基线，提升部分来自覆盖而非已见词几何改善。拆开报告使贡献更明确。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "013-fasttext",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

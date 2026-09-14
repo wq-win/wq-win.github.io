@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>061 · GPTQ：压缩权重时，为什么要让剩下的权重补偿误差 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">061 · GPTQ：压缩权重时，为什么要让剩下的权重补偿误差</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 061 · GPTQ：压缩权重时，为什么要让剩下的权重补偿误差
+
+[返回目录](README.md) · [上一篇：ReAct](060-react.md) · [下一篇：HELM](062-helm.md)
+
+论文：Elias Frantar等，*GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers*，2022年公开，ICLR 2023。[原始论文](https://arxiv.org/abs/2210.17323) · [v2正文](https://arxiv.org/pdf/2210.17323) · [官方代码](https://github.com/IST-DASLab/gptq)。阅读范围为方法、算法1、语言模型量化与生成实验；没有运行量化内核或独立复现性能。
+
+## 一分钟理解
+
+把每个权重存成较少的二进制位，可以显著降低模型存储量。但把所有小数分别四舍五入，未必能保持网络输出：输入经常一起出现的两个通道，其误差可以互相抵消，也可能相互放大。
+
+GPTQ利用少量真实输入估计这种关系。每量化一列权重，就调整尚未量化的部分来补偿输出误差；再通过统一处理顺序、分块更新和稳定的矩阵分解，使这一思路能处理千亿参数模型。它是训练后的权重量化，不是重新预训练，也没有把所有激活一起变成低比特。
+
+在大模型生成场景下，通过输入相关的逐层误差补偿，改善低比特压缩后的质量和部署可行性，代价是校准与专用内核，而且质量、显存与速度的收益需要分别验证。
+
+## 问题定义：应该保持权重，还是保持输出
+
+设线性层权重为 $W\in\mathbb R^{d_o\times d_i}$，校准输入组成矩阵 $X\in\mathbb R^{d_i\times n}$，量化后的权重为 $\widehat W$。逐层目标是
+
+$$
+\min_{\widehat W\in\mathcal Q}\|WX-\widehat WX\|_F^2.
+$$
+
+$\mathcal Q$ 表示允许的离散数值集合。这个目标不同于最小化 $\|W-\widehat W\|_F^2$：后者把每个参数误差同等看待，前者按照输入分布衡量影响。如果一个通道始终接近零，它的权重变化对当前数据影响很小；一个幅值较大的通道则可能非常敏感。
+
+这也解释了校准数据的必要性。算法不需要任务标签，但需要一批能代表部署输入的文本。没有标签不等于没有数据，局部输出保真也不等于所有下游任务表现不变。校准范围之外的新语言、代码或异常长输入，仍可能暴露未被目标充分约束的方向。
+
+与简单最近舍入相比，核心新增部分是补偿；与逐权重选择最优处理顺序的OBQ相比，核心工程改变是让各行使用相同列顺序，复用矩阵信息。它没有提出新语言建模损失，而是在既有模型上解决受离散约束的重建问题。
+
+## 方法：二阶信息怎样参与量化
+
+对于一行权重，重建误差是二次函数，其曲率矩阵为 $H=2XX^\top$。这里的“二阶”来自层输出平方误差，不应直接理解为完整语言模型交叉熵的精确Hessian。输入通道的相关性就编码在 $H$ 的非对角元素里。
+
+若先固定一个权重为离散值，其他自由权重可以移动，以减轻由这次固定造成的输出变化。在二次近似框架中，逆曲率给出适合补偿的方向。相互冗余的输入维度通常更容易替对方分担误差；没有替代通道的重要方向则不容易补偿。
+
+GPTQ采用三个关键措施。首先，跨行按统一的列顺序量化，使不同输出通道共用矩阵运算。其次，先积累一个列块的误差，再集中更新后面的权重，把许多低效率操作变成适合GPU的矩阵乘法。最后，对加阻尼后的逆矩阵做Cholesky分解，避免不断更新逆矩阵时数值误差累积。
+
+下面是算法1的教学化结构。为避免符号混淆，令 $R$ 专门表示逆曲率的上三角Cholesky因子，满足 $R^\top R=(H+\lambda I)^{-1}$；它不是逆曲率矩阵本身。$\lambda$ 是稳定计算的阻尼，$B$ 是列块大小。
+
+```text
+输入：某线性层 W，校准输入 X，量化网格，列块大小 B
+H = 2 X X^T
+R = 上三角Cholesky((H + λI)^(-1))
+Q = 与W同形状的空矩阵
+依次遍历列块 [a, b)：
+    E = 当前块的误差缓存
+    对 j = a ... b-1：
+        Q[:, j] = quantize(W[:, j])
+        E[:, j-a] = (W[:, j] - Q[:, j]) / R[j, j]
+        W[:, j:b] -= E[:, j-a] × R[j, j:b]
+    W[:, b:] -= E × R[a:b, b:]
+输出：量化权重Q及解码所需的尺度等信息
+```
+
+整个网络还需要逐块采集输入：上一块量化完成后，用量化后的块继续传递校准样本，再处理下一块。否则后面的层只见到理想浮点输入，可能低估前面量化已改变的分布。伪代码省略了权重打包、异常通道处理及内核调度，不能直接作为生产实现。
+
+“为什么有效”要分三层回答。平方目标的局部曲率是数学事实；统一顺序与分块是否兼顾精度和速度，需要实验判断；压缩后端到端能力是否保留，则必须由实际任务验证。不能从补偿公式直接推出所有任务的准确率不降。
+
+## 实验怎样组织
+
+| 项目 | 原文设置与阅读重点 |
+|---|---|
+| 模型 | OPT与BLOOM多个规模；观察规模及架构是否改变低比特敏感性 |
+| 校准 | 128段随机C4文本，每段2048 token；无任务标签 |
+| 比较 | FP16、最近舍入RTN；另有小模型量化方法比较 |
+| 质量 | WikiText2、PTB、C4困惑度及LAMBADA准确率；两类指标不能互换 |
+| 资源 | 逐块量化可在单张80GB A100执行；表2报告量化耗时 |
+| 推理 | 表6为batch 1生成128 token；同时比较所需GPU数量 |
+| 不确定性 | 主要表格没有完整多种子置信区间，微小差值不宜视为稳定能力提升 |
+
+校准token总量为 $128\times2048=262144$，这是按原设置自行计算。它远小于预训练规模，但依然是量化过程使用的额外数据。比较不同压缩方法时，应统一这些样本、位宽与分组粒度；更细分组需要更多尺度和零点，名义位宽相同也可能存储量不同。
+
+## 五处证据应该怎样读
+
+**证据一：表5，质量能否保住。** OPT-175B的WikiText2困惑度，FP16为8.34，4-bit GPTQ为8.37，3-bit为8.68；4-bit RTN为10.54。支持的是这组模型与数据上的输出质量保持，不能据此宣称低比特一定提升知识或推理。
+
+**证据二：表3，方法并非处处无损。** OPT-125M从27.65变为4-bit的31.12、3-bit的53.85。小模型的损失提醒读者：不能把最大的模型结果推广到任意规模。作者讨论的规模趋势也有例外，模型结构和激活分布值得单独检查。
+
+**证据三：表2，量化本身是否可负担。** OPT-175B约4.2小时，BLOOM-176B约3.8小时。这是生成低比特模型的成本，不是训练大模型所需时间，也不是用户每次回答问题的延迟。
+
+**证据四：表6，真实推理速度。** OPT-175B在A100上，FP16使用5张卡为230毫秒/token，3-bit使用1张卡为71毫秒/token，按数值计算约3.24倍。模型放置和访存都变化了；这个结果不能直接解释为同一硬件上的整数乘法吞吐提高3.24倍。
+
+**证据五：表7，极低位宽的隐藏开销。** 更细分组可改善2-bit结果，但尺度等信息提高了有效位宽。这里验证了分组与质量的交换关系，没有证明所有参数和辅助信息都只占两位。
+
+这些证据覆盖质量、处理成本和生成延迟三个不同问题。一个实现若只能给出更小的文件，尚未证明更快；若只能给出困惑度接近，也尚未证明代码执行或多轮指令表现接近。
+
+## 贡献、代价与适用边界
+
+真正的新意是把较精细的误差补偿量化做到了大模型可用的规模。精度收益来自补偿和数据感知，运行效率来自统一顺序、批量更新及数值实现，部署收益还依赖读取压缩权重的专用内核。这些环节不能混写成一个“低比特加速公式”。
+
+论文的生成加速主要利用减少权重访存，不是把整个计算图变成低比特整数计算。长上下文时，KV缓存会占据更多显存；高batch时，计算与访存的平衡也不同。这里关于不同部署负载的边界属于机制分析，具体交叉点需要在目标机器上测量。
+
+还应区分3-bit与4-bit的容量结论。175B权重、保留浮点的模块、量化元数据和缓存都要占空间，不能只用“参数量乘位宽”断言整模型一定装入某张卡。论文单卡大模型生成的展示对应特定3-bit配置，不能直接改写成任意4-bit配置都能单卡运行。
+
+## 一个自构例子与五个前置概念
+
+设模型只有 $y=w_1x_1+w_2x_2$，而校准样本中总是 $x_1=x_2$。原权重为0.49和0.51，输出等于 $x_1$。如果先把第一个权重舍入到0，让第二个自由权重吸收0.49，它就变成1，输出可以保持。这个自构例子说明相关性允许补偿；它不代表真实模型一定存在完美替代通道。
+
+如果部署时突然出现 $x_1=-x_2$，相同补偿就可能失败。这不是算法“忘了算误差”，而是校准目标没有覆盖该方向。因此检查校准分布，是理解此类方法的核心，而不是部署后附加的形式步骤。
+
+五个前置概念：**量化网格**规定允许存储哪些值；**校准**用样本估计压缩所需统计量；**Hessian**描述局部曲率；**Cholesky分解**把正定矩阵拆成三角因子以稳定计算；**内存带宽瓶颈**意味着搬运权重可能比执行乘法更限制速度。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 独立舍入忽略通道关联；精细逐权重量化难扩到千亿规模 | 用输入曲率补偿误差，统一列顺序并分块执行 | 在保持层输出的同时复用矩阵运算 | 表3/5质量、表2量化时间、表6生成延迟 | 依赖校准、元数据与专用内核；小模型或其他负载未必同样受益 |
+
+## 自测：能够回答，才算理解
+
+**1. 为什么最小化权重的舍入误差，不等于最小化模型输出误差？**
+
+答案：输出误差还要乘输入。通道的幅值、相关性与出现频率都会改变权重误差的影响。GPTQ利用 $XX^\top$ 描述这些关系，让还自由的参数补偿已经离散化的参数；它优化的是校准样本上的层输出重建，而非参数距离。
+
+**2. 为什么3-bit能装入单卡，不能推出4-bit也能装入同一张卡？**
+
+答案：更高位宽本来就需要更多容量，还要加上保留浮点的模块、尺度、零点、激活和KV缓存。单卡结论必须对应具体模型、上下文、batch和实现。只计算权重主体会低估需求。
+
+**3. 困惑度几乎没变、文件缩小数倍，能否说服务速度也提高同样倍数？**
+
+答案：不能。质量和存储没有决定所有运行成本。内核解码、访存、矩阵乘法、通信及缓存都影响延迟，而且prefill与逐token解码的瓶颈不同。至少要分别测目标负载的首token延迟、解码速度、吞吐与峰值显存。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "061-gptq",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

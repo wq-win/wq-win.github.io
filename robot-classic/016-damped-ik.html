@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>016｜奇异鲁棒逆解：允许一点偏差，换取可执行的关节运动 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人经典基础</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">奇异鲁棒逆解：允许一点偏差，换取可执行的关节运动</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 016｜奇异鲁棒逆解：允许一点偏差，换取可执行的关节运动
+
+[总览](00-发展时间线总览.md) · [目录](README.md) · [上一篇](015-subsumption.md) · [下一篇](017-uncertain-map.md)
+
+**论文**：Yoshihiko Nakamura、Hideo Hanafusa，*Inverse Kinematic Solutions With Singularity Robustness for Robot Manipulator Control*，1986，JDSMC 108(3):163–171。[原始出版入口](https://doi.org/10.1115/1.3143764)。
+
+**阅读范围**：已核对作者、版本、原始摘要及其关于 SR-inverse 的方法描述；出版全文未能取得。下文给出标准阻尼最小二乘的完整教学推导，用来解释奇异鲁棒逆的核心思想；原文权重、调度函数、具体公式编号与仿真图表未核实，不作为已经读过的细节呈现。
+
+## 一分钟理解：精确解可能是一条坏指令
+
+机械臂接近完全伸直时，要求夹爪沿某个方向移动一点点，可能需要关节以极高速度转动。数学上的逆解可以存在，电机却执行不了。直接截断巨大速度又会破坏各关节之间的配合。
+
+作者把“关节运动能否执行”纳入逆运动学的选择：与其精确追踪末端速度而要求不可行的关节运动，不如接受一些末端误差，得到有限且平滑的关节指令。原始摘要报告理论性质、计算复杂度分析与多组仿真；具体改善数值没有核实。
+
+一句话：**在雅可比接近奇异的速度控制中，通过对关节运动加正则化限制，抑制小奇异值造成的逆增益放大，代价是有意保留任务跟踪误差，且仍需处理硬限位与碰撞。**
+
+## 问题设定：病态与无解不是同一件事
+
+设期望任务速度为 $v_d$，机器人满足 $v=J(q)\dot q$。普通逆或伪逆给出 $\dot q=J^\dagger v_d$。若 $J$ 满行秩，这个解能精确实现任务速度；但接近奇异时，最小奇异值很小，关节速度可能异常大。
+
+在真正奇异点，某些任务速度方向根本不可实现；在邻近奇异点，这些方向虽然理论可实现，所需关节速度却可能超出硬件。工程控制必须同时面对两种情况，不能只在矩阵恰好不可逆时才采取措施。
+
+这里研究的是机器人局部运动学，不是规划完整路径。输入是当前姿态、雅可比和任务速度；输出是关节速度。它没有奖励学习，也不自动计算电机力矩。若把有限速度误认为动力学可行，就忽略了加速度与力矩约束。
+
+## 方法：把两个相互冲突的要求放进一个目标
+
+采用等权教学形式，求解
+
+$$\min_{\dot q}\ \|J\dot q-v_d\|^2+\lambda^2\|\dot q\|^2.$$
+
+第一项要求末端运动接近期望，第二项惩罚过大的关节速度。$\lambda>0$ 决定折中程度。对目标求导得到
+
+$$\dot q_\lambda=J^T(JJ^T+\lambda^2I)^{-1}v_d.$$
+
+实现应解线性方程，而不是显式计算逆矩阵。正则化使被求解矩阵保持正定，即使 $J$ 降秩也能给出唯一有限的优化解。这是目标的性质，不是说原机器人突然获得失去的自由度。
+
+令 $J=U\Sigma V^T$，每个奇异方向的逆增益从 $1/\sigma_i$ 变为
+
+$$g_i=\frac{\sigma_i}{\sigma_i^2+\lambda^2}.$$
+
+当 $\sigma_i$ 很小，增益不再爆炸；当 $\sigma_i$ 远大于 $\lambda$，行为接近伪逆。所实现的末端速度在该方向被乘以 $\sigma_i^2/(\sigma_i^2+\lambda^2)$，所以抑制关节速度必然伴随任务误差。
+
+增益 $g(\sigma)$ 的最大值为 $1/(2\lambda)$，可由求导验证。这为理解数值放大提供一个简单上界，但它不是每个关节都严格满足指定速度上限的约束。如果某关节有特别低的限速，仍需要权重设计或带不等式约束的优化。
+
+```text
+输入：当前 q、目标任务速度 vd、阻尼参数 lambda
+J ← 计算当前任务雅可比
+A ← J*J转置 + lambda平方*单位矩阵
+y ← 解线性方程 A*y = vd
+dq ← J转置*y
+检查预测末端误差 J*dq-vd、关节速度和限位余量
+若超过硬件限制，进入明确设计的约束处理
+输出 dq；下一控制周期依据新状态重新计算
+```
+
+这是一种现代标准化教学实现。原文的 SR-inverse 还涉及可行性评价与选择，未核实其全部调度细节，不能把固定 $\lambda$ 宣称为原文唯一版本。
+
+## 理论与仿真怎样判断
+
+| 证据位置或推导 | 验证对象 | 能确认的结论 | 边界 |
+|---|---|---|---|
+| 原始摘要，问题定义 | 逆解在奇异附近不可执行 | 研究重点是可行近似运动 | 具体机械臂设置未核实 |
+| 原始摘要，SR-inverse 描述 | 替代普通逆与伪逆 | 方法接受笛卡尔轨迹近似 | 不能说完全消除跟踪误差 |
+| 原始摘要，性质与复杂度 | 实施可行性分析 | 原文包含相关分析 | 原运算计数未核实 |
+| 原始摘要，仿真说明 | 奇异问题与方法效果 | 原文有仿真演示 | 图号、峰值速度及重复次数未核实 |
+| 本文 SVD 推导 | 逆增益与速度衰减 | 给出正则化作用的可计算解释 | 不替代实物实验 |
+
+目前不提供无法确认的实验表数字。若要复现实验，最有价值的图不是单一末端轨迹，而是同一横轴上的最小奇异值、关节速度峰值和末端速度误差。这样才能看见“牺牲什么，换来什么”。
+
+比较时还应固定任务轨迹、采样周期、速度上限与后处理。若伪逆结果经过截断而阻尼结果没有截断，必须同时报告截断策略，否则无法解释差异究竟来自逆解还是限制器。
+
+## 自构数值例子：最弱方向到底发生了什么
+
+设 $J=\operatorname{diag}(1,0.01)$，期望速度 $v_d=(0,1)$。伪逆要求第二个关节速度为 100。令 $\lambda=0.1$，阻尼解的第二分量为 $0.01/(0.0001+0.01)\approx0.9901$。
+
+此时末端第二方向实际速度只有约 $0.009901$，误差很大。这个例子刻意选得极端，用来说明“关节速度变小”不是免费收益：机器人几乎放弃了当前难以实现的任务方向。
+
+若 $\lambda$ 减小到 $0.001$，同一分量约为 $99.01$，跟踪恢复，但速度再次接近巨大伪逆值。没有一个阻尼参数能让真实缺失的运动能力凭空出现。更好的上层做法可能是换姿态、改路径或降低期望速度。
+
+还可以把期望速度改为 $(1,0)$。它沿强方向，阻尼影响小得多。由此可见，接近奇异不代表所有方向都一样危险，应结合任务速度在奇异向量上的投影分析。
+
+## 贡献、代价与失败情形
+
+核心思想是把数值逆问题变成可调的近似问题，承认硬件能力比代数精确性更重要。它与可操作度形成互补：可操作度描述能力，阻尼逆解根据能力不足改变动作。
+
+代价是跟踪偏差和参数选择。固定大阻尼会在正常姿态也降低准确度；过于突变的自适应阻尼可能导致指令不平滑。权重设置还涉及不同关节速度尺度，不能默认转动与移动关节的一单位成本相同。
+
+阻尼不是碰撞避免，也不是严格的任务优先级工具。尤其把阻尼伪逆直接放入 $I-J^\#J$ 后，这个矩阵通常不再是真正零空间投影，辅助动作可能泄漏到主要任务。这里是由公式推出的实现提醒，不是原文已核实的实验结论。
+
+五个前置概念：**病态矩阵**对误差有大放大；**伪逆**给出最小范数最小二乘解；**奇异值**刻画方向能力；**正则化**用偏差换取稳定性；**硬约束**明确禁止超限，而不仅在目标中惩罚它。
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 证据 | 代价与局限 |
+|---|---|---|---|---|
+| 奇异附近精确逆解产生不可执行指令 | SR-inverse 给出可行近似 | 抑制病态方向的逆增益 | 原文性质与仿真主张；本文独立 SVD 推导 | 任务偏差、调参及硬约束仍需处理 |
+
+## 自测与参考答案
+
+**1．为什么直接把伪逆输出逐关节截断不等价于阻尼最小二乘？**
+
+截断发生在解算之后，改变了关节间协作，却没有重新优化任务误差。阻尼解从一开始就在整个向量空间权衡两个目标；两者一般产生不同方向的末端误差。
+
+**2．阻尼让矩阵可逆，是否也让机器人雅可比恢复满秩？**
+
+没有。被正则化的是数值求解矩阵 $JJ^T+\lambda^2I$，真实运动关系仍由 $J$ 决定。缺失方向仍然不能实现。
+
+**3．如果要求每个关节速度绝对不超过上限，单独选择 $\lambda$ 足够吗？**
+
+通常不够。范数惩罚只鼓励小速度，不直接编码每关节边界。应使用带速度不等式的优化，或具有明确保证的限制机制，并重新评价任务误差。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "016-damped-ik",
+            active: "robot-classic",
+            seriesLabel: "\u673a\u5668\u4eba\u7ecf\u5178\u57fa\u7840",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>044 · Prefix-Tuning：把任务知识放进每层的虚拟上下文 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">044 · Prefix-Tuning：把任务知识放进每层的虚拟上下文</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 044 · Prefix-Tuning：把任务知识放进每层的虚拟上下文
+
+[返回目录](README.md) · [上一篇：CLIP](043-clip.md) · [下一篇：Prompt Tuning](045-prompt-tuning.md)
+
+论文：Xiang Lisa Li、Percy Liang，*Prefix-Tuning: Optimizing Continuous Prompts for Generation*，2021。[原始论文](https://arxiv.org/pdf/2101.00190)。依据§3–7、表1–5及附录的训练设置和外推实例；未独立复现。
+
+## 一分钟理解
+
+全量微调像给每个任务保存一本改写后的大字典。Prefix-Tuning提出：能否保留同一本大字典，只为每个任务学习一小段引导信息？这段信息不是人能读懂的提示词，而是可优化的连续向量，并且直接进入Transformer各层的注意力上下文。
+
+论文在表格转文本任务中用很少的任务参数得到接近全量微调的表现，在低数据与部分未见类别上更好。但摘要生成存在明确损失，所以“只训练0.1%参数就和全量一样”不是覆盖全文实验的结论。
+
+一句话：在预训练生成模型的任务适配中，通过冻结主模型并优化逐层前缀状态，减少每个任务需要保存的参数，在若干生成任务上保留较高质量，代价是受限的适配空间、前缀计算与对任务和初始化的依赖。
+
+## 研究问题与参照方法
+
+论文研究监督式条件生成：输入 $x$ 是线性化表格或新闻，输出 $y$ 是描述或摘要。GPT-2负责表格转文本，BART负责摘要。没有强化学习奖励；结束由生成终止符和解码限制控制，训练则使用目标序列似然。
+
+全量微调更新预训练参数 $\phi$，每个任务都需要独立权重。Adapter只添加较小模块，但模块仍嵌入计算路径。Prefix-Tuning选择另一种控制位置：让输入与输出token都能够注意到一组可学习的“历史状态”。它沿用主模型的注意力、前馈层和语言建模输出头，改变可训练参数及条件信息的提供方式。
+
+关键假设是预训练模型已经具有足够生成能力，小规模连续控制就能调用这些能力。冻结权重可能减少小数据过拟合，但也可能限制对新任务的改造幅度；这是需要实验判定的取舍，不是先验保证。
+
+## 连续前缀到底是什么
+
+对自回归模型，设 $P_\theta$ 是包含各层前缀状态的矩阵，普通位置的隐状态仍由冻结网络产生：
+
+$$
+h_i=\begin{cases}
+P_\theta[i,:],&i\in P_{\rm idx},\\
+\mathrm{LM}_{\phi}(z_i,h_{<i}),&\text{其他位置}.
+\end{cases}
+$$
+
+这里的 $h_i$ 汇总各层状态；在实现注意力缓存的视角下，前缀提供每层的key/value。它不是仅在最底层加几个可训练词向量：后者的高层状态仍完全受冻结模型映射约束，论文把它作为较弱的消融。
+
+一种便于理解的单层表达为：
+
+$$
+H'=\operatorname{softmax}\left(
+\frac{Q[K_P;K_x]^\top}{\sqrt{d_k}}
+\right)[V_P;V_x].
+$$
+
+$K_P,V_P$ 是前缀，$K_x,V_x$ 是正常上下文，分号表示沿序列维拼接。后续词既可读取真实输入，也可读取任务前缀。这个表达说明控制如何进入注意力，并非把论文所有编码器、解码器接口压成完全相同的实现。
+
+目标仍是：
+
+$$
+\min_\theta -\sum_t\log p_{\phi,\theta}(y_t\mid x,y_{<t}),
+\qquad \phi\text{固定}.
+$$
+
+§4还使用较小向量经过MLP生成完整前缀的重参数化以利优化。训练后可以只保存生成出的前缀并去掉MLP。因此训练期间参与优化的参数与最终每任务存储量要分别计算，不能只拿部署前缀大小推算训练内存。
+
+```text
+输入：预训练模型 φ、训练对 (x,y)、前缀长度 m
+冻结 φ，初始化前缀生成参数 θ
+重复：
+  P = MLPθ(较小前缀表示)
+  为所需注意力层构造前缀 K/V
+  将前缀与输入状态组合，教师强制预测 y
+  loss = 目标 token 的负对数似然
+  梯度穿过冻结网络，但只更新 θ
+训练完成后保存 P；推理时加载同一 φ 与任务 P
+输出：按指定 beam search 解码的描述或摘要
+```
+
+冻结网络并不意味着可以把所有前向过程都放在无梯度模式中：损失必须经网络传回前缀。节省主要来自任务参数、梯度与优化器状态，而不是把大模型的运算全部删掉。
+
+## 实验设置与预算
+
+| 项目 | 原文设置 |
+|---|---|
+| 表格生成数据 | §5.1，E2E约50K样例、WebNLG约22K、DART约82K；这些是论文的数据集规模口径 |
+| 摘要数据 | XSUM约225K，BART-large；输入截断至512个BPE token |
+| 主对照 | 全量微调、只调顶部两层、Adapter；0.1% Adapter用于接近参数预算比较 |
+| 前缀训练配方 | 表5，E2E为5 epoch/批量10/长度5；WebNLG为5 epoch/批量5/长度5；DART为10 epoch/批量5/长度10 |
+| 摘要配方 | 表5，30 epoch、批量14、前缀长度100、学习率5×10⁻⁵ |
+| 墙钟报告 | §5.3，22K样例每epoch前缀约0.2小时、全量约0.3小时；指定TITAN硬件上的局部结果 |
+| 解码 | 表格任务beam=5；摘要beam=6并使用长度归一化 |
+| 低数据与泛化 | 抽取小训练集并用开发集选参；WebNLG训练9类、测试另5类，XSUM另构造主题变化划分 |
+
+不同方法表5的epoch、批量和学习率并不完全相同，不能把主表称为逐步数、逐算力严格等预算试验。BLEU和ROUGE衡量与参考文本的匹配，不能单独证明没有漏写或幻觉；附录的定性实例也提示这两种失败仍存在。
+
+## 四组关键证据
+
+**证据一：表1，GPT-2 medium表格生成。** E2E BLEU全量微调68.2，Prefix为69.7，差1.5分；WebNLG总体BLEU为46.5对55.1。更值得拆分的是已见类别64.2对62.9，未见类别27.7对45.6：总体优势主要不能解释为训练分布内一律更好。0.1% Adapter的E2E为66.3，说明放置可训练自由度的位置也重要。
+
+**证据二：表2，XSUM摘要。** 全量ROUGE-L为37.25，2%前缀为36.05，0.1%前缀为35.05。对应绝对下降1.20和2.20分。作者讨论任务复杂度与数据量可能影响结果，但这些因素没有被完全独立控制，不能说已经证明“摘要需要多少参数”的普遍规律。
+
+**证据三：表4与图4，结构消融。** E2E完整前缀BLEU69.7，仅调10个输入嵌入为62.2。图4显示前缀长度增加到一定程度后测试表现略降，即使训练损失更低。支持逐层干预和容量选择在这些配置中重要；不能据此断言输入层提示在更大模型上永远无效，下一篇恰好研究这一规模条件。
+
+**证据四：图3、表3与附录A.4。** 小数据曲线偏向前缀；XSUM新闻到体育的ROUGE-L为31.51，全量为30.26。外推改善有真实主题划分依据，但附录指出前缀仍会遗漏表格内容，全量微调则常出现不符事实的生成。高自动指标并不能消除这两类风险。
+
+## 贡献与教学例子
+
+新意是把任务适配变成可学习的逐层条件状态，而不是换一种输出损失。作者提出的保留预训练参数有利外推，是与实验相符的解释；参数冻结、参数数量和优化路径同时变化，尚不能把收益完全归于单一原因。
+
+**自构例子：** 输入为“店名=青禾；菜系=川菜；价格=中等”。两个任务共享GPT-2：一个前缀学到简短介绍，另一个学到只列菜系和价格。前缀不应储存每家店的事实，而应改变如何使用当前表格。若输出捏造“可停车”，说明调节生成风格没有保证事实约束，需在评价中单独检查槽位覆盖和错误添加。
+
+五个前置概念：**条件生成**用输入约束输出分布；**教师强制**用真实历史token训练下一步；**KV缓存**保存注意力可读取的键和值；**参数冻结**禁止更新权重但不必阻断输入梯度；**重参数化**通过另一组变量生成实际被使用的参数，以改善优化。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 每任务保存整模型 | 冻结主干并保存逐层前缀 | 复用生成能力，以少量状态控制任务 | 表1少量参数保持表格生成质量 | 训练仍穿过大模型，存储节省不等于同倍率加速 |
+| 输入提示控制能力有限 | 直接调整多层前缀K/V | 不受单层嵌入映射的同等约束 | 表4完整69.7对EMB-10的62.2 | 前缀长度和初始化敏感 |
+| 小数据与未见类别适配 | 限制可训练自由度 | 可能减轻任务过拟合 | 图3、表3、WebNLG未见类别 | XSUM主结果下降，外推仍会漏写 |
+
+## 自测与答案
+
+**1. Prefix-Tuning和只学习几个输入词向量为什么不相同？**
+
+输入向量只能经冻结层逐层传播；Prefix-Tuning直接为多层注意力提供可训练上下文，拥有不同的控制自由度。表4在GPT-2表格生成上显示差异，但不构成所有规模和任务上的优劣定理。
+
+**2. 可训练参数只有0.1%，训练就会快1000倍吗？**
+
+不会。大模型仍需前向计算，且需要将梯度传到前缀。0.1%还涉及任务参数的统计口径，重参数化训练模块与最终存储不同。论文局部计时是每epoch约0.3小时到0.2小时，远非千倍。
+
+**3. 怎么判断前缀在WebNLG上改善的是记忆还是泛化？**
+
+分开看训练出现的9类和未出现的5类，而不是只看总体。medium结果已见类别略降、未见类别明显上升，支持该类别变化下的外推收益。仍需检查类别难度、内容覆盖和事实错误，不能把这一个划分推广为任意领域迁移。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "044-prefix-tuning",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

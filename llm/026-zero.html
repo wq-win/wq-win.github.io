@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>026｜ZeRO：数据并行中，没必要让每张卡保存全部训练状态 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">ZeRO：数据并行中，没必要让每张卡保存全部训练状态</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 026｜ZeRO：数据并行中，没必要让每张卡保存全部训练状态
+
+[目录](README.md) · [上一篇](025-albert.md) · [下一篇](027-t5.md)
+
+**论文**：Samyam Rajbhandari 等，*ZeRO: Memory Optimizations Toward Training Trillion Parameter Models*，2019 年预印本。[原文](https://arxiv.org/abs/1910.02054) · [PDF](https://arxiv.org/pdf/1910.02054)。本文区分状态分片理论、实现实验与容量推算；标题中的万亿参数方向不等于文中每个推算规模都已完整训练验证。
+
+## 一分钟理解
+
+混合精度 Adam 训练不仅保存模型权重，还要保存梯度、主精度副本和两个矩状态。普通数据并行让每张卡重复保存这些内容，浪费大量总显存。ZeRO 把不同状态分片到各卡，需要时通信取得或汇总，从而减少每卡冗余。
+
+它没有把参数剪掉，也没有改变目标函数。核心贡献是用通信安排替代重复存储；代价是状态调度、通信以及仍未被消除的激活和临时缓冲。模型状态估算能放下，不代表实际训练峰值一定放下。
+
+## 背景：权重文件大小远小于训练显存
+
+一个参数在推理时可能只需低精度权重，但训练要保留更多信息。Adam 的一阶、二阶矩通常使用较高精度，混合精度还可能维护主权重。若只把参数量乘以两字节，就会严重低估训练需求。
+
+普通数据并行的每张卡处理不同样本，却保存相同模型状态。这种冗余对吞吐有便利，但当模型接近显存上限时，就限制了可训练规模。ZeRO 观察到，参数更新并不要求每卡永久拥有所有优化器状态。
+
+它与 Megatron 的张量并行区别在于：张量并行切分同一层计算；ZeRO 首先切分数据并行中的状态所有权。两者可以结合，分别处理计算图和存储冗余，但组合后的通信成本需重新测量。
+
+## 方法：逐步分片三类状态
+
+设参数数为 $\Psi$、数据并行卡数为 $N$。在论文采用的具体混合精度状态口径下，普通状态约为 $16\Psi$ 字节。只分片优化器状态时约为 $4\Psi+12\Psi/N$；再分片梯度时约为 $2\Psi+14\Psi/N$；全部分片时理想常驻状态约为 $16\Psi/N$。
+
+这些式子描述特定精度和状态集合，不是所有框架永远固定的字节数。激活、通信 bucket、临时参数聚合和碎片还需要另外计入。理解口径比背诵 16 这个常数更重要。
+
+第一阶段每卡只更新自己负责的参数分片，再同步更新后权重；第二阶段梯度也按所有者聚合，减少完整梯度常驻；第三阶段连参数都分片，在计算需要时收集相关层，使用后再释放或重新分片。释放时机与预取策略影响峰值与吞吐。
+
+```text
+划分参数索引，给每个数据并行进程分配所有权
+按阶段决定分片优化器状态、梯度和参数
+每个batch：
+    按需要聚合当前层参数并执行前向
+    反向计算梯度，将分片梯度聚合到对应所有者
+    每卡用本地优化器状态更新自己的参数分片
+    按下一计算需要同步或收集更新参数
+记录峰值显存、通信量、吞吐与数值一致性
+```
+
+数学目标保持不变，机制是状态生命周期和通信重排，指标是容量、显存和训练效率。没有参数被删除，所以 ZeRO 不是量化或剪枝；也不能说每卡只训练自己样本对应的一部分模型。
+
+## 实验与证据
+
+| 项目 | 原文范围 |
+|---|---|
+| 理论对象 | 模型状态冗余与通信量分析 |
+| 分片阶段 | 优化器、梯度、参数逐步加入 |
+| 容量表 | 多个模型规模与并行度的每卡状态推算，需与实测区分 |
+| 实际系统 | 具体硬件上展示可训练模型规模与效率 |
+| 未覆盖内存 | 激活、临时缓冲及碎片属于额外分析和优化对象 |
+| 比较要求 | 相同精度、batch、模型和硬件下比较峰值与吞吐 |
+
+**证据一，图 1。**清晰分解不同状态的冗余，解释各阶段节省来自哪里。图中模型状态不是全部训练峰值。
+
+**证据二，表 1。**例如 7.5B 模型在 64 路条件下，完全分片的模型状态约 1.88GB，而普通状态约 120GB。这是论文口径的计算结果，不是说一张两GB卡便能完整训练该模型。
+
+**证据三，分片算法与通信量分析章节，以及实测扩展部分。**理论给出不同阶段的通信取舍，实测验证系统可运行。通信总量、通信关键路径和实际等待时间仍不相同，不能只凭字节总数预测速度。
+
+标题强调面向万亿模型的扩展方向，阅读时应逐项识别哪些是分析推算、哪些是已运行实验。容量推算有价值，但不能被改写成完整训练已经完成并达到某个任务质量。
+
+## 教学例子：谁拥有优化器状态
+
+构造四张卡和四个参数块。每卡仍处理自己的样本，所有样本梯度最终都应影响所有参数；只是第一卡保存并更新块一的 Adam 状态，第二卡负责块二，以此类推。所有权分片不等于数据对参数影响被隔离。
+
+若错误地让每卡只用自己的局部梯度更新其块，而不聚合其他样本贡献，就改变了训练算法。正确通信必须保持相应全局梯度语义。这也是验证分布式实现时应检查的小模型数值对照。
+
+第三阶段在执行某层时可能临时取得较完整参数，因此瞬时显存高于常驻分片值。若通信预取多层，吞吐可能改善，峰值却增加。内存与速度需要在同一时间线上分析，而不是两个独立最大化目标。
+
+## 怎样验证一个 ZeRO 配置
+
+先用小模型对照未分片训练，固定随机性，检查一两步参数变化与损失在浮点容差内一致。再测峰值内存，区分参数、优化器、激活和通信缓冲，最后比较达到相同质量所需时间。
+
+只报告“没有 OOM”不足以说明方案好。一个配置可能靠过度通信勉强运行，却吞吐很低；另一个可能内存稍高但总体训练成本更低。分片阶段越高并不自动越优，应由模型规模、互联和batch决定。
+
+## 贡献与局限
+
+ZeRO 将数据并行从完整状态复制转向按需协作，显著改变大模型训练的容量边界。限制包括通信、调度复杂性、故障恢复、检查点重组以及激活内存。它提供资源管理能力，不直接提高语言建模目标的统计效率。
+
+五个前置概念是优化器状态、reduce-scatter、all-gather、常驻与峰值显存、数据并行语义。理解这些，就能判断一个训练配置到底节省了什么，而不只凭阶段数字猜测性能。
+
+检查点保存也是状态分片带来的真实工程问题。每个进程可能只持有局部权重和优化器状态，恢复到不同并行度时必须重新组织所有权，并保持参数顺序和矩状态对应。若只合并权重做推理，这是合法导出，却不等于可无缝恢复原训练。可以用一个保存前后单步对照检验恢复语义，再测试改变设备数的重分片。这个实验方案还应模拟一个进程缺失文件，确认系统会明确失败，而不是静默生成不完整模型。它关注可靠性，与论文的理想内存公式是不同但相关的要求。
+
+分片后的模型状态估算不包含激活、临时通信缓冲和内存碎片，因此容量公式不能直接当作运行时显存峰值；实际最大批量仍需测量。
+
+|原有问题|作者改动|为什么可能有效|实验证据|代价与局限|
+|---|---|---|---|---|
+|数据并行重复保存模型训练状态|分阶段分片优化器、梯度和参数|把冗余状态分摊到各设备|图1状态分解、表1容量、通信分析|通信调度更复杂，激活仍需额外内存|
+
+## 自测与参考答案
+
+**1. 每卡只拥有部分优化器状态，是否意味着只训练部分参数？**
+
+全局仍更新全部参数，每卡负责一部分所有权，梯度需要正确聚合。所有权和学习范围不同，不能把分片误读成冻结其余参数。
+
+**2. 为什么 $16\Psi/N$ 不等于实际峰值显存？**
+
+它只描述特定状态与精度口径。激活、临时聚合参数、通信缓冲和碎片仍占空间，峰值还取决于调度。
+
+**3. 为什么最高分片阶段不一定最快？**
+
+更多分片减少常驻内存，却增加按需参数通信和调度。如果原模型已能放下，较低阶段可能有更好吞吐。需要在相同任务质量与硬件下实测。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "026-zero",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

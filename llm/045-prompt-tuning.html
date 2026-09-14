@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>045 · Prompt Tuning：模型越大，任务接口能否越小 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">045 · Prompt Tuning：模型越大，任务接口能否越小</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 045 · Prompt Tuning：模型越大，任务接口能否越小
+
+[返回目录](README.md) · [上一篇：Prefix-Tuning](044-prefix-tuning.md) · [下一篇：RoFormer](046-rope.md)
+
+论文：Brian Lester、Rami Al-Rfou、Noah Constant，*The Power of Scale for Parameter-Efficient Prompt Tuning*，2021。[原始论文](https://arxiv.org/pdf/2104.08691)。依据§2–7、图1与图3、表1–3及附录A的预算和重复设置；未独立运行训练。
+
+## 一分钟理解
+
+前一篇给Transformer多层都加可训练前缀。这篇把接口进一步缩小：只在输入嵌入前拼接一小段可训练向量，其余模型全部冻结。问题不是这种简化是否在任何情况下都足够，而是随着模型变大，它与全量微调的差距怎样变化。
+
+作者在T5系列发现，大模型更容易通过小提示调用已有能力；11B规模时，这种方法在所测SuperGLUE开发集上接近强全量微调基线。不过提示是用任务标注数据训练的，不是人工写一句话，也不是没有训练的few-shot推理。
+
+一句话：在大型预训练编码器—解码器的监督任务适配中，通过仅学习输入端连续提示，显著减少每任务参数，并随模型增大缩小质量差距，代价是对基础模型、预训练目标、任务数据及优化配方的依赖。
+
+## 为什么“只改输入”值得研究
+
+全量微调为每个任务保存一整套权重。即使基础语言知识相同，部署多个任务仍需要切换或存储多个模型。连续提示把一般能力放在共享主干，把任务控制放在小参数矩阵中，有助于多任务共用同一模型服务。
+
+论文以T5的text-to-text接口处理分类、问答等任务。输入是文本，输出可以是“蕴含”等标签词，也可以是答案片段。训练监督是正确目标序列，没有强化学习环境、奖励模型或策略优化。通过把类别变成文本，论文不需要为每个分类任务另学输出头。
+
+需要特别区分三件事：人工提示在词表中选离散token；Prompt Tuning直接优化连续嵌入；Prefix-Tuning还在中间层加入可训练状态。这些方法的参数自由度不同，却不能只按自由度多少断言质量高低，因为基础模型本身决定输入控制能够传播多远。
+
+## 目标函数与完整流程
+
+设输入有 $n$ 个token，嵌入维度为 $d$，冻结词嵌入得到 $X_e\in\mathbb R^{n\times d}$。学习 $m$ 个软提示向量 $P\in\mathbb R^{m\times d}$，把 $[P;X_e]$ 输入T5编码器：
+
+$$
+\min_P L(P)=-\sum_{(X,Y)\in D}\sum_t
+\log p_\theta(Y_t\mid [P;X_e],Y_{<t}),
+\qquad\theta\text{固定}.
+$$
+
+$D$ 为任务训练集，$\theta$ 包含所有原模型权重。只有 $md$ 个任务参数。提示不必等于任何真实词的嵌入，不能假定训练后可无损翻译成一句人类指令。
+
+论文还有一个容易漏掉的前置阶段。T5.1.1原先做片段恢复，习惯输出哨兵token；冻结后很难单靠提示改掉这种输出偏好。因此作者比较直接使用原模型、给任务答案添加哨兵，以及先做额外的自然文本续写式LM adaptation。默认配方采用最后一种，主模型在这个共享适配阶段会更新，之后才冻结以训练各任务提示。
+
+```text
+输入：T5.1.1、无监督自然文本、某任务标注集
+共享准备：
+  按论文默认设置做 100K 步 LM adaptation
+  固定得到的模型 θ，供多个任务复用
+每任务训练：
+  初始化 100 个软提示向量 P
+  把标签词嵌入用于部分初始化，其余从词表采样
+  对训练样本嵌入 X，拼接 [P; X]
+  用教师强制计算目标序列交叉熵
+  反向传播到 P，只更新 P
+  按开发集指标选择检查点
+部署：加载共享 θ 与目标任务 P，正常生成标签或答案
+```
+
+数学损失并未改成新的任务目标；算法机制是训练变量与输入条件的改变；衡量收益则要同时看任务分数、任务参数量、共享准备成本和推理吞吐。减少20,000倍任务参数，不意味着计算量或训练时间也减少20,000倍。
+
+## 实验表：哪些条件组成了“规模有效”
+
+| 维度 | 原文设置及证据意义 |
+|---|---|
+| 基础模型 | T5.1.1从Small到XXL，最大约11B；并非只在一个规模下试验 |
+| 共享准备 | 默认100K步LM adaptation；图3单独比较适配步数和预训练目标 |
+| 每任务训练 | 30,000步，批量32，恒定学习率0.3，Adafactor；开发集早停选检查点 |
+| 提示设置 | 默认100个向量、类别标签初始化；消融长度1、5、20、100、150 |
+| 任务数据 | SuperGLUE八个任务分别训练，未混合；表7如BoolQ训练9427、CB250、ReCoRD100730 |
+| 对照 | 单任务全量微调、多任务全量微调，以及引用的GPT-3人工few-shot结果 |
+| 硬件 | 附录A，Small/Base用4块TPU v2芯片，较大模型用16块TPU v3芯片 |
+| 重复与调参 | 主配置和消融各3次，报告均值与标准差；77次搜索试验中提示40次、单任务全量37次 |
+
+主结果使用开发集，且该集合也参与早停和选参，因此不能把它写成从未用于任何选择的最终隐藏测试结果。多任务基线还使用混合训练与额外DPR数据；引用GPT-3结果时，任务标注暴露、架构、预训练语料也不同，不能据此声称小T5具有普遍超过大GPT-3的能力。
+
+## 四组结果，分别证明什么
+
+**证据一：图1与§3.1。** 随T5变大，Prompt Tuning与全量微调的SuperGLUE差距缩小，XXL接近多任务微调基线，任务参数少超过20,000倍。这里支持的是该模型族的经验趋势，没有证明任意任务、任意预训练目标都随规模自动追平。
+
+**证据二：图3。** 较小模型对提示长度、初始化、预训练目标更加敏感，XXL对这些选择更稳健；超过约20个提示后的平均收益变小。额外LM adaptation对多数配置有用。实验说明“冻结哪个检查点”与“如何初始化”是方法的一部分，也解释了为何不能直接用前一篇小模型输入嵌入消融否定本篇结果。
+
+**证据三：表1，SQuAD训练后的领域迁移。** 域内F1全量94.9±0.2、提示94.8±0.1；迁移到TextbookQA时为54.3±3.7和66.8±2.9，提示高12.5分。但DuoRC为68.9对67.7，DROP为68.9对67.1，提示反而下降。冻结限制可能抑制过拟合，是作者解释；表格支持部分迁移改善，未建立全部领域优越的定理。
+
+**证据四：表3，五提示集成。** 单提示平均SuperGLUE开发分90.5，最佳单提示91.0，五提示多数投票91.3。相对平均提升0.8分，相对最佳提升0.3分，两个比较不能混写。共享主干减少模型副本存储，多提示可批处理，但仍对每个样本执行多个提示条件的计算，不能描述为单提示同等FLOPs。
+
+表2还显示迁移方向的不对称：QQP到MRPC的F1从81.2提高到84.3，反向从70.9降到69.7。哪种数据覆盖哪种任务关系，会影响“冻结更泛化”的实际结果。
+
+## 新意、限制与小例子
+
+本篇的主要贡献是实证揭示极小任务接口与模型规模之间的联系，并给出共享部署、提示集成和初始化分析。它没有创造新的语言建模损失，也没有证明软提示储存了可读的任务规则。
+
+§7用最近邻词检查提示，能看到一些语义相关词簇，却没有得到连贯可解释指令。最近邻分析只是表示空间的观察：把向量替换成最近真实词会改变实际输入，必须重新测性能才能判断是否保留功能。
+
+**自构例子：** 同一个冻结模型服务“情感判断”和“文本蕴含”。每个请求前拼接各自100个向量；假设嵌入维度为1024，每任务增加102400个数。这个数是教学计算，不是论文所有T5规格的参数量。两任务可放同一批次共享权重，但序列变长，注意力开销仍存在。如果每条都要五提示投票，工作量也高于单提示。
+
+五个前置概念：**软提示**是可训练连续向量；**标签词**把分类标签转成生成目标；**LM adaptation**改变共享模型的生成习惯；**领域迁移**在输入分布变化后评估同类任务；**集成**结合不同预测以减少部分误差。它们分别对应参数接口、输出接口、准备阶段、评估条件与推理策略。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 每任务需要完整模型副本 | 只学习输入软提示 | 大模型已有能力可由小条件接口调用 | 图1随规模接近微调 | 需要任务标注和大主干，不能保证所有任务 |
+| 冻结T5输出习惯不合任务 | 共享LM adaptation后再冻结 | 减少片段恢复与自然输出的失配 | 图3目标及步数消融 | 默认另花100K步共享训练 |
+| 单任务适配易过拟合或波动 | 限制参数并集成多个提示 | 保留共享表示，利用预测多样性 | 表1、表3 | 部分迁移退步，集成增加计算 |
+
+## 自测与答案
+
+**1. “模型从头到尾冻结”是否准确描述论文默认方法？**
+
+不准确。每个任务的提示学习阶段冻结主干，但默认先做100K步LM adaptation，更新共享模型。可把这项成本在多个任务间摊销，却不能在复现预算中省略。
+
+**2. 为什么本篇不与Prefix-Tuning的输入嵌入消融矛盾？**
+
+两篇测试的模型规模、基础架构、任务和准备阶段不同。本篇研究规模增长后输入层控制是否足够，发现11B模型更有利；前篇只说明其GPT-2生成设置下逐层前缀更强。跨设置结论需要限定条件。
+
+**3. 五提示集成只保存一个主模型，能否说推理成本不变？**
+
+不能。参数副本存储减少，但同一输入需要在五组提示条件下计算并投票。批处理可能改善硬件利用率，却不能消除额外算术、激活和延迟。应同时测存储、吞吐与每请求延迟。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "045-prompt-tuning",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

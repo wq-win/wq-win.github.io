@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>094｜DeepSeek-R1：奖励正确答案，为什么能改变解题过程 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">DeepSeek-R1：奖励正确答案，为什么能改变解题过程</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 094｜DeepSeek-R1：奖励正确答案，为什么能改变解题过程
+
+[返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
+
+**论文**：DeepSeek-AI，*DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning*，2025。[原文](https://arxiv.org/abs/2501.12948) · [正文 v1](https://arxiv.org/html/2501.12948v1) · [官方仓库](https://github.com/deepseek-ai/DeepSeek-R1)。以下使用首次报告的章节与表号，核对了方法、评估、失败尝试和局限；不把后续版本或其他复现的参数补写成 v1 已报告的设置。
+
+## 一、一分钟理解
+
+如果教师只给最终答案打分，而不逐行示范推导，学生能否逐渐学会检查、换方法和延长思考？R1-Zero 探索的是这个问题在强预训练语言模型上的版本。它从 DeepSeek-V3-Base 出发，用数学答案和代码测试等可验证反馈进行强化学习，不先执行一轮解题示范微调。
+
+训练后的正确率显著提高，生成过程也变长，出现重新检查的文本行为。但输出可读性和语言一致性有问题，因此完整 R1 加入冷启动示范、拒绝采样和通用能力训练。另一条路线把大模型生成的答案用于小模型 SFT，使后者获得较强数学成绩。
+
+一句话总结：在答案可以验证的推理任务中，通过在线采样与奖励更新，改善强基础模型的解题成功率，再通过监督整理与蒸馏提高可用性，代价是长回答、大量采样以及验证器与训练数据的限制。
+
+## 二、问题定义与三个必须区分的模型
+
+**R1-Zero** 没有冷启动 SFT，不等于没有预训练知识、人工题目、答案标签或人为设计。**完整 R1** 有监督训练与强化学习交替。**R1-Distill** 是在 Qwen、Llama 等基础上学习教师输出的模型，论文表 5 所报版本只使用 SFT，没有学生侧 RL。
+
+强化学习状态可以看成问题与已生成前缀，动作是下一个 token，终止发生在输出结束或长度达到上限，奖励来自整段回答的正确性、格式等检查。环境转移主要是把生成 token 接到前缀后；数学验证器并不是一个会替模型推导的世界模型。
+
+困难在于信用分配：最后答案正确，不代表每个中间句子都可靠；答案错误也不代表每一步都错。论文依赖足够强的基础模型，能够采样出有区别的候选解。如果所有回答都失败，结果奖励就很难告诉模型哪条路径更值得继续探索。
+
+## 三、方法：在同一道题的候选之间比较
+
+### GRPO 的作用
+
+对于问题 $q$，旧策略生成 $G$ 个回答，奖励为 $r_i$。组相对优势是：
+
+$$
+A_i=\frac{r_i-\bar r}{\operatorname{std}(r_1,\ldots,r_G)}.
+$$
+
+这里的基线来自同组回答，而非单独训练的 critic。优势回答一个相对问题：“这次回答比本题其他尝试更好吗？”它不能直接比较不同题目的绝对难度。当全组奖励相同，标准差为零，需要实现层面的处理；v1 没有详细交代该边界，不应自行给出某个稳定项并声称是原配置。
+
+以 $\rho_i=\pi_\theta(o_i|q)/\pi_{old}(o_i|q)$ 表示策略概率比，报告式（1）的裁剪项为：
+
+$$
+\min\{\rho_i A_i,\operatorname{clip}(\rho_i,1-\epsilon,1+\epsilon)A_i\}
+-\beta D_{KL}(\pi_\theta\Vert\pi_{ref}).
+$$
+
+$\epsilon$ 限制对旧策略的激进更新，$\beta$ 调节偏离参考模型的程度。原文用整段输出写出概括公式；不能据此臆造实际训练内核的 token 归一化和全部超参数。它继承 DeepSeekMath 的 GRPO，不是 R1 首次提出该算法。
+
+### 奖励与四阶段流程
+
+R1-Zero 主要采用正确性与格式奖励，不使用神经网络结果奖励或过程奖励模型。代码检查通常检查测试是否通过，数学检查提取指定格式的答案；正确性来自验证规则，不来自回答里“我已经验证”的自述。
+
+完整 R1 先用数千条长推理示范冷启动，随后执行推理 RL。为减少混合语言，又加入目标语言词比例奖励；作者承认这会略微降低部分推理表现。之后收集约 600K 推理样本与 200K 通用样本，重新微调 V3-Base 两轮，再执行面向推理与通用偏好的 RL。
+
+```text
+输入：V3-Base、可验证训练问题、通用任务数据
+Zero 路线：
+    直接从基础模型重复采样同题回答
+    用正确性与格式规则评分，计算组相对优势
+    用 GRPO 更新策略，跟踪正确率和回答长度
+完整 R1 路线：
+    基础模型 ← 数千条可读长推理示范的 SFT
+    执行推理 RL，并加入语言一致性约束
+    从成熟 RL 模型采样并过滤，获得推理示范
+    混合通用样本，重新对 V3-Base 做 SFT
+    执行混合规则奖励与偏好奖励的最终 RL
+蒸馏路线：
+    用约 800K 筛选样本对小模型做 SFT
+输出：三类不同训练来源的模型，分别评价
+```
+
+这段流程里最容易读错的是“重新微调 V3-Base”：后续 SFT 不是简单在前一 RL 检查点上接着训练。筛选后的回答把前阶段探索结果转化为监督数据，新的基础模型借此吸收比较干净的行为模式。
+
+## 四、实验设计与缺失信息
+
+| 项目 | 报告设置及解释 |
+|---|---|
+| 大模型基础 | V3-Base，671B 总参数、每 token 37B 激活；不能把稀疏激活量当完整存储量 |
+| 监督数据 | 冷启动仅报告数千条；后续约 800K、两轮；完整内容和所有过滤参数未报告 |
+| 大规模 RL 预算 | v1 未给出足以重建完整训练的采样批次、总 token、全部学习率和 GPU 小时 |
+| 小模型 RL 对照 | §4.1：Qwen-32B 基础上进行超过 10K 步数学、代码、STEM RL |
+| 采样评估 | 温度 0.6、top-p 0.95，输出上限 32768；按任务每题通常采样 4—64 个回答 |
+| Pass@1 | 对多次独立回答的正确指示取平均，估计一次随机回答的成功率；不是从中挑一个最优答案 |
+| cons@64 | 64 个回答的多数投票；需要额外推理预算，与 Pass@1 不同 |
+| 工程与模型裁判 | SWE-bench Verified 用 Agentless；开放回答评估只向裁判提供最终摘要 |
+| 对照口径 | o1-1217 成绩引用官方报告，并非所有模型都在同一实验平台重新测量 |
+| 不确定性 | 采样重复有助估计输出随机性，但不能替代多个独立训练种子；v1 未完整报告训练间方差 |
+
+正确性奖励与真实需求之间仍有距离：通过有限代码测试可能遗漏边界错误，数学答案正确可能掩盖无效推导。只展示最终成绩无法证明不存在奖励投机，也不能把可验证任务的收益自动推广到无法快速检验的开放式任务。
+
+## 五、结果：五处值得认真读的证据
+
+**证据 1：图 2、表 2，Zero 的改善。** AIME 2024 的平均 Pass@1 从 15.6 到 71.0，提高 55.4 个百分点；cons@64 为 86.7。图 2 每题采样 16 次跟踪训练。它支持无冷启动 SFT 的 RL 能在该基础模型上改善成功率，不能支持“从空白模型学出推理”。
+
+**证据 2：图 3、表 3，长度与重新检查。** 图 3 显示训练集回答长度增加，表 3 展示重新审视推导的个案。这些是行为观察，没有严格隔离长度、采样分布与策略变化的因果实验；个案也不能证明产生了人类式意识或稳定的内部自我验证机制。
+
+**证据 3：表 4，R1 的强项与退步。** AIME 为 79.8，V3 为 39.2；GPQA 为 71.5、V3 为 59.1。相反，IFEval 为 83.3、V3 为 86.1；C-SimpleQA 为 63.7、V3 为 68.0。论文对事实问答下降提出安全拒答解释，但不能由此把所有错误都归结为拒答。
+
+**证据 4：表 5，蒸馏后的模型。** Qwen-7B 蒸馏版 AIME 为 55.5、MATH-500 为 92.8；Qwen-32B 为 72.6、94.3。这是模型、教师示范和较长输出预算共同作用的结果。较小参数量不代表教学数据免费，也不代表所有任务都超过更大的通用模型。
+
+**证据 5：表 6，蒸馏与直接 RL。** 32B 直接 RL 的 AIME 为 47.0，蒸馏版为 72.6；LiveCodeBench 为 40.2 与 57.2。该对照说明作者所用方案中蒸馏更强，但两者信息来源不同，完整计算也未严格配平，因此不能推出所有小模型 RL 都不如蒸馏。
+
+## 六、贡献与适用边界
+
+R1 的贡献是展示一套可见的推理后训练路线，以及 RL 探索结果如何转成监督数据供更小模型学习。它既没有发明预训练，也没有证明 SFT 无用；完整系统恰恰组合了多种监督来源。
+
+§4.2 报告了过程奖励与 MCTS 尝试不成功的经验：步骤划分困难、价值判断不准、训练搜索代价高。这些失败有助于理解工程选择，但作者也明确没有否定这些方法未来的可能性。
+
+§5 承认函数调用、多轮、复杂角色扮演和 JSON 输出仍弱于 V3；其他语言还会出现混合输出。软件工程任务的验证慢，限制了大规模 RL 的使用。这里的分析是，奖励反馈的速度与可靠性会塑造能力分布：容易批量验收的数学、竞赛代码，更容易成为强化学习率先取得进展的领域。
+
+## 七、建立理解
+
+**自构例子。** 同一道算术题采样四次，奖励为 $[1,0,0,1]$。组平均为 0.5，使用总体标准差时优势为 $[1,-1,-1,1]$。成功轨迹被相对加强，但这不会逐句证明其中每一步正确。若四个答案全错，组内便没有相对信号；增加一个更强示范或改变采样策略可能比重复同样失败更有效。
+
+五个前置概念：**策略梯度** 根据回报调整生成概率；**优势** 表示相对基线的好坏；**KL 约束** 限制策略偏离参考分布；**拒绝采样** 保留满足检查条件的候选；**蒸馏** 让学生学习教师输出所携带的信息。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 解题依赖示范、正确率不足、长推理难以迁移 | 基础模型上 GRPO，监督与 RL 交替，再以筛选轨迹蒸馏 | 在线探索加强成功轨迹，监督整理行为并转移给学生 | 图 2、表 4—6 的推理成绩与对照 | 强基础与教师成本不可忽略；长输出增加推理费用；格式、语言和开放任务有退步 |
+
+## 八、自测与答案
+
+**1. R1-Zero 的 Zero 到底排除了什么，又没有排除什么？**
+
+答：它排除了 RL 前的冷启动 SFT；没有排除基础模型预训练、人工设计的任务与答案、格式约束及奖励规则。因而证据针对强基础模型上的后训练方式，不能解释成无知识起点的自发学习。
+
+**2. 采样 64 次估计 Pass@1，与 cons@64 的部署成本含义有什么不同？**
+
+答：前者用多次实验估计一次随机作答的平均成功率，实际一次回答仍可只生成一条；后者的预测方法本身依赖 64 条回答及投票，部署时也须承担这笔采样成本。
+
+**3. 只奖励最终正确，为什么不能把生成的推理文字当成经过证明的解释？**
+
+答：结果奖励只检验终点，可能保留错误但被后续修正的步骤、偶然得到答案的路径，甚至与答案没有因果关系的文字。需要额外的步骤检查、干预或形式验证，才能提高对解释本身的信任。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "094-r1",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

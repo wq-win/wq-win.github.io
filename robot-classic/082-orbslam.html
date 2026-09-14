@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>082｜ORB-SLAM：从持续跟踪走向能够重访和恢复的单目地图 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人经典基础</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">ORB-SLAM：从持续跟踪走向能够重访和恢复的单目地图</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 082｜ORB-SLAM：从持续跟踪走向能够重访和恢复的单目地图
+
+[总览](00-发展时间线总览.md) · [目录](README.md) · [上一篇](081-bitstar.md) · [下一篇](083-imu-preintegration.md)
+
+**论文**：Raúl Mur-Artal、J. M. M. Montiel、Juan D. Tardós，*ORB-SLAM: A Versatile and Accurate Monocular SLAM System*，2015。[原文](https://arxiv.org/html/1502.00956) · [官方代码](https://github.com/raulmur/ORB_SLAM)。
+
+**阅读范围**：核对正文系统设计、初始化、跟踪/建图/回环及实验，阅读附录的优化目标；未运行程序，未复算全部表格。后文简化推导与例子用于教学，不将 ORB-SLAM2/3 的能力移入第一代。
+
+## 一分钟理解：建过的地图应该帮助下一次定位
+
+相机向前走时，靠相邻图像估计运动可以形成一条轨迹。但一旦跟踪丢失，或绕一圈回来，系统还需要认出旧地点并修正累计误差。否则地图只是不断增长的历史记录。
+
+ORB-SLAM 用同一类 ORB 特征服务跟踪、三角化、重定位和回环，通过局部共视关系限制计算，并利用稀疏全局图修正长期漂移。关键帧可以积极创建，再删除冗余部分。
+
+实验支持它在多种室内外单目序列中兼顾精度、恢复和地图复用，但它仍有尺度模糊、初始化退化和回环漏检。单目结果经过尺度对齐后的厘米误差，不等于系统自己知道真实米制尺度。
+
+**一句话**：在有可重复视觉特征的单目定位中，通过统一特征、局部优化与尺度感知回环，把局部跟踪扩展为更完整的 SLAM 系统，代价是特征与地图管理，且无纹理、低视差和重访外观差异仍会限制表现。
+
+## 1．问题定义：相机位姿和地图一起估计
+
+输入是经过标定的单目图像流；状态包括关键帧位姿与三维地图点。输出是相机轨迹与稀疏地图，没有 IMU、双目深度或强化学习策略。
+
+单幅图像不能确定深度，多幅图像可以通过视差约束结构，但整体尺度仍不可观测。系统内部可以选定一个尺度，评价时再做相似变换对齐。不要把这种评价操作当作算法从图像中恢复了绝对距离。
+
+与 PTAM 相比，本篇强调自动初始化、全局回环、对视角变化更稳健的重定位和更大的地图范围。它继承关键帧 BA、词袋检索及尺度回环等已有思想，新意主要在组件改进与系统组织。
+
+## 2．地图里的几种图，各负责什么
+
+**共视图**连接观察到相同地图点的关键帧，帮助定位局部相关区域。**生成树**保持全局连通骨架。**Essential Graph**由生成树、强共视边和回环边构成，用较稀疏的约束做全局优化。
+
+“Essential Graph”不是本质矩阵，也不是将所有地图点都删掉只剩位姿。系统仍保留地图点与局部 BA，稀疏全局图主要服务回环修正。
+
+三个并行线程分别做逐帧跟踪、局部建图与回环。局部 BA 耗时可以大于相机帧间隔，因为它与逐帧跟踪并行；实时系统不要求每个后台任务都逐帧完成。
+
+## 3．初始化：宁可等待，也不急着选错解释
+
+第 IV 节并行拟合单应矩阵 $H$ 和基础矩阵 $F$。前者适合平面及部分退化情况，后者用于具有足够视差的一般结构。
+
+论文以得分比例 $R_H=S_H/(S_H+S_F)$ 选择模型，给出的启发式阈值是 0.45。选好模型还不够，必须检验运动假设的正深度、视差和重投影误差；有多个难以区分的解释时继续等待。
+
+这种拒绝初始化是合理行为。一个系统立即给出错误地图，不能仅凭“成功启动”就比谨慎等待的系统更稳健。实验中的平面二义性案例正说明了这个问题。
+
+## 4．跟踪、BA 与回环的数学关系
+
+基本重投影残差可写为：
+
+$$
+e_{ij}=z_{ij}-\pi(T_{iw}P_j),\qquad
+\min_{T,P}\sum_{ij}\rho(e_{ij}^{\mathsf T}\Sigma_{ij}^{-1}e_{ij}).
+$$
+
+$z_{ij}$ 是地图点 $j$ 在关键帧 $i$ 的图像观测，$T_{iw}$ 将世界点变到相机坐标，$\pi$ 为投影。跟踪时通常固定地图点，只优化当前位姿；局部 BA 同时优化局部关键帧和地图点，边界观测的其他关键帧固定。
+
+回环需要处理单目尺度漂移，因此使用含尺度的相似变换 $Sim(3)$，而不是只调整平移旋转的 $SE(3)$。词袋检索只给候选，随后通过几何一致性和相似变换验证。
+
+目标函数减小几何观测误差；算法机制是检索、关键帧筛选和分层优化；实验指标包括轨迹误差、恢复召回率和处理时间。三者不能简写为“ORB 特征让所有误差都下降”。
+
+```text
+对每帧图像：
+    提取 ORB 特征
+    若地图未初始化：并行拟合 H/F，验证重建；不足时等待
+    否则：预测位姿并匹配上一帧/局部地图
+    若跟踪失败：词袋检索候选，PnP+几何验证重定位
+    优化当前位姿，按视觉变化与跟踪条件考虑插入关键帧
+局部建图线程：
+    更新共视关系，三角化新点，剔除不可靠点
+    运行局部 BA，删除冗余关键帧
+回环线程：
+    检索时间一致的候选并几何验证
+    估计 Sim(3)，融合重复地图点，优化 Essential Graph
+返回当前轨迹和可复用的稀疏地图
+```
+
+关键帧剔除考虑其他关键帧是否以相同或更细尺度观察其大部分点，不是按时间间隔机械删帧。这让短期快速插帧和长期紧凑地图可以并存。
+
+## 5．实验设计与评价口径
+
+| 实验 | 数据与条件 | 基线与指标 | 必须保留的限制 |
+|---|---|---|---|
+| NewCollege | 2.2 km 机器人序列，使用单目 | 地图、线程时间、回环表现 | 反向经过的大环存在回环漏检 |
+| TUM | 选择适合单目的 16 个序列 | PTAM、LSD-SLAM、RGBD-SLAM；关键帧 ATE | 不是整个 TUM 全集；RGB-D 使用额外深度 |
+| 重定位 | 先建地图，再定位后续或另一动态序列 | 召回率与成功恢复帧误差 | 与在线从零建图条件不同 |
+| 地图复用 | 同一区域不同视点及动态序列 | 关键帧数量、创建/删除过程 | 有限实验不是无限生命周期证明 |
+| KITTI | 左相机，逐序列五次执行 | 关键帧 RMSE、回环优化方案 | 01 失败；09 报告检测到回环的执行 |
+
+TUM 的单目方法采用七自由度对齐；PTAM 初始化由人工选择合适帧，LSD-SLAM 的初始关键帧被按文中规则排除。公平讨论需要写明这些处理，而不是只给一列最低误差。
+
+这里没有策略训练或环境交互预算。重复执行次数明确，但实验表未统一报告全部任务的置信区间。原文给出的部分结果来自网站已有轨迹，也不等同于全部方法都在完全相同代码环境下重新训练运行。
+
+## 6．关键证据：系统优势不代表每个单项都赢
+
+| 图表 | 比较什么 → 观察什么 | 支持什么 | 不能证明什么 |
+|---|---|---|---|
+| 表 I、II | 跟踪、局部建图、回环耗时 | 不同频率模块可并行组织 | 总时间简单相加就是每帧延迟 |
+| 表 III | 所选 TUM 序列 ATE 与失效 | 多数序列精度和鲁棒性较好 | 每条序列误差最低 |
+| 表 IV | 重定位召回与误差 | 能从更多视角恢复定位 | 更高召回必然伴随更低条件误差 |
+| 图 9、10 | 同一环境的关键帧增删 | 冗余删除可限制重复区域增长 | 探索无限新环境时地图仍固定大小 |
+| 表 VI、图 13 | KITTI 09 不同回环优化 | 先图优化可改善大误差初值 | 更多 BA 迭代总能解决错误初值 |
+
+表 III 中 fr2_xyz 的 RMSE 为 ORB-SLAM 0.30 cm、PTAM 0.20 cm，说明优势并非所有单项都成立。表 IV 的 fr2_xyz 重定位召回为 78.4% 对 34.9%，但成功恢复帧的 RMSE 为 0.38 cm 对 0.26 cm；覆盖更多困难帧会改变误差统计的样本组成。
+
+表 VI 的同一次 KITTI 09 比较中，无回环误差 48.77 m；直接做 20 次 BA 为 49.90 m，而 Essential Graph 的一个配置约 0.48 s 得到 8.36 m。它说明非线性 BA 需要好的初值和全局约束，不能靠迭代次数替代回环信息。
+
+更需注意的是，KITTI 09 常规结果只纳入成功检测到末尾回环的执行。这个条件应留在解读中，不能当作任意重复都能得到的无条件成绩。NewCollege 反向经过的大环未闭合，也直接展示地点识别的边界。
+
+## 7．贡献、代价与局限
+
+统一特征避免跟踪与地点识别维护两套不一致的信息；共视局部地图让计算集中于相关区域；关键帧积极插入、严格删除兼顾短期鲁棒性和长期规模。这些系统决策共同起作用。
+
+局限包括单目尺度、稀疏地图、无纹理、远处结构与低视差、动态遮挡及外观变化。原文提出未来加入无穷远点和更密重建，而不是已经解决这些问题。
+
+作者用当时比较讨论特征法与直接法的精度。本文分析认为，这些结果比较的是具体系统及配置，不能成为“特征法在所有情况下必然优于直接法”的定理；后续方法还会改变优化、标定和评价设置。
+
+## 8．自构例子与前置概念
+
+**自构例子，未运行**：拿相机绕办公室一圈。局部 BA 不断修正附近桌角，但整圈的尺度与方向仍可能漂移；回到门口后，ORB 匹配与几何验证建立远距离约束，Sim(3) 图修正把两个门口对齐。若只是看到相似房门却不是同一地点，词袋分数高也不能直接闭环。
+
+五个前置概念：
+
+1. **三角化**：利用不同视点的射线恢复三维点。
+2. **Bundle Adjustment**：联合优化相机位姿与地图点的重投影误差。
+3. **共视**：多个关键帧观察到相同三维点的关系。
+4. **Sim(3)**：含尺度、旋转和平移的相似变换。
+5. **重定位**：跟踪中断后利用旧地图重新估计相机位姿。
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 跟踪与重访处理割裂 | 同一 ORB 特征服务多个模块 | 几何与检索信息易于复用 | 表 IV、回环实验 | 特征匹配仍受外观限制 |
+| 单目初始化容易选错 | H/F 模型选择及二义性拒绝 | 避免低视差下过早重建 | 第 IV 节、图 3、TUM 平面例 | 可能等待或拒绝启动 |
+| 大地图计算与漂移增长 | 局部 BA、关键帧剔除、Essential Graph | 集中计算并加入全局约束 | 表 I、II、VI | 地图新内容仍增长，回环可能漏检 |
+
+## 9．读懂了吗？三个问题与答案
+
+### 问题一：为什么单目 ATE 很小，不代表算法恢复了真实尺度？
+
+**答案**：单目评估先用含尺度的相似变换对齐真值，消除了全局尺度自由度。小 ATE 描述对齐后的轨迹形状与位置一致性，不能证明算法自身从图像知道“一米”。要获得物理尺度，需要额外信息或假设。
+
+### 问题二：为什么有时拒绝初始化反而是更稳健的设计？
+
+**答案**：低视差或平面二义性使多个三维解释同时符合图像。强行选一个可能产生看似合理却错误的地图，后续优化难以恢复。等待额外视差是在承认观测信息不足，不能只按启动速度评价。
+
+### 问题三：为什么回环先做稀疏图优化，而不是直接无限增加 BA 次数？
+
+**答案**：长程漂移可能使全局 BA 初值很差，局部非线性优化难以跨越较大误差。尺度感知图约束先把全局结构拉回合理范围，再做 BA 才更有效。表 VI 正是对这一机制的具体证据。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "082-orbslam",
+            active: "robot-classic",
+            seriesLabel: "\u673a\u5668\u4eba\u7ecf\u5178\u57fa\u7840",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

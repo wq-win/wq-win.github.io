@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>098｜DeepVerifier：让研究型 Agent 检查证据，而不是再自信一次 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">DeepVerifier：让研究型 Agent 检查证据，而不是再自信一次</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 098｜DeepVerifier：让研究型 Agent 检查证据，而不是再自信一次
+
+[返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
+
+**论文**：Wan 等，*Inference-Time Scaling of Verification: Self-Evolving Deep Research Agents via Test-Time Rubric-Guided Verification*，2026。[原文](https://arxiv.org/abs/2601.15808) · [正文 v2](https://arxiv.org/html/2601.15808v2) · [PDF v2](https://arxiv.org/pdf/2601.15808v2) · [官方代码](https://github.com/yxwan123/DeepVerifier)。本文核对 v2 的方法、实验表及评分准则，属于近期研究实例；没有独立复现网络环境或模型训练。
+
+## 一、一分钟理解
+
+一个研究 Agent 给出了貌似完整的答案，另一个模型看完说“合理”，并不等于核查成功。两者可能依赖同一条错误线索，或者都没有检查决定答案的关键来源。
+
+DeepVerifier 先找原始轨迹中可疑的环节，把“大答案正确吗”拆成若干可以查证的小问题，再用工具寻找外部证据，最后输出判断与修改建议。测试时反复进行这个循环，模型参数保持不变；论文另有一条 SFT 路线训练小模型的核查能力。
+
+一句话总结：在需要网页搜索与工具使用的研究任务中，通过按失败类型拆解核查问题并返回证据反馈，改善部分错误答案，代价是额外调用、误报导致的退步，以及依赖核查模型自身能力。
+
+## 二、问题定义与失败分类
+
+研究型 Agent 的状态包括任务、已访问页面、工具输出和行动历史；动作可以是搜索、点击、执行代码或提交答案。论文的主要干预位于一轮任务执行之后，不是训练一个新的环境模型，也不是每次重试都做 RL 更新。
+
+作者从 WebAggregatorQA 收集轨迹，构建五大类、十三小类失败分类，主要涉及来源寻找、推理、任务理解、动作执行与步骤预算。表 1 的语料来自 90 个任务、2997 个动作；对错误轨迹由两名研究人员标注，合并得到 555 个错误点，平均交集比例为 63.0%。
+
+摘要使用了自动构建分类的表述，但 §3 具体过程包含人工检查、标签归并和讨论。描述方法时应以过程为准，不能写成完全无人参与。63% 的交集比例也不是 Cohen's kappa，更不是证明错误标签全部客观一致。
+
+核心假设是：确认一个关键声明的证据，有时比重新解决整道复杂问题更容易。这种不对称并非总成立；若正确性依赖复杂综合判断，分解后的局部检查也可能漏掉全局矛盾。
+
+## 三、方法：从轨迹到可执行核查
+
+### 三个模块
+
+第一步生成带步骤编号的摘要，保留访问了什么来源、获得什么信息。它是降低上下文负担的措施，但摘要也可能遗漏决定性信息，因而不能把摘要当原始证据本身。
+
+第二步依据失败分类，识别行为与潜在错误的对应关系，再形成少量具体问题，例如某个来源是否真的支持某个数值，某篇论文是否确实早于另一篇。论文成本讨论将核查问题限制在不超过三个。
+
+第三步由具有搜索、截图和代码工具的验证 Agent 回答这些问题。裁判结合轨迹摘要、疑点、问题与新证据，给出 1—4 分以及反馈。评分不超过 2 继续修正，达到 3 或 4 则停止。因此系统的“接受”包含大体正确，而非只接受完全正确；这是评估和部署都应看清的阈值选择。
+
+```text
+输入：研究问题 q、初始 Agent 答案 a、轨迹 τ、最大反馈轮数 K
+重复至 K 轮：
+    summary ← 按步骤整理 τ 中的来源与事实
+    risks ← 根据失败分类定位关键疑点
+    checks ← 把疑点改写为至多三个外部可验证问题
+    evidence ← 调用工具逐项回答 checks
+    score, feedback ← 裁判结合 summary 与 evidence 评分
+    若 score ≥ 3：返回 a 与核查记录
+    否则依据 feedback 重试任务，得到新 a 与 τ
+达到轮数上限：返回当前结果并保留未解决疑点
+测试期间：所有语言模型权重保持不变
+```
+
+框架改变的是信息流与计算分配，没有提出主循环的新梯度损失。小模型路线从 400 条基础执行轨迹再生成验证轨迹，保留正确接受与正确拒绝的案例，整理成 4646 个训练对，与 CK-Pro 数据混合做 SFT。这些是步骤级训练对，不是 4646 道完全不同的研究任务。
+
+### 为什么要同时测 precision 和 recall
+
+论文把“拒绝错误答案”定义为正类。令 TP 为正确拒错，FP 为误拒正确答案，FN 为放过错误答案，则：
+
+$$
+P=\frac{TP}{TP+FP},\qquad R=\frac{TP}{TP+FN},\qquad
+F_1=\frac{2PR}{P+R}.
+$$
+
+高 precision 表示被指控错误的答案大多确实错误；高 recall 表示错误不容易漏掉。一个从不轻易质疑的裁判可以 precision 很高，却漏掉大量问题。反过来，频繁要求重写可能增加正确答案被改坏的机会。
+
+为理解迭代，构造一个教学关系：若当前正确率为 $p$，错转对概率为 $u$，对转错概率为 $v$，则下一轮 $p'=p+(1-p)u-pv$。这不是论文训练公式，而是说明净收益取决于两个方向；当可修错误逐渐耗尽时，持续误报可能使收益转负。
+
+## 四、实验设计
+
+| 项目 | 设置与证据边界 |
+|---|---|
+| 分类来源 | WebAggregatorQA 90 个任务；两人标注错误点，不与 GAIA 主评估混为同一语料 |
+| 执行框架 | CK-Pro，多模块 Agent，主要骨干 Claude-3.7-Sonnet；另检查 GPT-4.1 与 Qwen3-8B 系列 |
+| 验证对照 | 去掉外部核查的分解式 LLM 裁判；去掉分解的直接 Agent 裁判 |
+| 推理扩展 | 最多十轮反馈，验证器接受后停止；记录不同轮数成绩 |
+| 数据集 | GAIA-Web、完整 GAIA，另有 XBench-DeepSearch 与 BrowseComp |
+| 小模型训练 | DeepVerifier-4K 与 CK-Pro 训练集混合；不是仅 4646 条数据从零获得工具能力 |
+| 参数缺项 | §6 在介绍训练参数后没有列出具体数值，PDF 文本也未提供可确认的学习率、轮数和完整训练预算 |
+| 费用 | 提供核查问题数和早停机制的定性讨论；未给充分的美元、墙钟、总 token 对照证明最优成本比 |
+| 统计 | 主表未给独立重复执行的置信区间；实时网页、工具故障和 API 变化也影响复现 |
+
+外部核查对照需要更多工具调用，因此实验验证的是完整核查机制的收益。若要证明相同预算下优于多次重跑或 Best-of-N，还需要明确配平工具、输入输出 token 和等待时间。
+
+## 五、结果：收益与回退一起看
+
+**证据 1：表 2，裁判本身。** DeepVerifier 的拒错 precision/recall 为 75.00/71.43，F1 为 73.17。去掉验证为 100.00/14.29、F1 25.00；去掉分解为 86.96/47.62、F1 61.54。这说明外部核查与问题分解帮助发现更隐蔽错误，同时也牺牲了一些拒错精确率。
+
+摘要中的 F1 提升 12%—48% 应谨慎解释：表中直接差值为 11.63 与 48.17 个百分点。若计算相对增长，应分别除以 61.54 和 25.00，不能把这两种口径混写。
+
+**证据 2：表 3，GAIA 的轮数曲线。** Claude-3.7 在 Web 子集从 51.11 到四轮的 63.33，十轮为 62.22；完整集从 52.22 到四轮 60.12，十轮 58.93。应保留原表的百分比口径，不反推出未报告的整数计数。最佳与最终不同，直接反对“轮数越多必定越好”。
+
+**证据 3：表 4，跨任务。** DeepSearch 从 41.0 到最佳 47.0，十轮结束为 44.0；BrowseComp 从 5.0 到最佳 10.0，最终 9.0。这是不同任务也存在收益的证据，不能将最高点当作无需开发集就可选出的固定部署策略。
+
+**证据 4：表 5，错误转移。** 第一轮错转对比例为 18.99%，对转错为 12.79%；后期纠错收益明显衰减，而个别轮次仍有回退。两个比率的条件人群不同，不能简单相减就当总正确率净增加 6.20 个百分点。
+
+**证据 5：§7.3 与图 1，小模型适配。** DeepVerifier-8B 反思后完整 GAIA 约 32.2%，比自身无反思提高约 5.5 点；仅 CK-Pro 训练的模型改善约 2.6 点。它支持专门反馈数据有用，但混合训练、骨干能力与执行链共同影响结果，不能仅凭最终分数分离所有原因。
+
+## 六、贡献、代价与局限
+
+论文把“请检查一下”具体化为失败分类、证据问题和修改反馈，这比单纯增加自我评价文字更容易审计。价值在于核查行为，不在于用了多少次“反思”这个词。
+
+作者承认弱模型难以准确遵守准则，工具能力不足时反馈会变差，迭代也增加延迟。近期报告还存在需要保留的文档边界：摘要对分类自动化的描述与 §3 人工流程不同，训练超参数没有完整列出，成本优势主要是结构性解释。
+
+本文的分析是：验证器与执行者即使用不同提示，也可能共享同类知识偏差。真正降低共同错误需要原始来源、可执行检查及独立证据，而不是仅把同一个结论换种措辞说两遍。失败分类也应根据新任务更新，不能假设五类十三项穷尽所有错误。
+
+## 七、建立理解
+
+**自构例子。** Agent 说某位研究者最早论文发表于 2012 年。好的核查不应直接再搜索一次“最早论文”，而是检查作者身份是否同名、是否存在 2011 年正式记录、页面日期是发表还是更新。若新证据只否定一个来源，却没有找到更早论文，反馈应是结论未证实，不能捏造替代年份。
+
+五个前置概念：**轨迹** 是行动与观察的序列；**评分准则** 把抽象质量拆成可检查条件；**元评估** 评价裁判是否判断正确；**假阳性** 在本文指误拒正确答案；**测试时扩展** 通过额外推理和工具调用改变结果，而不必更新权重。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 整体裁判漏掉来源与推理错误 | 失败分类定位、最多三个证据问题、反馈重试 | 局部查证可能比重解整题更容易 | 表 2 拒错 F1、表 3/4 成绩、表 5 回退分析 | 增加工具成本；误拒可改坏正确答案；收益早期见顶；训练参数不完整 |
+
+## 八、自测与答案
+
+**1. 没有额外训练的自我改进，改的是什么？**
+
+答：改的是当前任务的上下文、证据和后续行动。模型参数不变，更多核查改变了可用信息；另行训练 DeepVerifier-8B 属于独立的 SFT 路线，不能混成一次测试中的权重自我进化。
+
+**2. 拒错 precision 为 100%，为什么仍可能是很差的验证器？**
+
+答：它可能只拒绝极少数明显错误，放过绝大多数隐蔽错误。论文去掉验证模块后 recall 只有 14.29%，说明判断保守不能代替有效覆盖。
+
+**3. 为什么不应总是运行到十轮？**
+
+答：后期剩余错误更难修，而误报仍可能触发错误重写，净收益会下降。应在开发集上选择停止或回退规则，并记录实际费用；不能看完测试曲线后用最佳轮次冒充预先固定的决策。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "098-rubric-verification",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

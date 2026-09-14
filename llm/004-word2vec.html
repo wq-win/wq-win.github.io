@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>004｜word2vec：把昂贵语言模型拆成便宜的表示学习任务 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">word2vec：把昂贵语言模型拆成便宜的表示学习任务</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 004｜word2vec：把昂贵语言模型拆成便宜的表示学习任务
+
+[目录](README.md) · [上一篇](003-rnnlm.md) · [下一篇](005-negative-sampling.md)
+
+**论文**：Tomas Mikolov 等，*Efficient Estimation of Word Representations in Vector Space*，2013。[原文](https://arxiv.org/abs/1301.3781) · [PDF](https://arxiv.org/pdf/1301.3781)。本篇聚焦 CBOW 与 Skip-gram；负采样和短语处理在下一篇单独讨论，不把两篇贡献混在一起。
+
+## 一分钟理解
+
+如果主要目的是得到好用的词向量，是否一定要训练一个复杂、昂贵的完整神经语言模型？本文把任务简化：CBOW 根据邻近词预测中心词，Skip-gram 根据中心词预测邻近词。省去较昂贵的非线性隐藏层后，能够在更多文本上学习表示。
+
+核心不只是速度，而是通过一个足够便宜的代理任务换取更大的数据规模。作者用词类比和句子补全等任务评价表示。向量能呈现某些关系结构，不等于它已经成为会生成长文、处理多义词或可靠推理的语言模型。
+
+## 背景：目标是概率模型，还是中间表示？
+
+神经概率语言模型联合学习词表示和下一词分布，但训练输出层与复杂隐藏映射会消耗大量计算。当词向量将被交给其他任务使用时，研究者可以重新选择训练目标：只要保留与语义相关的上下文规律，不一定需要完整重现顺序生成过程。
+
+CBOW 与 Skip-gram 的“上下文”可以同时包含左右邻词，因此它们并非严格因果的下一词预测器。左右信息在表示学习阶段是允许的，但若把它们直接当作在线生成概率，就可能使用未来信息。区分预训练代理任务与部署任务，是理解这篇论文的第一步。
+
+词表仍是离散词项，每个词有一个向量。模型没有根据每句话重新生成该词的不同表示，所以同一个词的多个意义可能叠在一起。后来的 ELMo、BERT 改变的是这种上下文化程度，而不仅是向量维度更高。
+
+## 两个方向相反的预测任务
+
+设中心词为 $w_t$，窗口半径为 $c$。Skip-gram 的目标可以写成：
+
+$$
+\max_\theta\sum_t\sum_{-c\le j\le c,j\ne0}
+\log P_\theta(w_{t+j}\mid w_t).
+$$
+
+每个训练对只用中心词向量预测一个邻词，因此一段文本贡献多个局部关系。CBOW 则先聚合邻词向量，再预测中心词：
+
+$$
+h_t=\frac{1}{|C_t|}\sum_{j\in C_t}v_{w_j},\qquad
+\max_\theta\sum_t\log P_\theta(w_t\mid h_t).
+$$
+
+$v_w$ 为输入词向量，$C_t$ 是上下文位置集合。平均是一种教学表示，具体实现的求和、归一化与窗口采样应以原实现为准。聚合通常忽略邻词内部精确顺序，这正是“词袋”的含义。
+
+如果输出使用普通 softmax，需要对整个词表归一化。论文讨论分层 softmax 等效率方案；下一篇的负采样不应回填成这里唯一的训练方式。输入向量与输出向量也属于不同参数角色，最后选哪组或怎样组合，是表示使用协议的一部分。
+
+```text
+输入：分词语料、窗口范围、词表、向量维度
+初始化输入词向量和输出参数
+遍历中心位置 t：
+    采样允许的上下文窗口
+    若使用 CBOW：
+        聚合邻词向量，预测中心词
+    若使用 Skip-gram：
+        对每个邻词，以中心词向量预测该邻词
+    通过选定输出层计算损失并更新涉及的参数
+导出词向量
+在独立词关系、相似度或下游任务中评价
+```
+
+数学目标是局部词预测，机制是廉价共享表示，指标是类比准确率等外部评价。训练没有直接给出“国王减男人加女人等于女王”这类标签；某些几何规律来自分布统计，但不能因此假定所有语义关系都线性可解。
+
+## 实验与三类证据
+
+| 项目 | 论文中的比较重点 |
+|---|---|
+| 语料 | 多种规模配置，包括 Google News；不能把所有表看成等语料 |
+| 表示 | NNLM、RNNLM、CBOW、Skip-gram 等，维度和训练量会变化 |
+| 关系评价 | 语义与句法类比，使用向量运算检索候选词 |
+| 任务评价 | Microsoft 句子补全挑战，包含与其他模型组合 |
+| 效率 | 报告训练时间与资源配置；分布式开销影响实际成本 |
+| 重复报告 | 表格为具体配置结果，统一多种子置信区间未报告 |
+
+**证据一，架构部分。**CBOW 和 Skip-gram 的计算路径说明减少隐藏计算的原因。复杂度分析支持训练可以更便宜，但真实墙钟速度仍取决于词表、输出方法和硬件。
+
+**证据二，表 6。**大规模配置把表示质量与训练时间放在一起，展示规模和架构之间的取舍。不同模型维度不完全相同，因此不能把这一表当作“只替换一个模块”的纯消融。
+
+**证据三，表 7。**句子补全中 Skip-gram 单独为 48.0%，RNNLM 为 55.4%，组合为 58.9%。这说明表示信息可以与序列模型互补，同时直接反驳“词向量在任何语言任务上都胜过语言模型”的泛化说法。
+
+表 8 的关系例子很直观，但例子是展示，不是完整统计。若只挑成功的近邻，几乎任何高维表示都可能显得有语义。因此应同时查看完整测试集准确率、未登录词处理及候选排除规则。
+
+## 教学例子：为什么上下文会塑造几何
+
+构造一个小语料，“咖啡”“茶”经常与“喝”“杯”“热”一起出现。为了预测相似邻词，两者的表示可能接近。若“冰”也经常出现在这些上下文里，它未必是饮料，却可能共享部分方向。这说明分布相似是由使用环境定义，不等于严格的类别同一。
+
+再把“银行”同时用于金融机构与河岸，单一向量需要兼顾两种上下文。模型可能形成折中位置，导致相似词列表混杂。增加数据有助于稳定估计，却不会自动消除单向量表示的结构限制。
+
+可以做一个小实验：固定语料，打乱每个局部窗口内的词序。CBOW 的聚合几乎不变，但严格序列语言模型的目标会变化。这个实验揭示 CBOW 主动丢弃什么信息，也说明简化带来的效率来自真实的信息取舍。
+
+## 贡献与边界
+
+word2vec 使大规模词表示学习成为更易使用的基础工具。最值得借鉴的研究思想是：围绕最终需要的表示，重新设计足够便宜而仍有信息的训练任务，而不是一味扩大原有复杂模型。
+
+代价包括静态多义词混合、局部窗口信息损失、罕见词估计困难以及对语料偏差的继承。词类比可能受到词频和候选空间影响；向量相近也不提供事实真实性保证。本文的分析是，后续大模型仍沿用“从预测中学习表示”的原则，但通过上下文化、数据规模和交互深度改变表示能力。
+
+理解本篇需要区分上下文窗口、输入与输出嵌入、代理任务、余弦相似度和类比检索。它们分别回答数据怎样构成、参数怎样分工、训练为什么设计、距离怎样衡量以及评价如何运行。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 复杂神经语言模型的计算限制了大规模词表示训练 | 采用CBOW与Skip-gram的简化预测结构 | 减少隐藏计算，把更多资源用于语料和表示维度 | 表6的质量与训练时间、表7句子补全 | 词向量缺少完整顺序建模；单独Skip-gram在所列补全任务低于RNNLM，组合条件须说明 |
+
+## 自测与参考答案
+
+**1. CBOW 为什么速度可能更快，却会丢失信息？**
+
+邻词被简单聚合，省去复杂的逐位置非线性交互，但精确顺序可能消失。不同词序若含相同词集合，可能得到相同输入表示。速度收益与表示限制来自同一个设计选择。
+
+**2. Skip-gram 类比准确率高，为什么不保证句子补全最好？**
+
+类比测试偏重词向量几何，句子补全还需要顺序、句法与更完整的上下文建模。代理任务和下游任务存在差异，原文表 7 也显示单独 Skip-gram 不及所列 RNNLM，而组合能获得互补收益。
+
+**3. 为什么不能只展示十个漂亮近邻就证明词向量质量？**
+
+手工选择容易隐藏失败，近邻还受词频、词表和多义词影响。需要完整测试集、明确检索规则以及至少一种下游评价。展示帮助理解，统计比较才支撑总体结论。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "004-word2vec",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

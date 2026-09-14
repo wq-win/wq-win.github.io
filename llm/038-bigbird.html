@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>038 · BigBird：用稀疏连接保留长序列的信息通路 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">038 · BigBird：用稀疏连接保留长序列的信息通路</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 038 · BigBird：用稀疏连接保留长序列的信息通路
+
+[返回目录](README.md) · [上一篇：GShard](037-gshard.md) · [下一篇：MMLU](039-mmlu.md)
+
+论文：Manzil Zaheer 等，*Big Bird: Transformers for Longer Sequences*，NeurIPS 2020。[原始论文](https://arxiv.org/pdf/2007.14062)。阅读依据为§2–4、理论定理与命题、附录E配置和表1–3、8–10；未复现全部语言及基因组实验。
+
+## 一分钟理解
+
+长序列的全注意力很贵，纯局部窗口又可能让远处信息传递缓慢。BigBird 研究局部、随机和全局连接的组合：附近位置保存局部结构，随机连接提供远程路径，全局位置汇总和分发信息。
+
+它不仅报告任务结果，还讨论稀疏Transformer的表达能力。然而“能表达某类函数”是存在性结论，不保证实际深度、训练预算下和全注意力一样好。论文同时给出稀疏连接在某些任务上可能需要更多层的条件性限制。
+
+一句话：在长序列建模中，通过结构化稀疏注意力降低连接数量，并保留理论上的表达能力与有效经验表现，代价是连接设计、全局位置预算，以及某些任务上的深度或精度损失。
+
+## 问题设定与Longformer的联系
+
+两者都希望减少序列长度平方增长的注意力成本，也都使用局部与全局连接。BigBird 进一步从图结构讨论随机长程边和全局节点，研究理论能力与实际组合。不能简单把区别概括成“所有BigBird模型都比Longformer多随机边”，因为原论文某些ETC配置的随机连接数为零。
+
+主要自然语言实验包括遮盖语言建模、带证据问答和文档分类。这里的Natural Questions配置提供长文档并预测答案区域，与DPR中的全百科开放域检索口径不同。任务同名不代表输入信息相同，跨论文引用分数尤其要检查这一点。
+
+模型并不改变语言任务的奖励函数；它改变输入位置之间可以计算注意力的连接。下游仍优化MLM或监督任务损失。
+
+## 稀疏图与公式
+
+对普通位置 $i$，允许关注局部集合 $W_i$、随机集合 $R_i$和全局集合 $G$；全局位置可与全部位置相连。注意力写为：
+
+$$
+S_i=W_i\cup R_i\cup G,\quad
+h_i'=\sum_{j\in S_i}\frac{\exp(q_i^\top k_j/\sqrt d)}{\sum_{u\in S_i}\exp(q_i^\top k_u/\sqrt d)}v_j.
+$$
+
+对于全局位置，将 $S_i$替换为全部位置。$q,k,v$来自查询、键、值投影，$d$是每头维度。若每位置局部与随机连接数、全局数量固定，总边数随长度 $n$近似线性增长。但这是连接数量结论，不是任意实现的墙钟复杂度保证。
+
+ITC把已有token指定为全局节点；ETC额外增加全局token，提供专门汇总空间。附录里的ETC还使用适合任务结构的全局位置，例如问题、段落和句子对应节点。它们来自输入结构，不能使用测试答案位置作为额外提示。
+
+实现采用块状连接以适配硬件。逐元素随机边可能造成不规则访存，块稀疏使矩阵操作更有效，但也改变连接粒度。算法图中的“一条边”和实际块计算不能不加区分。
+
+```text
+输入：序列、局部窗口、随机块数、全局节点方案
+构建ITC或ETC的允许连接图
+每个Transformer层：
+    计算Q、K、V投影
+    仅为局部块、随机块和全局连接计算分数
+    在允许邻域归一化并聚合
+    执行残差与前馈网络
+按任务输出头计算MLM、问答或分类损失
+训练和评估使用明确的长度、连接与全局节点配置
+输出：序列表示和任务预测
+```
+
+## 理论到底保证了什么
+
+§3定理1在相应函数空间和距离下，说明包含星形连接图的稀疏Transformer可以逼近紧致域上的连续序列函数。直觉是全局节点提供交换信息的通路，再通过足够多层组合计算。它是“存在某个网络”的表达能力论证，而不是训练算法能够找到该网络的保证。
+
+附录还讨论图灵完备性，需要沿用理想化计算模型的假设。有限精度、固定上下文和有限层数的实际模型不能由此获得无限计算能力。
+
+论文命题1进一步在正交向量猜想相关条件下构造问题：一层全注意力可完成的计算，稀疏图可能需要很多层。这恰好说明表达能力相同不等于计算效率相同，不能只摘录通用逼近结论而省略限制。
+
+## 实验配置
+
+|项目|原文设置与比较口径|
+|---|---|
+|预训练数据|表9列Books 1.0B、CC-News 7.4B、Stories 7.7B、Wikipedia 3.1B tokens；从RoBERTa热启动|
+|base配置|12层、12头、隐藏768、长度4096、批量256、学习率$10^{-4}$，预热10k步；资源8×8 TPUv3|
+|ITC连接|表8块长64、全局128、窗口192、随机192|
+|ETC连接|表8块长84、全局256、窗口252、随机0；不能把理论总图当作这组实际参数|
+|问答|HotpotQA、Natural Questions、TriviaQA、WikiHop，base开发集与large测试表分开|
+|指标|MLM BPC、各任务F1或准确率；HotpotQA还区分答案、支持事实与联合指标|
+|不确定性|主表没有所有配置统一多种子置信区间；各任务调参和资源见表12–13|
+
+对于超过4096的Natural Questions文档，附录采用步长2048的滑动窗口。因此结果不表示一次前向计算处理任意长全文。large与base的窗口和批量也不同，不能仅以参数数量解释分数差别。
+
+## 三处关键证据
+
+**证据一：表1，只有局部与随机边够不够。** 长度512的构件比较中，BERT-base的SQuAD为88.5，随机连接83.0、局部窗口76.4、随机加窗口85.1。它支持简单稀疏构件有性能损失，也为加入全局连接提供动机。它没有隔离所有块大小、训练及连接数的组合。
+
+**证据二：表2，长文档问答收益。** base开发集HotpotQA联合F1，Longformer64.4，BigBird-ITC67.7、ETC67.8；WikiHop准确率75.0与两种BigBird的75.9。结果说明相关配置有效，但ETC增加的结构性全局节点和连接方案也是系统差异，不能把收益全部归因于随机边。
+
+**证据三：表10与§3，质量与理论边界并存。** base MLM BPC中ETC1.611、ITC1.678、Longformer1.705；large时ITC1.456却差于Longformer1.358。这说明配置和规模交互明显。理论逼近能力没有承诺每个规模的有限训练结果占优，实际反例必须保留。
+
+表3测试排行榜还显示部分任务不是最强，例如HotpotQA存在更高的联合F1系统。带证据问答分数不能与前篇FiD开放域问答EM直接相减：评价条件、指标和材料来源都不同。
+
+## 一个构造例子与可检验理解
+
+自构长文中，开头给出某人物别名，末尾用别名描述事件。局部连接让相邻句形成表示，随机长程边可能缩短信号路径，全局节点则提供统一交流站。但全局节点数量有限，也可能成为信息压缩瓶颈。
+
+可以设计未执行实验：固定token数、总连接预算和模型深度，分别使用局部、局部加随机、局部加全局、三者组合；逐步增加跨段依赖距离与干扰实体。测准确率、显存和速度，同时重复随机图采样。如果不同随机种子差异很大，应报告分布；不能只挑一张连通性好的图。
+
+另一个有用对照是固定全局节点数与随段落数增长两种方案。后者可能更好保留信息，但改变复杂度常数乃至渐近关系。质量收益应和新增连接成本一起报告，才能判断是否真的更有效。
+
+## 贡献与局限
+
+BigBird把稀疏注意力、图结构直觉、表达能力论证与多类任务实验放在同一框架中。限制包括有限预算下理论不保证训练成功，结构节点可能依赖任务设计，块稀疏需要专门实现，以及部分场景相对全注意力要用更多层。
+
+五个前置概念是：稀疏图限制计算边，全局节点连接全序列，随机边缩短部分路径，通用逼近是存在性表达能力，块稀疏用规则小矩阵适配硬件。它们帮助区分“连接稀疏”与后篇Performer的“核近似”。
+
+|原有问题|作者改动|为什么可能有效|实验证据|代价与局限|
+|---|---|---|---|---|
+|全注意力昂贵、纯局部缺长程通路|局部、随机与全局连接框架|保留局部结构和远程信息路径|表1构件、表2问答、表10MLM|具体ETC可无随机边，收益依配置|
+|稀疏化表达能力不清楚|证明特定图的逼近能力并分析限制|全局通路支持信息组合|定理1、命题1与附录|存在性不保证有限深度和训练效率|
+
+## 自测与参考答案
+
+**1. BigBird是否每个实验都同时使用三种连接？**
+
+不是。框架讨论三种构件，但附录表8的ETC配置随机数为零。必须核对具体实验参数，不能把总架构图当作所有模型的逐项说明。
+
+**2. 通用逼近定理意味着训练后的BigBird一定不输全注意力吗？**
+
+不意味着。定理讨论存在足够合适的网络，未保证固定深度、有限精度和训练过程的结果；论文还给出稀疏连接可能需要更多层的限制。
+
+**3. 为什么不能直接比较这里Natural Questions与DPR的分数？**
+
+这里使用给定长文档并预测长短答案，DPR先从全库检索再回答；指标也可能是F1与EM。输入信息和评价不同，直接相减没有明确含义。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "038-bigbird",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

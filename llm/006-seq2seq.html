@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>006｜Seq2Seq：用一个条件生成模型连接两种长度不同的序列 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">大语言模型</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Seq2Seq：用一个条件生成模型连接两种长度不同的序列</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 006｜Seq2Seq：用一个条件生成模型连接两种长度不同的序列
+
+[目录](README.md) · [上一篇](005-negative-sampling.md) · [下一篇](007-attention.md)
+
+**论文**：Ilya Sutskever、Oriol Vinyals、Quoc V. Le，*Sequence to Sequence Learning with Neural Networks*，2014。[原文](https://arxiv.org/abs/1409.3215) · [PDF](https://arxiv.org/pdf/1409.3215)。以下以论文的 LSTM 编码器—解码器为对象，不把后来注意力加入到原始方法中。
+
+## 一分钟理解
+
+翻译输入有十个词，输出可能有十二个词，如何用一个统一模型处理？编码器先读完整输入，把它压缩到状态；解码器从这个状态出发，逐词生成目标序列，直到结束符。不同长度被转化为条件概率建模，而不再要求输入输出位置一一对应。
+
+作者还把源句顺序反转，使部分源词与对应输出之间的学习路径更短。论文展示了强翻译结果，但集成、搜索和重评分需要分别识别。它的历史贡献是简洁统一的条件序列接口；核心限制则是输入信息经有限状态压缩，以及训练与实际生成时前缀分布不同。
+
+## 背景：从多个模块到条件序列概率
+
+传统翻译系统包含显式词组、对齐和语言模型等组件。Seq2Seq 希望直接学习源句 $x$ 到目标句 $y$ 的条件分布：
+
+$$
+P_\theta(y\mid x)=\prod_{t=1}^{T_y}
+P_\theta(y_t\mid y_{<t},c(x)).
+$$
+
+$c(x)$ 是编码器从源句得到的状态，$y_{<t}$ 是此前目标词。链式分解允许输出长度变化，只需把结束符也当作候选 token。编码器与解码器承担不同角色：前者整理输入，后者根据输入摘要与已生成内容预测下一词。
+
+“端到端”描述参数通过统一目标学习，并不表示系统没有任何预处理、词表或搜索选择。分词、未知词、长度限制和 beam search 都属于实际方法。若只画两个网络方框，很容易忽略这些对最终结果很重要的条件。
+
+## 方法：状态如何传递
+
+编码器用多层 LSTM 顺序读源词。输入结束后，所得状态作为解码器的条件信息；解码器读开始符，再根据前一目标词逐步更新。训练时通常提供真实目标前缀，最大化参考翻译的对数似然；测试时前缀来自模型自己，错误可能累积。
+
+源句反转并不改变句子包含哪些词，而是改变递归路径长度。假设源句开头的信息最先在目标句中使用，不反转时，它距离解码开始较远；反转后，它更靠近编码结束，从而减少某些关键依赖的距离。这是对优化的帮助，不是对所有语言重排的通用最优规则。
+
+解码寻找高概率序列通常无法穷举。Beam search 保留若干当前得分较好的前缀，继续扩展。更大的 beam 增加搜索计算，也可能改变长度偏好与错误类型。搜索找到模型更偏好的答案，不保证找到人类认为最好的翻译，因为模型概率与翻译质量并不完全一致。
+
+```text
+训练输入：源句 x、参考目标句 y
+将源句按论文协议反转
+encoder_state ← EncoderLSTM(x)
+decoder_state ← encoder_state
+loss ← 0
+对目标位置 t：
+    用真实的前一目标词更新 DecoderLSTM
+    计算下一词分布 p
+    loss ← loss - log p[y[t]]
+反向传播更新编码器和解码器
+
+推理：编码输入，从开始符建立候选前缀
+重复扩展并保留 beam 中候选，直到结束符或长度上限
+输出得分最高的完整候选
+```
+
+目标函数优化似然；机制将可变长映射改为状态条件生成；最终评价用 BLEU 等指标。不能说训练直接最大化 BLEU，也不能把 beam 搜索改进等同于参数能力提高。模型、搜索和集成必须分别列出。
+
+## 实验设置
+
+| 项目 | 原文范围及条件 |
+|---|---|
+| 任务 | WMT 2014 英语到法语翻译 |
+| 模型 | 多层 LSTM 编码器—解码器，源序列正向与反转对比 |
+| 输出 | 有限词表，未知词问题是明确限制 |
+| 解码 | 不同 beam 宽度与多个模型集成，表格分别列出 |
+| 对照 | 传统翻译基线，以及结合 SMT 候选重评分的设置 |
+| 指标 | 测试 BLEU；不是逐词准确率，也不是人工充分性评分 |
+| 重复 | 集成模型数可见，不应把集成解释为多随机种子误差条 |
+
+**证据一，方法与源序列反转讨论。**论文给出条件生成目标与反转输入的动机，说明优化路径可以通过数据排列改变。这并不意味着模型学习了显式对齐矩阵。
+
+**证据二，表 1。**相同 beam 12 下，单个正向 LSTM 为 26.17 BLEU，单个反转 LSTM 为 30.59；五个反转模型集成、beam 12 为 34.81。反转与集成是两项不同变化，不能把最后分数全部归给反转。
+
+**证据三，第 3.7 节与图 3。**按句长观察表现，检验固定状态是否立即在较长输入上失效。论文结果表明该设置下长句仍可处理，但不证明固定向量可无损表达任意长度。表 2 的 SMT 重评分也应作为额外系统条件阅读。
+
+还有一个重要比较边界：生成式模型可能无法输出未知词，传统系统却有不同的词表处理方式。若只比较一个总 BLEU，不说明词表与数据筛选，就会遗漏能力上限。评分差异既可能来自建模，也可能来自可输出符号集合。
+
+## 教学例子：编码、生成与搜索的区别
+
+构造源句“红色的小球在桌上”。编码器不必把每个词保存在固定槽位，而是形成一个向量状态。解码器生成英语时，先预测“The”，再根据状态和“The”预测下一词。训练时即便第一词预测错，下一步仍可能喂入真实“The”；测试时却要面对自己的错误前缀。
+
+若模型把“红色”信息在编码过程中丢掉，增大 beam 通常无法凭空恢复。若颜色信息仍在，正确翻译只是早期被贪心选择淘汰，那么 beam 可能有帮助。这个区别解释为什么搜索预算只能修复某类错误，不能代替表示能力。
+
+再把源句末尾加入“不是红色，而是蓝色”。状态需要整合更晚的否定信息，单纯让最初词离解码更近不一定足够。反转是针对当时训练问题的有效技巧，其价值来自实验，不是普遍语义定理。
+
+## 贡献、代价与延伸
+
+Seq2Seq 提供了可复用的任务接口：翻译、摘要和其他序列转换都可以写成条件生成。它把不同长度与非逐位置对齐放进统一概率模型，减少手工模块边界。这里的通用性指形式统一，不等于一个在翻译上训练的模型无需新数据就能完成任意任务。
+
+代价是顺序计算、有限状态瓶颈、教师强制下的前缀分布差异，以及昂贵集成搜索。本文的分析是，下一篇注意力通过让解码器直接访问多个源状态，改变了最关键的信息通路；它不是简单增大原来的摘要向量。
+
+理解本篇的五个前置概念是条件概率分解、编码器状态、教师强制、结束符与 beam search。分别对应训练对象、输入接口、训练前缀来源、可变长度终止及近似解码。只要明确这些，许多后来的编码解码模型便容易比较。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 输入与输出长度不同，固定维度预测接口难以直接处理翻译 | LSTM编码器—解码器，并反转源序列改善优化 | 编码状态连接两条变长序列；反转改变部分词对的时间距离 | 表1正向/反向/集成比较，§3.7与图3句长分析 | 固定状态仍有信息瓶颈；集成、beam与SMT重评分是额外系统条件 |
+
+## 自测与参考答案
+
+**1. 为什么反转源句可能有帮助，却不是翻译时把意思倒着理解？**
+
+反转改变词在循环计算中的时间位置，从而缩短部分输入输出依赖路径。词的身份和监督翻译没有改变，模型仍学习正常目标句。它主要影响优化和信息路径，不是语义规则。
+
+**2. 更大的 beam 为什么不能保证更高 BLEU？**
+
+Beam 更接近模型的高概率解，而模型似然与 BLEU 不完全一致；长度偏好、错误校准也可能被放大。它还无法补回编码器没有保留的信息，因此需要实测质量与搜索成本。
+
+**3. 怎样区分架构、集成和重评分的收益？**
+
+先固定数据、词表、单模型和 beam 比较架构，再固定模型比较 beam，再单独增加集成；使用 SMT 候选时另列系统结果。只有把变化拆开，才能把每个提升绑定到相应机制。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "006-seq2seq",
+            active: "llm",
+            seriesLabel: "\u5927\u8bed\u8a00\u6a21\u578b",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

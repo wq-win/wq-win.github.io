@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>090｜SE-Sync：不仅求一张地图，还证明目标值已经不能更低 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人经典基础</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">SE-Sync：不仅求一张地图，还证明目标值已经不能更低</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 090｜SE-Sync：不仅求一张地图，还证明目标值已经不能更低
+
+[返回总览](00-发展时间线总览.md) · [上一篇：ORB-SLAM2](089-orbslam2.md) · [下一篇：CBF-QP](091-cbfqp.md)
+
+**论文**：David M. Rosen、Luca Carlone、Afonso S. Bandeira、John J. Leonard，*SE-Sync: A Certifiably Correct Algorithm for Synchronization over the Special Euclidean Group*，2016 年首次公开。[扩展稿 v2](https://arxiv.org/html/1612.07386v2) · [官方代码](https://github.com/david-m-rosen/SE-Sync)。
+
+**阅读范围**：2017 年 2 月扩展稿的建模、松弛、算法、实验与定理陈述；附录 B、C 的长证明未逐行复算。下面区分原问题、半正定松弛和低秩数值求解，未运行实现，也不把数值容差下的证书当作任意精度的符号证明。
+
+## 一、一分钟理解
+
+位姿图 SLAM 把机器人在不同地点的相对运动拼起来。因为测量有噪声，一个回路上的相对变换往往不能完全闭合，优化器要找一组最一致的全局位姿。
+
+普通局部优化停止时，我们常只能说“附近没有更好的更新”，不知道远处有没有更低的解。SE-Sync 除了给出可行位姿，还计算一个可靠的目标下界。如果候选解的代价已经等于这个下界，就证明它对这个数学问题达到了全局最优。
+
+最重要的边界是：**全局最优是相对指定测量和损失函数而言，不等于恢复了无噪声真实地图。** 假回环、模型偏差或错误权重仍可能让最优解偏离现实。
+
+一句话：**在给定相对位姿和噪声模型的同步问题中，通过半正定松弛与低秩流形求解获得可验证的全局最优估计，代价是松弛紧致性的条件及对异常测量的限制。**
+
+## 二、问题定义与前人局限
+
+“同步”在这里不是相机和 IMU 的时间同步，而是从相对关系恢复一组整体一致的群元素。每个状态 $x_i=(R_i,t_i)$ 属于 $SE(d)$，边上测量的是 $x_i^{-1}x_j$。
+
+这是图优化后端问题，不负责图像匹配、激光点关联、回环检索或控制策略。图由前端提供；若图不连通，各分量需要分别估计，分量之间的关系无法从缺失测量中凭空恢复。
+
+第 2.2 节用各向同性高斯模型描述平移噪声，用各向同性 Langevin 模型描述旋转噪声。它不是任意鲁棒核、任意完整协方差都直接适用的万能 SLAM 求解器。相对测量也不能决定全局原点和朝向，因此一组整体刚体变换等价的解具有相同目标值。
+
+局部 Gauss–Newton 可以很快得到好解，却通常没有全局证书。通用半正定规划可以处理凸松弛，但对大图直接存储和分解巨大矩阵成本很高。本文要同时解决“有保证”和“能算得动”。
+
+## 三、方法：下界怎样变成证书
+
+### 1. 原始目标
+
+问题 1 的加权最小二乘形式为：
+
+$$\min_{R_i\in SO(d),t_i}\sum_{(i,j)}\kappa_{ij}\|R_j-R_i\tilde R_{ij}\|_F^2
++\tau_{ij}\|t_j-t_i-R_i\tilde t_{ij}\|^2.$$
+
+波浪号表示测量，$\kappa,\tau$ 为对应精度权重。旋转残差使用矩阵弦距离，而不是任意选定的李代数角度误差；证书只证明这里定义的目标。换一个损失后不能直接继承同一证书。
+
+### 2. 先消去平移，再放松旋转约束
+
+固定旋转时，平移最优解来自线性最小二乘。消去它后得到只含旋转的二次形式 $\operatorname{tr}(\tilde Q R^TR)$。矩阵 $\tilde Q$ 包含旋转观测以及平移对整体一致性的影响，并不是只做旋转平均再随便拼位置。
+
+设 $Z=R^TR$。真实旋转产生的 $Z$ 半正定，且每个对角块为单位矩阵，还带低秩及正确旋转的限制。半正定松弛扩大可行域：
+
+$$p_{SDP}^*=\min_Z\operatorname{tr}(\tilde QZ),\qquad Z\succeq0,\quad Z_{ii}=I_d.$$
+
+可行域更大，最小值只能更小，因此 $p_{SDP}^*\le p_{MLE}^*$。如果松弛解恰好可恢复为合法旋转，就达到原问题同一最优值。这是第 3 节定理 1 的关键逻辑。
+
+### 3. 证书表达什么
+
+对可行估计 $\hat x$，若其代价为 $f(\hat x)$，则：
+
+$$0\le f(\hat x)-p_{MLE}^*\le f(\hat x)-p_{SDP}^*.$$
+
+右边是次优性上界。等于零时证明全局最优；大于零时，只知道尚未证明足够好，不能直接断言候选解一定次优，因为松弛本身可能不紧。
+
+浮点实现要报告可行性、数值容差和证书误差。梯度很小只能说明局部驻点；一个未经充分求解的松弛候选目标值，也不能随意当作已验证下界。
+
+### 4. 低秩分解与 Riemannian Staircase
+
+为避免直接操作巨大 $Z$，令 $Z=Y^TY$，使每个块 $Y_i$ 满足 $Y_i^TY_i=I_d$，在 Stiefel 流形上优化。低秩表达重新引入非凸性，所以不能只说“已经变凸，因此随便优化都行”。
+
+论文利用一个充分条件：行秩不足的二阶临界点可给出松弛全局解。阶梯方法逐渐增加秩，在相应流形上求解并检查条件；通过结构化 Hessian–向量乘法与稀疏图运算降低成本。达到松弛最优后，若不能直接恢复原问题旋转，则用 SVD 截断与投影给出可行近似，并保留次优性界。
+
+### 5. 小噪声定理的限度
+
+命题 2 给出依赖真实数据矩阵的正阈值：当扰动谱范数足够小时，松弛具有所需恢复性质。作者采用的是阈值存在性结果，不是通用的“每条边旋转误差低于某角度就保证成功”。实验中的约十五度范围是特定生成模型观察，不能当作该定理的普适常数。
+
+### 6. 教学伪代码
+
+```text
+输入：连通相对位姿图、与论文模型一致的权重
+建立结构化数据矩阵的运算，不必显式存储全部稠密矩阵
+消去平移变量；选定初始低秩因子
+重复：
+    在块 Stiefel 流形上用信赖域法优化
+    检查二阶条件及松弛最优性
+    若尚未满足，增加秩并沿改进方向继续求解
+从已求解松弛获得下界
+通过 SVD 与旋转投影恢复可行旋转，再求对应最优平移
+比较可行目标与已验证下界
+输出：位姿、次优性上界，以及是否达到数值认证条件
+```
+
+这是核心流程而非完备数值代码。收益指标包括目标值、证书间隙和耗时；定位真值误差是另一项，不能被证书间隙替代。
+
+## 四、实验如何验证
+
+| 项目 | 原文设置 |
+|---|---|
+| 实现 | MATLAB，使用 Manopt 的截断 Newton 信赖域；另实现 Gauss–Newton 对照 |
+| 硬件 | Xeon E3-1505M 2.80 GHz、16 GB RAM，Ubuntu 16.04 |
+| 预算 | 最多 500 外层迭代；梯度阈值 $10^{-2}$、相对目标改进 $10^{-5}$；信赖域每层至多 500 Hessian–向量乘积 |
+| 初始化 | GN 用 chordal 初值；SE-Sync 同时比较随机与同一 chordal 初值；默认阶梯起始秩为 5 |
+| Cube | 默认 1000 位姿，近邻回环概率 0.1，旋转 RMS 约 10°、平移 RMS 0.20 m；每参数设置 50 次随机实例 |
+| 大图 | sphere、torus、grid 为合成；garage、cubicle、rim 为真实来源图；比较 QR+chord 与 GN+chord |
+| 统计边界 | Cube 报平均曲线；大图表 1 未给重复计时置信区间；不含图像、激光前端计算 |
+
+## 五、四组证据与不能推出的结论
+
+**图 2(a)：旋转噪声与紧致性。** 所测 Cube 范围中约十五度 RMS 以内可保持精确恢复松弛的性质；更大噪声时证书间隙可出现。作者也指出高噪声下 GN 可能仍得到很好的解，只是同一松弛无法认证。不能将“未认证”自动标成“算法错误”。
+
+**图 2(b)–(d)：噪声、图密度与规模。** 分别改变参数，有助于隔离影响；它们仍来自规则格点与指定观测生成方式，不覆盖任意恶意假回环或真实前端的相关误差。更多回环是否有益，前提之一是这些边代表可信测量。
+
+**表 1：这里两个方法目标值相同。** 所有六个大图中，GN 与 SE-Sync 都到达同一个全局最优值；优势主要是速度与可验证性，并不是本方法的地图精度全都更高。garage 耗时 17.81→5.33 s，rim 为 575.42→36.66 s，分别约 3.34 倍和 15.70 倍；这是表内实现与硬件条件的比值。
+
+**图 3 与表 1 的证书。** rim 含 10,195 位姿、29,743 测量，报告次优性上界约 $5.639\times10^{-11}$。这说明目标在数值精度上被认证，不表示每个位置误差只有 $10^{-11}$ 米。图中的好看轨迹也不代替独立真值精度表。
+
+证据见[原文第 5 节](https://arxiv.org/html/1612.07386v2)。摘要的数量级加速说法应结合具体表格；garage 只有约三倍，不是所有任务都超过十倍。
+
+## 六、贡献、代价与局限
+
+新意是把可验证的凸松弛与可扩展的低秩几何求解结合起来，使大图上也能报告有意义的全局最优性信息。它不是通用非凸优化问题的万能解法。
+
+作者把含外点的鲁棒扩展列为后续方向。我的分析是：即使某个错误测量图的最小值被严格求到，仍可能是一张错误地图；反之，真值附近的解也可能因噪声而不是最小二乘最优。因此复现需要分别检验“求解正确”“模型合适”“观测关联正确”。
+
+对完整各向异性信息矩阵、相关噪声或鲁棒损失的推广，需要重新检查推导和证书。当前官方实现可能有额外接口或优化，不能直接将其能力、耗时倒写成本文原始实验。
+
+## 七、一个自构证书例子
+
+**教学构造，未运行。** 某张图的候选可行代价为 12.0，经过验证的松弛下界为 11.7，则最多还有 0.3 的目标改进空间；若下界也是 12.0，就可认证最优。如果一个假回环使“真实地图”的代价变成 20，而错误折叠地图代价为 12，证书仍可能认证后者——因为它证明的只是给定目标。
+
+五个前置概念：
+
+1. **群同步**：从带噪相对变换恢复整体一致的状态集合。
+2. **凸松弛**：扩大或简化可行域，得到较易求解的界。
+3. **半正定矩阵**：二次型非负的对称矩阵，是 SDP 的约束核心。
+4. **Stiefel 流形**：列正交矩阵构成的几何空间。
+5. **次优性界**：候选目标与可靠下界之差，限制可能剩余的改善。
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 局部收敛无全局证书 | 半正定松弛给下界 | 可行值达到下界即可认证 | 定理 1、表 1 | 证书只针对指定目标 |
+| 通用 SDP 太大 | 低秩分解与图结构运算 | 避免巨大稠密存储与分解 | 图 2、表 1 | 需要正确的流形求解与认证 |
+| 紧致性条件不明确 | 小扰动存在性分析 | 解释常见噪声下可恢复 | 命题 2 | 没有普适角度阈值 |
+| 松弛不紧仍需输出 | 投影恢复并报告间隙 | 提供可行估计及质量界 | 算法 2–3 | 投影解未必全局最优 |
+
+## 八、理解检查：问题与答案
+
+**问题 1：为什么有非零证书间隙，不能断定候选解不是全局最优？**
+
+**答案：** 松弛最优值可能严格低于原问题最优值。即使候选已经达到原问题最优，仍会和松弛下界有距离。非零间隙表示尚未凭这个界完成认证。
+
+**问题 2：低秩分解重新变成非凸，意义何在？**
+
+**答案：** 它显著减少计算，同时利用特定几何结构和二阶、秩条件连接回凸松弛的全局解。关键不是“非凸就随便求”，而是阶梯搜索与最优性检查为这种高效表达提供依据。
+
+**问题 3：获得全局最优证书后，还应该做什么实验？**
+
+**答案：** 还要用独立真值验证几何误差，检查假回环、噪声模型和权重敏感性，并报告前端与后端总成本。证书解决求解器是否优化到位的问题，不能替代整个机器人系统的正确性评估。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "090-se-sync",
+            active: "robot-classic",
+            seriesLabel: "\u673a\u5668\u4eba\u7ecf\u5178\u57fa\u7840",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

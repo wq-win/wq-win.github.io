@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>043｜RRT-Connect：让两棵搜索树主动相遇 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人经典基础</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">RRT-Connect：让两棵搜索树主动相遇</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 043｜RRT-Connect：让两棵搜索树主动相遇
+
+[总览](00-发展时间线总览.md) · [目录](README.md) · [上一篇](042-zhang-calibration.md) · [下一篇](044-slam-convergence.md)
+
+**论文**：James J. Kuffner, Jr.、Steven M. LaValle，*RRT-Connect: An Efficient Approach to Single-Query Path Planning*，ICRA 2000。[原文](https://www.kuffner.org/james/papers/kuffner_icra2000.pdf) · [DOI](https://doi.org/10.1109/ROBOT.2000.844730)。本文依据作者提供的七页会议稿，页码采用该稿的 1–7 页，不混入后来同主题文章的发表年份。
+
+**阅读范围**：已核对全文算法、理论论述、实验与结论。原文的证明为证明梗概；以下说明其前提与结论，不把有限实验扩大为任意场景的运行时间保证。
+
+## 一分钟：随机探索之后，主动走向另一棵树
+
+机械臂从桌子一侧伸到另一侧，可能需要先抬起肘部，再绕过桌沿。只朝目标姿态移动容易撞上障碍；在整个姿态空间提前建好路线图又可能花费过多准备时间。
+
+RRT 提供了一个探索办法：随机选一个姿态，从树中离它最近的节点向它走一步。RRT-Connect 在起点和终点各建一棵树。第一棵树增加节点后，第二棵树连续朝这个新节点走，直到接上或者遇阻。随后交换两棵树的角色。随机性负责发现绕行方向，连续连接负责快速穿过空旷区域。
+
+这是一种单次查询的几何规划器。它输出无碰路径，而不是学习到的策略、最短路径或可以直接下发电机的力矩序列。作者报告 Connect 在许多场景中降低搜索耗时，但也明确指出非常拥挤的环境中可能略慢。
+
+一句话：**在已知静态几何环境的单次路径查询中，通过双向随机树与贪心连接，缩短找到可行路径的时间，代价是路径质量没有最优保证，而且狭窄通道与碰撞检测仍会成为瓶颈。**
+
+## 问题定义：姿态空间里的线段是什么
+
+设构型为 $q\in\mathcal C$，自由空间为 $\mathcal C_{free}$。对于机械臂，$q$ 通常包含各关节角；对于搬运刚体，还要表示平移与旋转。输入是起点 $q_s$、终点 $q_g$、构型距离 $\rho$ 和几何碰撞检测器，输出连续曲线 $\sigma:[0,1]\to\mathcal C_{free}$，满足端点条件。
+
+这里没有奖励、训练集或终止回报。终止条件是树成功连接，或者耗尽搜索预算。失败返回仅表示预算内未找到路径，不能当成不可行证明。
+
+原文第 2–3 节明确将该算法限定为没有微分约束的构型空间规划。汽车不能侧向移动，即使两姿态之间的直线都不碰撞，也未必能沿该线行驶；这类约束不能靠把构型向量改名为状态向量解决。对于力矩受限机械臂，也还需要时间参数化与控制验证。
+
+距离函数不是附属细节。把一米平移与一弧度旋转直接相加，会影响最近邻以及搜索偏置；周期角需要合理处理跨越正负边界的距离。论文提出的结构可以复用，但具体度量要与机器人几何相适应。
+
+## 方法：EXTEND 与 CONNECT 的区别
+
+RRT 的基础操作从最近节点 $q_{near}$ 朝目标样本走不超过步长 $\epsilon$。在欧氏坐标中的教学写法是
+
+$$q_{new}=q_{near}+\min\left(1,\frac{\epsilon}{\|q-q_{near}\|}\right)(q-q_{near}).$$
+
+旋转空间应使用相应插值，这个表达式不能直接替代所有流形上的局部规划器。新边通过碰撞检查后加入树。操作返回三种状态：到达目标 Reached；前进但未到达 Advanced；无法前进 Trapped。
+
+CONNECT 反复调用这个操作，只有 Reached 或 Trapped 才停止。它没有把跨越障碍的长线段直接视为有效，而是连续验证前进过程。在工程实现中，碰撞检查还必须覆盖边内部；只检查端点，细障碍可能落在两个有效端点之间。
+
+下面是对应原文 Figure 5 的教学伪代码，补充了路径方向与边验证的说明：
+
+```text
+输入：起点 qs，终点 qg，距离与插值器，边碰撞检测器，预算 K
+Ta ← 以 qs 为根的树；Tb ← 以 qg 为根的树
+for k = 1 ... K:
+    qrand ← 从构型空间采样
+    status, qnew ← EXTEND(Ta, qrand)
+    if status != Trapped:
+        repeat:
+            result, _ ← EXTEND(Tb, qnew)
+        until result != Advanced
+        if result == Reached:
+            读取两棵树从根到连接点的父指针链
+            按原始起点到原始终点的方向拼接路径
+            return 路径
+    交换 Ta 与 Tb
+return 预算内未找到路径
+
+EXTEND(T, target):
+    near ← 距 target 最近的树节点
+    new ← 从 near 向 target 插值最多 epsilon
+    if 整段 near→new 不能通过碰撞检查:
+        return Trapped, none
+    添加 new 与父边
+    return (Reached if new 到达 target else Advanced), new
+```
+
+交换树后，变量名不再固定代表起点树与终点树。因此实现必须记录根的身份，不能始终把第一棵树的路径接在前面。树结构本身也保证了父指针链的可追溯性，而不是让两个临近节点仅凭位置接近就宣布连接成功。
+
+### 为什么贪心连接可能更快
+
+单步扩展每次只走一点，空旷走廊里会反复进行采样与最近邻查询。Connect 对同一目标连续前进，可以摊薄这些开销。原文第 3 节指出，沿同一方向新增节点会成为下一步的最近邻，因此可避免每一个小步都重新做全树搜索。
+
+但障碍很密时，连续前进很快被截断，收益消失；一次次无效尝试还会增加工作。因而改变的是**搜索调度机制**，评估改善的是**求解耗时**，不是某个显式优化目标下降。算法没有路径长度最小化损失。论文实验又使用路径平滑，平滑后路径的外观不能独自证明原始树搜索产生了短路径。
+
+## 理论：概率完备不等于按时完成
+
+第 4 节先讨论有界开放自由空间中的覆盖，再给出连接分量上的推广与 RRT-Connect 的推论。关键直觉是：如果可行路线有正宽度，可以用有限串相交的小自由球覆盖；采样有机会进入每一段，探索可逐段推进。
+
+这与“任意零宽度通道也必然找到”不同。几何可行性若只存在于低维接触集合，均匀采样命中的概率可能为零，原证明前提不再直接适用。碰撞检测错误、错误的局部插值或有限精度同样不由理论自动解决。
+
+作者在这一节明确没有给出收敛速度的理论刻画。概率完备说明预算无限增加时的成功趋势，不告诉我们十毫秒、十秒或者一小时的成功率。对于有实时截止期限的机器人，这个差别决定了是否需要安全停止方案和已有可行路径。
+
+## 实验怎样支持结论
+
+| 项目 | 原文设置 | 能回答的问题 |
+|---|---|---|
+| 平台 | 第 5 节：270 MHz SGI O2，R12000；RAPID 碰撞库 | 给出当时实现的运行时间背景 |
+| 低维刚体 | 二维运动中的二维、三维构型空间；部分结果按 100 次试验平均 | 随机查询重复运行的平均计算负担 |
+| 三维搬运 | 钢琴模型跨房间；需要转动以避障 | 不仅能处理点机器人 |
+| 机械臂 | 六自由度 PUMA 模型，结合逆运动学拆分搬书任务 | 能否支持具有多阶段目标的几何动作生成 |
+| 人体动画 | 七自由度手臂、棋子操作与狭窄装配场景 | 方法的高维应用与困难场景 |
+| 基线 | 若干 RRT 变体，比较 CONNECT 与 EXTEND 的组合 | 贪心连接的作用，而非与所有规划器的统一排名 |
+| 指标范围 | 墙钟时间与路径演示；曲线置信区间、逐场景完整分布未给出 | 可以讨论计算效果，难以判断尾部风险 |
+
+这不是实体机械臂在真实接触条件下反复抓取的成功率实验。动画中的抓住、搬动、放开属于高层动作安排；抓取稳定性和执行误差不由几何路径规划结果验证。
+
+### 五处值得回看原文的证据
+
+1. **Figure 5，第 3 页**：直接对照单步扩展和连续连接，支持算法结构的判断；它本身不是速度提升的实验。
+2. **Figure 7 与第 5 节，第 5 页**：展示树与平滑路径，并报告重复试验的平均时间。支持低维实例可快速求解，不能证明路径最短。
+3. **Figure 8，第 6 页**：钢琴跨房间的序列要求改变姿态；第 5 节报告该实例平均 12.5 秒、100 次试验。这个数字属于指定场景和硬件，不是现代机器人的通用延迟。
+4. **Figure 9，第 6 页**：PUMA 模型搬书任务分成接近、搬运、返回。支持几何规划与逆解组合，不能证明力闭合、无滑动或实机控制稳定。
+5. **第 5–6 节**：作者称多数问题中 Connect 常带来数倍加速，同时承认非常拥挤时可能稍慢，并将更广泛的基准研究列为后续工作。证据因此更接近有希望的初步实验，而非跨任务全面胜出。
+
+原文没有把不同模块的时间全部拆开。最近邻数据结构和碰撞检测都可能改变相对结果，因此复现应同时记录两者调用次数与耗时，而不能只换一个库就把差异全归因于算法。
+
+## 贡献、代价与边界
+
+真正有用的组合是让随机探索产生新的连接目标，再用贪心局部运动尽可能完成连接。它避免了固定朝终点下降的势场把全局搜索压在同一个局部吸引区域，但没有消除狭窄通道的采样困难。
+
+原文结论称方法不需要参数调优；这应放在其演示语境中理解。算法描述仍包含步长、距离和碰撞检查方式。把这句话解释成“任何机器人都没有参数选择问题”，会超出正文机制和实验覆盖范围。
+
+路径中可能出现多余转折，且未考虑速度、加速度、力矩、接触稳定和不确定障碍。后处理可能缩短路径，但必须再次检查整条新边的碰撞；时间参数化还要验证执行约束。路径规划器的快速可行性与运动系统的可靠执行，是两个需要分别验收的层次。
+
+## 一个小例子与五个前置概念
+
+**自构例子**：两个房间之间有一道偏离起终点直连方向的门。起点树随机探索到门边时，终点树朝这个新节点连续推进，很可能一次跨过自身房间的大块空地；到门框处若受阻，保留已经生成的节点，再换方向探索。Connect 的作用是少重复探索已经畅通的方向，门口仍必须被采样引导发现。
+
+若把门宽逐渐减小，可以预期耗时方差变大；这是根据采样机制的分析，不是本文额外运行的实验结果。
+
+五个前置概念：**构型空间**把机器人整体姿态视为点；**局部规划器**连接两个近邻姿态；**Voronoi 区域**解释哪些树节点容易被选中扩展；**概率完备性**描述预算趋向无限时的求解趋势；**时间参数化**给几何路径安排可执行的速度进度。
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 单树探索不主动接近另一端 | 起终点双树交替扩展 | 从两边寻找连通区域 | Figure 5、6 | 需要可用的局部连接机制 |
+| 空旷区域反复单步查询 | CONNECT 连续前进 | 减少重复调度和最近邻开销 | 第 5 节变体比较 | 拥挤区域收益可能消失 |
+| 单次查询不适合昂贵预处理 | 查询时构树 | 将工作集中在当前目标 | 搬运与机械臂例子 | 不复用所有后续查询的结构 |
+| 可行路径不等于可执行轨迹 | 论文处理几何可行性 | 明确分离搜索层次 | 模型中的无碰路径 | 动力学、接触与鲁棒性需另验 |
+
+## 自测：能否解释机制，而不只背算法名字
+
+**问题 1：两棵树已经相距很近，为什么不能直接宣布成功？**
+
+**参考答案**：构型距离小不保证连接段无碰撞，例如薄墙可能隔开两个近邻姿态。还必须由局部规划器生成并验证有效连接，且拼接的父指针链方向正确。如果存在非完整约束，还需要满足运动方向与系统动力学，单纯几何接近更加不足。
+
+**问题 2：为什么 Connect 在空旷场景通常有利，在拥挤场景却不一定？**
+
+**参考答案**：空旷区域允许连续多步向目标前进，能摊薄采样和最近邻查询成本；拥挤区域会很快触发碰撞，长连接被反复截断。它减少的是特定搜索开销，没有保证每一次贪心尝试都带来更好的全局进度。
+
+**问题 3：概率完备的 RRT-Connect 能否保证机械臂在一秒内找到最省力的动作？**
+
+**参考答案**：不能。概率完备是满足假设时的渐近可行性性质，不包含一秒成功率；算法没有最省力目标，也没有动力学模型。需要额外的预算实验、轨迹优化和执行约束验证，才能回答时限、能耗与控制可行性问题。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "043-rrt-connect",
+            active: "robot-classic",
+            seriesLabel: "\u673a\u5668\u4eba\u7ecf\u5178\u57fa\u7840",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

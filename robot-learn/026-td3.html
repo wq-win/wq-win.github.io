@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>026｜TD3：防止策略利用价值估计错误 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">TD3：防止策略利用价值估计错误</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 026｜TD3：防止策略利用价值估计错误
+
+[系列首页](README.md) · [上一篇](025-sac.md) · [下一篇](027-dynamics-embedding.md)
+
+**原论文**：*Addressing Function Approximation Error in Actor-Critic Methods*，Scott Fujimoto、Herke van Hoof、David Meger，2018。[论文](https://arxiv.org/abs/1802.09477)。
+
+## 一、一分钟理解：先把评分器变可靠，再相信它的动作建议
+
+假设机械臂尝试动作 A 得分普通，而价值网络错误地认为动作 B 特别好。Actor 会向 B 靠近；Critic 又用“下一步做 B”的预测给当前动作打分。即使最初误差很小，这个循环也可能把虚假的高分扩散开。
+
+TD3 直接研究这种 Actor 与 Critic 相互强化的错误。在 DDPG 上增加三个机制：两个评价器取较小值、策略慢于评价器更新、目标动作附近加小扰动。前两个分别降低乐观偏差与更新耦合，第三个避免策略依赖一个极窄的虚假价值尖峰。
+
+作者将其概括为减少函数近似误差的影响。实验支持多个连续控制仿真任务上的改进，但不是“两个网络一定给出真实价值”，也没有直接证明真实机器人更安全。
+
+一句话：在确定性连续控制中，通过限制过高评价、延迟策略更新和局部动作平滑，提高学习可靠性，代价是双 Critic 计算与额外参数，并可能引入低估。
+
+## 二、问题定义：没有显式 max，也会选择误差
+
+设定是单智能体、在线收集、离策略更新、无模型连续控制。状态是仿真提供的运动状态，动作是连续控制量，奖励和终止沿用七个 OpenAI Gym MuJoCo 任务。没有示范、语言或图像预训练输入。
+
+DQN 的高估很直观：从若干带误差的数里选最大值，更容易选中误差偏大的那个。DDPG 没有枚举动作，却通过梯度让 Actor 朝 Q 的高点移动，这同样是对估计值的选择。因此不能因为“没有 max 符号”就认为最大化偏差消失。
+
+论文第 4.1 节在小步更新等假设下分析这种倾向。这里的结论有条件，不是说每个状态、每次更新、每个网络都必须高估。更重要的是错误与数据分布的互动：Actor 会反复访问它认为好的动作，随后 TD 标签又传播这些预测。
+
+普通 Double DQN 式的“当前网络选动作、目标网络评价”在本实验里帮助有限。作者解释为 Actor 变化慢，两个选择仍高度相关。两个 Critic 也共享数据和目标，因此称它们为完全统计独立并不准确。
+
+## 三、三处修改及其准确位置
+
+### 1. 双 Q 取较小值用于目标
+
+记当前策略为 $\pi_\phi$，两套评价器为 $Q_{\theta_1},Q_{\theta_2}$，带横线者为目标网络。目标动作先加受限噪声：
+
+$$
+\tilde a=\operatorname{clip}\left(
+\pi_{\bar\phi}(s')+\operatorname{clip}(\epsilon,-c,c),
+a_{\min},a_{\max}\right),\quad
+\epsilon\sim\mathcal N(0,\sigma^2I).
+$$
+
+然后构造：
+
+$$
+y=r+\gamma(1-d_{\rm terminal})
+\min_{i=1,2}Q_{\bar\theta_i}(s',\tilde a).
+$$
+
+两个 Critic 都拟合同一个目标 $y$。取最小值意味着一个网络单独给出的高峰不足以成为乐观标签，但如果两个网络同时出错，最小值仍可能过高。另一方面，低估也可能发生，所以它不是无偏估计器。
+
+### 2. Actor 每隔几步再更新
+
+Critic 每次更新，而 Actor 与目标网络每隔 $d$ 次 Critic 更新才调整。论文常用 $d=2$。Actor 的损失仍使用第一个评价器：
+
+$$
+L_\pi=-\mathbb E_{s\sim D}Q_{\theta_1}(s,\pi_\phi(s)).
+$$
+
+这里与“在 Actor 损失中也取两个 Q 的最小值”有区别。原始 TD3 的最小值关键放在 TD 目标中。延迟也不是停止与环境交互，而是降低网络参数更新频率。多给评价器一些拟合时间，有可能使下一次策略梯度更可靠，但过度延迟又会让策略学习不足。
+
+### 3. 目标平滑不是采集探索
+
+采集数据时给当前 Actor 加噪声，是为了看见新动作的后果；目标平滑给下一状态的目标 Actor 加噪声，是为了让 TD 标签考虑动作邻域。二者位置和目的不同，可以独立设置。
+
+如果某个动作点预测特别高，而左右稍有偏差就很低，平滑后的目标会降低这座尖峰的吸引力。机器人电机和接触通常存在误差，这一直觉很自然；但如果真实任务确实需要极精确的动作，过大的平滑也可能损害控制。因此“邻近动作应有相近价值”是有适用范围的归纳偏置。
+
+教学伪代码：
+
+~~~text
+初始化 Actor、两个 Critic、三套对应目标网络和经验池
+每次环境交互：
+    用 Actor 加探索噪声选择动作，保存转移
+    随机抽取一批经验
+    用目标 Actor 生成下一动作，加入截断平滑噪声
+    用两个目标 Critic 的较小值形成 TD 目标
+    分别更新 Q1、Q2
+    如果 Critic 更新次数是 d 的倍数：
+        最大化 Q1 对当前 Actor 动作的评分
+        缓慢更新 Actor 和两个 Critic 的目标参数
+评估时关闭采集探索噪声，累计任务回报
+~~~
+
+数学目标仍是最大化任务回报，没有 SAC 的熵目标。算法机制针对评价误差，实验改善的是回报与学习速度，三者需要分开描述。
+
+## 四、实验设置：把网络改动也列入对照
+
+| 项目 | 原文设置 |
+|---|---|
+| 环境 | HalfCheetah、Hopper、Walker2d、Ant、Reacher、单摆与双摆，共七个旧版 Gym 任务 |
+| 数据与预算 | 每任务一百万环境步，每步一次 Critic 更新 |
+| 评估 | 每 5000 步评估十回合，关闭探索噪声 |
+| 重复 | 十个仿真及网络初始化随机种子 |
+| 网络 | Actor、Critic 两层，400 和 300 隐藏单元；Adam 学习率 $10^{-3}$ |
+| 批量 | 100 条转移，经验均匀采样 |
+| 噪声 | 探索标准差 0.1；目标平滑 0.2，并截断至正负 0.5 |
+| 延迟及目标 | $d=2$，软更新系数 0.005 |
+| 基线 | DDPG、重新调参的 DDPG、PPO、TRPO、ACKTR、当时实现的 SAC |
+
+HalfCheetah 与 Ant 前一万步完全探索，其他环境前一千步。这个差异影响早期数据，因此复现时不应全部替换成一个统一默认值。
+
+作者不仅比较原始 DDPG，还提供包含网络、超参数与探索改动的自家 DDPG。这样能检查提升究竟来自 TD3 三个机制，还是基础实现已经变强。等环境交互量并不代表等训练时间：双 Critic 增加计算，而延迟 Actor 又减少部分更新。硬件和全面等算力调参预算本文没有逐项确认。
+
+## 五、五处证据与两个容易看错的表
+
+| 位置 | 观察 | 支持与限制 |
+|---|---|---|
+| 图 1 | 估计 Q 与从状态出发的蒙特卡洛回报对照，DDPG 有明显高估 | 支持偏差在训练中真实出现；蒙特卡洛也只是对真值的估计 |
+| 图 2 | Double DQN、Double Q 的 Actor–Critic 版本仍有残余偏差 | 说明直接移植离散方案不充分，不否定所有双估计方法 |
+| 图 3 | 固定策略与持续更新策略下，目标网络速率影响不同 | 支持 Actor 与 Critic 耦合是重要问题 |
+| 表 1、图 5 | TD3 在多数任务表现强，简单单摆多算法达到上限 | 不是每个表格数值都严格第一 |
+| 表 2 | 去掉各模块，影响随任务明显不同 | 支持组合价值，不能说三模块在每任务都不可缺少 |
+
+表 1 报告 **最大平均回报**，表 2 则是最后十次评估的平均值，两者不能直接拼成同一个排行榜。图 5 阴影是十次运行平均评估的半个标准差；表 1 的“±”为一个标准差，这也不能混称为 95% 置信区间。
+
+以表 1 为例，HalfCheetah 的 TD3 为 $9636.95\pm859.065$，原 DDPG 为 3305.60，而重新调参的 DDPG 已到 8577.29。相对后者，均值差为 1059.66，约 12.35%；相对原始实现则大得多。这个例子说明选择哪个参照决定“提高多少”的含义。
+
+表 1 中双摆 DDPG 为 9355.52，TD3 为 9337.47。因此摘要里的全面优胜措辞应结合接近饱和任务和统计波动理解，不能改写成“所有任务严格超过全部基线”。
+
+表 2 更有教学价值：Ant 完整 TD3 为 4185.06，去双 Q 为 849.75，差别很大；但 HalfCheetah 去双 Q 为 9792.80，反而高于完整版本 9532.99。双 Q 是有价值的稳定设计，而不是每个任务上单调增加回报的按钮。
+
+## 六、贡献与边界：对误差保持克制
+
+TD3 把连续控制中的高估、方差累积和策略更新耦合放进同一个分析框架，提出了简单、可插入 DDPG 的工程修正。附录的有限 MDP 收敛结果不等于神经网络 TD3 在任意机器人任务都收敛。
+
+与 SAC 对比也要保留版本边界。本篇使用当时的 SAC 实现，附录 E 专门讨论实现及结果差异；不同论文的基准协议和版本并不构成永久的算法胜负关系。更合理的阅读方式是理解两条路线：TD3 保留确定性目标并约束误差，SAC 用最大熵随机策略改变优化问题。
+
+本文的分析是，最小 Q 值也可能过于悲观，尤其在数据覆盖不足时。TD3 没有明确限制 Actor 只能选择数据支持的动作，因此离线使用时仍可能遇到分布外高估。它也未解决真实硬件安全、视觉表征或稀疏任务发现问题。
+
+## 七、一个能辨认三种机制的例子
+
+自构例子，未运行：某推力的两个 Q 预测分别是 20 和 8，真实回报暂未知。取小值把标签从 20 限制为 8；如果邻近推力预测也只有 7 到 9，平滑进一步阻止孤立尖峰传播；延迟策略更新则先让评价器多吸收一次经验。三个步骤分别作用于评价选择、动作邻域和时间节奏，并不是同一种“加正则”。
+
+五个前置概念：**高估偏差**是优化倾向挑中正误差；**TD 自举**使用预测训练预测；**确定性策略梯度**通过 Q 对动作的导数训练 Actor；**双时间尺度**让策略与评价器以不同频率更新；**蒙特卡洛评价**用真实轨迹回报估计价值。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 证据 | 代价与局限 |
+|---|---|---|---|---|
+| 虚假高 Q 被选中 | 两 Critic 目标取小 | 限制单网络乐观误差 | 图 1、表 2 | 可低估、错误仍相关 |
+| 策略追随未拟合评价器 | 延迟 Actor 更新 | 减少反馈放大 | 图 3、表 2 | 延迟过大也变慢 |
+| 利用狭窄价值峰 | 目标动作加平滑噪声 | 学邻域价值 | 5.3 节、表 2 | 精确控制需选尺度 |
+
+阅读范围：核对[原文方法、实验和附录目录](https://arxiv.org/html/1802.09477)，HTML 页首题名转换为 Supplementary Material，但正文是完整论文内容；书目题名依原始记录。未独立复现，未重新比较现代实现。
+
+## 八、三个问题及答案
+
+**问题1：TD3 的两个 Q 取最小值后，为什么不等于有保证的下界？**
+
+答案：两个预测都可能高于真值，例如真值为 5，预测为 8 和 10，最小值仍是 8。该机制限制相对高估倾向，缺少校准误差界时不能宣称数学下界。
+
+**问题2：把探索噪声加大，能否替代目标策略平滑？**
+
+答案：不能。探索噪声改变采集到的数据；目标平滑改变每次 TD 标签使用的下一动作邻域。即使经验池不变，也能改变后者。因此二者独立影响学习，过大的探索还可能降低任务采样质量。
+
+**问题3：Actor 只更新一半次数，为什么反而可能更快学会？**
+
+答案：更新数量不是有效改进数量。如果每次都沿高误差 Critic 的梯度移动，更多更新会放大错误。先让 Critic 更接近当前数据，再做较少但较好的策略更新，可能用相同交互量获得更高回报。不过这是实验支持的趋势，不保证任意延迟都好。
+
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "026-td3",
+            active: "robot-learn",
+            seriesLabel: "\u673a\u5668\u4eba\u5b66\u4e60",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

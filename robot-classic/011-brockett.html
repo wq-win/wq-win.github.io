@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>011｜指数积：用关节轴直接写出机器人的运动 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人经典基础</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">指数积：用关节轴直接写出机器人的运动</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 011｜指数积：用关节轴直接写出机器人的运动
+
+[总览](00-发展时间线总览.md) · [目录](README.md) · [上一篇](010-featherstone.md) · [下一篇](012-manipulability.md)
+
+**论文**：Roger W. Brockett，*Robotic Manipulators and the Product of Exponentials Formula*，1984，MTNS 1983 会议论文集，120–129 页。[原始出版入口](https://doi.org/10.1007/BFb0031048)。年份采用论文集出版年。
+
+**阅读范围**：原始章节全文未能取得，不能逐页核查 Brockett 的论证及例题。下面对核心公式的教学推导，另据 Lynch 与 Park 的[官方教材配套讲解 §4.1.1](https://modernrobotics.northwestern.edu/nu-gm-book-resource/4-1-1-product-of-exponentials-formula-in-the-space-frame/)核对；现代符号和实现步骤不冒充原文记号。本文侧重理解这一经典思想，原稿实验与章节位置保持未核实状态。
+
+## 一分钟理解：先记录轴，再组合运动
+
+给定一只机械臂的所有关节角，如何算出夹爪的位置和姿态？D–H 方法通过逐连杆坐标变换解决这个问题。指数积方法换了一个建模入口：在机器人零位记录每个关节轴，把每个关节引起的刚体运动写成一个矩阵指数，再按运动链次序相乘。
+
+它没有让机械臂凭空增加运动能力，也不是学习算法。它改善的是运动学描述的统一性，使旋转、平移和螺旋运动进入同一种数学语言。其价值主要体现为表示与推导，不应该用未经核查的“计算速度提高多少”包装。
+
+一句话：**在刚性串联机构中，通过关节螺旋轴的指数积表示，统一正运动学及其微分结构，代价是需要理解坐标系、矩阵指数与不交换的变换组合。**
+
+## 问题设定与必要假设
+
+输入为关节变量 $q=(q_1,\ldots,q_n)$，输出为末端相对基座的刚体变换 $T(q)$。模型假定连杆刚性、关节几何已知，零位定义一致。这里没有奖励、采样训练或终止条件；需要检验的是几何等式与实现正确性。
+
+齐次变换 $T=[R,p;0,1]$ 中，$R$ 是旋转矩阵，$p$ 是位置向量。若把点的齐次坐标左乘 $T$，就把它从末端坐标表达变为基座表达。因此，矩阵乘法方向有物理意义：不是把所有旋转角加起来就能得到末端姿态。
+
+D–H 需要按约定放置中间坐标系；相邻轴平行、交叉或重合时，参数选取容易困扰初学者。指数积直接记录轴的几何信息，有助于减少这些人为选择，但并没有消除模型标定误差。轴方向写错一度，另一种表示不会自动把它修正。
+
+## 方法：从无穷小运动到有限运动
+
+采用角速度在前的六维排列 $S=(\omega,v)$，构造
+
+$$
+[S]=\begin{bmatrix}[\omega]_\times&v\\0&0\end{bmatrix},\qquad
+T(q)=e^{[S_1]q_1}e^{[S_2]q_2}\cdots e^{[S_n]q_n}M.
+$$
+
+$[\omega]_\times a=\omega\times a$；$M=T(0)$ 是末端零位。转动关节的单位轴方向为 $\omega$，轴上一点为 $r$，则 $v=-\omega\times r$。移动关节取 $\omega=0$，$v$ 为单位平移方向。这些轴均在零位、同一基座坐标系表达。
+
+为什么轴不经过原点时需要 $v$？因为刚体绕偏置轴转动，坐标原点会绕轴画圆。如果只填写旋转部分，计算结果就变成绕原点转动，忽略关节轴的位置。另一个易错点是：$v$ 是螺旋坐标的线性部分，不总等于夹爪原点的实际线速度。
+
+指数函数把恒定的无穷小运动生成元积分为有限刚体位移。对于单轴转动，旋转部分可用 Rodrigues 公式计算；对于纯平移，指数直接得到位移 $vq$。这解释了为何两种关节能共享外部调用接口。
+
+公式虽然写作从关节 1 到关节 $n$ 的乘积，推导可以从最末端关节开始：只动最后一关节时，其作用左乘零位；再动倒数第二关节，就带动已经变换的末端部分。依次向基座回溯，得到上述次序。此处是教材配套讲解的推导路线，而非已核实的 Brockett 原文段落。
+
+```text
+输入：同一零位下的关节轴 S[1:n]、末端零位 M、关节变量 q
+检查：转动轴单位化；移动轴方向单位化；角度使用弧度
+T ← 单位齐次矩阵
+for i = 1 ... n:
+    Xi ← 由 S[i] 构造 4×4 螺旋矩阵
+    Ei ← 刚体矩阵指数(Xi * q[i])
+    T ← T * Ei
+输出 T * M
+```
+
+这是教学正运动学流程。它没有定义优化损失，也没有执行逆运动学。若要从目标位姿求 $q$，还需另行设计求根或优化算法，并处理多解、关节限制和奇异性。
+
+## 证据怎样阅读
+
+| 证据位置 | 能确认什么 | 不能据此确认什么 |
+|---|---|---|
+| 原始出版记录，120–129 页 | 论文题名、作者和出版归属 | 原稿所有推导步骤 |
+| 官方教材配套 §4.1.1，零位定义段 | $M$ 与零位关节轴的意义 | 这些符号是 1984 年原符号 |
+| 同节，末端关节到基座的构造段 | 指数乘积的运动链次序 | 任意改变乘法顺序仍正确 |
+| 同节，旋转关节与移动关节示例 | 两类关节可统一进入公式 | 闭链约束无需额外求解 |
+
+本篇没有可核实的原稿机器人实验表，不提供成功率、运行时间或随机种子。它属于几何理论阅读：适当验证是证明公式在给定假设下成立，再让独立实现交叉核对。不能把现代教材的教学示例说成原作者的实验。
+
+可以安排三个数值检查：零位是否返回 $M$；单关节运动是否绕正确轴运动；随机姿态是否与独立 D–H 模型一致。第二项尤其重要，因为两套程序若共享同一个错误坐标定义，随机结果一致仍不代表模型与实物一致。
+
+## 自构例子：一个偏置转轴
+
+设二维平面里，轴垂直纸面并通过 $(1,0)$，末端零位在 $(2,0)$。转动 $90°$ 后，末端应在 $(1,1)$。取 $\omega=(0,0,1)$、$r=(1,0,0)$，则 $v=(0,-1,0)$。将它们放入指数后，恰好得到绕偏置轴转动。
+
+如果误设 $v=0$，末端会到 $(0,2)$：这是绕基座原点转动的结果。这个错误不是小数精度问题，而是改变了物理机构。把零位图画出来，往往比盲目调矩阵公式更快。
+
+再增加一个不共轴关节，交换两个指数通常就会改变末端位置。这可以作为“不交换”的直观实验：先转手腕再转肩膀，与先把局部动作解释成基座动作，并不是同一操作。
+
+## 贡献、成本与边界
+
+核心贡献方向是把机器人运动学放进刚体运动群的结构中。由此得到的清晰微分关系，有利于后续雅可比、标定和几何控制；这些后续用途属于方法影响的分析，不是原稿实验已经证明的性能收益。
+
+指数积不会消除机构的真实奇异性。它也没有自动保证碰撞安全、闭链闭合或动力学可行。若机构含柔性变形，固定关节轴与刚体连杆假设本身就需要扩展。实现成本还包括小角度数值稳定、坐标约定一致，以及把厂商几何参数转换成正确轴线。
+
+五个前置概念：**齐次变换**描述刚体位姿；**叉乘矩阵**把向量叉乘变为线性运算；**螺旋轴**同时描述旋转与平移；**矩阵指数**把局部生成元变成有限运动；**非交换性**表示变换次序会改变结果。
+
+| 原有问题 | 作者的改动 | 为什么可能有效 | 证据 | 代价与局限 |
+|---|---|---|---|---|
+| 连杆运动描述依赖多层坐标选择 | 用轴的指数积表达串联运动 | 直接利用刚体运动的组合结构 | 原始题名归属与现代官方推导；原稿全文未核实 | 不处理接触、闭链约束和模型误差 |
+
+## 自测与参考答案
+
+**1．为什么所有轴都在零位记录，却能计算关节已经转动后的姿态？**
+
+因为前面的指数已把后续子链整体变换。若既更新后续轴到运动后位置，又仍套零位空间形式，就可能重复计入前级运动。固定轴与乘积顺序必须作为一个整体理解。
+
+**2．把 $M$ 放到最左边是否也可以？**
+
+可以构造本体形式，但必须把轴改为在末端零位坐标系表达的本体轴。仅把同一组空间轴公式中的 $M$ 移到前面通常错误，因为矩阵乘法不交换。
+
+**3．指数积得到平滑位姿，是否说明逆运动学没有奇异性？**
+
+不说明。正运动学光滑与其微分可逆是两件事。某些姿态下不同关节速度产生重合的末端运动方向，雅可比降秩；无论采用 D–H 还是指数积，这种真实能力损失都存在。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "011-brockett",
+            active: "robot-classic",
+            seriesLabel: "\u673a\u5668\u4eba\u7ecf\u5178\u57fa\u7840",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

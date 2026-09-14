@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>005｜递归Newton–Euler：沿机械臂来回走一遍，计算关节力矩 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人经典基础</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">递归Newton–Euler：沿机械臂来回走一遍，计算关节力矩</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 005｜递归Newton–Euler：沿机械臂来回走一遍，计算关节力矩
+
+[系列首页](README.md) · [上一篇](004-resolved-rate.md) · [下一篇](006-ransac.md)
+
+**原论文**：J. Y. S. Luh、M. W. Walker、R. P. C. Paul，*On-Line Computational Scheme for Mechanical Manipulators*，1980，Journal of Dynamic Systems, Measurement, and Control 102(2):69–76。[原出版记录](https://doi.org/10.1115/1.3149599)。
+
+**证据范围**：原题名、摘要和出版元数据已核对；全文图表与运算计数的详细条件尚未取得稳定解析。本文用现代空间向量解释递归原理，相关记号不等于1980年原文的逐式复刻。原摘要的硬件时间主张仅作为历史报告，不用于现代平台速度比较。
+
+## 原版勘误与复现版本
+
+原论文有正式勘误：*Erratum: On-Line Computational Scheme for Mechanical Manipulators*，Journal of Dynamic Systems, Measurement, and Control 102，1980 年 9 月，第 173 页。[出版原页镜像](https://scispace.com/pdf/erratum-on-line-computational-scheme-for-mechanical-1p9gytrwm3.pdf)。勘误原页已视觉核对：第 74 页第二栏漏掉 Step 6，应按式（45）计算关节作用量；Step 7 应在 i=1 时停止，否则取 i'=i−1 回到 Step 5；第 73 页式（38）还修正了相邻连杆为移动关节时的第三项。
+
+式（38）的细小上标在镜像中辨认有限，因此这里不手工转录该长式。实现原论文逐式算法时需同时采用正式勘误。下面的现代空间向量教学递推说明计算结构，不宣称逐字复刻存在勘误的初版步骤。
+
+## 一、一分钟理解
+
+规划器给出一条关节轨迹，电机却需要力矩指令。即使两个关节各自匀速，旋转连杆之间仍有惯性耦合，载荷和重力也会改变所需力矩。直接展开完整动力学表达式容易变得庞大，而且每个控制周期都要重新求值。
+
+论文利用机械臂的链式结构：先从基座向末端传播速度与加速度，再从末端向基座传播力与力矩。每根连杆只处理局部关系，就能得到整条链所需的驱动力矩。
+
+一句话：在刚体串联机械臂的逆动力学中，通过两次局部递推，把在线计算组织成随连杆数线性增长的流程，代价是仍需正确的惯性、载荷与外力模型。
+
+## 二、逆动力学究竟解什么
+
+机械臂动力学常写成：
+
+$$
+M(q)\ddot q+h(q,\dot q)=\tau+J(q)^\top f_{ext}.
+$$
+
+M是惯性矩阵，h包含重力、科里奥利和离心等项，$f_{ext}$是外部施加到机器人的力旋量。给定运动求$\tau$叫逆动力学；给定力矩求$\ddot q$叫前向动力学。两者不能因为都含M而混为一谈。
+
+| 要素 | 原理中的含义 |
+|---|---|
+| 输入 | q、dq、ddq，连杆惯性，重力和外部载荷 |
+| 输出 | 每个关节应施加的驱动力矩或驱动力 |
+| 机械前提 | 刚体连杆、已知关节关系和适当边界条件 |
+| 性能目标 | 降低每次逆动力学求值的算术与存储负担 |
+| 不是目标 | 自动辨识未知参数，或单凭前馈保证轨迹跟踪 |
+
+如果载荷未知，计算得到的是所设载荷模型下的力矩。算法再精确也不会自动知道夹爪刚拿起一个更重的箱子。实际控制通常将模型前馈与反馈结合，处理这种偏差。
+
+## 三、两次递推：运动向外，受力向内
+
+为了理解结构，使用六维空间速度v与空间加速度a。每根连杆的空间惯性I把加速度与力关联，X负责把父连杆上的量变换到当前连杆坐标，S描述关节允许运动的轴。
+
+前向递推的现代示意形式为：
+
+$$
+v_i=X_i v_{p(i)}+S_i\dot q_i,
+$$
+$$
+a_i=X_i a_{p(i)}+S_i\ddot q_i+v_i\times(S_i\dot q_i).
+$$
+
+最后一项表示转动坐标与速度组合产生的加速度项。不能在多个坐标系之间直接加数字；变换在这里是物理必要步骤。
+
+连杆所需空间力为$I_i a_i+v_i\times^*I_i v_i-f_i^{ext}$。然后累加子连杆传来的反作用，最后投影到关节允许的运动方向：$\tau_i=S_i^\top f_i$。空间力与空间速度的交叉运算不同，所以使用$\times^*$区分对偶运算。
+
+```text
+输入：运动q、dq、ddq，机构树，空间惯性和外力
+设置基座速度与加速度；按约定加入重力
+从根向叶遍历：
+    计算父到子的运动变换X和关节轴S
+    递推当前连杆速度v、加速度a
+    计算惯性力与速度相关力，减去已知外力
+从叶向根遍历：
+    把子连杆力变换并累加到当前连杆
+    tau_i = S_i转置 * f_i
+输出所有关节驱动力tau
+```
+
+这段教学伪代码表达RNEA家族的结构，不把现代树状扩展或空间向量库接口归给原文。原论文主要讨论机械臂在线计算；处理闭环约束需要额外约束力求解。
+
+## 四、为什么不必显式形成完整惯性矩阵
+
+逆动力学只需要给定一次运动时的力矩，并不总需要把M的每个元素存下来。递推直接计算这次运动造成的受力，避免先展开所有关节对之间的完整符号表达。
+
+每根连杆只执行固定规模的局部计算，遍历次数固定，因此对于相应链结构，运算量随连杆数线性增长。这个复杂度描述不意味着所有基于Lagrange方程的方法都天然低效：同一个动力学也可以通过不同算法有效计算。应比较具体算法与实现，而不是把物理定律当作性能标签。
+
+## 五、原文证据与现代检验
+
+| 证据或检验 | 说明的问题 | 结论边界 |
+|---|---|---|
+| 原摘要的向外运动、向内受力说明 | 递推组织方式 | 不等于省略惯性耦合 |
+| 原摘要的连杆数增长讨论 | 在线计算扩展性 | 现代语言与硬件速度需重新测量 |
+| 原摘要报告Stanford机械臂实现 | 方法具有历史实时应用依据 | 具体计时条件未完整复核，不作新排名 |
+| 静态与单连杆解析检验 | 实现符号、重力、惯性是否正确 | 只是自构代码测试，不是原实验 |
+
+理论上精确是相对于刚体模型而言。摩擦、弹性、执行器滞后和参数误差会使真实系统偏离模型。原文摘要中历史计算机的毫秒数，不应脱离浮点实现、机构自由度和测量方式直接比较今天的控制库。
+
+适当的现代复现实验可以对同一组q、dq、ddq，比较递推结果与由能量法构造的独立实现；再改变连杆数观察耗时趋势。两个实现都使用同一错误惯性参数时，彼此一致也不说明真实模型正确，因此还需要真实力矩或运动测量。
+
+## 六、教学例子：一根静止水平杆
+
+一根长度L、质量m的均匀杆，在重力下水平静止。关节速度和加速度为零，但维持姿态所需重力力矩幅值仍为$mgL/2$。若程序输出零，通常是重力没有进入基座加速度或外力计算。
+
+如果杆末端再挂一个质量M的物体，附加力矩幅值为$MgL$。这部分受力沿链条向基座传递，多连杆情况下每个上游关节都会受到影响。不能只给最后一个关节增加负载补偿。
+
+再让杆旋转，加速度项与速度相关项会出现。速度为零并不代表加速度为零，某个轨迹转折点可能瞬时停止，却仍需要较大加速力矩。这是区分姿态、速度与加速度输入的一个简单测试。
+
+## 七、局限与前置概念
+
+实际需要注意外力符号：传感器读到的“工具作用于环境的力”与方程中“环境作用于工具的力”方向相反。惯性参数也必须在正确坐标系表达，质心惯量与连杆原点惯量不能混用。
+
+另一边界是执行器能力。算出力矩只是需求分析；若超出电机限值，实际运动无法遵从规划加速度。规划、时间参数化和控制器必须据此协调，而不是把超限数值直接裁剪后仍声称跟踪原轨迹。
+
+五个前置概念：逆动力学由运动求力；空间向量组合转动和平移；惯性描述加速度代价；力的对偶变换维护功率一致；递推利用机构拓扑避免重复计算。
+
+| 原有问题 | 改动 | 为什么有效 | 证据 | 代价与局限 |
+|---|---|---|---|---|
+| 在线动力学展开昂贵 | 两遍局部递推 | 复用链式依赖 | 算法结构与历史实现主张 | 参数、外力、摩擦与执行器能力仍需处理 |
+
+## 八、自测与参考答案
+
+**问题1：为什么先算运动，再从末端回传力？**
+
+参考答案：子连杆运动依赖上游运动，所以向外计算；上游需要承受所有下游连杆的惯性和外部负载，所以受力向内累加。两个方向分别对应两类依赖。
+
+**问题2：静止时所有关节力矩是否都应为零？**
+
+参考答案：不应。零速度与零加速度没有消除重力或外部载荷。只有在相应力矩恰好为零、或由其他支撑承担时，某个关节才可能无需驱动力。
+
+**问题3：RNEA快，是否意味着可以直接用它计算任意接触系统的加速度？**
+
+参考答案：不能。它主要解决给定运动的逆动力学；接触系统还要确定未知约束力和满足接触条件的加速度。前向动力学及约束求解是额外问题。
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "005-newton-euler",
+            active: "robot-classic",
+            seriesLabel: "\u673a\u5668\u4eba\u7ecf\u5178\u57fa\u7840",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

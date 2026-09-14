@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>008｜ProMP：把动作技能表示为轨迹分布 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">ProMP：把动作技能表示为轨迹分布</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 008｜ProMP：把动作技能表示为轨迹分布
+
+[系列首页](README.md) · [上一篇](007-pilco.md) · [下一篇](009-gps.md)
+
+**原论文**：*Probabilistic Movement Primitives*，Paraschos、Daniel、Peters、Neumann，NIPS 2013。[原文](https://proceedings.neurips.cc/paper/2013/hash/e53a0a2978c28872a4505bdb51db06dc-Abstract.html)。
+
+## 一、为什么一条平均轨迹不够
+
+两次伸手动作看起来略有不同，却都准确抓住杯子：肩膀往左一点，手肘就可以往右补偿。若只保留每个关节的平均曲线，就会丢掉这种协调；若分别对每个关节加独立噪声，原本互相抵消的变化又可能让手偏离杯口。
+
+ProMP 将技能表示为轨迹分布，尤其保留跨时间和跨关节的相关性。条件化可以调整目标或中间点，概率分布的乘积可以表达多个要求的共同满足。[原文 §2、表 1](https://proceedings.neurips.cc/paper/2013/file/e53a0a2978c28872a4505bdb51db06dc-Paper.pdf)
+
+一句话：用基函数权重的概率分布表示示范中的变化，便于调整和组合运动；代价是需要足够示范估计协方差，且单高斯结构不能自动表达所有复杂多峰技能。
+
+## 二、从轨迹回归到权重分布
+
+对某个时间点，用基函数写运动：
+
+$$
+y_t=\Phi_t^\top w+\epsilon_y,\qquad
+w\sim\mathcal N(\mu_w,\Sigma_w).
+$$
+
+$w$ 控制整条运动，$\Phi_t$ 选择当前相位对应的形状组合。将位置与速度堆叠、把多个自由度的权重连接起来，可以在一个分布里表达整机协调。
+
+由线性高斯关系：
+
+$$
+p(y_t)=\mathcal N
+(\Phi_t^\top\mu_w,\,
+\Phi_t^\top\Sigma_w\Phi_t+\Sigma_y).
+$$
+
+均值给出典型运动，协方差描述哪些变化一起发生。它不是简单给每个时刻放一个互不相关的高斯，因为不同时间共享同一个 $w$。
+
+| 要素 | ProMP 的角色 |
+|---|---|
+| 数据 | 多条运动示范及其阶段对齐 |
+| 学习目标 | 拟合轨迹／权重分布 |
+| 输出 | 可采样、条件化与组合的运动模型 |
+| 奖励 | 基础模仿过程不需要环境奖励 |
+| 控制 | 根据目标分布推导或实现反馈跟踪 |
+| 任务参数 | 中间点、终点、速度等条件 |
+
+多个示范里的方差也不一定全部代表“允许偏差”。它可能混有测量误差、不同目标和操作员习惯。建模前必须判断哪些变化属于同一种技能，哪些应作为条件或不同模式分开。
+
+## 三、如何用一个新目标调整整条运动
+
+假设要求某个阶段满足观测 $y^*$，其允许误差协方差为 $R$，对应矩阵为 $H$。条件化后的权重均值为：
+
+$$
+\mu'_w=\mu_w+
+\Sigma_wH^\top(H\Sigma_wH^\top+R)^{-1}
+(y^*-H\mu_w).
+$$
+
+协方差相应收缩。这个形式与高斯条件概率相同：目标误差通过先验相关性传播到整条轨迹，而不是只把最后一个点硬改过去。
+
+若 $R$ 很小，模型更强地满足目标；若较大，则只温和偏向目标。过分自信的条件可能迫使轨迹离开真实可行区域，因此小 $R$ 并不天然更好。
+
+### 乘积不是“把两个技能任选一个”
+
+两个高斯的乘积会偏向两者共同有概率的区域，精度矩阵相加：
+
+$$
+\Sigma^{-1}=\Sigma_1^{-1}+\Sigma_2^{-1}.
+$$
+
+混合分布则表示“选择技能 1 或技能 2”。前者类似同时满足两个软约束，后者类似保留两个行为选项。将两者混淆，会错误解释技能组合的结果。
+
+## 四、一个协调的手算例子
+
+教学构造：两关节位置 $q_1,q_2$ 都有方差 1，协方差为 −0.9，而手端关键方向近似为 $x=q_1+q_2$。则：
+
+$$
+\operatorname{Var}(x)=1+1+2(-0.9)=0.2.
+$$
+
+各关节变化很大，末端却很稳定。若把相关性丢掉，方差变成 2，增加了一个数量级。这说明协方差不是只用来画漂亮阴影，而是控制任务中真实的协调信息。
+
+再假设原权重分布很窄，新目标却离所有示范很远。高斯条件公式仍会给出答案，但可能需要极端参数。这是数学可计算与物理可执行的区别，不能因为矩阵可逆就认为新轨迹合理。
+
+## 五、教学伪代码
+
+~~~text
+输入：相同技能的多条示范、相位定义、基函数
+对每条示范：
+    对齐相位与时间尺度
+    回归整条轨迹的权重 w_i
+估计权重均值 mu_w 与协方差 Sigma_w
+构成轨迹分布 p(y_t)
+
+指定新任务时：
+    将目标／中间点写成线性观测或合适近似
+    对权重分布做条件化
+    若多个运动要求同时激活，按概率乘积组合
+    由新分布生成参考轨迹或反馈控制
+输出：调整后的运动分布及执行轨迹
+~~~
+
+采样时应先采一个权重向量，再生成完整轨迹；每时刻独立采样边缘分布会破坏时间相关性。使用概率反馈控制时还需要相应模型和执行条件，不能把离线分布拟合直接等同于闭环稳定证明。
+
+## 六、原文实验提供了哪些证据
+
+| 位置 | 任务与设置 | 支持的结论 | 不能证明 |
+|---|---|---|---|
+| 表 1、§2 | 概率操作与技能性质对应 | 条件化、乘积、相位等操作有明确含义 | 所有概率组合都物理可行 |
+| 图 2 | 七连杆到达与中间点 | 关节变化可协调保持任务点准确 | 任意碰撞场景自动满足约束 |
+| 图 3 | 真实机器人击冰球 | 方向／距离变化可建模和条件化 | 未见物体与摩擦的普遍泛化 |
+| 图 4 | 真实机器人沙锤节律 | 调速与连续混合可产生相应运动 | 所有速度下满足执行器约束 |
+
+真实实验使用七自由度 KUKA 机械臂。冰球两组示范各有 10 条，分别改变射程与角度；七连杆中间点示例使用 0.25 秒与 0.75 秒的要求。这些数字描述实验设置，不是 10 条示范即可完成所有机器人任务的样本复杂度保证。
+
+图 3 特别适合比较“合并数据训练”与“相乘两个模型”：前者保留更广变化，后者聚焦共同区域。图 4 说明相位与分布控制可以实现节律调整，但不能从单组轨迹阴影推出跨机器人置信区间。
+
+## 七、相对于 DMP，真正新增了什么
+
+DMP 强调动态结构与目标吸引性，ProMP 强调分布、相关性和概率操作。它们都使用紧凑运动表示和相位思想，但并非简单地把 DMP 参数加个高斯就继承所有性质。
+
+ProMP 的改进使“哪个阶段必须精确、哪个阶段允许变化”成为分布的一部分。若任务点附近方差小，中间运动方差大，控制就可以利用这种结构，而不是在全程维持同样刚性。然而把示范方差直接解释成最优反馈强度，也需要相应控制推导与环境假设。
+
+当左右绕行形成两个分离模式时，单高斯可能平均出中间穿过障碍的轨迹。可以考虑条件模型或混合分布，但那是进一步扩展，不应在原文基础方法中默认已经解决。
+
+五个前置概念是基函数、协方差、高斯条件分布、概率乘积与相位。基函数压缩轨迹，协方差表达协调，条件化注入要求，乘积寻找共同支持，相位组织时间伸缩。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| 单轨迹不能表达示范变化与关节耦合 | 权重分布与概率操作 | 保留相关性并传播新条件 | 图 2–4 | 协方差估计、单高斯限制与执行控制条件 |
+
+阅读范围为主文表示、条件化／组合和三类实验；补充材料中的全部实现与预算没有逐项复算，未独立复现。
+
+## 八、自测题与参考答案
+
+**问题 1：每个关节的方差都大，末端位置是否必然不准确？**
+
+参考答案：不必然。不同关节变化可以负相关并互相补偿，末端误差取决于联合协方差及运动学映射。只看各关节独立误差会遗漏协调结构。
+
+**问题 2：两个技能分布的乘积与混合有什么区别？**
+
+参考答案：乘积偏向两个技能共同认可的区域，适合表达共同约束；混合保留“这个或那个”的选择。两个完全不兼容的技能相乘可能得到不合理的折中，不能把它当作万能组合。
+
+**问题 3：为什么不能每个时刻独立采样轨迹位置？**
+
+参考答案：ProMP 的时间相关性来自共享权重。独立采样边缘分布虽然每一时刻统计看似正确，整条轨迹可能抖动并违反速度关系。应采样权重后生成整段运动，或使用一致的反馈生成过程。
+
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "008-promp",
+            active: "robot-learn",
+            seriesLabel: "\u673a\u5668\u4eba\u5b66\u4e60",
+            root: '../'
+        });
+    </script>
+</body>
+</html>

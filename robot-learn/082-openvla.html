@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>082｜OpenVLA：开源视觉语言动作模型 | MyLog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">机器人学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">OpenVLA：开源视觉语言动作模型</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" class="hidden" readonly># 082｜OpenVLA：开源视觉语言动作模型
+
+[系列首页](README.md) · [上一篇](081-robocasa.md) · [下一篇](083-diffusion-rl.md)
+
+**原论文**：*OpenVLA: An Open-Source Vision-Language-Action Model*，Moo Jin Kim、Karl Pertsch 等，2024。[论文](https://arxiv.org/abs/2406.09246)。
+
+## 一、一分钟理解：让视觉语言模型直接输出动作
+
+OpenVLA 将已经具备视觉语言知识的模型继续训练成机器人策略：看一张图、读一条指令，然后输出末端位移、旋转和夹爪动作。它沿用 RT-2 的动作 token 思路，重点解决开放使用、机器人数据训练和低成本适配问题。
+
+它不是先写一段计划再调用技能库，也不是通过奖励自主发现动作。主体训练是大规模示范上的监督学习。动作成功依赖视觉语义知识、机器人示范和执行接口共同作用。
+
+实验支持它在多个物体和多指令任务中有较强适应能力；窄任务的精细控制并非总优于 Diffusion Policy。它的重要性在于提供可研究、可微调的 VLA 起点，而非已经实现高可靠通用操作。
+
+一句话：在需要语言接地与少量目标示范适配的操作场景，通过将预训练视觉语言模型转为动作预测器，改善多任务控制与泛化，代价是上游训练昂贵、单步自回归推理慢和精细动作能力有限。
+
+## 二、背景与设定
+
+这是离线模仿学习。输入是单张第三人称图像和语言指令；原始版本没有观测历史、本体状态或多相机输入。输出主要采用 7 维单臂末端控制动作。不要把后续 OpenVLA-OFT 等扩展能力倒写进这篇原论文。
+
+预训练语料提供物体和语言知识，机器人数据提供观察到动作的映射。看懂“红杯子”不等于知道夹爪应旋转多少；反过来，只会把杯子抓起来也不一定能从多个物体中选择指令指定的那个。
+
+任务奖励不是训练优化对象。实验用人工定义的成功或部分成功评分，不同任务评分规则并不完全一致。终止依赖具体任务的成功、失败和评价流程，不能把动作 token 结束标志当成机器人任务结束。
+
+**阅读范围**：依据 [2024 年 v1 正文及附录](https://arxiv.org/html/2406.09246v1)，核查架构、训练数据、微调、量化和逐任务评分。本文未独立复现，未逐项确认所有训练运行的随机种子。
+
+## 三、方法：动作怎样进入语言模型
+
+### 1. 融合视觉特征，再接入语言主干
+
+模型基于 Prismatic：DINOv2 和 SigLIP 分别编码图像，将相应 patch 特征按通道拼接，由投影器映射到 Llama 2 的嵌入空间。
+
+作者把 DINOv2 与空间信息、SigLIP 与语义信息联系起来，这是有背景依据的设计解释。最终系统同时改变数据和模型，不能把全部性能差异归功于其中一个编码器。
+
+### 2. 每个动作维度变成离散 token
+
+对一个连续动作维度，取训练分布的第 1 与第 99 百分位作为离散范围，划分为 256 个区间。这减少极端离群值拉大区间造成的精度损失，但也意味着范围外动作需要截断或边界处理。
+
+教学上，设分位点为 $l,u$：
+
+$$
+b(a)=\operatorname{clip}
+\left(\left\lfloor256\frac{a-l}{u-l}\right\rfloor,0,255\right).
+$$
+
+反解可取区间中心。这个表达解释离散化，不替代具体实现的边界约定。256 个动作符号被映射到词表中保留给动作使用的位置，不能理解成给模型自然语言输出“0.012 米”就完成了控制。
+
+### 3. 自回归目标与物理误差不同
+
+训练损失只计算动作 token：
+
+$$
+\mathcal L=-\sum_{j=1}^{d}\log p_\theta
+(b_j\mid I,\ell,b_{<j}).
+$$
+
+$I$ 是图像，$\ell$ 是指令，$d$ 为动作维度。模型先预测某个动作分量，再条件于已有分量预测下一个。这里的序列首先是同一动作向量的编码，不是未来很多时间步的动作块。
+
+交叉熵并不直接表示物理距离。相邻 bin 和相距很远的 bin 都是分类错误；机器人闭环还会放大或修正误差。因此高 token 准确率是训练诊断量，不是成功率的替代品。
+
+### 4. 机器人微调与 LoRA
+
+完整微调更新模型参数，包括视觉编码器。低秩适配则把某个权重变化写成：
+
+$$
+W'=W+BA,\qquad \operatorname{rank}(BA)\le r.
+$$
+
+冻结大矩阵 $W$，训练小矩阵 $A,B$，减少优化器状态和梯度存储；前向激活及基础权重仍需要显存。只训练 1.4% 参数不等于只需 1.4% 总显存。
+
+~~~text
+准备经过清洗、动作语义一致的机器人轨迹
+以分位数定义每维动作的离散区间
+对每条训练样本：
+    编码单张图像与语言指令
+    将专家动作映射成 token 序列
+    用动作 token 交叉熵更新模型
+新任务：使用目标示范全量微调或训练低秩适配器
+部署：
+    获取当前图像和任务
+    自回归预测动作分量 token
+    反离散化并按目标机器人统计还原尺度
+    执行动作，获取下一张图像
+~~~
+
+## 四、实验设计与预算
+
+| 项目 | 论文设置 | 检验问题 |
+|---|---|---|
+| 机器人预训练 | 约 970k Open X 轨迹；训练混合后期调整 | 大规模动作经验 |
+| 主训练预算 | 64 A100、14 天、约 21500 A100 小时，batch 2048 | 上游计算成本 |
+| 开箱评价 | WidowX 17 任务各 10 次；Google 12 任务各 5 次 | 多种分布变化 |
+| 新任务适配 | Franka 两个设置，7 任务，每任务 10–150 示范 | 下游数据效率 |
+| 全量微调 | 8 A100，每任务约 5–15 小时 | 获得新策略的训练成本 |
+| 对照 | RT-X、Octo、完整及接口匹配的 Diffusion Policy | 系统表现与接口影响 |
+| 参数效率 | 33 次评价的选定任务子集 | LoRA 与冻结策略 |
+| 量化 | 8 个 Bridge 任务，80 次评价 | 显存、速度和闭环表现 |
+
+数据混合不是始终固定：DROID 在训练中以较保守权重加入，最终三分之一训练移除。论文的 970k 是整体训练资源描述，不应推成每个阶段始终均匀采样同一集合。
+
+参数效率与量化实验还有关键限定：§5.3–5.4 使用较小数据混合、仅 SigLIP 的简化版本。它们不是最终双视觉编码器主模型在所有任务上的逐项复验。
+
+OpenVLA 的开放性也有范围：提供机器人训练部分的代码、数据配方与权重，但基础视觉和语言组件的完整上游训练数据并未全部开放。
+
+## 五、五组证据与解释
+
+**图 3、表 4：WidowX。** OpenVLA 平均 70.6%，RT-2-X 50.6%，差约 20 个百分点。然而部分任务允许 0.5 分，这不是全部由二元完整成功构成的频率。语义泛化类别中 RT-2-X 仍占优，不能说 OpenVLA 每种泛化都更好。
+
+**图 4、表 5：Google。** 85.0% 对 78.3%，误差区间较宽，论文按接近表现解读。主张的跨平台平均优势不能代替单个平台的统计强度。29 任务也不是 29 个全新机器人。
+
+**图 5、表 6：下游适配。** OpenVLA 聚合较强，但倒物体等窄任务中 Diffusion Policy 可以更好。擦桌任务允许把一部分物体扫入簸箕获得部分分数，因此分数百分比不能直接说成完成整个清扫任务的比例。
+
+**表 1：低秩微调。** 全量约 69.7%，rank 32 LoRA 约 68.2%，在此小评价集上相近；batch 16 的 LoRA 显存仍约 59.7 GB。降低参数训练量有价值，但“消费显卡可适配”依赖 batch 等配置，不能拿该表直接声称 24 GB 就能以相同设置训练。
+
+**表 2：量化。** bfloat16 约 71.3%，int8 58.1%，int4 71.9%。8 位并非因精度更低就必然比 4 位差；作者观察到 int8 在评价 GPU 上推理只有约 1.2 Hz，改变了非阻塞控制时序，而 int4 约 3 Hz。离线 token 准确率接近，支持延迟解释，但若要严格分离，仍应做固定控制频率的对照。
+
+附录 C 说明 Bridge 数据的首步全零动作导致冻结问题，OpenVLA 清洗该数据；RT-2-X 无法重训，评价时采用第二可能动作的查询办法。这是透明且重要的系统差异，不能把对比结果解释为纯架构的因果优势。
+
+## 六、贡献、成本与局限
+
+主要贡献是开放 VLA 及其训练适配实践：让视觉语言预训练和机器人动作数据真正形成可用的控制模型。低秩适配和量化本身来自已有机器学习方法，新价值在机器人闭环中的验证。
+
+上游数据、训练时间与基础模型知识都是成本。下游少量示范学习不是从零具备能力；与从零训练方法比较时必须保留这一背景。
+
+作者承认单图像接口、吞吐和可靠性不足。我的分析是，这三个限制互相影响：缺历史会加剧遮挡和速度推断困难；慢推理会改变动作持续时间；单步预测缺少时间结构。改善最终控制未必需要扩大语言模型，可能更需要动作分块、时序设计或感知接口。
+
+## 七、教学例子与五个前置概念
+
+**自构例子，未运行**：同一个权重模型以 5 Hz 与 1 Hz 控制推杯子。即使每次预测的位移都正确，后者可能长时间持有旧目标，错过纠偏机会。再加入“统一 1 Hz”“同样动作但插值执行”两组，记录成功、超调与接触冲击，可区分模型误差和控制时序误差。
+
+五个前置概念：**VLM**用图像条件生成语言表示；**动作离散化**把连续量编码为有限符号；**自回归**逐个预测条件符号；**LoRA**限制可训练权重变化的秩；**非阻塞控制**让机器人在模型计算时继续执行，因此延迟直接影响闭环。
+
+| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
+|---|---|---|---|---|
+| VLA 难获取、难适配 | 开放模型、丰富示范训练及低秩微调 | 复用语义与控制经验 | 多平台、下游与效率实验 | 大量上游成本；单图像、慢推理与部分评分 |
+
+## 八、三个问题及答案
+
+**问题1：为什么动作 token 准确率高仍可能操作失败？**
+
+答案：离散分类没有直接表达物理误差大小，而且动作会改变下一步观测。小误差累积、错误动作持续时间或接触状态变化，都可能让离线正确率无法代表闭环成功。
+
+**问题2：为什么不能据此宣布扩散策略被 VLA 全面取代？**
+
+答案：窄任务中扩散可以更好，完整扩散策略还使用不同历史、本体信息和动作块。实验显示 VLA 对多物体、多指令任务有优势，不等于所有接触精度和时序需求都更优。
+
+**问题3：8 位不如 4 位，应该先怀疑什么？**
+
+答案：先核实硬件实现和控制频率。量化可能减少显存却增加算子开销，推理变慢会改变机器人行为。固定频率重新比较，才能更清楚判断数值精度与延迟分别贡献多少。
+
+</textarea>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script src="../js/series-article.js"></script>
+    <script>
+        SeriesArticle.boot({
+            posts: SERIES_POSTS,
+            slugMap: SERIES_SLUG_MAP,
+            slug: "082-openvla",
+            active: "robot-learn",
+            seriesLabel: "\u673a\u5668\u4eba\u5b66\u4e60",
+            root: '../'
+        });
+    </script>
+</body>
+</html>
