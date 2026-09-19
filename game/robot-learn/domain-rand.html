@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>域随机化 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人学习</a> / 域随机化</p>
+        <h1 class="text-3xl font-bold mb-3">域随机化</h1>
+        <p class="text-gray-600 mb-4">质点受推力和侧风，质量会变。专家知道当前质量和风力，学习者只看见位置和速度。红线只在无风、质量=1 上克隆，测试时换环境和风就会冲飞；绿线在训练时随机质量和风，测试同一环境还能靠近目标。</p>
+        <div class="demo-toolbar">
+            <button id="fit" class="bg-primary text-white">训练两种策略</button>
+            <button id="test" class="border">在新环境测试</button>
+            <span id="status" class="text-sm text-gray-500">先训练，再测试</span>
+        </div>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <p class="text-sm mt-4"><a class="text-primary" href="../../robot-learn/018-domain-randomization.html">对照精读：Domain Randomization</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'robot-learn' });
+        const W = 900, H = 520, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        const start = { x: 120, y: 360, vx: 0, vy: 0 };
+        const goal = { x: 740, y: 140 };
+        const dt = 0.05;
+        let wBC = null, wDR = null, bcPath = [], drPath = [], test = { mass: 2.1, wind: 70 };
+        function feats(s) {
+            return [1, (goal.x - s.x) / 400, (goal.y - s.y) / 280, s.vx / 90, s.vy / 90];
+        }
+        function expertU(s, mass, wind) {
+            const ax = 7.5 * (goal.x - s.x) / 80 - 3.4 * s.vx;
+            const ay = 7.5 * (goal.y - s.y) / 80 - 3.4 * s.vy;
+            return [mass * ax - wind, mass * ay];
+        }
+        function step(s, u, mass, wind) {
+            const ax = (u[0] + wind) / mass - 0.45 * s.vx;
+            const ay = u[1] / mass - 0.45 * s.vy;
+            return {
+                x: DemoKit.clamp(s.x + s.vx * dt, 20, W - 20),
+                y: DemoKit.clamp(s.y + s.vy * dt, 20, H - 20),
+                vx: DemoKit.clamp(s.vx + ax * dt, -140, 140),
+                vy: DemoKit.clamp(s.vy + ay * dt, -140, 140)
+            };
+        }
+        function solve(data, dim) {
+            const n = 5;
+            const A = [];
+            for (let i = 0; i < n; i += 1) {
+                A[i] = [];
+                for (let j = 0; j < n; j += 1) A[i][j] = (i === j ? 1e-3 : 0);
+                A[i][n] = 0;
+            }
+            data.forEach((d) => {
+                for (let i = 0; i < n; i += 1) {
+                    A[i][n] += d.f[i] * d.u[dim];
+                    for (let j = 0; j < n; j += 1) A[i][j] += d.f[i] * d.f[j];
+                }
+            });
+            for (let i = 0; i < n; i += 1) {
+                let max = i;
+                for (let r = i + 1; r < n; r += 1) if (Math.abs(A[r][i]) > Math.abs(A[max][i])) max = r;
+                const tmp = A[i]; A[i] = A[max]; A[max] = tmp;
+                const piv = A[i][i] || 1e-9;
+                for (let j = i; j <= n; j += 1) A[i][j] /= piv;
+                for (let r = 0; r < n; r += 1) if (r !== i) {
+                    const f = A[r][i];
+                    for (let j = i; j <= n; j += 1) A[r][j] -= f * A[i][j];
+                }
+            }
+            return A.map((row) => row[n]);
+        }
+        function policy(w, s) {
+            const f = feats(s);
+            const ux = w.x.reduce((sum, v, i) => sum + v * f[i], 0);
+            const uy = w.y.reduce((sum, v, i) => sum + v * f[i], 0);
+            return [DemoKit.clamp(ux, -220, 220), DemoKit.clamp(uy, -220, 220)];
+        }
+        function collect(randomize) {
+            const data = [];
+            for (let ep = 0; ep < 40; ep += 1) {
+                const mass = randomize ? 0.7 + Math.random() * 1.6 : 1;
+                const wind = randomize ? (Math.random() - 0.5) * 120 : 0;
+                let s = { x: start.x, y: start.y, vx: 0, vy: 0 };
+                for (let t = 0; t < 70; t += 1) {
+                    const u = expertU(s, mass, wind);
+                    data.push({ f: feats(s), u: u });
+                    s = step(s, u, mass, wind);
+                }
+            }
+            return { x: solve(data, 0), y: solve(data, 1) };
+        }
+        function rollout(w, mass, wind) {
+            const path = [];
+            let s = { x: start.x, y: start.y, vx: 0, vy: 0 };
+            for (let t = 0; t < 90; t += 1) {
+                path.push({ x: s.x, y: s.y });
+                s = step(s, policy(w, s), mass, wind);
+            }
+            path.push({ x: s.x, y: s.y });
+            return path;
+        }
+        function dist(path) {
+            const p = path[path.length - 1];
+            return Math.hypot(p.x - goal.x, p.y - goal.y);
+        }
+        function draw() {
+            DemoKit.drawPanel(ctx, W, H);
+            ctx.fillStyle = '#1e293b';
+            DemoKit.roundRect(ctx, goal.x - 16, goal.y - 16, 32, 32, 6);
+            ctx.fill();
+            ctx.strokeStyle = '#4ade80';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(goal.x - 16, goal.y - 16, 32, 32);
+            ctx.strokeStyle = 'rgba(248,113,113,0.9)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            bcPath.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+            ctx.stroke();
+            ctx.strokeStyle = '#4ade80';
+            ctx.beginPath();
+            drPath.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+            ctx.stroke();
+            ctx.fillStyle = '#38bdf8';
+            ctx.beginPath(); ctx.arc(start.x, start.y, 7, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = '#7dd3fc';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(40, 80);
+            ctx.lineTo(40 + test.wind * 0.7, 80);
+            ctx.stroke();
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '13px ui-sans-serif';
+            ctx.fillText('红：单环境克隆    绿：域随机化    风 →  质量 ' + test.mass.toFixed(2), 24, 28);
+        }
+        document.getElementById('fit').onclick = () => {
+            wBC = collect(false);
+            wDR = collect(true);
+            bcPath = [];
+            drPath = [];
+            draw();
+            document.getElementById('status').textContent = '两种线性策略已拟合，点测试看新风和新质量';
+        };
+        document.getElementById('test').onclick = () => {
+            if (!wBC || !wDR) {
+                document.getElementById('fit').click();
+            }
+            test = { mass: 1.8 + Math.random() * 0.6, wind: 50 + Math.random() * 40 };
+            bcPath = rollout(wBC, test.mass, test.wind);
+            drPath = rollout(wDR, test.mass, test.wind);
+            draw();
+            document.getElementById('status').textContent = '测试质量 ' + test.mass.toFixed(2) + '、风力 ' + test.wind.toFixed(0) + ' · 红终点距 ' + dist(bcPath).toFixed(0) + ' · 绿终点距 ' + dist(drPath).toFixed(0);
+        };
+        draw();
+    </script>
+</body>
+</html>

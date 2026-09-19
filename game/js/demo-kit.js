@@ -10,21 +10,14 @@
         return { ctx: ctx, width: cssWidth, height: cssHeight, dpr: dpr };
     }
 
-    function pointer(canvas, event, width) {
-        const rect = canvas.getBoundingClientRect();
-        const src = event.touches ? event.touches[0] : event;
-        return {
-            x: (src.clientX - rect.left) * (width / rect.width),
-            y: (src.clientY - rect.top) * ((canvas.height / (window.devicePixelRatio || 1)) / rect.height)
-        };
-    }
-
     function pointerFromEvent(canvas, event, view) {
         const rect = canvas.getBoundingClientRect();
-        const src = event.touches ? event.touches[0] : event;
+        const src = (event.touches && event.touches[0]) || (event.changedTouches && event.changedTouches[0]) || event;
+        const width = view && view.width ? view.width : rect.width;
+        const height = view && view.height ? view.height : rect.height;
         return {
-            x: (src.clientX - rect.left) * (view.width / rect.width),
-            y: (src.clientY - rect.top) * (view.height / rect.height)
+            x: (src.clientX - rect.left) * (width / (rect.width || 1)),
+            y: (src.clientY - rect.top) * (height / (rect.height || 1))
         };
     }
 
@@ -80,6 +73,18 @@
         ctx.strokeRect(0.5, 0.5, width - 1, height - 1);
     }
 
+    function strokeLabel(ctx, text, x, y) {
+        ctx.save();
+        ctx.lineJoin = 'round';
+        ctx.miterLimit = 2;
+        ctx.lineWidth = 3.6;
+        ctx.strokeStyle = 'rgba(7,11,20,0.72)';
+        ctx.fillStyle = '#f8fafc';
+        ctx.strokeText(text, x, y);
+        ctx.fillText(text, x, y);
+        ctx.restore();
+    }
+
     function segmentHitsCircle(ax, ay, bx, by, cx, cy, r) {
         const abx = bx - ax;
         const aby = by - ay;
@@ -107,6 +112,96 @@
         });
     }
 
+    function escapeHtml(text) {
+        return String(text).replace(/[&<>"']/g, (ch) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[ch]));
+    }
+
+    function catalog() {
+        return ((global.SITE && global.SITE.demos) || []).filter((item) => item.cat && item.file);
+    }
+
+    function relativeDemoHref(item, fromCat) {
+        if (item.cat === fromCat) return item.file + '.html';
+        return '../' + item.cat + '/' + item.file + '.html';
+    }
+
+    function mountNav() {
+        const path = String(location.pathname || '').replace(/\\/g, '/');
+        const match = path.match(/\/game\/(rl|llm|robot-classic|robot-learn)\/([^/]+)\.html$/);
+        if (!match || match[2] === 'index') return;
+        if (document.getElementById('demo-jump')) return;
+        const cat = match[1];
+        const file = match[2];
+        const items = catalog();
+        if (!items.length) return;
+        const main = document.querySelector('main');
+        if (!main) return;
+
+        const groups = [];
+        items.forEach((item) => {
+            let group = groups.find((entry) => entry.cat === item.cat);
+            if (!group) {
+                group = { cat: item.cat, label: item.group || item.catLabel || item.cat, items: [] };
+                groups.push(group);
+            }
+            group.items.push(item);
+        });
+
+        const selectHtml = groups.map((group) => (
+            '<optgroup label="' + escapeHtml(group.label) + '">' +
+            group.items.map((item) => {
+                const selected = item.cat === cat && item.file === file ? ' selected' : '';
+                return '<option value="' + escapeHtml(relativeDemoHref(item, cat)) + '"' + selected + '>' + escapeHtml(item.title) + '</option>';
+            }).join('') +
+            '</optgroup>'
+        )).join('');
+
+        const same = items.filter((item) => item.cat === cat);
+        const chips = same.map((item) => {
+            const on = item.file === file ? ' is-on' : '';
+            return '<a class="demo-chip' + on + '" href="' + escapeHtml(item.file + '.html') + '">' + escapeHtml(item.title) + '</a>';
+        }).join('');
+
+        const bar = document.createElement('nav');
+        bar.id = 'demo-jump';
+        bar.className = 'demo-jump';
+        bar.setAttribute('aria-label', '切换演示');
+        bar.innerHTML =
+            '<label class="demo-jump-select">切换演示 <select>' + selectHtml + '</select></label>' +
+            '<div class="demo-jump-chips">' + chips + '</div>';
+        const intro = main.querySelector('h1') && main.querySelector('h1').nextElementSibling;
+        if (intro) intro.insertAdjacentElement('afterend', bar);
+        else main.insertBefore(bar, main.firstChild);
+        bar.querySelector('select').addEventListener('change', (event) => {
+            if (event.target.value) location.href = event.target.value;
+        });
+
+        const rail = document.createElement('aside');
+        rail.id = 'demo-rail';
+        rail.className = 'demo-rail';
+        rail.innerHTML = groups.map((group) => (
+            '<p class="demo-rail-h">' + escapeHtml(group.label) + '</p>' +
+            group.items.map((item) => {
+                const on = item.cat === cat && item.file === file ? ' is-on' : '';
+                return '<a class="' + on + '" href="' + escapeHtml(relativeDemoHref(item, cat)) + '">' + escapeHtml(item.title) + '</a>';
+            }).join('')
+        )).join('') + '<a class="demo-rail-all" href="../index.html">全部演示</a>';
+        document.body.appendChild(rail);
+        document.body.classList.add('has-demo-rail');
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', mountNav);
+    } else {
+        mountNav();
+    }
+
     global.DemoKit = {
         setupCanvas: setupCanvas,
         pointer: pointerFromEvent,
@@ -116,8 +211,10 @@
         viridis: viridis,
         roundRect: roundRect,
         drawPanel: drawPanel,
+        strokeLabel: strokeLabel,
         segmentHitsCircle: segmentHitsCircle,
         segmentHitsRect: segmentHitsRect,
+        mountNav: mountNav,
         parseMaze: function (rows) {
             const h = rows.length;
             const w = rows[0].length;

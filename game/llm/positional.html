@@ -16,9 +16,9 @@
     <main class="container mx-auto px-4 py-10 max-w-5xl">
         <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">大语言模型</a> / 位置编码</p>
         <h1 class="text-3xl font-bold mb-3">正弦位置编码</h1>
-        <p class="text-gray-600 mb-4">横轴是位置，纵轴是维度。低频维变化慢，高频维变化快。点两列看它们的余弦相似度：邻近位置更像，不是一条直线。</p>
+        <p class="text-gray-600 mb-4">横轴是位置，纵轴是维度。上面几维频率高、条纹密；下面几维频率低、变化慢。点一列，下面的曲线是它和所有位置的余弦相似度：邻近位置更像，不是一条直线。</p>
         <div class="demo-toolbar">
-            <span id="status" class="text-sm text-gray-500">点两列做比较</span>
+            <span id="status" class="text-sm text-gray-500">点热图上的一列</span>
         </div>
         <canvas id="c" class="demo-canvas"></canvas>
         <p class="text-sm mt-4"><a class="text-primary" href="../../llm/015-transformer.html">对照精读：Transformer</a> · <a class="text-primary" href="../../llm/046-rope.html">RoPE</a></p>
@@ -29,18 +29,33 @@
     <script src="../js/demo-kit.js"></script>
     <script>
         SeriesChrome.mount({ root: '../../', active: 'llm' });
-        const POS = 32, DIM = 24, W = 920, H = 520;
-        const view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        const POS = 32, DIM = 24, W = 920, H = 560;
+        const canvas = document.getElementById('c');
+        const view = DemoKit.setupCanvas(canvas, W, H), ctx = view.ctx;
         const pe = [];
         for (let p = 0; p < POS; p += 1) {
             pe[p] = [];
-            for (let i = 0; i < DIM; i += 1) {
-                const exp = Math.pow(10000, Math.floor(i / 2) * 2 / DIM);
-                pe[p][i] = (i % 2 === 0) ? Math.sin(p / exp) : Math.cos(p / exp);
+            for (let pair = 0; pair < DIM / 2; pair += 1) {
+                const angle = p / Math.pow(10000, (2 * pair) / DIM);
+                pe[p][2 * pair] = Math.sin(angle);
+                pe[p][2 * pair + 1] = Math.cos(angle);
             }
         }
-        let a = 3, b = 10;
-        const left = 70, top = 40, cw = 22, ch = 14;
+        let selected = 8;
+        function layout() {
+            const left = 58, right = 18, top = 28, curveH = 118, gap = 26;
+            const heatH = H - top - curveH - gap - 18;
+            return {
+                left: left,
+                top: top,
+                cw: (W - left - right) / POS,
+                ch: heatH / DIM,
+                heatH: heatH,
+                curveY: top + heatH + gap,
+                curveH: curveH,
+                right: W - right
+            };
+        }
         function cosine(i, j) {
             let dot = 0, na = 0, nb = 0;
             for (let k = 0; k < DIM; k += 1) {
@@ -48,38 +63,82 @@
                 na += pe[i][k] * pe[i][k];
                 nb += pe[j][k] * pe[j][k];
             }
-            return dot / Math.sqrt(na * nb);
+            return dot / Math.sqrt((na * nb) || 1e-9);
+        }
+        function colFromEvent(event) {
+            const L = layout();
+            const p = DemoKit.pointer(canvas, event, view);
+            if (p.y < L.top - 4 || p.y > L.top + L.heatH + 8) return -1;
+            const col = Math.floor((p.x - L.left) / L.cw);
+            return (col >= 0 && col < POS) ? col : -1;
         }
         function draw() {
+            const L = layout();
             DemoKit.drawPanel(ctx, W, H);
             for (let p = 0; p < POS; p += 1) {
                 for (let i = 0; i < DIM; i += 1) {
-                    const t = (pe[p][i] + 1) / 2;
-                    ctx.fillStyle = DemoKit.viridis(t);
-                    ctx.fillRect(left + p * cw, top + i * ch, cw - 1, ch - 1);
+                    ctx.fillStyle = DemoKit.viridis((pe[p][i] + 1) / 2);
+                    ctx.fillRect(L.left + p * L.cw, L.top + i * L.ch, Math.max(1, L.cw - 1), Math.max(1, L.ch - 1));
                 }
             }
             ctx.strokeStyle = '#f8fafc';
             ctx.lineWidth = 2;
-            ctx.strokeRect(left + a * cw, top, cw - 1, DIM * ch);
-            ctx.strokeStyle = '#fbbf24';
-            ctx.strokeRect(left + b * cw, top, cw - 1, DIM * ch);
+            ctx.strokeRect(L.left + selected * L.cw, L.top, L.cw, L.heatH);
             ctx.fillStyle = '#94a3b8';
             ctx.font = '12px ui-sans-serif';
-            for (let p = 0; p < POS; p += 4) ctx.fillText(String(p), left + p * cw, top + DIM * ch + 18);
-            ctx.fillText('位置 →', left, H - 24);
-            ctx.save(); ctx.translate(22, top + 80); ctx.rotate(-Math.PI / 2); ctx.fillText('维度', 0, 0); ctx.restore();
-            const sim = cosine(a, b);
+            ctx.textBaseline = 'top';
+            for (let p = 0; p < POS; p += 4) ctx.fillText(String(p), L.left + p * L.cw + 2, L.top + L.heatH + 4);
+            ctx.save();
+            ctx.translate(18, L.top + 86);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('维度 0（高频）→ 底部低频', 0, 0);
+            ctx.restore();
+            const sims = [];
+            let smin = 1, smax = -1;
+            for (let p = 0; p < POS; p += 1) {
+                const s = cosine(selected, p);
+                sims.push(s);
+                smin = Math.min(smin, s);
+                smax = Math.max(smax, s);
+            }
+            const cy = L.curveY, ch = L.curveH;
+            ctx.fillStyle = '#0b1220';
+            DemoKit.roundRect(ctx, L.left, cy, L.right - L.left, ch, 8);
+            ctx.fill();
+            ctx.strokeStyle = '#1e293b';
+            ctx.stroke();
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(L.left, cy + ch / 2);
+            ctx.lineTo(L.right, cy + ch / 2);
+            ctx.stroke();
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 2.4;
+            ctx.beginPath();
+            sims.forEach((s, p) => {
+                const x = L.left + (p + 0.5) * L.cw;
+                const y = cy + 10 + (1 - (s + 1) / 2) * (ch - 20);
+                if (p === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+            ctx.fillStyle = '#fbbf24';
+            ctx.beginPath();
+            ctx.arc(L.left + (selected + 0.5) * L.cw, cy + 10 + (1 - (1 + 1) / 2) * (ch - 20), 4.5, 0, Math.PI * 2);
+            ctx.fill();
             ctx.fillStyle = '#e2e8f0';
-            ctx.font = '16px ui-sans-serif';
-            ctx.fillText('pos ' + a + ' 与 pos ' + b + ' 的余弦相似度  ' + sim.toFixed(3), left, H - 48);
-            document.getElementById('status').textContent = '已选位置 ' + a + ' 和 ' + b;
+            ctx.font = '14px ui-sans-serif';
+            ctx.textBaseline = 'alphabetic';
+            ctx.fillText('pos ' + selected + ' 与各位置的余弦   最近邻 ' + (selected === 0 ? sims[1] : sims[selected - 1]).toFixed(3) + ' · 最远 ' + sims[selected < POS / 2 ? POS - 1 : 0].toFixed(3), L.left, cy - 8);
+            document.getElementById('status').textContent = '已选位置 ' + selected + ' · 点其他列比较相对距离';
         }
-        document.getElementById('c').onclick = (event) => {
-            const p = DemoKit.pointer(document.getElementById('c'), event, view);
-            const col = Math.floor((p.x - left) / cw);
-            if (col >= 0 && col < POS) { a = b; b = col; draw(); }
-        };
+        function pick(event) {
+            const col = colFromEvent(event);
+            if (col < 0) return;
+            selected = col;
+            draw();
+        }
+        canvas.addEventListener('pointerdown', pick);
         draw();
     </script>
 </body>

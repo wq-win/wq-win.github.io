@@ -16,10 +16,11 @@
     <main class="container mx-auto px-4 py-10 max-w-5xl">
         <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人学习</a> / DAgger</p>
         <h1 class="text-3xl font-bold mb-3">行为克隆 vs DAgger</h1>
-        <p class="text-gray-600 mb-4">灰带是道路。只模仿专家轨迹时，小误差会把车带离训练分布，蓝线容易冲出弯道。DAgger 在学习者自己走到的位置询问专家，绿线更能收回来。</p>
+        <p class="text-gray-600 mb-4">专家用前瞻纯追踪。学习者只做状态近邻查询：行为克隆的数据集全在路面上，一旦噪声把车带偏，最近的专家动作仍是“沿路走”而不是“回来”。DAgger 会在学习者自己走到的位置询问专家，红线冲出，绿线收回。</p>
         <div class="demo-toolbar">
             <button id="bc" class="border">只做行为克隆</button>
             <button id="dagger" class="bg-primary text-white">跑 DAgger</button>
+            <button id="both" class="border">两条一起看</button>
             <span id="status" class="text-sm text-gray-500"></span>
         </div>
         <canvas id="c" class="demo-canvas"></canvas>
@@ -31,149 +32,149 @@
     <script src="../js/demo-kit.js"></script>
     <script>
         SeriesChrome.mount({ root: '../../', active: 'robot-learn' });
-        const W = 900, H = 520, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        const W = 900, H = 520, canvas = document.getElementById('c');
+        const view = DemoKit.setupCanvas(canvas, W, H), ctx = view.ctx;
         function center(t) {
-            return { x: 70 + t * 760, y: 260 + Math.sin(t * Math.PI * 2.2) * 150 + Math.sin(t * Math.PI * 4) * 40 };
+            const u = DemoKit.clamp(t, 0, 1);
+            return { x: 70 + u * 760, y: 270 + Math.sin(u * Math.PI * 2.4) * 145 + Math.sin(u * Math.PI * 5) * 28 };
         }
         function tangent(t) {
-            const a = center(Math.max(0, t - 0.01)), b = center(Math.min(1, t + 0.01));
+            const a = center(Math.max(0, t - 0.008)), b = center(Math.min(1, t + 0.008));
             const dx = b.x - a.x, dy = b.y - a.y, n = Math.hypot(dx, dy) || 1;
             return { x: dx / n, y: dy / n };
         }
-        function normal(t) {
-            const tg = tangent(t);
-            return { x: -tg.y, y: tg.x };
+        function nearestT(p) {
+            let bestT = 0, bestD = 1e12;
+            for (let i = 0; i <= 400; i += 1) {
+                const t = i / 400, c = center(t);
+                const d = (p.x - c.x) * (p.x - c.x) + (p.y - c.y) * (p.y - c.y);
+                if (d < bestD) { bestD = d; bestT = t; }
+            }
+            return { t: bestT, dist: Math.sqrt(bestD) };
+        }
+        function wrap(a) {
+            while (a > Math.PI) a -= Math.PI * 2;
+            while (a < -Math.PI) a += Math.PI * 2;
+            return a;
         }
         function expertSteer(p) {
-            let bestT = 0, bestD = 1e9;
-            for (let i = 0; i <= 80; i += 1) {
-                const t = i / 80, c = center(t);
-                const d = (p.x - c.x) ** 2 + (p.y - c.y) ** 2;
-                if (d < bestD) { bestD = d; bestT = t; }
-            }
-            const c = center(bestT), n = normal(bestT), tg = tangent(bestT);
-            const offset = (p.x - c.x) * n.x + (p.y - c.y) * n.y;
+            const near = nearestT(p);
+            const look = center(Math.min(1, near.t + 0.07));
+            const want = Math.atan2(look.y - p.y, look.x - p.x);
             const heading = Math.atan2(p.hy, p.hx);
-            const want = Math.atan2(tg.y, tg.x);
-            let err = want - heading;
-            while (err > Math.PI) err -= Math.PI * 2;
-            while (err < -Math.PI) err += Math.PI * 2;
-            return DemoKit.clamp(-0.045 * offset + 1.3 * err, -0.28, 0.28);
+            return DemoKit.clamp(1.85 * wrap(want - heading), -0.42, 0.42);
         }
-        function features(p) {
-            let bestT = 0, bestD = 1e9;
-            for (let i = 0; i <= 80; i += 1) {
-                const t = i / 80, c = center(t);
-                const d = (p.x - c.x) ** 2 + (p.y - c.y) ** 2;
-                if (d < bestD) { bestD = d; bestT = t; }
-            }
-            const c = center(bestT), n = normal(bestT), tg = tangent(bestT);
-            const offset = (p.x - c.x) * n.x + (p.y - c.y) * n.y;
-            let err = Math.atan2(tg.y, tg.x) - Math.atan2(p.hy, p.hx);
-            while (err > Math.PI) err -= Math.PI * 2;
-            while (err < -Math.PI) err += Math.PI * 2;
-            return [1, offset / 80, err];
+        function feat(p) {
+            return [p.x, p.y, p.hx * 110, p.hy * 110];
         }
-        function fit(data) {
-            // 3 weights least squares
-            const xtx = [[0,0,0],[0,0,0],[0,0,0]], xty = [0,0,0];
-            data.forEach((d) => {
-                for (let i = 0; i < 3; i += 1) {
-                    xty[i] += d.f[i] * d.a;
-                    for (let j = 0; j < 3; j += 1) xtx[i][j] += d.f[i] * d.f[j];
-                }
+        function knnAct(data, p, k) {
+            if (!data.length) return 0;
+            const f = feat(p);
+            const scored = data.map((d) => {
+                let s = 0;
+                for (let i = 0; i < 4; i += 1) s += (d.f[i] - f[i]) * (d.f[i] - f[i]);
+                return { s: s, a: d.a };
             });
-            for (let i = 0; i < 3; i += 1) xtx[i][i] += 1e-4;
-            // gaussian elimination
-            const A = xtx.map((row, i) => row.concat([xty[i]]));
-            for (let i = 0; i < 3; i += 1) {
-                let max = i;
-                for (let r = i + 1; r < 3; r += 1) if (Math.abs(A[r][i]) > Math.abs(A[max][i])) max = r;
-                const tmp = A[i]; A[i] = A[max]; A[max] = tmp;
-                const piv = A[i][i] || 1e-9;
-                for (let j = i; j < 4; j += 1) A[i][j] /= piv;
-                for (let r = 0; r < 3; r += 1) if (r !== i) {
-                    const f = A[r][i];
-                    for (let j = i; j < 4; j += 1) A[r][j] -= f * A[i][j];
-                }
-            }
-            return [A[0][3], A[1][3], A[2][3]];
+            scored.sort((a, b) => a.s - b.s);
+            const n = Math.min(k, scored.length);
+            let sum = 0;
+            for (let i = 0; i < n; i += 1) sum += scored[i].a;
+            return sum / n;
         }
-        function policy(w, p) {
-            const f = features(p);
-            return DemoKit.clamp(w[0] * f[0] + w[1] * f[1] + w[2] * f[2], -0.28, 0.28);
+        function startPose() {
+            const p = center(0), tg = tangent(0);
+            return { x: p.x, y: p.y, hx: tg.x, hy: tg.y };
         }
-        function run(steerFn) {
-            const p = { x: 70, y: 260, hx: 1, hy: 0 };
-            const path = [];
-            for (let i = 0; i < 260; i += 1) {
-                const a = steerFn(p);
+        function run(steerFn, noise) {
+            const p = startPose();
+            const path = [{ x: p.x, y: p.y, hx: p.hx, hy: p.hy }];
+            let off = 0;
+            for (let i = 0; i < 280; i += 1) {
+                let a = steerFn(p);
+                if (noise) a += (Math.random() - 0.5) * noise;
+                a = DemoKit.clamp(a, -0.42, 0.42);
                 const ang = Math.atan2(p.hy, p.hx) + a;
                 p.hx = Math.cos(ang); p.hy = Math.sin(ang);
-                p.x += p.hx * 3.1; p.y += p.hy * 3.1;
+                p.x += p.hx * 3.05; p.y += p.hy * 3.05;
                 path.push({ x: p.x, y: p.y, hx: p.hx, hy: p.hy });
-                if (p.x > 880 || p.y < 20 || p.y > 500) break;
+                if (nearestT(p).dist > 22) off += 1;
+                if (p.x > 890 || p.y < 8 || p.y > 512) break;
             }
-            return path;
+            return { path: path, off: off };
         }
-        function expertDataset() {
-            const data = [];
-            const path = run((p) => expertSteer(p));
-            path.forEach((p) => data.push({ f: features(p), a: expertSteer(p) }));
-            return { data, path };
+        function expertData() {
+            const path = run(expertSteer, 0).path;
+            return path.map((p) => ({ f: feat(p), a: expertSteer(p), x: p.x, y: p.y }));
         }
-        function draw(learnerPath, expertPath) {
+        let expertPath = [], bcPath = null, daggerPath = null;
+        function draw() {
             DemoKit.drawPanel(ctx, W, H);
-            ctx.lineWidth = 34;
+            ctx.lineWidth = 36;
             ctx.strokeStyle = '#1e293b';
             ctx.lineCap = 'round';
             ctx.beginPath();
-            for (let i = 0; i <= 80; i += 1) {
-                const p = center(i / 80);
+            for (let i = 0; i <= 120; i += 1) {
+                const p = center(i / 120);
                 if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
             }
             ctx.stroke();
             ctx.lineWidth = 2;
             ctx.strokeStyle = '#475569';
             ctx.beginPath();
-            for (let i = 0; i <= 80; i += 1) {
-                const p = center(i / 80);
+            for (let i = 0; i <= 120; i += 1) {
+                const p = center(i / 120);
                 if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
             }
             ctx.stroke();
-            function strokePath(path, color) {
+            function strokePath(path, color, width) {
                 if (!path || !path.length) return;
-                ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.beginPath();
+                ctx.strokeStyle = color; ctx.lineWidth = width || 3; ctx.beginPath();
                 path.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
                 ctx.stroke();
             }
-            strokePath(expertPath, 'rgba(148,163,184,0.7)');
-            strokePath(learnerPath, '#4ade80');
+            strokePath(expertPath, 'rgba(148,163,184,0.75)', 2.5);
+            strokePath(bcPath, '#f87171', 3.2);
+            strokePath(daggerPath, '#4ade80', 3.2);
             ctx.fillStyle = '#94a3b8';
             ctx.font = '13px ui-sans-serif';
-            ctx.fillText('灰：专家    绿：当前学习者', 24, 28);
+            ctx.fillText('灰：专家    红：行为克隆    绿：DAgger', 24, 28);
+        }
+        function summarize(label, result) {
+            const last = result.path[result.path.length - 1];
+            const left = last.x < 820;
+            return label + '：离路 ' + result.off + ' 步' + (left ? '，未跑完' : '');
         }
         document.getElementById('bc').onclick = () => {
-            const exp = expertDataset();
-            const w = fit(exp.data);
-            const path = run((p) => policy(w, p));
-            draw(path, exp.path);
-            document.getElementById('status').textContent = '行为克隆：只在专家轨迹上训练，弯道后容易冲出';
+            const data = expertData();
+            const result = run((p) => knnAct(data, p, 4), 0.12);
+            bcPath = result.path;
+            daggerPath = null;
+            draw();
+            document.getElementById('status').textContent = summarize('行为克隆', result);
         };
         document.getElementById('dagger').onclick = () => {
-            let data = expertDataset().data;
-            let w = fit(data);
-            for (let round = 0; round < 6; round += 1) {
-                const path = run((p) => policy(w, p));
-                path.forEach((p) => data.push({ f: features(p), a: expertSteer(p) }));
-                w = fit(data);
+            let data = expertData();
+            for (let round = 0; round < 8; round += 1) {
+                const w = data.slice();
+                const path = run((p) => knnAct(w, p, 4), 0.12).path;
+                path.forEach((p) => data.push({ f: feat(p), a: expertSteer(p) }));
             }
-            const exp = expertDataset();
-            const path = run((p) => policy(w, p));
-            draw(path, exp.path);
-            document.getElementById('status').textContent = 'DAgger：在学习者自己访问的状态上问专家，6 轮后收回弯道';
+            const result = run((p) => knnAct(data, p, 4), 0.12);
+            daggerPath = result.path;
+            draw();
+            document.getElementById('status').textContent = summarize('DAgger（8 轮）', result);
         };
-        draw(null, expertDataset().path);
+        document.getElementById('both').onclick = () => {
+            document.getElementById('bc').click();
+            const keepBc = bcPath;
+            document.getElementById('dagger').click();
+            bcPath = keepBc;
+            draw();
+            document.getElementById('status').textContent = '红线只看过专家分布；绿线在自己走偏的地方问过专家';
+        };
+        expertPath = run(expertSteer, 0).path;
+        draw();
+        document.getElementById('status').textContent = '灰线是专家。先点行为克隆看它怎么冲出弯道。';
     </script>
 </body>
 </html>

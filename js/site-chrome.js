@@ -6,15 +6,45 @@
         { id: 'robot-classic', href: 'robot-classic/index.html', label: '机器人经典基础 100 篇' }
     ];
 
-    const GAMES = [
-        { href: 'game/index.html', label: '演示入口' },
-        { href: 'game/sudoku.html', label: 'Sudoku' },
-        { href: 'game/jianghu-slay.html', label: '江湖 Slay' },
-        { href: 'game/rl/index.html', label: '强化学习演示' },
-        { href: 'game/llm/index.html', label: '大语言模型演示' },
-        { href: 'game/robot-learn/index.html', label: '机器人学习演示' },
-        { href: 'game/robot-classic/index.html', label: '机器人经典演示' }
+    const FALLBACK_DEMOS = [
+        { group: '休闲', href: 'game/sudoku.html', title: 'Sudoku' },
+        { group: '休闲', href: 'game/jianghu-slay.html', title: '江湖 Slay' },
+        { group: '强化学习', cat: 'rl', file: 'q-learning', href: 'game/rl/q-learning.html', title: 'Q-learning 迷宫' },
+        { group: '强化学习', cat: 'rl', file: 'value-iteration', href: 'game/rl/value-iteration.html', title: '价值迭代' },
+        { group: '强化学习', cat: 'rl', file: 'policy-gradient', href: 'game/rl/policy-gradient.html', title: 'REINFORCE 倒立摆' },
+        { group: '强化学习', cat: 'rl', file: 'cliff', href: 'game/rl/cliff.html', title: '悬崖：SARSA vs Q' },
+        { group: '大语言模型', cat: 'llm', file: 'attention', href: 'game/llm/attention.html', title: '注意力可视化' },
+        { group: '大语言模型', cat: 'llm', file: 'positional', href: 'game/llm/positional.html', title: '正弦位置编码' },
+        { group: '大语言模型', cat: 'llm', file: 'softmax', href: 'game/llm/softmax.html', title: 'Softmax 与温度' },
+        { group: '大语言模型', cat: 'llm', file: 'bpe', href: 'game/llm/bpe.html', title: 'BPE 分词' },
+        { group: '机器人经典', cat: 'robot-classic', file: 'astar', href: 'game/robot-classic/astar.html', title: 'A* 与 Dijkstra' },
+        { group: '机器人经典', cat: 'robot-classic', file: 'rrt', href: 'game/robot-classic/rrt.html', title: 'RRT 绕障' },
+        { group: '机器人经典', cat: 'robot-classic', file: 'kalman', href: 'game/robot-classic/kalman.html', title: 'Kalman 跟踪' },
+        { group: '机器人经典', cat: 'robot-classic', file: 'potential', href: 'game/robot-classic/potential.html', title: '人工势场' },
+        { group: '机器人经典', cat: 'robot-classic', file: 'pid', href: 'game/robot-classic/pid.html', title: 'PID 跟踪' },
+        { group: '机器人经典', cat: 'robot-classic', file: 'icp', href: 'game/robot-classic/icp.html', title: 'ICP 点云配准' },
+        { group: '机器人学习', cat: 'robot-learn', file: 'dmp', href: 'game/robot-learn/dmp.html', title: 'DMP 运动基元' },
+        { group: '机器人学习', cat: 'robot-learn', file: 'dagger', href: 'game/robot-learn/dagger.html', title: '行为克隆 vs DAgger' },
+        { group: '机器人学习', cat: 'robot-learn', file: 'domain-rand', href: 'game/robot-learn/domain-rand.html', title: '域随机化' }
     ];
+
+    function demoItems() {
+        if (global.SITE && global.SITE.demos && global.SITE.demos.length) return global.SITE.demos;
+        return FALLBACK_DEMOS;
+    }
+
+    function gameGroups() {
+        const groups = [{ heading: '入口', items: [{ href: 'game/index.html', label: '全部演示' }] }];
+        demoItems().forEach((item) => {
+            let group = groups.find((entry) => entry.heading === item.group);
+            if (!group) {
+                group = { heading: item.group, items: [] };
+                groups.push(group);
+            }
+            group.items.push({ href: item.href, label: item.title });
+        });
+        return groups;
+    }
 
     function scriptBase() {
         const scripts = document.getElementsByTagName('script');
@@ -56,7 +86,24 @@
                     <button class="${active ? 'text-primary' : 'text-gray-700 hover:text-primary'} font-medium flex items-center focus:outline-none">
                         ${label} <i class="fa fa-caret-down ml-1 text-xs"></i>
                     </button>
-                    <div class="absolute right-0 mt-2 ${width || 'w-64'} bg-white rounded-md shadow-lg py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-50">
+                    <div class="absolute right-0 mt-2 ${width || 'w-64'} bg-white rounded-md shadow-lg py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-50 max-h-[80vh] overflow-y-auto">
+                        ${list}
+                    </div>
+                </div>`;
+    }
+
+    function groupedDropdown(label, groups, width) {
+        const list = groups.map((group) => {
+            const head = group.heading ? `<div class="px-4 pt-2 pb-1 text-[11px] tracking-wide text-gray-400">${group.heading}</div>` : '';
+            const items = group.items.map((item) => `<a href="${item.href}" class="block px-4 py-1.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-800">${item.label}</a>`).join('');
+            return head + items;
+        }).join('');
+        return `
+                <div class="relative group">
+                    <button class="text-gray-700 hover:text-primary font-medium flex items-center focus:outline-none">
+                        ${label} <i class="fa fa-caret-down ml-1 text-xs"></i>
+                    </button>
+                    <div class="absolute right-0 mt-2 ${width || 'w-64'} bg-white rounded-md shadow-lg py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-50 max-h-[80vh] overflow-y-auto">
                         ${list}
                     </div>
                 </div>`;
@@ -64,7 +111,7 @@
 
     function renderHeader(root, active) {
         const seriesItems = SERIES.map((item) => ({ id: item.id, href: root + item.href, label: item.label }));
-        const gameItems = GAMES.map((item) => ({ href: root + item.href, label: item.label }));
+        const groups = gameGroups();
         return `
     <header class="sticky top-0 z-50 bg-white shadow-sm site-header">
         <nav class="container mx-auto px-4 py-4 flex justify-between items-center gap-4">
@@ -75,7 +122,10 @@
             <div class="hidden md:flex items-center space-x-6">
                 ${navLink(root + 'index.html', 'Home')}
                 ${dropdown('精读', seriesItems, active)}
-                ${dropdown('演示', gameItems, '', 'w-56')}
+                ${groupedDropdown('演示', groups.map((group) => ({
+                    heading: group.heading,
+                    items: group.items.map((item) => ({ href: root + item.href, label: item.label }))
+                })), 'w-72')}
                 ${navLink(root + 'glossary.html', '名词表')}
                 ${navLink(root + 'map.html', '概念图')}
                 ${navLink(root + 'index.html#contact', '联系')}
@@ -102,7 +152,7 @@
             <div class="flex flex-col space-y-3">
                 <a href="${root}index.html" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">Home</a>
                 ${SERIES.map((item) => `<a href="${root}${item.href}" class="${item.id === active ? 'text-primary' : 'text-gray-700 hover:text-primary'} font-medium py-2 border-b border-gray-100">${item.label}</a>`).join('')}
-                ${GAMES.map((item) => `<a href="${root}${item.href}" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">${item.label}</a>`).join('')}
+                ${groups.map((group) => `<div class="pt-2 pb-1 text-xs text-gray-400">${group.heading}</div>` + group.items.map((item) => `<a href="${root}${item.href}" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">${item.label}</a>`).join('')).join('')}
                 <a href="${root}glossary.html" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">名词表</a>
                 <a href="${root}map.html" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">概念图</a>
                 <a href="${root}index.html#contact" class="text-gray-700 hover:text-primary font-medium py-2 border-b border-gray-100">联系</a>

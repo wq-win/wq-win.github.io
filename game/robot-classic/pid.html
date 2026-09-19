@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PID 跟踪 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人经典</a> / PID</p>
+        <h1 class="text-3xl font-bold mb-3">PID 跟踪</h1>
+        <p class="text-gray-600 mb-4">黄点是目标，蓝点是带阻尼的质点。P 拉向误差，D 压速度，I 消掉稳态偏差。把 P 开很大会振荡；只开 I 会爬升过头。在画布上移动鼠标改目标。</p>
+        <div class="demo-toolbar">
+            <label>Kp <input id="kp" type="range" min="0" max="80" value="18"></label>
+            <label>Ki <input id="ki" type="range" min="0" max="40" value="4"></label>
+            <label>Kd <input id="kd" type="range" min="0" max="40" value="12"></label>
+            <button id="reset" class="border">重置</button>
+            <span id="status" class="text-sm text-gray-500"></span>
+        </div>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <p class="text-sm mt-4"><a class="text-primary" href="../../robot-classic/013-impedance.html">对照精读：阻抗控制</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'robot-classic' });
+        const W = 900, H = 520, canvas = document.getElementById('c');
+        const view = DemoKit.setupCanvas(canvas, W, H), ctx = view.ctx;
+        let target = { x: 620, y: 180 };
+        let pos = { x: 160, y: 360, vx: 0, vy: 0 };
+        let integ = { x: 0, y: 0 };
+        let trail = [], t0 = 0;
+        function gains() {
+            return {
+                kp: document.getElementById('kp').value / 4,
+                ki: document.getElementById('ki').value / 80,
+                kd: document.getElementById('kd').value / 8
+            };
+        }
+        function reset() {
+            pos = { x: 160, y: 360, vx: 0, vy: 0 };
+            integ = { x: 0, y: 0 };
+            trail = [];
+        }
+        function tick(dt) {
+            const g = gains();
+            const ex = target.x - pos.x, ey = target.y - pos.y;
+            integ.x = DemoKit.clamp(integ.x + ex * dt, -240, 240);
+            integ.y = DemoKit.clamp(integ.y + ey * dt, -240, 240);
+            const ux = g.kp * ex + g.ki * integ.x + g.kd * (-pos.vx);
+            const uy = g.kp * ey + g.ki * integ.y + g.kd * (-pos.vy);
+            pos.vx += (ux - 1.1 * pos.vx) * dt;
+            pos.vy += (uy - 1.1 * pos.vy) * dt;
+            pos.x = DemoKit.clamp(pos.x + pos.vx * dt, 16, W - 16);
+            pos.y = DemoKit.clamp(pos.y + pos.vy * dt, 16, H - 16);
+            trail.push({ x: pos.x, y: pos.y });
+            if (trail.length > 180) trail.shift();
+        }
+        function draw() {
+            DemoKit.drawPanel(ctx, W, H);
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            trail.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+            ctx.stroke();
+            ctx.fillStyle = '#fbbf24';
+            ctx.beginPath(); ctx.arc(target.x, target.y, 9, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#38bdf8';
+            ctx.beginPath(); ctx.arc(pos.x, pos.y, 11, 0, Math.PI * 2); ctx.fill();
+            const g = gains();
+            const err = Math.hypot(target.x - pos.x, target.y - pos.y);
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '13px ui-sans-serif';
+            ctx.fillText('Kp ' + g.kp.toFixed(1) + '   Ki ' + g.ki.toFixed(2) + '   Kd ' + g.kd.toFixed(1) + '   误差 ' + err.toFixed(1), 24, 28);
+            document.getElementById('status').textContent = err < 8 ? '已跟上' : '跟踪中';
+        }
+        canvas.addEventListener('pointermove', (event) => {
+            target = DemoKit.pointer(canvas, event, view);
+        });
+        document.getElementById('reset').onclick = reset;
+        let last = performance.now();
+        function loop(now) {
+            const dt = Math.min(0.032, (now - last) / 1000);
+            last = now;
+            t0 += dt;
+            tick(dt);
+            draw();
+            requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+    </script>
+</body>
+</html>

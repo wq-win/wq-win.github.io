@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>悬崖：SARSA vs Q | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">强化学习</a> / 悬崖</p>
+        <h1 class="text-3xl font-bold mb-3">悬崖：SARSA vs Q-learning</h1>
+        <p class="text-gray-600 mb-4">底边除了起点和终点都是悬崖。Q-learning 用 max Q，学会贴着悬崖的最短路；SARSA 评价的是 ε-greedy 真会走的下一步，所以宁可绕远。两边用同一组随机种子并行训练。</p>
+        <div class="demo-toolbar">
+            <button id="train" class="bg-primary text-white">训练 400 回合</button>
+            <button id="reset" class="border">重置</button>
+            <label>ε <input id="eps" type="range" min="0" max="40" value="10"></label>
+            <span id="status" class="text-sm text-gray-500">尚未训练</span>
+        </div>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <p class="text-sm mt-4"><a class="text-primary" href="../../rl/06-sarsa.html">对照精读：SARSA</a> · <a class="text-primary" href="../../rl/04-q-learning.html">Q-learning</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'rl' });
+        const ROWS = 4, COLS = 12, ACT = [[1,0],[0,1],[-1,0],[0,-1]];
+        const start = { x: 0, y: 3 }, goal = { x: 11, y: 3 };
+        const W = 920, H = 520, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        let sarsa = {}, qlearn = {}, episodes = 0;
+        function key(x, y, a) { return x + ',' + y + ',' + a; }
+        function isCliff(x, y) { return y === 3 && x >= 1 && x <= 10; }
+        function emptyQ() {
+            const Q = {};
+            for (let y = 0; y < ROWS; y += 1) for (let x = 0; x < COLS; x += 1) for (let a = 0; a < 4; a += 1) Q[key(x, y, a)] = 0;
+            return Q;
+        }
+        function maxQA(Q, x, y) {
+            let best = 0, v = -1e9;
+            for (let a = 0; a < 4; a += 1) {
+                const q = Q[key(x, y, a)];
+                if (q > v) { v = q; best = a; }
+            }
+            return { a: best, v: v };
+        }
+        function egreedy(Q, x, y, eps) {
+            if (Math.random() < eps) return Math.floor(Math.random() * 4);
+            return maxQA(Q, x, y).a;
+        }
+        function step(x, y, a) {
+            let nx = DemoKit.clamp(x + ACT[a][0], 0, COLS - 1);
+            let ny = DemoKit.clamp(y + ACT[a][1], 0, ROWS - 1);
+            if (isCliff(nx, ny)) return { x: start.x, y: start.y, r: -100, done: true };
+            if (nx === goal.x && ny === goal.y) return { x: nx, y: ny, r: -1, done: true };
+            return { x: nx, y: ny, r: -1, done: false };
+        }
+        function trainOne(Q, kind, eps, alpha) {
+            let x = start.x, y = start.y, a = egreedy(Q, x, y, eps);
+            for (let t = 0; t < 200; t += 1) {
+                const ns = step(x, y, a);
+                if (kind === 'q') {
+                    const target = ns.done ? ns.r : ns.r + maxQA(Q, ns.x, ns.y).v;
+                    Q[key(x, y, a)] += alpha * (target - Q[key(x, y, a)]);
+                    x = ns.x; y = ns.y;
+                    if (ns.done) break;
+                    a = egreedy(Q, x, y, eps);
+                } else {
+                    const a2 = ns.done ? 0 : egreedy(Q, ns.x, ns.y, eps);
+                    const target = ns.done ? ns.r : ns.r + Q[key(ns.x, ns.y, a2)];
+                    Q[key(x, y, a)] += alpha * (target - Q[key(x, y, a)]);
+                    x = ns.x; y = ns.y; a = a2;
+                    if (ns.done) break;
+                }
+            }
+        }
+        function greedyPath(Q) {
+            const path = [{ x: start.x, y: start.y }];
+            let x = start.x, y = start.y;
+            const seen = new Set();
+            for (let i = 0; i < 40; i += 1) {
+                const id = x + ',' + y;
+                if (seen.has(id) || (x === goal.x && y === goal.y)) break;
+                seen.add(id);
+                const a = maxQA(Q, x, y).a;
+                const ns = step(x, y, a);
+                x = ns.x; y = ns.y;
+                path.push({ x: x, y: y });
+                if (ns.done) break;
+            }
+            return path;
+        }
+        function drawPanel(Q, ox, title, pathColor) {
+            const pad = 18, cellW = (W / 2 - pad * 2) / COLS, cellH = (H - 70) / ROWS;
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = '16px ui-sans-serif';
+            ctx.fillText(title, ox + pad, 28);
+            let vmin = 0, vmax = 0.001;
+            for (let y = 0; y < ROWS; y += 1) for (let x = 0; x < COLS; x += 1) {
+                if (isCliff(x, y)) continue;
+                const v = maxQA(Q, x, y).v;
+                vmin = Math.min(vmin, v); vmax = Math.max(vmax, v);
+            }
+            for (let y = 0; y < ROWS; y += 1) {
+                for (let x = 0; x < COLS; x += 1) {
+                    const px = ox + pad + x * cellW, py = 44 + y * cellH;
+                    if (isCliff(x, y)) {
+                        ctx.fillStyle = '#7f1d1d';
+                        DemoKit.roundRect(ctx, px + 2, py + 2, cellW - 4, cellH - 4, 6);
+                        ctx.fill();
+                        ctx.fillStyle = '#fecaca';
+                        ctx.font = '11px ui-sans-serif';
+                        ctx.fillText('悬崖', px + 8, py + cellH / 2 + 4);
+                        continue;
+                    }
+                    const v = maxQA(Q, x, y).v;
+                    const t = (v - vmin) / (vmax - vmin || 1);
+                    ctx.fillStyle = DemoKit.viridis(t);
+                    DemoKit.roundRect(ctx, px + 2, py + 2, cellW - 4, cellH - 4, 6);
+                    ctx.fill();
+                    if (episodes > 0) {
+                        const a = maxQA(Q, x, y).a, cx = px + cellW / 2, cy = py + cellH / 2, len = Math.min(cellW, cellH) * 0.28;
+                        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                        ctx.beginPath();
+                        if (a === 0) { ctx.moveTo(cx + len, cy); ctx.lineTo(cx, cy - 5); ctx.lineTo(cx, cy + 5); }
+                        if (a === 1) { ctx.moveTo(cx, cy + len); ctx.lineTo(cx - 5, cy); ctx.lineTo(cx + 5, cy); }
+                        if (a === 2) { ctx.moveTo(cx - len, cy); ctx.lineTo(cx, cy - 5); ctx.lineTo(cx, cy + 5); }
+                        if (a === 3) { ctx.moveTo(cx, cy - len); ctx.lineTo(cx - 5, cy); ctx.lineTo(cx + 5, cy); }
+                        ctx.fill();
+                    }
+                    ctx.font = '11px ui-sans-serif';
+                    DemoKit.strokeLabel(ctx, maxQA(Q, x, y).v.toFixed(1), px + 6, py + cellH - 10);
+                }
+            }
+            const path = greedyPath(Q);
+            ctx.strokeStyle = pathColor;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            path.forEach((p, i) => {
+                const x = ox + pad + (p.x + 0.5) * cellW, y = 44 + (p.y + 0.5) * cellH;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+            ctx.fillStyle = '#38bdf8';
+            ctx.beginPath(); ctx.arc(ox + pad + (start.x + 0.5) * cellW, 44 + (start.y + 0.5) * cellH, 6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#4ade80';
+            ctx.beginPath(); ctx.arc(ox + pad + (goal.x + 0.5) * cellW, 44 + (goal.y + 0.5) * cellH, 7, 0, Math.PI * 2); ctx.fill();
+        }
+        function draw() {
+            DemoKit.drawPanel(ctx, W, H);
+            ctx.strokeStyle = '#1e293b';
+            ctx.beginPath(); ctx.moveTo(W / 2, 12); ctx.lineTo(W / 2, H - 12); ctx.stroke();
+            drawPanel(sarsa, 0, 'SARSA（绕远、避开悬崖）', '#38bdf8');
+            drawPanel(qlearn, W / 2, 'Q-learning（贴边最短路）', '#fbbf24');
+        }
+        function reset() {
+            sarsa = emptyQ();
+            qlearn = emptyQ();
+            episodes = 0;
+            document.getElementById('status').textContent = '尚未训练';
+            draw();
+        }
+        document.getElementById('train').onclick = () => {
+            const eps = document.getElementById('eps').value / 100;
+            for (let i = 0; i < 400; i += 1) {
+                trainOne(sarsa, 'sarsa', eps, 0.5);
+                trainOne(qlearn, 'q', eps, 0.5);
+            }
+            episodes += 400;
+            document.getElementById('status').textContent = '已训练 ' + episodes + ' 回合 · ε=' + eps.toFixed(2);
+            draw();
+        };
+        document.getElementById('reset').onclick = reset;
+        reset();
+    </script>
+</body>
+</html>

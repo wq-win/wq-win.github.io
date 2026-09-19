@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ICP 点云配准 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人经典</a> / ICP</p>
+        <h1 class="text-3xl font-bold mb-3">ICP 点云配准</h1>
+        <p class="text-gray-600 mb-4">灰点是目标形状，橙点是被旋转、平移并加了噪声的扫描。每一步：最近邻对应 → 用 2D 的 Horn 法求刚体变换 → 把扫描拉过去。细线是当前对应。</p>
+        <div class="demo-toolbar">
+            <button id="step" class="bg-primary text-white">迭代一步</button>
+            <button id="run" class="border">连续 12 步</button>
+            <button id="reset" class="border">打乱重来</button>
+            <span id="status" class="text-sm text-gray-500"></span>
+        </div>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <p class="text-sm mt-4"><a class="text-primary" href="../../robot-classic/028-icp.html">对照精读：ICP</a> · <a class="text-primary" href="../../robot-classic/021-horn.html">Horn</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'robot-classic' });
+        const W = 900, H = 520, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        let target = [], source = [], iter = 0, mean = 0, pairs = [];
+        function shape() {
+            const pts = [];
+            for (let i = 0; i <= 36; i += 1) {
+                const a = -0.9 + i / 36 * 4.6;
+                pts.push({ x: 430 + Math.cos(a) * 150, y: 270 + Math.sin(a) * 95 });
+            }
+            for (let i = 0; i <= 12; i += 1) pts.push({ x: 430 + 70, y: 270 - 40 + i * 8 });
+            return pts;
+        }
+        function meanPt(pts) {
+            const n = pts.length || 1;
+            return { x: pts.reduce((s, p) => s + p.x, 0) / n, y: pts.reduce((s, p) => s + p.y, 0) / n };
+        }
+        function apply(pts, ang, tx, ty) {
+            const c = Math.cos(ang), s = Math.sin(ang);
+            return pts.map((p) => ({ x: c * p.x - s * p.y + tx, y: s * p.x + c * p.y + ty }));
+        }
+        function nearest(p, cloud) {
+            let best = cloud[0], d = 1e12;
+            cloud.forEach((q) => {
+                const v = (p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y);
+                if (v < d) { d = v; best = q; }
+            });
+            return { q: best, d: Math.sqrt(d) };
+        }
+        function reset() {
+            target = shape();
+            const ang = 0.55 + Math.random() * 0.5;
+            const tx = 90 + Math.random() * 40, ty = -70 - Math.random() * 30;
+            source = apply(shape(), ang, tx, ty).map((p) => ({
+                x: p.x + (Math.random() - 0.5) * 10,
+                y: p.y + (Math.random() - 0.5) * 10
+            }));
+            iter = 0;
+            pairs = [];
+            mean = 0;
+            document.getElementById('status').textContent = '已打乱，点迭代';
+            draw();
+        }
+        function iterate() {
+            const mapped = source.map((p) => {
+                const hit = nearest(p, target);
+                return { p: p, q: hit.q, d: hit.d };
+            });
+            pairs = mapped;
+            mean = mapped.reduce((s, x) => s + x.d, 0) / mapped.length;
+            const ps = mapped.map((x) => x.p), qs = mapped.map((x) => x.q);
+            const mp = meanPt(ps), mq = meanPt(qs);
+            let cross = 0, dot = 0;
+            for (let i = 0; i < pairs.length; i += 1) {
+                const sx = ps[i].x - mp.x, sy = ps[i].y - mp.y;
+                const tx = qs[i].x - mq.x, ty = qs[i].y - mq.y;
+                cross += sx * ty - sy * tx;
+                dot += sx * tx + sy * ty;
+            }
+            const ang = Math.atan2(cross, dot);
+            const c = Math.cos(ang), s = Math.sin(ang);
+            const tx = mq.x - (c * mp.x - s * mp.y);
+            const ty = mq.y - (s * mp.x + c * mp.y);
+            source = apply(source, ang, tx, ty);
+            iter += 1;
+            document.getElementById('status').textContent = '第 ' + iter + ' 步 · 平均最近邻距离 ' + mean.toFixed(2);
+            draw();
+        }
+        function draw() {
+            DemoKit.drawPanel(ctx, W, H);
+            ctx.fillStyle = '#64748b';
+            target.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2); ctx.fill(); });
+            if (pairs.length) {
+                ctx.strokeStyle = 'rgba(148,163,184,0.35)';
+                ctx.lineWidth = 1;
+                pairs.forEach((pair, i) => {
+                    if (i % 2) return;
+                    ctx.beginPath();
+                    ctx.moveTo(pair.p.x, pair.p.y);
+                    ctx.lineTo(pair.q.x, pair.q.y);
+                    ctx.stroke();
+                });
+            }
+            ctx.fillStyle = '#fb923c';
+            source.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 3.6, 0, Math.PI * 2); ctx.fill(); });
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '13px ui-sans-serif';
+            ctx.fillText('灰：目标    橙：扫描', 24, 28);
+        }
+        document.getElementById('step').onclick = iterate;
+        document.getElementById('reset').onclick = reset;
+        document.getElementById('run').onclick = async () => {
+            for (let i = 0; i < 12; i += 1) {
+                iterate();
+                await new Promise((r) => setTimeout(r, 120));
+            }
+        };
+        reset();
+    </script>
+</body>
+</html>

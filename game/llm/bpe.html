@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BPE 分词 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">大语言模型</a> / BPE</p>
+        <h1 class="text-3xl font-bold mb-3">BPE 分词</h1>
+        <p class="text-gray-600 mb-4">从字符开始，每次合并当前语料里出现最多的相邻对。滑动条停在第几步，下面的色块就是那一步的切分。经典例子会先合并 <code>e</code>+<code>s</code>，再出现 <code>est</code>。</p>
+        <div class="demo-toolbar">
+            <input id="text" value="low lower newest widest" class="border rounded px-2 py-1 text-sm w-72">
+            <button id="run" class="bg-primary text-white">重新合并</button>
+            <label>步数 <input id="step" type="range" min="0" max="12" value="0"></label>
+            <span id="status" class="text-sm text-gray-500"></span>
+        </div>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <p class="text-sm mt-4"><a class="text-primary" href="../../llm/011-bpe.html">对照精读：BPE</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'llm' });
+        const W = 920, H = 520, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        const COLORS = ['#38bdf8','#818cf8','#34d399','#fbbf24','#f472b6','#22d3ee','#a3e635','#fb7185'];
+        let history = [];
+        function splitWords(text) {
+            return text.trim().split(/\s+/).filter(Boolean).map((w) => w.split('').concat(['</w>']));
+        }
+        function countPairs(words) {
+            const c = {};
+            words.forEach((tokens) => {
+                for (let i = 0; i < tokens.length - 1; i += 1) {
+                    const k = tokens[i] + '\0' + tokens[i + 1];
+                    c[k] = (c[k] || 0) + 1;
+                }
+            });
+            return c;
+        }
+        function applyMerge(words, a, b) {
+            return words.map((tokens) => {
+                const out = [];
+                for (let i = 0; i < tokens.length; i += 1) {
+                    if (i < tokens.length - 1 && tokens[i] === a && tokens[i + 1] === b) {
+                        out.push(a + b);
+                        i += 1;
+                    } else out.push(tokens[i]);
+                }
+                return out;
+            });
+        }
+        function rebuild() {
+            const text = document.getElementById('text').value || 'low lower newest widest';
+            let words = splitWords(text);
+            history = [{ words: words.map((w) => w.slice()), merge: '字符起点', n: 0 }];
+            for (let i = 0; i < 18; i += 1) {
+                const counts = countPairs(words);
+                let best = null, n = 1;
+                Object.keys(counts).forEach((k) => {
+                    if (counts[k] > n) { n = counts[k]; best = k; }
+                });
+                if (!best) break;
+                const parts = best.split('\0');
+                words = applyMerge(words, parts[0], parts[1]);
+                history.push({ words: words.map((w) => w.slice()), merge: parts[0] + ' + ' + parts[1], n: n });
+            }
+            const slider = document.getElementById('step');
+            slider.max = String(history.length - 1);
+            if (Number(slider.value) > history.length - 1) slider.value = String(history.length - 1);
+            draw();
+        }
+        function draw() {
+            const step = Number(document.getElementById('step').value);
+            const snap = history[step] || history[0];
+            DemoKit.drawPanel(ctx, W, H);
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = '16px ui-sans-serif';
+            ctx.fillText('第 ' + step + ' 步：' + snap.merge + (snap.n ? '  （出现 ' + snap.n + ' 次）' : ''), 24, 32);
+            let y = 70;
+            snap.words.forEach((tokens, wi) => {
+                let x = 24;
+                tokens.forEach((tok, ti) => {
+                    const label = tok.replace('</w>', '·');
+                    ctx.font = '15px ui-sans-serif';
+                    const tw = ctx.measureText(label).width + 18;
+                    ctx.fillStyle = COLORS[(wi * 3 + ti) % COLORS.length];
+                    DemoKit.roundRect(ctx, x, y, tw, 34, 8);
+                    ctx.fill();
+                    ctx.fillStyle = '#0f172a';
+                    ctx.fillText(label, x + 9, y + 23);
+                    x += tw + 8;
+                });
+                y += 52;
+            });
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '13px ui-sans-serif';
+            ctx.fillText('合并记录', 24, 320);
+            history.forEach((h, i) => {
+                const col = i < 10 ? 24 : 360;
+                const row = 344 + (i % 10) * 16;
+                ctx.fillStyle = i === step ? '#fbbf24' : '#94a3b8';
+                ctx.fillText((i < 10 ? '0' : '') + i + '  ' + h.merge, col, row);
+            });
+            document.getElementById('status').textContent = '词块数 ' + snap.words.reduce((n, w) => n + w.length, 0);
+        }
+        document.getElementById('run').onclick = rebuild;
+        document.getElementById('step').oninput = draw;
+        document.getElementById('text').addEventListener('change', rebuild);
+        rebuild();
+    </script>
+</body>
+</html>
