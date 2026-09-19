@@ -3,8 +3,9 @@
         const dpr = Math.max(1, window.devicePixelRatio || 1);
         canvas.width = Math.round(cssWidth * dpr);
         canvas.height = Math.round(cssHeight * dpr);
-        canvas.style.width = cssWidth + 'px';
-        canvas.style.height = cssHeight + 'px';
+        canvas.style.width = '100%';
+        canvas.style.maxWidth = cssWidth + 'px';
+        canvas.style.height = 'auto';
         const ctx = canvas.getContext('2d');
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         return { ctx: ctx, width: cssWidth, height: cssHeight, dpr: dpr };
