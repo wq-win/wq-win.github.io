@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>价值迭代 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">强化学习</a> / 价值迭代</p>
+        <h1 class="text-3xl font-bold mb-3">价值迭代</h1>
+        <p class="text-gray-600 mb-4">从终点把价值往回传。每扫一遍，走廊里的颜色会绕过墙扩散，不会穿过障碍走直线。</p>
+        <div class="demo-toolbar">
+            <button id="step" class="bg-primary text-white">扫一遍</button>
+            <button id="play" class="border">连续迭代</button>
+            <button id="reset" class="border">重置</button>
+            <span id="status" class="text-sm text-gray-500">迭代 0</span>
+        </div>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <p class="text-sm mt-4"><a class="text-primary" href="../../rl/04-q-learning.html">对照精读：Q-learning / 贝尔曼最优</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'rl' });
+        const maze = DemoKit.parseMaze(DemoKit.DETOUR_MAZE);
+        const W = 900, H = 540, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        const pad = 18, cell = Math.min((W - pad * 2) / maze.width, (H - pad * 2) / maze.height);
+        const ox = (W - maze.width * cell) / 2, oy = (H - maze.height * cell) / 2;
+        const ACT = [[1,0],[0,1],[-1,0],[0,-1]];
+        let V = {}, n = 0, playing = false;
+        function key(x, y) { return x + ',' + y; }
+        function wall(x, y) { return maze.walls.has(key(x, y)); }
+        function reset() {
+            V = {};
+            n = 0;
+            for (let y = 0; y < maze.height; y += 1) for (let x = 0; x < maze.width; x += 1) V[key(x, y)] = 0;
+            V[key(maze.goal.x, maze.goal.y)] = 1;
+            document.getElementById('status').textContent = '迭代 0';
+            draw();
+        }
+        function backup() {
+            const next = Object.assign({}, V);
+            for (let y = 0; y < maze.height; y += 1) {
+                for (let x = 0; x < maze.width; x += 1) {
+                    if (wall(x, y) || (x === maze.goal.x && y === maze.goal.y)) continue;
+                    let best = -1e9;
+                    ACT.forEach(([dx, dy]) => {
+                        const nx = x + dx, ny = y + dy;
+                        if (wall(nx, ny)) best = Math.max(best, -0.04 + 0.95 * V[key(x, y)]);
+                        else best = Math.max(best, -0.04 + 0.95 * V[key(nx, ny)]);
+                    });
+                    next[key(x, y)] = best;
+                }
+            }
+            next[key(maze.goal.x, maze.goal.y)] = 1;
+            V = next;
+            n += 1;
+            document.getElementById('status').textContent = '迭代 ' + n;
+            draw();
+        }
+        function policy(x, y) {
+            let a = 0, best = -1e9;
+            ACT.forEach((d, i) => {
+                const nx = x + d[0], ny = y + d[1];
+                const val = wall(nx, ny) ? -1e9 : V[key(nx, ny)];
+                if (val > best) { best = val; a = i; }
+            });
+            return a;
+        }
+        function draw() {
+            DemoKit.drawPanel(ctx, W, H);
+            let vmax = 0.001;
+            Object.keys(V).forEach((k) => { if (!maze.walls.has(k)) vmax = Math.max(vmax, V[k]); });
+            for (let y = 0; y < maze.height; y += 1) {
+                for (let x = 0; x < maze.width; x += 1) {
+                    const px = ox + x * cell, py = oy + y * cell;
+                    if (wall(x, y)) {
+                        ctx.fillStyle = '#1e293b';
+                        DemoKit.roundRect(ctx, px + 1, py + 1, cell - 2, cell - 2, 4);
+                        ctx.fill();
+                        continue;
+                    }
+                    ctx.fillStyle = DemoKit.viridis(V[key(x, y)] / vmax);
+                    DemoKit.roundRect(ctx, px + 1, py + 1, cell - 2, cell - 2, 5);
+                    ctx.fill();
+                    if (n > 0 && !(x === maze.goal.x && y === maze.goal.y)) {
+                        const a = policy(x, y), cx = px + cell / 2, cy = py + cell / 2, len = cell * 0.28;
+                        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+                        ctx.beginPath();
+                        if (a === 0) { ctx.moveTo(cx + len, cy); ctx.lineTo(cx, cy - 5); ctx.lineTo(cx, cy + 5); }
+                        if (a === 1) { ctx.moveTo(cx, cy + len); ctx.lineTo(cx - 5, cy); ctx.lineTo(cx + 5, cy); }
+                        if (a === 2) { ctx.moveTo(cx - len, cy); ctx.lineTo(cx, cy - 5); ctx.lineTo(cx, cy + 5); }
+                        if (a === 3) { ctx.moveTo(cx, cy - len); ctx.lineTo(cx - 5, cy); ctx.lineTo(cx + 5, cy); }
+                        ctx.fill();
+                    }
+                    ctx.fillStyle = 'rgba(15,23,42,0.7)';
+                    ctx.font = '11px ui-sans-serif';
+                    ctx.fillText(V[key(x, y)].toFixed(2), px + 6, py + cell - 8);
+                }
+            }
+            ctx.fillStyle = '#38bdf8'; ctx.beginPath(); ctx.arc(ox + (maze.start.x + 0.5) * cell, oy + (maze.start.y + 0.5) * cell, 6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#4ade80'; ctx.beginPath(); ctx.arc(ox + (maze.goal.x + 0.5) * cell, oy + (maze.goal.y + 0.5) * cell, 7, 0, Math.PI * 2); ctx.fill();
+        }
+        let timer = 0;
+        document.getElementById('step').onclick = backup;
+        document.getElementById('play').onclick = () => {
+            playing = !playing;
+            document.getElementById('play').textContent = playing ? '停止' : '连续迭代';
+            const tick = () => { if (!playing) return; backup(); timer = setTimeout(tick, 220); };
+            if (playing) tick(); else clearTimeout(timer);
+        };
+        document.getElementById('reset').onclick = () => { playing = false; clearTimeout(timer); document.getElementById('play').textContent = '连续迭代'; reset(); };
+        reset();
+    </script>
+</body>
+</html>

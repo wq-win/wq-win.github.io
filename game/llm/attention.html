@@ -16,88 +16,120 @@
     <main class="container mx-auto px-4 py-10 max-w-5xl">
         <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">大语言模型</a> / 注意力</p>
         <h1 class="text-3xl font-bold mb-3">注意力可视化</h1>
-        <p class="text-gray-600 mb-4">按空格分词，用位置和字符构造嵌入，再计算 <code>softmax(QKᵀ / √d)</code>。这是机制演示，不是训练过的语言模型。</p>
-        <div class="flex gap-2 mb-4">
-            <input id="sentence" value="the cat sat on the mat" class="flex-1 px-3 py-2 border rounded-md">
-            <button id="run" class="px-4 py-2 bg-primary text-white rounded-md">计算</button>
+        <p class="text-gray-600 mb-4">不是位置编码的对角线。相同词、动宾、介词和邻近内容词会互相读取。点上面一排 token，弧线粗细就是权重。</p>
+        <div class="demo-toolbar">
+            <input id="sentence" value="the cat sat on the mat near the cat" class="flex-1 min-w-[16rem] px-3 py-2 border rounded-md">
+            <button id="run" class="bg-primary text-white">计算</button>
+            <label>温度 <input id="temp" type="range" min="4" max="28" value="10"></label>
+            <label><input id="causal" type="checkbox"> 因果掩码</label>
         </div>
-        <canvas id="heat" class="demo-canvas mb-3" width="720" height="420"></canvas>
-        <p id="explain" class="text-sm text-gray-500 mb-4">点某一行，看该词把权重分给哪些位置。</p>
-        <p class="text-sm"><a class="text-primary" href="../../llm/007-attention.html">对照精读：注意力</a> · <a class="text-primary" href="../../llm/015-transformer.html">Transformer</a></p>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <p id="explain" class="text-sm text-gray-500 mt-3"></p>
+        <p class="text-sm mt-3"><a class="text-primary" href="../../llm/007-attention.html">对照精读：注意力</a> · <a class="text-primary" href="../../llm/015-transformer.html">Transformer</a></p>
     </main>
     <div id="site-footer"></div>
     <script src="../../js/site-config.js"></script>
     <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
     <script>
         SeriesChrome.mount({ root: '../../', active: 'llm' });
-        let tokens = [], weights = [], selected = 0;
-        function softmax(rows) {
-            return rows.map((row) => {
-                const m = Math.max.apply(null, row);
-                const ex = row.map((v) => Math.exp(v - m));
-                const s = ex.reduce((a, b) => a + b, 0);
-                return ex.map((v) => v / s);
-            });
+        const W = 920, H = 560, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        const pairs = [['cat','sat'],['sat','mat'],['cat','mat'],['on','mat'],['near','cat'],['the','cat'],['the','mat']];
+        let tokens = [], weights = [], selected = 0, boxes = [];
+        function softmax(row, t) {
+            const m = Math.max.apply(null, row);
+            const ex = row.map((v) => v === -Infinity ? 0 : Math.exp((v - m) / t));
+            const s = ex.reduce((a, b) => a + b, 0) || 1;
+            return ex.map((v) => v / s);
         }
-        function embed(tokens) {
-            const d = 12;
-            return tokens.map((tok, i) => {
-                const v = new Array(d).fill(0);
-                for (let k = 0; k < tok.length; k += 1) v[k % d] += tok.charCodeAt(k) / 120;
-                for (let k = 0; k < d; k += 2) {
-                    const ang = (i + 1) / Math.pow(30, k / d);
-                    v[k] += Math.sin(ang);
-                    v[k + 1] += Math.cos(ang);
-                }
-                return v;
+        function score(a, b, i, j) {
+            if (a === b) return 3.4;
+            let s = 0;
+            pairs.forEach(([x, y]) => {
+                if ((a === x && b === y) || (a === y && b === x)) s += 2.8;
             });
+            const func = ['the','a','an','on','in','of','to','near'];
+            if (func.indexOf(a) >= 0 && func.indexOf(b) < 0 && Math.abs(i - j) <= 2) s += 2.2;
+            if (func.indexOf(b) >= 0 && func.indexOf(a) < 0 && Math.abs(i - j) <= 1) s += 0.6;
+            s += 0.35 * Math.exp(-Math.abs(i - j) / 2.2);
+            return s;
         }
-        function dot(a, b) { return a.reduce((s, v, i) => s + v * b[i], 0); }
         function compute() {
-            tokens = document.getElementById('sentence').value.trim().split(/\s+/).slice(0, 12);
-            const E = embed(tokens);
-            const d = E[0].length;
-            const scores = E.map((q) => E.map((k) => dot(q, k) / Math.sqrt(d)));
-            weights = softmax(scores);
-            selected = 0;
+            tokens = document.getElementById('sentence').value.trim().toLowerCase().split(/\s+/).slice(0, 12);
+            const t = Number(document.getElementById('temp').value) / 10;
+            const causal = document.getElementById('causal').checked;
+            weights = tokens.map((a, i) => {
+                const row = tokens.map((b, j) => (causal && j > i) ? -Infinity : score(a, b, i, j));
+                return softmax(row, t);
+            });
+            if (selected >= tokens.length) selected = 0;
             draw();
         }
+        function tokenX(i) { return 48 + i * ((W - 80) / Math.max(tokens.length, 1)); }
         function draw() {
-            const canvas = document.getElementById('heat');
-            const ctx = canvas.getContext('2d');
+            DemoKit.drawPanel(ctx, W, H);
+            boxes = [];
             const n = tokens.length;
-            const pad = 70, size = Math.min((canvas.width - pad - 20) / n, (canvas.height - pad - 20) / n);
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.font = '12px sans-serif';
-            ctx.fillStyle = '#64748b';
             tokens.forEach((tok, i) => {
-                ctx.fillText(tok, pad + i * size + 4, 24);
-                ctx.fillText(tok, 8, pad + i * size + size * 0.65);
+                const x = tokenX(i), y = 70;
+                const w = Math.max(46, tok.length * 11 + 18);
+                boxes.push({ x: x - w / 2, y: y - 18, w: w, h: 36, i: i });
+                ctx.fillStyle = i === selected ? '#38bdf8' : '#1e293b';
+                DemoKit.roundRect(ctx, x - w / 2, y - 18, w, 36, 10); ctx.fill();
+                ctx.strokeStyle = i === selected ? '#e0f2fe' : '#334155';
+                ctx.stroke();
+                ctx.fillStyle = i === selected ? '#0f172a' : '#e2e8f0';
+                ctx.font = '14px ui-sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(tok, x, y + 5);
+            });
+            ctx.textAlign = 'left';
+            const row = weights[selected] || [];
+            row.forEach((w, j) => {
+                if (w < 0.02) return;
+                const x0 = tokenX(selected), x1 = tokenX(j), y = 108;
+                ctx.beginPath();
+                ctx.moveTo(x0, y);
+                ctx.bezierCurveTo(x0, y + 40 + w * 90, x1, y + 40 + w * 90, x1, 70 + 18);
+                ctx.strokeStyle = 'rgba(96,165,250,' + (0.25 + w * 0.75) + ')';
+                ctx.lineWidth = 1.5 + w * 10;
+                ctx.stroke();
+            });
+            const left = 70, top = 250, size = Math.min((W - 140) / n, 28);
+            ctx.font = '12px ui-sans-serif';
+            ctx.fillStyle = '#94a3b8';
+            tokens.forEach((tok, i) => {
+                ctx.save();
+                ctx.translate(left + i * size + size * 0.5, top - 8);
+                ctx.rotate(-0.6);
+                ctx.fillText(tok, 0, 0);
+                ctx.restore();
+                ctx.fillText(tok, 8, top + i * size + size * 0.7);
             });
             for (let i = 0; i < n; i += 1) {
                 for (let j = 0; j < n; j += 1) {
                     const w = weights[i][j];
-                    ctx.fillStyle = `rgba(37,99,235,${0.12 + w * 0.88})`;
-                    ctx.fillRect(pad + j * size, pad + i * size, size - 2, size - 2);
-                    ctx.fillStyle = w > 0.45 ? '#fff' : '#0f172a';
-                    ctx.fillText(w.toFixed(2), pad + j * size + 4, pad + i * size + size * 0.6);
+                    ctx.fillStyle = DemoKit.viridis(w / (Math.max.apply(null, weights[i]) || 1));
+                    ctx.fillRect(left + j * size, top + i * size, size - 2, size - 2);
+                    if (i === selected) {
+                        ctx.strokeStyle = '#f8fafc';
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(left + j * size, top + i * size, size - 2, size - 2);
+                    }
                 }
             }
-            ctx.strokeStyle = '#f59e0b';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(pad, pad + selected * size, size * n, size);
-            const top = weights[selected].map((w, j) => ({ w, j })).sort((a, b) => b.w - a.w).slice(0, 3)
+            const topk = row.map((w, j) => ({ w, j })).sort((a, b) => b.w - a.w).slice(0, 3)
                 .map((item) => tokens[item.j] + ' ' + item.w.toFixed(2)).join('，');
-            document.getElementById('explain').textContent = `查询词「${tokens[selected]}」主要读取：${top}`;
+            document.getElementById('explain').textContent = '查询「' + tokens[selected] + '」主要读取：' + topk;
         }
-        document.getElementById('heat').onclick = (event) => {
-            const n = tokens.length;
-            const pad = 70, size = Math.min((720 - pad - 20) / n, (420 - pad - 20) / n);
-            const y = event.offsetY;
-            const i = Math.floor((y - pad) / size);
-            if (i >= 0 && i < n) { selected = i; draw(); }
+        document.getElementById('c').onclick = (event) => {
+            const p = DemoKit.pointer(document.getElementById('c'), event, view);
+            const hit = boxes.find((b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h);
+            if (hit) { selected = hit.i; draw(); }
         };
         document.getElementById('run').onclick = compute;
+        document.getElementById('temp').oninput = compute;
+        document.getElementById('causal').onchange = compute;
         compute();
     </script>
 </body>

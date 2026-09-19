@@ -15,94 +15,112 @@
     <div id="site-header"></div>
     <main class="container mx-auto px-4 py-10 max-w-5xl">
         <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人经典</a> / A*</p>
-        <h1 class="text-3xl font-bold mb-3">A* 寻路</h1>
-        <p class="text-gray-600 mb-4">点格子切换障碍。搜索按 <code>f = g + h</code>，h 是曼哈顿距离。黄格是 open set，蓝格是已扩展，绿线是最终路径。</p>
-        <div class="flex flex-wrap gap-2 mb-4">
-            <button id="run" class="px-4 py-2 bg-primary text-white rounded-md">搜索</button>
-            <button id="clear" class="px-4 py-2 border rounded-md">清空障碍</button>
-            <span id="status" class="self-center text-sm text-gray-500"></span>
+        <h1 class="text-3xl font-bold mb-3">A* 与 Dijkstra</h1>
+        <p class="text-gray-600 mb-4">墙把直线堵死了。A* 用曼哈顿启发，展开的格子会偏向终点；Dijkstra 把启发关掉，展开得更圆。点格子改墙。</p>
+        <div class="demo-toolbar">
+            <button id="astar" class="bg-primary text-white">A*</button>
+            <button id="dijkstra" class="border">Dijkstra</button>
+            <button id="reset" class="border">恢复迷宫</button>
+            <span id="status" class="text-sm text-gray-500"></span>
         </div>
-        <div id="board" class="demo-grid mb-4"></div>
-        <p class="text-sm"><a class="text-primary" href="../../robot-classic/003-astar.html">对照精读：A*</a></p>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <div class="demo-legend">
+            <span><i style="background:#fde68a"></i>open</span>
+            <span><i style="background:#38bdf8"></i>已扩展</span>
+            <span><i style="background:#4ade80"></i>路径</span>
+        </div>
+        <p class="text-sm mt-3"><a class="text-primary" href="../../robot-classic/003-astar.html">对照精读：A*</a></p>
     </main>
     <div id="site-footer"></div>
     <script src="../../js/site-config.js"></script>
     <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
     <script>
         SeriesChrome.mount({ root: '../../', active: 'robot-classic' });
-        const N = 16, start = [0, 0], goal = [15, 15];
-        let walls = new Set(['4,1','4,2','4,3','4,4','4,5','8,6','8,7','8,8','8,9','8,10','11,11','12,11','13,11']);
-        let paint = {};
+        const maze = DemoKit.parseMaze(DemoKit.DETOUR_MAZE);
+        const W = 900, H = 540, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        const cell = Math.min((W - 36) / maze.width, (H - 36) / maze.height);
+        const ox = (W - maze.width * cell) / 2, oy = (H - maze.height * cell) / 2;
+        let paint = {}, path = [], searching = false;
         function key(x, y) { return x + ',' + y; }
-        function render() {
-            const board = document.getElementById('board');
-            board.style.gridTemplateColumns = `repeat(${N}, 22px)`;
-            board.innerHTML = '';
-            for (let y = 0; y < N; y += 1) {
-                for (let x = 0; x < N; x += 1) {
-                    const cell = document.createElement('div');
-                    cell.className = 'demo-cell';
-                    cell.style.width = '22px';
-                    cell.style.height = '22px';
-                    const s = key(x, y);
-                    if (walls.has(s)) cell.style.background = '#111827';
-                    else if (x === start[0] && y === start[1]) cell.style.background = '#60a5fa';
-                    else if (x === goal[0] && y === goal[1]) cell.style.background = '#34d399';
-                    else if (paint[s] === 'path') cell.style.background = '#4ade80';
-                    else if (paint[s] === 'closed') cell.style.background = '#93c5fd';
-                    else if (paint[s] === 'open') cell.style.background = '#fde68a';
-                    cell.onclick = () => {
-                        if ((x === start[0] && y === start[1]) || (x === goal[0] && y === goal[1])) return;
-                        if (walls.has(s)) walls.delete(s); else walls.add(s);
-                        paint = {};
-                        render();
-                    };
-                    board.appendChild(cell);
+        function draw() {
+            DemoKit.drawPanel(ctx, W, H);
+            for (let y = 0; y < maze.height; y += 1) {
+                for (let x = 0; x < maze.width; x += 1) {
+                    const px = ox + x * cell, py = oy + y * cell, k = key(x, y);
+                    let color = '#0f172a';
+                    if (maze.walls.has(k)) color = '#334155';
+                    else if (paint[k] === 'path') color = '#4ade80';
+                    else if (paint[k] === 'closed') color = '#0ea5e9';
+                    else if (paint[k] === 'open') color = '#f59e0b';
+                    ctx.fillStyle = color;
+                    DemoKit.roundRect(ctx, px + 1.5, py + 1.5, cell - 3, cell - 3, 6);
+                    ctx.fill();
                 }
             }
+            ctx.fillStyle = '#7dd3fc';
+            ctx.beginPath(); ctx.arc(ox + (maze.start.x + 0.5) * cell, oy + (maze.start.y + 0.5) * cell, cell * 0.22, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#86efac';
+            ctx.beginPath(); ctx.arc(ox + (maze.goal.x + 0.5) * cell, oy + (maze.goal.y + 0.5) * cell, cell * 0.24, 0, Math.PI * 2); ctx.fill();
         }
-        function h(x, y) { return Math.abs(x - goal[0]) + Math.abs(y - goal[1]); }
-        async function search() {
-            paint = {};
-            const open = [{ x: start[0], y: start[1], g: 0, f: h(start[0], start[1]) }];
-            const came = {};
-            const gScore = { [key(start[0], start[1])]: 0 };
-            const seen = new Set();
+        function h(x, y, useH) { return useH ? Math.abs(x - maze.goal.x) + Math.abs(y - maze.goal.y) : 0; }
+        async function search(useH) {
+            if (searching) return;
+            searching = true;
+            paint = {}; path = [];
+            const open = [{ x: maze.start.x, y: maze.start.y, g: 0, f: h(maze.start.x, maze.start.y, useH) }];
+            const came = {}, gScore = { [key(maze.start.x, maze.start.y)]: 0 }, seen = new Set();
+            let expanded = 0;
             while (open.length) {
-                open.sort((a, b) => a.f - b.f);
+                open.sort((a, b) => a.f - b.f || a.g - b.g);
                 const cur = open.shift();
                 const ck = key(cur.x, cur.y);
                 if (seen.has(ck)) continue;
                 seen.add(ck);
                 paint[ck] = 'closed';
-                if (cur.x === goal[0] && cur.y === goal[1]) {
+                expanded += 1;
+                if (cur.x === maze.goal.x && cur.y === maze.goal.y) {
                     let p = ck;
                     while (came[p]) { paint[p] = 'path'; p = came[p]; }
-                    paint[key(start[0], start[1])] = 'path';
-                    document.getElementById('status').textContent = '路径代价 ' + cur.g;
-                    render();
+                    paint[key(maze.start.x, maze.start.y)] = 'path';
+                    document.getElementById('status').textContent = (useH ? 'A*' : 'Dijkstra') + ' 扩展 ' + expanded + ' 格 · 路径 ' + cur.g;
+                    draw();
+                    searching = false;
                     return;
                 }
-                [[0,-1],[1,0],[0,1],[-1,0]].forEach(([dx, dy]) => {
+                [[1,0],[0,1],[-1,0],[0,-1]].forEach(([dx, dy]) => {
                     const nx = cur.x + dx, ny = cur.y + dy, nk = key(nx, ny);
-                    if (nx < 0 || ny < 0 || nx >= N || ny >= N || walls.has(nk)) return;
+                    if (nx < 0 || ny < 0 || nx >= maze.width || ny >= maze.height || maze.walls.has(nk)) return;
                     const g = cur.g + 1;
                     if (g < (gScore[nk] === undefined ? Infinity : gScore[nk])) {
-                        gScore[nk] = g;
-                        came[nk] = ck;
-                        open.push({ x: nx, y: ny, g, f: g + h(nx, ny) });
+                        gScore[nk] = g; came[nk] = ck;
+                        open.push({ x: nx, y: ny, g, f: g + h(nx, ny, useH) });
                         if (!seen.has(nk)) paint[nk] = 'open';
                     }
                 });
-                render();
-                await new Promise((r) => setTimeout(r, 12));
+                draw();
+                await new Promise((r) => setTimeout(r, 16));
             }
             document.getElementById('status').textContent = '无路径';
-            render();
+            searching = false;
+            draw();
         }
-        document.getElementById('run').onclick = search;
-        document.getElementById('clear').onclick = () => { walls = new Set(); paint = {}; render(); };
-        render();
+        document.getElementById('c').onclick = (event) => {
+            const p = DemoKit.pointer(document.getElementById('c'), event, view);
+            const x = Math.floor((p.x - ox) / cell), y = Math.floor((p.y - oy) / cell);
+            if (x <= 0 || y <= 0 || x >= maze.width - 1 || y >= maze.height - 1) return;
+            if ((x === maze.start.x && y === maze.start.y) || (x === maze.goal.x && y === maze.goal.y)) return;
+            const k = key(x, y);
+            if (maze.walls.has(k)) maze.walls.delete(k); else maze.walls.add(k);
+            paint = {}; draw();
+        };
+        document.getElementById('astar').onclick = () => search(true);
+        document.getElementById('dijkstra').onclick = () => search(false);
+        document.getElementById('reset').onclick = () => {
+            const fresh = DemoKit.parseMaze(DemoKit.DETOUR_MAZE);
+            maze.walls = fresh.walls; paint = {}; draw();
+        };
+        draw();
     </script>
 </body>
 </html>

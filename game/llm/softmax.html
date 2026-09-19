@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Softmax 采样 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">大语言模型</a> / Softmax</p>
+        <h1 class="text-3xl font-bold mb-3">Softmax 与温度</h1>
+        <p class="text-gray-600 mb-4">前文是 “the cat sat on the”。温度低时几乎总抽到 mat；温度高时 hat / floor 也会出现。柱高是概率，不是原始 logit。</p>
+        <div class="demo-toolbar">
+            <label>温度 T <input id="temp" type="range" min="2" max="40" value="8"></label>
+            <button id="sample" class="bg-primary text-white">采样一次</button>
+            <span id="status" class="text-sm text-gray-500"></span>
+        </div>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <p class="text-sm mt-4"><a class="text-primary" href="../../llm/017-gpt.html">对照精读：GPT</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'llm' });
+        const words = [
+            { tok: 'mat', logit: 6.2 },
+            { tok: 'hat', logit: 3.1 },
+            { tok: 'floor', logit: 2.4 },
+            { tok: 'car', logit: 0.2 },
+            { tok: 'the', logit: 1.1 },
+            { tok: 'cat', logit: -0.4 }
+        ];
+        const W = 900, H = 480, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        let last = -1, hist = words.map(() => 0);
+        function probs() {
+            const T = Number(document.getElementById('temp').value) / 10;
+            const m = Math.max.apply(null, words.map((w) => w.logit / T));
+            const ex = words.map((w) => Math.exp(w.logit / T - m));
+            const s = ex.reduce((a, b) => a + b, 0);
+            return ex.map((v) => v / s);
+        }
+        function draw() {
+            DemoKit.drawPanel(ctx, W, H);
+            const p = probs();
+            const T = Number(document.getElementById('temp').value) / 10;
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '16px ui-sans-serif';
+            ctx.fillText('the cat sat on the  ____     T = ' + T.toFixed(1), 36, 40);
+            p.forEach((pr, i) => {
+                const x = 70 + i * 140, h = pr * 300;
+                ctx.fillStyle = i === last ? '#fbbf24' : '#38bdf8';
+                DemoKit.roundRect(ctx, x, 400 - h, 88, h, 8); ctx.fill();
+                ctx.fillStyle = '#e2e8f0';
+                ctx.font = '18px ui-sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(words[i].tok, x + 44, 428);
+                ctx.font = '13px ui-sans-serif';
+                ctx.fillStyle = '#94a3b8';
+                ctx.fillText((pr * 100).toFixed(1) + '%', x + 44, 390 - h);
+                ctx.fillText('抽中 ' + hist[i], x + 44, 448);
+            });
+            ctx.textAlign = 'left';
+        }
+        document.getElementById('sample').onclick = () => {
+            const p = probs();
+            let r = Math.random(), i = 0;
+            for (; i < p.length; i += 1) { r -= p[i]; if (r <= 0) break; }
+            last = Math.min(i, p.length - 1);
+            hist[last] += 1;
+            document.getElementById('status').textContent = '抽到 「' + words[last].tok + '」';
+            draw();
+        };
+        document.getElementById('temp').oninput = draw;
+        draw();
+    </script>
+</body>
+</html>

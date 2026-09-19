@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kalman 跟踪 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人经典</a> / Kalman</p>
+        <h1 class="text-3xl font-bold mb-3">Kalman 滤波跟踪</h1>
+        <p class="text-gray-600 mb-4">白点是真实位置，散开的蓝点是带噪声观测，橙点是滤波估计，椭圆是协方差。移动鼠标，估计会跟着走但更稳。</p>
+        <div class="demo-toolbar">
+            <label>观测噪声 <input id="noise" type="range" min="4" max="60" value="22"></label>
+            <span id="status" class="text-sm text-gray-500">把鼠标移进画布</span>
+        </div>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <p class="text-sm mt-4"><a class="text-primary" href="../../robot-classic/002-kalman.html">对照精读：Kalman 滤波</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'robot-classic' });
+        const W = 900, H = 520, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        let trueP = { x: 200, y: 240 }, meas = [], x = [200, 240, 0, 0], P = [[80,0,0,0],[0,80,0,0],[0,0,40,0],[0,0,0,40]];
+        const dt = 1;
+        function mat4I() { return [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]; }
+        function mul(A, B) {
+            const n = A.length, m = B[0].length, k = B.length, C = [];
+            for (let i = 0; i < n; i += 1) {
+                C[i] = [];
+                for (let j = 0; j < m; j += 1) {
+                    let s = 0; for (let t = 0; t < k; t += 1) s += A[i][t] * B[t][j];
+                    C[i][j] = s;
+                }
+            }
+            return C;
+        }
+        function add(A, B) { return A.map((row, i) => row.map((v, j) => v + B[i][j])); }
+        function sub(A, B) { return A.map((row, i) => row.map((v, j) => v - B[i][j])); }
+        function transpose(A) { return A[0].map((_, j) => A.map((row) => row[j])); }
+        function inv2(M) {
+            const d = M[0][0] * M[1][1] - M[0][1] * M[1][0] || 1e-6;
+            return [[M[1][1] / d, -M[0][1] / d], [-M[1][0] / d, M[0][0] / d]];
+        }
+        function predict() {
+            const F = [[1,0,dt,0],[0,1,0,dt],[0,0,1,0],[0,0,0,1]];
+            const Q = [[2,0,0,0],[0,2,0,0],[0,0,4,0],[0,0,0,4]];
+            const nx = mul(F, x.map((v) => [v])).map((r) => r[0]);
+            P = add(mul(mul(F, P), transpose(F)), Q);
+            x = nx;
+        }
+        function update(zx, zy, r) {
+            const H = [[1,0,0,0],[0,1,0,0]];
+            const R = [[r, 0], [0, r]];
+            const z = [[zx],[zy]];
+            const y = sub(z, mul(H, x.map((v) => [v])));
+            const S = add(mul(mul(H, P), transpose(H)), R);
+            const K = mul(mul(P, transpose(H)), inv2(S));
+            const dx = mul(K, y).map((r) => r[0]);
+            x = x.map((v, i) => v + dx[i]);
+            const I = mat4I();
+            P = mul(sub(I, mul(K, H)), P);
+        }
+        function ellipse() {
+            const a = P[0][0], b = P[0][1], c = P[1][1];
+            const tr = a + c, det = a * c - b * b;
+            const disc = Math.sqrt(Math.max(0, tr * tr / 4 - det));
+            const l1 = tr / 2 + disc, l2 = tr / 2 - disc;
+            const angle = Math.abs(b) < 1e-6 ? (a >= c ? 0 : Math.PI / 2) : Math.atan2(l1 - a, b);
+            return { rx: Math.sqrt(Math.max(l1, 4)) * 2.2, ry: Math.sqrt(Math.max(l2, 4)) * 2.2, angle: angle };
+        }
+        function draw() {
+            DemoKit.drawPanel(ctx, W, H);
+            meas.slice(-40).forEach((m, i) => {
+                ctx.fillStyle = 'rgba(56,189,248,' + (0.15 + i / 80) + ')';
+                ctx.beginPath(); ctx.arc(m.x, m.y, 3, 0, Math.PI * 2); ctx.fill();
+            });
+            const e = ellipse();
+            ctx.save();
+            ctx.translate(x[0], x[1]);
+            ctx.rotate(e.angle);
+            ctx.strokeStyle = 'rgba(251,191,36,0.8)';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.ellipse(0, 0, e.rx, e.ry, 0, 0, Math.PI * 2); ctx.stroke();
+            ctx.restore();
+            ctx.fillStyle = '#f8fafc';
+            ctx.beginPath(); ctx.arc(trueP.x, trueP.y, 6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#f59e0b';
+            ctx.beginPath(); ctx.arc(x[0], x[1], 7, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '13px ui-sans-serif';
+            ctx.fillText('白：真值    蓝：观测    橙：估计', 24, 28);
+        }
+        document.getElementById('c').onmousemove = (event) => {
+            trueP = DemoKit.pointer(document.getElementById('c'), event, view);
+        };
+        setInterval(() => {
+            const n = Number(document.getElementById('noise').value);
+            const zx = trueP.x + (Math.random() - 0.5) * n * 2;
+            const zy = trueP.y + (Math.random() - 0.5) * n * 2;
+            meas.push({ x: zx, y: zy });
+            if (meas.length > 80) meas.shift();
+            predict();
+            update(zx, zy, n * n);
+            draw();
+        }, 40);
+        draw();
+    </script>
+</body>
+</html>

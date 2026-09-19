@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>REINFORCE 倒立摆 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">强化学习</a> / REINFORCE</p>
+        <h1 class="text-3xl font-bold mb-3">REINFORCE 倒立摆</h1>
+        <p class="text-gray-600 mb-4">策略是左右推力的概率。回报高的回合把当时动作的概率推高。右边是最近回合长度，杆能越来越久地立住。</p>
+        <div class="demo-toolbar">
+            <button id="run" class="bg-primary text-white">训练</button>
+            <button id="pause" class="border">暂停</button>
+            <button id="reset" class="border">重置策略</button>
+            <span id="status" class="text-sm text-gray-500">回合 0</span>
+        </div>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <p class="text-sm mt-4"><a class="text-primary" href="../../rl/05-reinforce.html">对照精读：REINFORCE</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'rl' });
+        const W = 900, H = 520, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        let w = [0, 0, 0, 8, 1.2], baseline = 12, ep = 0, returns = [], running = false;
+        let state = { x: 0, xd: 0, th: 0.12, thd: 0 };
+        function feat(s) { return [s.x, s.xd, s.th, s.thd]; }
+        function logit(s) {
+            const f = feat(s);
+            return f.reduce((sum, v, i) => sum + w[i] * v, 0);
+        }
+        function piLeft(s) {
+            return 1 / (1 + Math.exp(DemoKit.clamp(logit(s), -12, 12)));
+        }
+        function resetState() {
+            state = { x: (Math.random() - 0.5) * 0.2, xd: 0, th: (Math.random() - 0.5) * 0.22, thd: 0 };
+        }
+        function physics(s, action) {
+            const force = action === 0 ? -10 : 10;
+            const g = 9.8, mc = 1, mp = 0.1, l = 0.5, total = mc + mp;
+            const c = Math.cos(s.th), si = Math.sin(s.th);
+            const temp = (force + mp * l * s.thd * s.thd * si) / total;
+            const thacc = (g * si - c * temp) / (l * (4 / 3 - mp * c * c / total));
+            const xacc = temp - mp * l * thacc * c / total;
+            const ns = {
+                x: s.x + 0.02 * s.xd,
+                xd: s.xd + 0.02 * xacc,
+                th: s.th + 0.02 * s.thd,
+                thd: s.thd + 0.02 * thacc
+            };
+            return ns;
+        }
+        function done(s) { return Math.abs(s.x) > 2.4 || Math.abs(s.th) > 0.28; }
+        function rollout() {
+            resetState();
+            const traj = [];
+            let s = state;
+            for (let t = 0; t < 220; t += 1) {
+                const p = piLeft(s);
+                const a = Math.random() < p ? 0 : 1;
+                traj.push({ s: s, a: a, p: a === 0 ? p : 1 - p });
+                s = physics(s, a);
+                if (done(s)) break;
+            }
+            state = s;
+            return traj;
+        }
+        function learn(traj) {
+            const G = traj.length;
+            const adv = G - baseline;
+            baseline = 0.9 * baseline + 0.1 * G;
+            const alpha = 0.0008;
+            traj.forEach((step) => {
+                const f = feat(step.s);
+                const sign = step.a === 0 ? -1 : 1;
+                const gradScale = sign * (1 - step.p) * adv;
+                for (let i = 0; i < w.length; i += 1) w[i] += alpha * gradScale * f[i];
+            });
+            returns.push(G);
+            if (returns.length > 80) returns.shift();
+            ep += 1;
+        }
+        function draw(traj) {
+            DemoKit.drawPanel(ctx, W, H);
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '13px ui-sans-serif';
+            ctx.fillText('倒立摆', 24, 32);
+            ctx.fillText('回合长度', 640, 32);
+            ctx.strokeStyle = '#334155';
+            ctx.beginPath(); ctx.moveTo(40, 430); ctx.lineTo(560, 430); ctx.stroke();
+            const show = traj[Math.min(traj.length - 1, traj.length - 1)];
+            const s = show ? show.s : state;
+            const cartX = 300 + s.x * 90;
+            ctx.fillStyle = '#38bdf8';
+            DemoKit.roundRect(ctx, cartX - 28, 402, 56, 22, 6); ctx.fill();
+            ctx.strokeStyle = '#fbbf24';
+            ctx.lineWidth = 7;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(cartX, 402);
+            ctx.lineTo(cartX + Math.sin(s.th) * 140, 402 - Math.cos(s.th) * 140);
+            ctx.stroke();
+            ctx.fillStyle = '#f59e0b';
+            ctx.beginPath(); ctx.arc(cartX + Math.sin(s.th) * 140, 402 - Math.cos(s.th) * 140, 8, 0, Math.PI * 2); ctx.fill();
+            const p = piLeft(s);
+            ctx.fillStyle = '#64748b'; ctx.fillText('P(左) ' + p.toFixed(2) + '   P(右) ' + (1 - p).toFixed(2), 40, 470);
+            ctx.fillStyle = '#1e293b';
+            DemoKit.roundRect(ctx, 620, 50, 250, 430, 12); ctx.fill();
+            ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2; ctx.beginPath();
+            returns.forEach((r, i) => {
+                const x = 640 + i * 2.8, y = 460 - r * 1.6;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+        }
+        let timer = 0, live = [];
+        function tick() {
+            if (!running) return;
+            const traj = rollout();
+            learn(traj);
+            live = traj;
+            draw(traj);
+            document.getElementById('status').textContent = '回合 ' + ep + ' · 本回合 ' + traj.length + ' 步 · 基线 ' + baseline.toFixed(1);
+            timer = setTimeout(tick, 40);
+        }
+        document.getElementById('run').onclick = () => { if (!running) { running = true; tick(); } };
+        document.getElementById('pause').onclick = () => { running = false; clearTimeout(timer); };
+        document.getElementById('reset').onclick = () => { running = false; clearTimeout(timer); w = [0, 0, 0, 8, 1.2]; baseline = 12; ep = 0; returns = []; resetState(); draw([]); document.getElementById('status').textContent = '回合 0'; };
+        resetState();
+        draw([]);
+    </script>
+</body>
+</html>

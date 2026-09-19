@@ -15,50 +15,66 @@
     <div id="site-header"></div>
     <main class="container mx-auto px-4 py-10 max-w-5xl">
         <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人经典</a> / RRT</p>
-        <h1 class="text-3xl font-bold mb-3">RRT 路径树</h1>
-        <p class="text-gray-600 mb-4">随机采样、找最近节点、沿该方向走一步。点画布添加圆形障碍。这是基础 RRT，不保证最优。</p>
-        <div class="flex flex-wrap gap-2 mb-4">
-            <button id="run" class="px-4 py-2 bg-primary text-white rounded-md">生长</button>
-            <button id="reset" class="px-4 py-2 border rounded-md">重置</button>
-            <span id="status" class="self-center text-sm text-gray-500"></span>
+        <h1 class="text-3xl font-bold mb-3">RRT 绕障</h1>
+        <p class="text-gray-600 mb-4">扩展时检查整段边是否撞墙，树不会穿过去。窄通道迫使树先向下再穿门。黄点是当前随机采样。</p>
+        <div class="demo-toolbar">
+            <button id="run" class="bg-primary text-white">生长</button>
+            <button id="reset" class="border">重置</button>
+            <span id="status" class="text-sm text-gray-500"></span>
         </div>
-        <canvas id="c" class="demo-canvas mb-4" width="720" height="420"></canvas>
-        <p class="text-sm"><a class="text-primary" href="../../robot-classic/040-rrt.html">对照精读：RRT</a></p>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <p class="text-sm mt-4"><a class="text-primary" href="../../robot-classic/040-rrt.html">对照精读：RRT</a></p>
     </main>
     <div id="site-footer"></div>
     <script src="../../js/site-config.js"></script>
     <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
     <script>
         SeriesChrome.mount({ root: '../../', active: 'robot-classic' });
-        const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
-        const start = { x: 40, y: 210 }, goal = { x: 680, y: 210 };
-        let nodes = [{ ...start, parent: -1 }];
-        let obstacles = [{ x: 260, y: 210, r: 55 }, { x: 430, y: 120, r: 48 }, { x: 430, y: 300, r: 48 }];
-        let path = [], growing = false;
-        function collide(x, y) {
-            return obstacles.some((o) => (x - o.x) ** 2 + (y - o.y) ** 2 < (o.r + 4) ** 2);
+        const W = 900, H = 520, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        const start = { x: 70, y: 260 }, goal = { x: 830, y: 260 };
+        const rects = [
+            { x: 210, y: 40, w: 46, h: 250 },
+            { x: 210, y: 340, w: 46, h: 140 },
+            { x: 430, y: 40, w: 52, h: 160 },
+            { x: 430, y: 260, w: 52, h: 220 },
+            { x: 640, y: 40, w: 40, h: 210 },
+            { x: 640, y: 310, w: 40, h: 170 }
+        ];
+        const circles = [{ x: 340, y: 270, r: 42 }, { x: 545, y: 200, r: 36 }];
+        let nodes = [{ ...start, parent: -1 }], path = [], sample = null, growing = false;
+        function blocked(ax, ay, bx, by) {
+            if (bx < 16 || by < 16 || bx > W - 16 || by > H - 16) return true;
+            return rects.some((r) => DemoKit.segmentHitsRect(ax, ay, bx, by, r.x, r.y, r.w, r.h))
+                || circles.some((c) => DemoKit.segmentHitsCircle(ax, ay, bx, by, c.x, c.y, c.r + 6));
         }
         function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            DemoKit.drawPanel(ctx, W, H);
             ctx.fillStyle = '#1e293b';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            obstacles.forEach((o) => { ctx.fillStyle = '#64748b'; ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill(); });
+            rects.forEach((r) => { DemoKit.roundRect(ctx, r.x, r.y, r.w, r.h, 8); ctx.fill(); });
+            circles.forEach((c) => { ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.fill(); });
             ctx.strokeStyle = '#38bdf8';
-            ctx.lineWidth = 1;
+            ctx.globalAlpha = 0.85;
+            ctx.lineWidth = 1.2;
             for (let i = 1; i < nodes.length; i += 1) {
                 const p = nodes[nodes[i].parent];
                 ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(nodes[i].x, nodes[i].y); ctx.stroke();
             }
+            ctx.globalAlpha = 1;
+            if (sample) {
+                ctx.fillStyle = '#fbbf24';
+                ctx.beginPath(); ctx.arc(sample.x, sample.y, 4, 0, Math.PI * 2); ctx.fill();
+            }
             if (path.length) {
-                ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 3; ctx.beginPath();
+                ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 4; ctx.beginPath();
                 path.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
                 ctx.stroke();
             }
-            ctx.fillStyle = '#60a5fa'; ctx.beginPath(); ctx.arc(start.x, start.y, 6, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = '#34d399'; ctx.beginPath(); ctx.arc(goal.x, goal.y, 8, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#7dd3fc'; ctx.beginPath(); ctx.arc(start.x, start.y, 8, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#86efac'; ctx.beginPath(); ctx.arc(goal.x, goal.y, 10, 0, Math.PI * 2); ctx.fill();
         }
         function nearest(x, y) {
-            let best = 0, bestD = Infinity;
+            let best = 0, bestD = 1e15;
             nodes.forEach((n, i) => {
                 const d = (n.x - x) ** 2 + (n.y - y) ** 2;
                 if (d < bestD) { bestD = d; best = i; }
@@ -66,39 +82,40 @@
             return best;
         }
         function step() {
-            const rx = Math.random() < 0.08 ? goal.x : Math.random() * canvas.width;
-            const ry = Math.random() < 0.08 ? goal.y : Math.random() * canvas.height;
+            const aimGoal = Math.random() < 0.12;
+            const rx = aimGoal ? goal.x : 20 + Math.random() * (W - 40);
+            const ry = aimGoal ? goal.y : 20 + Math.random() * (H - 40);
+            sample = { x: rx, y: ry };
             const i = nearest(rx, ry), n = nodes[i];
             const dx = rx - n.x, dy = ry - n.y, len = Math.hypot(dx, dy) || 1;
-            const x = n.x + 18 * dx / len, y = n.y + 18 * dy / len;
-            if (x < 0 || y < 0 || x > canvas.width || y > canvas.height || collide(x, y)) return false;
+            const stepLen = 16;
+            const x = n.x + stepLen * dx / len, y = n.y + stepLen * dy / len;
+            if (blocked(n.x, n.y, x, y)) return false;
             nodes.push({ x, y, parent: i });
-            if (Math.hypot(x - goal.x, y - goal.y) < 20) {
+            if (Math.hypot(x - goal.x, y - goal.y) < 22 && !blocked(x, y, goal.x, goal.y)) {
                 path = [{ x: goal.x, y: goal.y }];
                 let k = nodes.length - 1;
                 while (k >= 0) { path.push(nodes[k]); k = nodes[k].parent; }
                 growing = false;
-                document.getElementById('status').textContent = '到达目标，节点 ' + nodes.length;
+                document.getElementById('status').textContent = '到达，节点 ' + nodes.length;
                 return true;
             }
             return false;
         }
         async function grow() {
+            if (growing) return;
             growing = true;
-            document.getElementById('status').textContent = '生长中…';
-            for (let i = 0; i < 2500 && growing; i += 1) {
+            document.getElementById('status').textContent = '生长中';
+            for (let i = 0; i < 4000 && growing; i += 1) {
                 if (step()) break;
-                if (i % 8 === 0) { draw(); await new Promise((r) => setTimeout(r, 0)); }
+                if (i % 3 === 0) { draw(); await new Promise((r) => setTimeout(r, 8)); }
             }
             draw();
+            growing = false;
         }
-        canvas.onclick = (event) => {
-            obstacles.push({ x: event.offsetX, y: event.offsetY, r: 28 });
-            draw();
-        };
         document.getElementById('run').onclick = grow;
         document.getElementById('reset').onclick = () => {
-            nodes = [{ ...start, parent: -1 }]; path = []; growing = false;
+            growing = false; nodes = [{ ...start, parent: -1 }]; path = []; sample = null;
             document.getElementById('status').textContent = '';
             draw();
         };

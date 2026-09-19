@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>势场法 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人经典</a> / 势场</p>
+        <h1 class="text-3xl font-bold mb-3">人工势场</h1>
+        <p class="text-gray-600 mb-4">背景箭头是合力方向。U 形障碍会造成局部最小，机器人可能在凹处打转，而不是直线穿过去。点画布移动终点。</p>
+        <div class="demo-toolbar">
+            <button id="run" class="bg-primary text-white">运动</button>
+            <button id="reset" class="border">重置</button>
+            <span id="status" class="text-sm text-gray-500"></span>
+        </div>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <p class="text-sm mt-4"><a class="text-primary" href="../../robot-classic/014-potential-field.html">对照精读：势场法</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'robot-classic' });
+        const W = 900, H = 520, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        const start = { x: 80, y: 260 };
+        let goal = { x: 820, y: 260 }, robot = { x: start.x, y: start.y }, trail = [], running = false;
+        const obs = [
+            { x: 320, y: 160, r: 48 }, { x: 390, y: 250, r: 52 }, { x: 320, y: 340, r: 48 },
+            { x: 560, y: 120, r: 40 }, { x: 620, y: 260, r: 44 }, { x: 560, y: 400, r: 40 }
+        ];
+        function field(x, y) {
+            let fx = 1.6 * (goal.x - x) / 220, fy = 1.6 * (goal.y - y) / 220;
+            obs.forEach((o) => {
+                const dx = x - o.x, dy = y - o.y, d = Math.hypot(dx, dy) || 1;
+                const d0 = o.r + 70;
+                if (d < d0) {
+                    const mag = 2200 * (1 / d - 1 / d0) / (d * d);
+                    fx += mag * dx / d;
+                    fy += mag * dy / d;
+                }
+            });
+            return { fx, fy };
+        }
+        function draw() {
+            DemoKit.drawPanel(ctx, W, H);
+            for (let y = 30; y < H; y += 28) {
+                for (let x = 30; x < W; x += 28) {
+                    const f = field(x, y);
+                    const len = Math.hypot(f.fx, f.fy) || 1;
+                    const ux = f.fx / len * 10, uy = f.fy / len * 10;
+                    ctx.strokeStyle = 'rgba(148,163,184,0.28)';
+                    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + ux, y + uy); ctx.stroke();
+                }
+            }
+            ctx.fillStyle = '#334155';
+            obs.forEach((o) => { ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill(); });
+            ctx.strokeStyle = 'rgba(74,222,128,0.5)'; ctx.lineWidth = 2; ctx.beginPath();
+            trail.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
+            ctx.fillStyle = '#86efac'; ctx.beginPath(); ctx.arc(goal.x, goal.y, 9, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#38bdf8'; ctx.beginPath(); ctx.arc(robot.x, robot.y, 8, 0, Math.PI * 2); ctx.fill();
+        }
+        function tick() {
+            if (!running) return;
+            const f = field(robot.x, robot.y);
+            const len = Math.hypot(f.fx, f.fy) || 1;
+            robot.x += DemoKit.clamp(f.fx, -3.2, 3.2);
+            robot.y += DemoKit.clamp(f.fy, -3.2, 3.2);
+            trail.push({ x: robot.x, y: robot.y });
+            if (trail.length > 400) trail.shift();
+            if (Math.hypot(robot.x - goal.x, robot.y - goal.y) < 14) {
+                running = false;
+                document.getElementById('status').textContent = '到达终点';
+            } else if (len < 0.05) {
+                document.getElementById('status').textContent = '掉进局部最小';
+            }
+            draw();
+            if (running) requestAnimationFrame(tick);
+        }
+        document.getElementById('run').onclick = () => { if (!running) { running = true; tick(); } };
+        document.getElementById('reset').onclick = () => { running = false; robot = { x: start.x, y: start.y }; trail = []; document.getElementById('status').textContent = ''; draw(); };
+        document.getElementById('c').onclick = (event) => { goal = DemoKit.pointer(document.getElementById('c'), event, view); draw(); };
+        draw();
+    </script>
+</body>
+</html>

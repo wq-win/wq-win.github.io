@@ -16,93 +16,210 @@
     <main class="container mx-auto px-4 py-10 max-w-5xl">
         <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人学习</a> / DMP</p>
         <h1 class="text-3xl font-bold mb-3">DMP 运动基元</h1>
-        <p class="text-gray-600 mb-4">灰线是示范，绿线是改目标后的 DMP 重放。点画布设置新终点。形状由强迫项保持，终点由吸引子系统决定。</p>
-        <div class="flex flex-wrap gap-2 mb-4">
-            <button id="replay" class="px-4 py-2 bg-primary text-white rounded-md">重放</button>
-            <span id="status" class="self-center text-sm text-gray-500">点画布改目标</span>
+        <p class="text-gray-600 mb-4">灰线是示范，绿线是改目标后的重放。形状来自强迫项，不是直线插值。按住鼠标画一条新示范，再点终点看它如何被拉过去。</p>
+        <div class="demo-toolbar">
+            <button id="sine" class="border">拱形示范</button>
+            <button id="s" class="border">S 形示范</button>
+            <button id="play" class="bg-primary text-white">重放</button>
+            <span id="status" class="text-sm text-gray-500">可直接在画布上画</span>
         </div>
-        <canvas id="c" class="demo-canvas mb-4" width="720" height="420"></canvas>
-        <p class="text-sm"><a class="text-primary" href="../../robot-learn/001-dmp.html">对照精读：DMP</a></p>
+        <canvas id="c" class="demo-canvas"></canvas>
+        <p class="text-sm mt-4"><a class="text-primary" href="../../robot-learn/001-dmp.html">对照精读：DMP</a></p>
     </main>
     <div id="site-footer"></div>
     <script src="../../js/site-config.js"></script>
     <script src="../../js/site-chrome.js"></script>
+    <script src="../js/demo-kit.js"></script>
     <script>
         SeriesChrome.mount({ root: '../../', active: 'robot-learn' });
-        const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
-        const demo = [];
-        for (let i = 0; i <= 80; i += 1) {
-            const t = i / 80;
-            demo.push({ x: 80 + t * 420, y: 300 - Math.sin(t * Math.PI) * 160 });
-        }
-        const start = demo[0], demoGoal = demo[demo.length - 1];
-        let goal = { x: demoGoal.x + 80, y: demoGoal.y - 40 };
-        const K = 8, centers = [], weightsX = [], weightsY = [];
-        for (let i = 0; i < K; i += 1) centers.push(Math.exp(-2.5 * i / (K - 1)));
-        function psi(s, c) { return Math.exp(-40 * (s - c) ** 2); }
-        function fit() {
-            const alpha = 25, beta = 6.25, tau = 1;
-            const dt = 1 / (demo.length - 1);
-            for (let dim of ['x', 'y']) {
-                const w = dim === 'x' ? weightsX : weightsY;
-                w.length = 0;
-                for (let k = 0; k < K; k += 1) {
-                    let num = 0, den = 0;
-                    for (let i = 1; i < demo.length - 1; i += 1) {
-                        const s = Math.exp(-2.5 * i / (demo.length - 1));
-                        const y = demo[i][dim], yd = (demo[i + 1][dim] - demo[i - 1][dim]) / (2 * dt);
-                        const ydd = (demo[i + 1][dim] - 2 * y + demo[i - 1][dim]) / (dt * dt);
-                        const g = demoGoal[dim];
-                        const f = tau * tau * ydd - alpha * (beta * (g - y) - tau * yd);
-                        const p = psi(s, centers[k]);
-                        num += p * s * f;
-                        den += p * s * s;
-                    }
-                    w.push(den ? num / den : 0);
-                }
+        const W = 900, H = 520, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
+        const K = 40, alphaZ = 25, betaZ = alphaZ / 4, alphaS = 4;
+        let demo = [], goal, weights = { x: [], y: [] }, y0, g0, playing = false, playPath = [];
+        function makeSine() {
+            const pts = [];
+            for (let i = 0; i <= 180; i += 1) {
+                const t = i / 180;
+                pts.push({ x: 90 + t * 620, y: 380 - Math.sin(t * Math.PI) * 230 });
             }
+            return pts;
         }
-        function force(s, weights) {
+        function makeS() {
+            const pts = [];
+            for (let i = 0; i <= 200; i += 1) {
+                const t = i / 200;
+                pts.push({ x: 100 + t * 600 + Math.sin(t * Math.PI * 2) * 70, y: 90 + t * 330 });
+            }
+            return pts;
+        }
+        function resample(pts, n) {
+            if (pts.length < 2) return pts.slice();
+            let len = 0;
+            const acc = [0];
+            for (let i = 1; i < pts.length; i += 1) {
+                len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+                acc.push(len);
+            }
+            const out = [];
+            for (let i = 0; i < n; i += 1) {
+                const target = len * i / (n - 1);
+                let k = 1;
+                while (k < acc.length && acc[k] < target) k += 1;
+                const a = pts[k - 1], b = pts[Math.min(k, pts.length - 1)];
+                const span = acc[k] - acc[k - 1] || 1;
+                const u = (target - acc[k - 1]) / span;
+                out.push({ x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u });
+            }
+            return out;
+        }
+        function centers() {
+            const c = [];
+            for (let i = 0; i < K; i += 1) c.push(Math.exp(-alphaS * i / (K - 1)));
+            return c;
+        }
+        const C = centers();
+        function psi(s, c) { return Math.exp(-0.5 * Math.pow((s - c) / 0.045, 2)); }
+        function deriv(arr, dt) {
+            const d = [];
+            for (let i = 0; i < arr.length; i += 1) {
+                if (i === 0) d.push((arr[1] - arr[0]) / dt);
+                else if (i === arr.length - 1) d.push((arr[i] - arr[i - 1]) / dt);
+                else d.push((arr[i + 1] - arr[i - 1]) / (2 * dt));
+            }
+            return d;
+        }
+        function fitDim(values) {
+            const dt = 1 / (values.length - 1);
+            const yd = deriv(values, dt), ydd = deriv(yd, dt);
+            const g = values[values.length - 1], yStart = values[0];
+            const scale = g - yStart || 1e-3;
+            const w = [];
+            for (let k = 0; k < K; k += 1) {
+                let num = 0, den = 0;
+                for (let i = 0; i < values.length; i += 1) {
+                    const t = i / (values.length - 1);
+                    const s = Math.exp(-alphaS * t);
+                    const f = ydd[i] - alphaZ * (betaZ * (g - values[i]) - yd[i]);
+                    const p = psi(s, C[k]);
+                    const feat = s / scale;
+                    num += p * feat * f;
+                    den += p * feat * feat;
+                }
+                w.push(den > 1e-9 ? num / den : 0);
+            }
+            return w;
+        }
+        function force(s, w, scale) {
             let num = 0, den = 0;
             for (let k = 0; k < K; k += 1) {
-                const p = psi(s, centers[k]);
-                num += p * weights[k];
+                const p = psi(s, C[k]);
+                num += p * w[k];
                 den += p;
             }
-            return den ? (num / den) * s : 0;
+            return (den ? num / den : 0) * s * scale;
+        }
+        function integrate(dim, g) {
+            const n = 280, dt = 1 / (n - 1);
+            const start = y0[dim];
+            let y = start, yd = 0, s = 1;
+            const out = [y];
+            const scale = g - start;
+            for (let i = 1; i < n; i += 1) {
+                const f = force(s, weights[dim], scale);
+                const ydd = alphaZ * (betaZ * (g - y) - yd) + f;
+                yd += ydd * dt;
+                y += yd * dt;
+                s += -alphaS * s * dt;
+                out.push(y);
+            }
+            return out;
         }
         function rollout() {
-            const alpha = 25, beta = 6.25, dt = 0.012;
-            let x = start.x, y = start.y, xd = 0, yd = 0, s = 1;
-            const path = [{ x, y }];
-            for (let i = 0; i < 220; i += 1) {
-                const xdd = alpha * (beta * (goal.x - x) - xd) + force(s, weightsX);
-                const ydd = alpha * (beta * (goal.y - y) - yd) + force(s, weightsY);
-                xd += xdd * dt; yd += ydd * dt; x += xd * dt; y += yd * dt;
-                s += -2.5 * s * dt;
-                path.push({ x, y });
-            }
-            return path;
+            const xs = integrate('x', goal.x);
+            const ys = integrate('y', goal.y);
+            return xs.map((x, i) => ({ x: x, y: ys[i] }));
         }
-        function draw(path) {
-            ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.strokeStyle = '#64748b'; ctx.setLineDash([6, 6]); ctx.lineWidth = 2; ctx.beginPath();
-            demo.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
+        function setDemo(pts) {
+            demo = resample(pts, 160);
+            y0 = { x: demo[0].x, y: demo[0].y };
+            g0 = { x: demo[demo.length - 1].x, y: demo[demo.length - 1].y };
+            goal = { x: g0.x + 90, y: g0.y - 50 };
+            weights.x = fitDim(demo.map((p) => p.x));
+            weights.y = fitDim(demo.map((p) => p.y));
+            playPath = rollout();
+            draw();
+        }
+        function draw(cursor) {
+            DemoKit.drawPanel(ctx, W, H);
+            ctx.strokeStyle = '#64748b';
+            ctx.setLineDash([7, 6]);
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            demo.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+            ctx.stroke();
             ctx.setLineDash([]);
-            ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 3; ctx.beginPath();
-            path.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
-            ctx.fillStyle = '#60a5fa'; ctx.beginPath(); ctx.arc(start.x, start.y, 6, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(demoGoal.x, demoGoal.y, 5, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = '#34d399'; ctx.beginPath(); ctx.arc(goal.x, goal.y, 7, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = '#4ade80';
+            ctx.lineWidth = 3.5;
+            ctx.beginPath();
+            playPath.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+            ctx.stroke();
+            if (cursor) {
+                ctx.fillStyle = '#fbbf24';
+                ctx.beginPath(); ctx.arc(cursor.x, cursor.y, 7, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.fillStyle = '#38bdf8'; ctx.beginPath(); ctx.arc(y0.x, y0.y, 7, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(g0.x, g0.y, 6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#86efac'; ctx.beginPath(); ctx.arc(goal.x, goal.y, 8, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '13px ui-sans-serif';
+            ctx.fillText('灰：示范    绿：DMP    亮绿点：新目标', 24, 28);
         }
-        fit();
-        draw(rollout());
-        canvas.onclick = (event) => {
-            goal = { x: event.offsetX, y: event.offsetY };
-            draw(rollout());
-            document.getElementById('status').textContent = `新目标 (${Math.round(goal.x)}, ${Math.round(goal.y)})`;
+        async function play() {
+            const path = rollout();
+            playPath = [];
+            playing = true;
+            for (let i = 0; i < path.length; i += 4) {
+                playPath = path.slice(0, i + 1);
+                draw(path[i]);
+                await new Promise((r) => setTimeout(r, 12));
+            }
+            playPath = path;
+            playing = false;
+            draw();
+        }
+        let drawing = false, sketch = [], skipClick = false;
+        document.getElementById('c').onmousedown = (event) => {
+            drawing = true;
+            sketch = [DemoKit.pointer(document.getElementById('c'), event, view)];
         };
-        document.getElementById('replay').onclick = () => draw(rollout());
+        document.getElementById('c').onmousemove = (event) => {
+            if (!drawing) return;
+            sketch.push(DemoKit.pointer(document.getElementById('c'), event, view));
+            DemoKit.drawPanel(ctx, W, H);
+            ctx.strokeStyle = '#f8fafc'; ctx.lineWidth = 3; ctx.beginPath();
+            sketch.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+            ctx.stroke();
+        };
+        window.onmouseup = () => {
+            if (!drawing) return;
+            drawing = false;
+            if (sketch.length > 8) {
+                setDemo(sketch);
+                skipClick = true;
+                document.getElementById('status').textContent = '已用你画的轨迹拟合 DMP，再点终点';
+            }
+            sketch = [];
+        };
+        document.getElementById('c').onclick = (event) => {
+            if (skipClick) { skipClick = false; return; }
+            goal = DemoKit.pointer(document.getElementById('c'), event, view);
+            playPath = rollout();
+            draw();
+            document.getElementById('status').textContent = '新目标已设置';
+        };
+        document.getElementById('sine').onclick = () => setDemo(makeSine());
+        document.getElementById('s').onclick = () => setDemo(makeS());
+        document.getElementById('play').onclick = play;
+        setDemo(makeSine());
     </script>
 </body>
 </html>
