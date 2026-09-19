@@ -16,11 +16,11 @@
     <main class="container mx-auto px-4 py-10 max-w-5xl">
         <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人学习</a> / DAgger</p>
         <h1 class="text-3xl font-bold mb-3">行为克隆 vs DAgger</h1>
-        <p class="text-gray-600 mb-4">专家用前瞻纯追踪。学习者只做状态近邻查询：行为克隆的数据集全在路面上，一旦噪声把车带偏，最近的专家动作仍是“沿路走”而不是“回来”。DAgger 会在学习者自己走到的位置询问专家，红线冲出，绿线收回。</p>
+        <p class="text-gray-600 mb-4">灰带是路。红线只模仿专家在路上的动作，稍一偏就按“沿路开”把误差放大；绿线会在自己走偏的地方问专家怎么回来。噪声是测试扰动：拉大后红更容易冲出，绿仍应贴路，不该在坡顶打转。</p>
         <div class="demo-toolbar">
-            <button id="bc" class="border">只做行为克隆</button>
-            <button id="dagger" class="bg-primary text-white">跑 DAgger</button>
-            <button id="both" class="border">两条一起看</button>
+            <button id="run" class="bg-primary text-white">再跑一次</button>
+            <label>噪声 <input id="noise" type="range" min="2" max="30" value="14" data-scale="0.01" data-digits="2"></label>
+            <label>DAgger 轮数 <input id="rounds" type="range" min="4" max="12" value="8"></label>
             <span id="status" class="text-sm text-gray-500"></span>
         </div>
         <canvas id="c" class="demo-canvas"></canvas>
@@ -59,10 +59,16 @@
         }
         function expertSteer(p) {
             const near = nearestT(p);
-            const look = center(Math.min(1, near.t + 0.07));
-            const want = Math.atan2(look.y - p.y, look.x - p.x);
+            const tg = tangent(near.t);
+            const road = center(near.t);
+            const look = center(Math.min(1, near.t + 0.08));
+            const target = near.dist > 10
+                ? { x: road.x + tg.x * 34, y: road.y + tg.y * 34 }
+                : look;
+            const want = Math.atan2(target.y - p.y, target.x - p.x);
             const heading = Math.atan2(p.hy, p.hx);
-            return DemoKit.clamp(1.85 * wrap(want - heading), -0.42, 0.42);
+            const gain = near.dist > 10 ? 2.45 : 1.9;
+            return DemoKit.clamp(gain * wrap(want - heading), -0.48, 0.48);
         }
         function feat(p) {
             return [p.x, p.y, p.hx * 110, p.hy * 110];
@@ -77,9 +83,13 @@
             });
             scored.sort((a, b) => a.s - b.s);
             const n = Math.min(k, scored.length);
-            let sum = 0;
-            for (let i = 0; i < n; i += 1) sum += scored[i].a;
-            return sum / n;
+            let num = 0, den = 0;
+            for (let i = 0; i < n; i += 1) {
+                const w = 1 / (scored[i].s + 40);
+                num += w * scored[i].a;
+                den += w;
+            }
+            return den ? num / den : 0;
         }
         function startPose() {
             const p = center(0), tg = tangent(0);
@@ -88,26 +98,31 @@
         function run(steerFn, noise) {
             const p = startPose();
             const path = [{ x: p.x, y: p.y, hx: p.hx, hy: p.hy }];
-            let off = 0;
-            for (let i = 0; i < 280; i += 1) {
+            let off = 0, lastT = 0, stall = 0;
+            for (let i = 0; i < 340; i += 1) {
                 let a = steerFn(p);
                 if (noise) a += (Math.random() - 0.5) * noise;
-                a = DemoKit.clamp(a, -0.42, 0.42);
+                a = DemoKit.clamp(a, -0.48, 0.48);
                 const ang = Math.atan2(p.hy, p.hx) + a;
                 p.hx = Math.cos(ang); p.hy = Math.sin(ang);
                 p.x += p.hx * 3.05; p.y += p.hy * 3.05;
                 path.push({ x: p.x, y: p.y, hx: p.hx, hy: p.hy });
-                if (nearestT(p).dist > 22) off += 1;
-                if (p.x > 890 || p.y < 8 || p.y > 512) break;
+                const near = nearestT(p);
+                if (near.dist > 22) off += 1;
+                if (near.t + 0.003 < lastT) stall += 1; else stall = 0;
+                lastT = Math.max(lastT, near.t);
+                if (stall > 18 || p.x > 890 || p.y < 8 || p.y > 512) break;
             }
-            return { path: path, off: off };
+            const last = path[path.length - 1];
+            return { path: path, off: off, done: last.x >= 820 && nearestT(last).dist < 28 };
         }
         function expertData() {
             const path = run(expertSteer, 0).path;
             return path.map((p) => ({ f: feat(p), a: expertSteer(p), x: p.x, y: p.y }));
         }
-        let expertPath = [], bcPath = null, daggerPath = null;
-        function draw() {
+        let expertPath = [], bcPath = null, daggerPath = null, playing = false, bcResult = null, dgResult = null;
+        function draw(cut) {
+            const n = cut == null ? 9999 : cut;
             DemoKit.drawPanel(ctx, W, H);
             ctx.lineWidth = 36;
             ctx.strokeStyle = '#1e293b';
@@ -128,53 +143,69 @@
             ctx.stroke();
             function strokePath(path, color, width) {
                 if (!path || !path.length) return;
-                ctx.strokeStyle = color; ctx.lineWidth = width || 3; ctx.beginPath();
-                path.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+                const pts = path.slice(0, n);
+                if (!pts.length) return;
+                ctx.strokeStyle = color; ctx.lineWidth = width || 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+                ctx.beginPath();
+                pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
                 ctx.stroke();
+                const last = pts[pts.length - 1];
+                ctx.fillStyle = color;
+                ctx.beginPath(); ctx.arc(last.x, last.y, 7, 0, Math.PI * 2); ctx.fill();
+                return last;
             }
-            strokePath(expertPath, 'rgba(148,163,184,0.75)', 2.5);
-            strokePath(bcPath, '#f87171', 3.2);
-            strokePath(daggerPath, '#4ade80', 3.2);
+            strokePath(expertPath, 'rgba(148,163,184,0.55)', 2.5);
+            const bcLast = strokePath(bcPath, '#ef4444', 4);
+            const dgLast = strokePath(daggerPath, '#4ade80', 3.4);
+            ctx.font = '14px ui-sans-serif';
+            if (bcLast) DemoKit.strokeLabel(ctx, '红：行为克隆', bcLast.x - 86, bcLast.y - 14);
+            if (dgLast) DemoKit.strokeLabel(ctx, '绿：DAgger', dgLast.x + 12, dgLast.y + 18);
             ctx.fillStyle = '#94a3b8';
             ctx.font = '13px ui-sans-serif';
-            ctx.fillText('灰：专家    红：行为克隆    绿：DAgger', 24, 28);
+            ctx.fillText('灰带是路    红：只模仿专家    绿：走偏了会问专家', 24, 28);
         }
-        function summarize(label, result) {
-            const last = result.path[result.path.length - 1];
-            const left = last.x < 820;
-            return label + '：离路 ' + result.off + ' 步' + (left ? '，未跑完' : '');
-        }
-        document.getElementById('bc').onclick = () => {
+        function trainBc() {
+            const noise = DemoKit.rangeValue('noise');
             const data = expertData();
-            const result = run((p) => knnAct(data, p, 4), 0.12);
-            bcPath = result.path;
-            daggerPath = null;
-            draw();
-            document.getElementById('status').textContent = summarize('行为克隆', result);
-        };
-        document.getElementById('dagger').onclick = () => {
+            return run((p) => knnAct(data, p, 4), noise);
+        }
+        function trainDagger() {
+            const noise = DemoKit.rangeValue('noise');
+            const collect = Math.max(noise, 0.16);
+            const rounds = Math.round(DemoKit.rangeValue('rounds'));
             let data = expertData();
-            for (let round = 0; round < 8; round += 1) {
+            for (let round = 0; round < rounds; round += 1) {
                 const w = data.slice();
-                const path = run((p) => knnAct(w, p, 4), 0.12).path;
+                const path = run((p) => knnAct(w, p, 4), collect).path;
                 path.forEach((p) => data.push({ f: feat(p), a: expertSteer(p) }));
             }
-            const result = run((p) => knnAct(data, p, 4), 0.12);
-            daggerPath = result.path;
+            return run((p) => knnAct(data, p, 4), noise);
+        }
+        function phrase(result, color) {
+            if (result.off < 20) return color + '贴着路（离路 ' + result.off + ' 步）';
+            return color + '冲出赛道（离路 ' + result.off + ' 步）';
+        }
+        async function play() {
+            if (playing) return;
+            playing = true;
+            document.getElementById('status').textContent = '正在对比两条策略…';
+            bcResult = trainBc();
+            dgResult = trainDagger();
+            bcPath = bcResult.path;
+            daggerPath = dgResult.path;
+            const len = Math.max(bcPath.length, daggerPath.length);
+            for (let i = 2; i <= len; i += 3) {
+                draw(i);
+                await new Promise((r) => setTimeout(r, 12));
+            }
             draw();
-            document.getElementById('status').textContent = summarize('DAgger（8 轮）', result);
-        };
-        document.getElementById('both').onclick = () => {
-            document.getElementById('bc').click();
-            const keepBc = bcPath;
-            document.getElementById('dagger').click();
-            bcPath = keepBc;
-            draw();
-            document.getElementById('status').textContent = '红线只看过专家分布；绿线在自己走偏的地方问过专家';
-        };
+            document.getElementById('status').textContent = phrase(bcResult, '红') + ' · ' + phrase(dgResult, '绿');
+            playing = false;
+        }
+        document.getElementById('run').onclick = play;
         expertPath = run(expertSteer, 0).path;
         draw();
-        document.getElementById('status').textContent = '灰线是专家。先点行为克隆看它怎么冲出弯道。';
+        play();
     </script>
 </body>
 </html>

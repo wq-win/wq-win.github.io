@@ -132,6 +132,43 @@
         return '../' + item.cat + '/' + item.file + '.html';
     }
 
+    function rangeValue(idOrEl) {
+        const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+        if (!el) return 0;
+        return Number(el.value) * Number(el.dataset.scale || 1);
+    }
+
+    function paintRange(input) {
+        if (!input || !input.parentElement) return;
+        let out = input.parentElement.querySelector('.range-val');
+        if (!out) {
+            out = document.createElement('span');
+            out.className = 'range-val';
+            input.insertAdjacentElement('afterend', out);
+        }
+        const v = rangeValue(input);
+        const digits = input.dataset.digits != null
+            ? Number(input.dataset.digits)
+            : (Math.abs(Number(input.dataset.scale || 1)) < 1 ? 2 : 0);
+        out.textContent = v.toFixed(digits);
+    }
+
+    function frameDelay(baseMs) {
+        const el = document.getElementById('speed');
+        const speed = el ? Math.max(1, rangeValue(el)) : 12;
+        const ms = (baseMs == null ? 16 : baseMs) * 12 / speed;
+        return Math.max(4, Math.min(48, Math.round(ms)));
+    }
+
+    function mountRanges() {
+        document.querySelectorAll('.demo-toolbar input[type=range]').forEach((input) => {
+            paintRange(input);
+            if (input.dataset.boundVal) return;
+            input.dataset.boundVal = '1';
+            input.addEventListener('input', () => paintRange(input));
+        });
+    }
+
     function mountNav() {
         const path = String(location.pathname || '').replace(/\\/g, '/');
         const match = path.match(/\/game\/(rl|llm|robot-classic|robot-learn)\/([^/]+)\.html$/);
@@ -197,10 +234,14 @@
         document.body.classList.add('has-demo-rail');
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', mountNav);
-    } else {
+    function boot() {
         mountNav();
+        mountRanges();
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot);
+    } else {
+        boot();
     }
 
     global.DemoKit = {
@@ -215,6 +256,9 @@
         strokeLabel: strokeLabel,
         segmentHitsCircle: segmentHitsCircle,
         segmentHitsRect: segmentHitsRect,
+        rangeValue: rangeValue,
+        frameDelay: frameDelay,
+        mountRanges: mountRanges,
         mountNav: mountNav,
         parseMaze: function (rows) {
             const h = rows.length;

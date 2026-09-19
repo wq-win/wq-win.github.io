@@ -19,8 +19,11 @@
         <p class="text-gray-600 mb-4">灰点是目标形状，橙点是被旋转、平移并加了噪声的扫描。每一步：最近邻对应 → 用 2D 的 Horn 法求刚体变换 → 把扫描拉过去。细线是当前对应。</p>
         <div class="demo-toolbar">
             <button id="step" class="bg-primary text-white">迭代一步</button>
-            <button id="run" class="border">连续 12 步</button>
+            <button id="run" class="border">连续迭代</button>
             <button id="reset" class="border">打乱重来</button>
+            <label>初转角 <input id="ang" type="range" min="5" max="70" value="25"></label>
+            <label>噪声 <input id="noise" type="range" min="0" max="20" value="5"></label>
+            <label>速度 <input id="speed" type="range" min="1" max="20" value="8"></label>
             <span id="status" class="text-sm text-gray-500"></span>
         </div>
         <canvas id="c" class="demo-canvas"></canvas>
@@ -33,7 +36,7 @@
     <script>
         SeriesChrome.mount({ root: '../../', active: 'robot-classic' });
         const W = 900, H = 520, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
-        let target = [], source = [], iter = 0, mean = 0, pairs = [];
+        let target = [], source = [], iter = 0, mean = 0, pairs = [], jitter = [];
         function shape() {
             const pts = [];
             for (let i = 0; i <= 28; i += 1) pts.push({ x: 360, y: 130 + i * 9 });
@@ -64,13 +67,19 @@
             });
             return { q: best, d: Math.sqrt(d) };
         }
+        function scramble() {
+            jitter = shape().map(() => ({ x: Math.random(), y: Math.random(), t: Math.random() }));
+            reset();
+        }
         function reset() {
+            if (!jitter.length) jitter = shape().map(() => ({ x: Math.random(), y: Math.random(), t: Math.random() }));
             target = shape();
             const mid = meanPt(target);
-            const ang = 0.32 + Math.random() * 0.22;
-            source = rotateAround(shape(), ang, mid.x, mid.y).map((p) => ({
-                x: p.x + 80 + Math.random() * 20 + (Math.random() - 0.5) * 5,
-                y: p.y - 50 + (Math.random() - 0.5) * 5
+            const ang = DemoKit.rangeValue('ang') * Math.PI / 180;
+            const noise = DemoKit.rangeValue('noise');
+            source = rotateAround(shape(), ang, mid.x, mid.y).map((p, i) => ({
+                x: p.x + 70 + jitter[i].t * 30 + (jitter[i].x - 0.5) * noise,
+                y: p.y - 50 + (jitter[i].y - 0.5) * noise
             }));
             iter = 0;
             pairs = [];
@@ -130,14 +139,16 @@
             ctx.fillText('灰：目标    橙：扫描', 24, 28);
         }
         document.getElementById('step').onclick = iterate;
-        document.getElementById('reset').onclick = reset;
+        document.getElementById('reset').onclick = scramble;
+        document.getElementById('ang').oninput = reset;
+        document.getElementById('noise').oninput = reset;
         document.getElementById('run').onclick = async () => {
             for (let i = 0; i < 12; i += 1) {
                 iterate();
-                await new Promise((r) => setTimeout(r, 120));
+                await new Promise((r) => setTimeout(r, DemoKit.frameDelay(24)));
             }
         };
-        reset();
+        scramble();
     </script>
 </body>
 </html>

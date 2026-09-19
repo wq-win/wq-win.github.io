@@ -16,11 +16,13 @@
     <main class="container mx-auto px-4 py-10 max-w-5xl">
         <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人学习</a> / 域随机化</p>
         <h1 class="text-3xl font-bold mb-3">域随机化</h1>
-        <p class="text-gray-600 mb-4">质点要飞向绿色方块，但测试时质量会变大。红线只用质量=1 时合适的增益，同样时间内还在半路；绿线把多种质量上的增益平均起来，能更靠近目标。</p>
+        <p class="text-gray-600 mb-4">打开就会飞。红点只用质量=1 时的增益，质量变大后同样时间内还在半路；绿点把多种质量上的增益平均起来，能更靠近目标。点画布改终点。</p>
         <div class="demo-toolbar">
-            <button id="fit" class="bg-primary text-white">训练两种策略</button>
-            <button id="test" class="border">在新环境测试</button>
-            <span id="status" class="text-sm text-gray-500">先训练，再测试</span>
+            <button id="run" class="bg-primary text-white">再跑一次</button>
+            <label>质量 <input id="mass" type="range" min="28" max="60" value="34" data-scale="0.1" data-digits="1"></label>
+            <label>风力 <input id="wind" type="range" min="0" max="30" value="14"></label>
+            <label>Kp <input id="kp" type="range" min="8" max="30" value="12" data-scale="0.1" data-digits="1"></label>
+            <span id="status" class="text-sm text-gray-500"></span>
         </div>
         <canvas id="c" class="demo-canvas"></canvas>
         <p class="text-sm mt-4"><a class="text-primary" href="../../robot-learn/018-domain-randomization.html">对照精读：Domain Randomization</a></p>
@@ -33,10 +35,11 @@
         SeriesChrome.mount({ root: '../../', active: 'robot-learn' });
         const W = 900, H = 520, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
         const start = { x: 110, y: 380, vx: 0, vy: 0 };
-        const goal = { x: 680, y: 130 };
-        const dt = 0.05, kp = 1.2, kd = 2.2;
-        let scaleBC = 1, scaleDR = 1.5, bcPath = [], drPath = [], test = { mass: 2.2, wind: 18 }, trained = false;
+        let goal = { x: 680, y: 130 };
+        const dt = 0.05, kd = 2.2;
+        let scaleBC = 1, scaleDR = 1.5, bcPath = [], drPath = [], test = { mass: 3.4, wind: 14 }, playing = false;
         function control(s, scale) {
+            const kp = DemoKit.rangeValue('kp');
             return [
                 scale * (kp * (goal.x - s.x) - kd * s.vx),
                 scale * (kp * (goal.y - s.y) - kd * s.vy)
@@ -66,59 +69,88 @@
             const p = path[path.length - 1];
             return Math.hypot(p.x - goal.x, p.y - goal.y);
         }
-        function draw() {
+        function draw(cut) {
+            const n = cut == null ? 9999 : cut;
+            const bc = bcPath.slice(0, n);
+            const dr = drPath.slice(0, n);
             DemoKit.drawPanel(ctx, W, H);
-            ctx.fillStyle = '#1e293b';
-            DemoKit.roundRect(ctx, goal.x - 16, goal.y - 16, 32, 32, 6);
+            ctx.fillStyle = '#14532d';
+            DemoKit.roundRect(ctx, goal.x - 18, goal.y - 18, 36, 36, 6);
             ctx.fill();
             ctx.strokeStyle = '#4ade80';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(goal.x - 16, goal.y - 16, 32, 32);
-            function strokePath(path, color) {
+            ctx.lineWidth = 3;
+            ctx.strokeRect(goal.x - 18, goal.y - 18, 36, 36);
+            ctx.fillStyle = '#bbf7d0';
+            ctx.font = '13px ui-sans-serif';
+            ctx.fillText('目标', goal.x - 14, goal.y - 26);
+            function strokePath(path, color, width) {
                 if (!path.length) return;
                 ctx.strokeStyle = color;
-                ctx.lineWidth = 3;
+                ctx.lineWidth = width;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
                 ctx.beginPath();
                 path.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
                 ctx.stroke();
-                const last = path[path.length - 1];
-                ctx.fillStyle = color;
-                ctx.beginPath(); ctx.arc(last.x, last.y, 6, 0, Math.PI * 2); ctx.fill();
             }
-            strokePath(bcPath, '#f87171');
-            strokePath(drPath, '#4ade80');
+            strokePath(bc, '#ef4444', 5);
+            strokePath(dr, '#4ade80', 4);
+            if (bc.length) {
+                const p = bc[bc.length - 1];
+                ctx.fillStyle = '#ef4444';
+                ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, Math.PI * 2); ctx.fill();
+                ctx.font = '14px ui-sans-serif';
+                DemoKit.strokeLabel(ctx, '红：单环境', p.x - 78, p.y + 22);
+            }
+            if (dr.length) {
+                const p = dr[dr.length - 1];
+                ctx.fillStyle = '#4ade80';
+                ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, Math.PI * 2); ctx.fill();
+                ctx.font = '14px ui-sans-serif';
+                DemoKit.strokeLabel(ctx, '绿：域随机化', p.x + 14, p.y - 12);
+            }
             ctx.fillStyle = '#38bdf8';
             ctx.beginPath(); ctx.arc(start.x, start.y, 7, 0, Math.PI * 2); ctx.fill();
-            ctx.strokeStyle = '#7dd3fc';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(40, 80);
-            ctx.lineTo(40 + test.wind * 1.4, 80);
-            ctx.stroke();
-            ctx.fillStyle = '#94a3b8';
+            ctx.fillStyle = '#e2e8f0';
             ctx.font = '13px ui-sans-serif';
-            ctx.fillText('红：只在质量=1 上学的增益    绿：在随机质量上平均后的增益    风 →  质量 ' + test.mass.toFixed(2), 24, 28);
+            ctx.fillText('质量 ' + test.mass.toFixed(2) + ' · 红线停得更远，绿线更靠近目标', 24, 28);
         }
-        document.getElementById('fit').onclick = () => {
+        async function run() {
+            if (playing) return;
+            playing = true;
             scaleBC = 1;
             let sum = 0;
             for (let i = 0; i < 24; i += 1) sum += 1.15 + Math.random() * 1.2;
             scaleDR = sum / 24;
-            trained = true;
-            bcPath = [];
-            drPath = [];
-            draw();
-            document.getElementById('status').textContent = '单环境增益 1.0，域随机化平均增益 ' + scaleDR.toFixed(2) + '，再点测试';
-        };
-        document.getElementById('test').onclick = () => {
-            if (!trained) document.getElementById('fit').click();
-            test = { mass: 3.2 + Math.random() * 0.4, wind: 12 + Math.random() * 8 };
+            test = { mass: DemoKit.rangeValue('mass'), wind: DemoKit.rangeValue('wind') };
             bcPath = rollout(scaleBC, test.mass, test.wind);
             drPath = rollout(scaleDR, test.mass, test.wind);
+            for (let i = 1; i <= bcPath.length; i += 2) {
+                draw(i);
+                await new Promise((r) => setTimeout(r, 16));
+            }
             draw();
-            document.getElementById('status').textContent = '测试质量 ' + test.mass.toFixed(2) + '、风力 ' + test.wind.toFixed(0) + ' · 红终点距 ' + dist(bcPath).toFixed(0) + ' · 绿终点距 ' + dist(drPath).toFixed(0);
+            playing = false;
+            document.getElementById('status').textContent = '红终点距 ' + dist(bcPath).toFixed(0) + ' · 绿终点距 ' + dist(drPath).toFixed(0);
+        }
+        document.getElementById('run').onclick = run;
+        document.getElementById('c').onclick = (event) => {
+            goal = DemoKit.pointer(document.getElementById('c'), event, view);
+            goal.x = DemoKit.clamp(goal.x, 40, W - 40);
+            goal.y = DemoKit.clamp(goal.y, 40, H - 40);
+            run();
         };
-        draw();
+        ['mass', 'wind', 'kp'].forEach((id) => {
+            document.getElementById(id).addEventListener('input', () => {
+                if (playing) return;
+                test = { mass: DemoKit.rangeValue('mass'), wind: DemoKit.rangeValue('wind') };
+                bcPath = rollout(1, test.mass, test.wind);
+                drPath = rollout(scaleDR, test.mass, test.wind);
+                draw();
+                document.getElementById('status').textContent = '红终点距 ' + dist(bcPath).toFixed(0) + ' · 绿终点距 ' + dist(drPath).toFixed(0);
+            });
+        });
+        run();
     </script>
 </body>
 </html>
