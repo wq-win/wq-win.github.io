@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DMP 运动基元 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人学习</a> / DMP</p>
+        <h1 class="text-3xl font-bold mb-3">DMP 运动基元</h1>
+        <p class="text-gray-600 mb-4">灰线是示范，绿线是改目标后的 DMP 重放。点画布设置新终点。形状由强迫项保持，终点由吸引子系统决定。</p>
+        <div class="flex flex-wrap gap-2 mb-4">
+            <button id="replay" class="px-4 py-2 bg-primary text-white rounded-md">重放</button>
+            <span id="status" class="self-center text-sm text-gray-500">点画布改目标</span>
+        </div>
+        <canvas id="c" class="demo-canvas mb-4" width="720" height="420"></canvas>
+        <p class="text-sm"><a class="text-primary" href="../../robot-learn/001-dmp.html">对照精读：DMP</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'robot-learn' });
+        const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+        const demo = [];
+        for (let i = 0; i <= 80; i += 1) {
+            const t = i / 80;
+            demo.push({ x: 80 + t * 420, y: 300 - Math.sin(t * Math.PI) * 160 });
+        }
+        const start = demo[0], demoGoal = demo[demo.length - 1];
+        let goal = { x: demoGoal.x + 80, y: demoGoal.y - 40 };
+        const K = 8, centers = [], weightsX = [], weightsY = [];
+        for (let i = 0; i < K; i += 1) centers.push(Math.exp(-2.5 * i / (K - 1)));
+        function psi(s, c) { return Math.exp(-40 * (s - c) ** 2); }
+        function fit() {
+            const alpha = 25, beta = 6.25, tau = 1;
+            const dt = 1 / (demo.length - 1);
+            for (let dim of ['x', 'y']) {
+                const w = dim === 'x' ? weightsX : weightsY;
+                w.length = 0;
+                for (let k = 0; k < K; k += 1) {
+                    let num = 0, den = 0;
+                    for (let i = 1; i < demo.length - 1; i += 1) {
+                        const s = Math.exp(-2.5 * i / (demo.length - 1));
+                        const y = demo[i][dim], yd = (demo[i + 1][dim] - demo[i - 1][dim]) / (2 * dt);
+                        const ydd = (demo[i + 1][dim] - 2 * y + demo[i - 1][dim]) / (dt * dt);
+                        const g = demoGoal[dim];
+                        const f = tau * tau * ydd - alpha * (beta * (g - y) - tau * yd);
+                        const p = psi(s, centers[k]);
+                        num += p * s * f;
+                        den += p * s * s;
+                    }
+                    w.push(den ? num / den : 0);
+                }
+            }
+        }
+        function force(s, weights) {
+            let num = 0, den = 0;
+            for (let k = 0; k < K; k += 1) {
+                const p = psi(s, centers[k]);
+                num += p * weights[k];
+                den += p;
+            }
+            return den ? (num / den) * s : 0;
+        }
+        function rollout() {
+            const alpha = 25, beta = 6.25, dt = 0.012;
+            let x = start.x, y = start.y, xd = 0, yd = 0, s = 1;
+            const path = [{ x, y }];
+            for (let i = 0; i < 220; i += 1) {
+                const xdd = alpha * (beta * (goal.x - x) - xd) + force(s, weightsX);
+                const ydd = alpha * (beta * (goal.y - y) - yd) + force(s, weightsY);
+                xd += xdd * dt; yd += ydd * dt; x += xd * dt; y += yd * dt;
+                s += -2.5 * s * dt;
+                path.push({ x, y });
+            }
+            return path;
+        }
+        function draw(path) {
+            ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = '#64748b'; ctx.setLineDash([6, 6]); ctx.lineWidth = 2; ctx.beginPath();
+            demo.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 3; ctx.beginPath();
+            path.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
+            ctx.fillStyle = '#60a5fa'; ctx.beginPath(); ctx.arc(start.x, start.y, 6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(demoGoal.x, demoGoal.y, 5, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#34d399'; ctx.beginPath(); ctx.arc(goal.x, goal.y, 7, 0, Math.PI * 2); ctx.fill();
+        }
+        fit();
+        draw(rollout());
+        canvas.onclick = (event) => {
+            goal = { x: event.offsetX, y: event.offsetY };
+            draw(rollout());
+            document.getElementById('status').textContent = `新目标 (${Math.round(goal.x)}, ${Math.round(goal.y)})`;
+        };
+        document.getElementById('replay').onclick = () => draw(rollout());
+    </script>
+</body>
+</html>

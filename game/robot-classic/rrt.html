@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RRT 路径树 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人经典</a> / RRT</p>
+        <h1 class="text-3xl font-bold mb-3">RRT 路径树</h1>
+        <p class="text-gray-600 mb-4">随机采样、找最近节点、沿该方向走一步。点画布添加圆形障碍。这是基础 RRT，不保证最优。</p>
+        <div class="flex flex-wrap gap-2 mb-4">
+            <button id="run" class="px-4 py-2 bg-primary text-white rounded-md">生长</button>
+            <button id="reset" class="px-4 py-2 border rounded-md">重置</button>
+            <span id="status" class="self-center text-sm text-gray-500"></span>
+        </div>
+        <canvas id="c" class="demo-canvas mb-4" width="720" height="420"></canvas>
+        <p class="text-sm"><a class="text-primary" href="../../robot-classic/040-rrt.html">对照精读：RRT</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'robot-classic' });
+        const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+        const start = { x: 40, y: 210 }, goal = { x: 680, y: 210 };
+        let nodes = [{ ...start, parent: -1 }];
+        let obstacles = [{ x: 260, y: 210, r: 55 }, { x: 430, y: 120, r: 48 }, { x: 430, y: 300, r: 48 }];
+        let path = [], growing = false;
+        function collide(x, y) {
+            return obstacles.some((o) => (x - o.x) ** 2 + (y - o.y) ** 2 < (o.r + 4) ** 2);
+        }
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            obstacles.forEach((o) => { ctx.fillStyle = '#64748b'; ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill(); });
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 1;
+            for (let i = 1; i < nodes.length; i += 1) {
+                const p = nodes[nodes[i].parent];
+                ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(nodes[i].x, nodes[i].y); ctx.stroke();
+            }
+            if (path.length) {
+                ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 3; ctx.beginPath();
+                path.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+                ctx.stroke();
+            }
+            ctx.fillStyle = '#60a5fa'; ctx.beginPath(); ctx.arc(start.x, start.y, 6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#34d399'; ctx.beginPath(); ctx.arc(goal.x, goal.y, 8, 0, Math.PI * 2); ctx.fill();
+        }
+        function nearest(x, y) {
+            let best = 0, bestD = Infinity;
+            nodes.forEach((n, i) => {
+                const d = (n.x - x) ** 2 + (n.y - y) ** 2;
+                if (d < bestD) { bestD = d; best = i; }
+            });
+            return best;
+        }
+        function step() {
+            const rx = Math.random() < 0.08 ? goal.x : Math.random() * canvas.width;
+            const ry = Math.random() < 0.08 ? goal.y : Math.random() * canvas.height;
+            const i = nearest(rx, ry), n = nodes[i];
+            const dx = rx - n.x, dy = ry - n.y, len = Math.hypot(dx, dy) || 1;
+            const x = n.x + 18 * dx / len, y = n.y + 18 * dy / len;
+            if (x < 0 || y < 0 || x > canvas.width || y > canvas.height || collide(x, y)) return false;
+            nodes.push({ x, y, parent: i });
+            if (Math.hypot(x - goal.x, y - goal.y) < 20) {
+                path = [{ x: goal.x, y: goal.y }];
+                let k = nodes.length - 1;
+                while (k >= 0) { path.push(nodes[k]); k = nodes[k].parent; }
+                growing = false;
+                document.getElementById('status').textContent = '到达目标，节点 ' + nodes.length;
+                return true;
+            }
+            return false;
+        }
+        async function grow() {
+            growing = true;
+            document.getElementById('status').textContent = '生长中…';
+            for (let i = 0; i < 2500 && growing; i += 1) {
+                if (step()) break;
+                if (i % 8 === 0) { draw(); await new Promise((r) => setTimeout(r, 0)); }
+            }
+            draw();
+        }
+        canvas.onclick = (event) => {
+            obstacles.push({ x: event.offsetX, y: event.offsetY, r: 28 });
+            draw();
+        };
+        document.getElementById('run').onclick = grow;
+        document.getElementById('reset').onclick = () => {
+            nodes = [{ ...start, parent: -1 }]; path = []; growing = false;
+            document.getElementById('status').textContent = '';
+            draw();
+        };
+        draw();
+    </script>
+</body>
+</html>

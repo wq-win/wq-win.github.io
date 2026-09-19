@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Q-learning 格子世界 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">强化学习</a> / Q-learning</p>
+        <h1 class="text-3xl font-bold mb-3">Q-learning 格子世界</h1>
+        <p class="text-gray-600 mb-4">点格子切换障碍。学习时用 <code>Q(s,a) ← Q + α[r + γ max Q(s′,a′) − Q]</code>。箭头是当前贪心策略，不是最优保证。</p>
+        <div class="flex flex-wrap gap-2 mb-4">
+            <button id="run" class="px-4 py-2 bg-primary text-white rounded-md">开始学习</button>
+            <button id="pause" class="px-4 py-2 border rounded-md">暂停</button>
+            <button id="reset" class="px-4 py-2 border rounded-md">重置 Q</button>
+            <span id="status" class="self-center text-sm text-gray-500">回合 0</span>
+        </div>
+        <div id="board" class="demo-grid mb-4"></div>
+        <p class="text-sm"><a class="text-primary" href="../../rl/04-q-learning.html">对照精读：Q-learning</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'rl' });
+        const N = 8, ACTIONS = [[0,-1],[1,0],[0,1],[-1,0]], ARROWS = ['↑','→','↓','←'];
+        const start = [0, 0], goal = [N - 1, N - 1];
+        let walls = new Set(['3,3','3,4','4,3']);
+        let Q = {}, episode = 0, running = false, agent = start.slice();
+        function key(x, y) { return x + ',' + y; }
+        function qs(s) { if (!Q[s]) Q[s] = [0, 0, 0, 0]; return Q[s]; }
+        function blocked(x, y) { return x < 0 || y < 0 || x >= N || y >= N || walls.has(key(x, y)); }
+        function greedy(s) {
+            const values = qs(s);
+            let best = 0;
+            for (let i = 1; i < 4; i += 1) if (values[i] > values[best]) best = i;
+            return best;
+        }
+        function render() {
+            const board = document.getElementById('board');
+            board.style.gridTemplateColumns = `repeat(${N}, 32px)`;
+            board.innerHTML = '';
+            for (let y = 0; y < N; y += 1) {
+                for (let x = 0; x < N; x += 1) {
+                    const cell = document.createElement('div');
+                    cell.className = 'demo-cell';
+                    const s = key(x, y);
+                    if (walls.has(s)) { cell.style.background = '#111827'; cell.style.color = '#fff'; cell.textContent = ''; }
+                    else if (x === start[0] && y === start[1]) { cell.style.background = '#93c5fd'; cell.textContent = 'S'; }
+                    else if (x === goal[0] && y === goal[1]) { cell.style.background = '#86efac'; cell.textContent = 'G'; }
+                    else {
+                        const a = greedy(s);
+                        const v = Math.max(...qs(s));
+                        cell.textContent = v === 0 ? '' : ARROWS[a];
+                        cell.style.background = v > 0 ? `rgba(37,99,235,${Math.min(0.15 + v, 0.7)})` : '#f8fafc';
+                    }
+                    if (agent[0] === x && agent[1] === y) cell.style.outline = '2px solid #f59e0b';
+                    cell.onclick = () => {
+                        if ((x === start[0] && y === start[1]) || (x === goal[0] && y === goal[1])) return;
+                        if (walls.has(s)) walls.delete(s); else walls.add(s);
+                        render();
+                    };
+                    board.appendChild(cell);
+                }
+            }
+            document.getElementById('status').textContent = '回合 ' + episode;
+        }
+        function stepEpisode() {
+            let s = start.slice();
+            for (let t = 0; t < 80; t += 1) {
+                const sk = key(s[0], s[1]);
+                const a = Math.random() < 0.2 ? Math.floor(Math.random() * 4) : greedy(sk);
+                let nx = s[0] + ACTIONS[a][0], ny = s[1] + ACTIONS[a][1];
+                let r = -0.04;
+                if (blocked(nx, ny)) { nx = s[0]; ny = s[1]; r = -0.2; }
+                if (nx === goal[0] && ny === goal[1]) r = 1;
+                const nk = key(nx, ny);
+                const target = (nx === goal[0] && ny === goal[1]) ? r : r + 0.95 * Math.max(...qs(nk));
+                qs(sk)[a] += 0.3 * (target - qs(sk)[a]);
+                s = [nx, ny];
+                if (r === 1) break;
+            }
+            agent = s;
+            episode += 1;
+            render();
+            if (running) setTimeout(stepEpisode, 40);
+        }
+        document.getElementById('run').onclick = () => { running = true; stepEpisode(); };
+        document.getElementById('pause').onclick = () => { running = false; };
+        document.getElementById('reset').onclick = () => { Q = {}; episode = 0; agent = start.slice(); running = false; render(); };
+        render();
+    </script>
+</body>
+</html>

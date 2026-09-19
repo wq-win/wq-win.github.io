@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A* 寻路 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人经典</a> / A*</p>
+        <h1 class="text-3xl font-bold mb-3">A* 寻路</h1>
+        <p class="text-gray-600 mb-4">点格子切换障碍。搜索按 <code>f = g + h</code>，h 是曼哈顿距离。黄格是 open set，蓝格是已扩展，绿线是最终路径。</p>
+        <div class="flex flex-wrap gap-2 mb-4">
+            <button id="run" class="px-4 py-2 bg-primary text-white rounded-md">搜索</button>
+            <button id="clear" class="px-4 py-2 border rounded-md">清空障碍</button>
+            <span id="status" class="self-center text-sm text-gray-500"></span>
+        </div>
+        <div id="board" class="demo-grid mb-4"></div>
+        <p class="text-sm"><a class="text-primary" href="../../robot-classic/003-astar.html">对照精读：A*</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'robot-classic' });
+        const N = 16, start = [0, 0], goal = [15, 15];
+        let walls = new Set(['4,1','4,2','4,3','4,4','4,5','8,6','8,7','8,8','8,9','8,10','11,11','12,11','13,11']);
+        let paint = {};
+        function key(x, y) { return x + ',' + y; }
+        function render() {
+            const board = document.getElementById('board');
+            board.style.gridTemplateColumns = `repeat(${N}, 22px)`;
+            board.innerHTML = '';
+            for (let y = 0; y < N; y += 1) {
+                for (let x = 0; x < N; x += 1) {
+                    const cell = document.createElement('div');
+                    cell.className = 'demo-cell';
+                    cell.style.width = '22px';
+                    cell.style.height = '22px';
+                    const s = key(x, y);
+                    if (walls.has(s)) cell.style.background = '#111827';
+                    else if (x === start[0] && y === start[1]) cell.style.background = '#60a5fa';
+                    else if (x === goal[0] && y === goal[1]) cell.style.background = '#34d399';
+                    else if (paint[s] === 'path') cell.style.background = '#4ade80';
+                    else if (paint[s] === 'closed') cell.style.background = '#93c5fd';
+                    else if (paint[s] === 'open') cell.style.background = '#fde68a';
+                    cell.onclick = () => {
+                        if ((x === start[0] && y === start[1]) || (x === goal[0] && y === goal[1])) return;
+                        if (walls.has(s)) walls.delete(s); else walls.add(s);
+                        paint = {};
+                        render();
+                    };
+                    board.appendChild(cell);
+                }
+            }
+        }
+        function h(x, y) { return Math.abs(x - goal[0]) + Math.abs(y - goal[1]); }
+        async function search() {
+            paint = {};
+            const open = [{ x: start[0], y: start[1], g: 0, f: h(start[0], start[1]) }];
+            const came = {};
+            const gScore = { [key(start[0], start[1])]: 0 };
+            const seen = new Set();
+            while (open.length) {
+                open.sort((a, b) => a.f - b.f);
+                const cur = open.shift();
+                const ck = key(cur.x, cur.y);
+                if (seen.has(ck)) continue;
+                seen.add(ck);
+                paint[ck] = 'closed';
+                if (cur.x === goal[0] && cur.y === goal[1]) {
+                    let p = ck;
+                    while (came[p]) { paint[p] = 'path'; p = came[p]; }
+                    paint[key(start[0], start[1])] = 'path';
+                    document.getElementById('status').textContent = '路径代价 ' + cur.g;
+                    render();
+                    return;
+                }
+                [[0,-1],[1,0],[0,1],[-1,0]].forEach(([dx, dy]) => {
+                    const nx = cur.x + dx, ny = cur.y + dy, nk = key(nx, ny);
+                    if (nx < 0 || ny < 0 || nx >= N || ny >= N || walls.has(nk)) return;
+                    const g = cur.g + 1;
+                    if (g < (gScore[nk] === undefined ? Infinity : gScore[nk])) {
+                        gScore[nk] = g;
+                        came[nk] = ck;
+                        open.push({ x: nx, y: ny, g, f: g + h(nx, ny) });
+                        if (!seen.has(nk)) paint[nk] = 'open';
+                    }
+                });
+                render();
+                await new Promise((r) => setTimeout(r, 12));
+            }
+            document.getElementById('status').textContent = '无路径';
+            render();
+        }
+        document.getElementById('run').onclick = search;
+        document.getElementById('clear').onclick = () => { walls = new Set(); paint = {}; render(); };
+        render();
+    </script>
+</body>
+</html>

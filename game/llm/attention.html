@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>注意力可视化 | MyLog</title>
+    <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../css/style.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#3b82f6' } } } };</script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../../rss.xml">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-10 max-w-5xl">
+        <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">大语言模型</a> / 注意力</p>
+        <h1 class="text-3xl font-bold mb-3">注意力可视化</h1>
+        <p class="text-gray-600 mb-4">按空格分词，用位置和字符构造嵌入，再计算 <code>softmax(QKᵀ / √d)</code>。这是机制演示，不是训练过的语言模型。</p>
+        <div class="flex gap-2 mb-4">
+            <input id="sentence" value="the cat sat on the mat" class="flex-1 px-3 py-2 border rounded-md">
+            <button id="run" class="px-4 py-2 bg-primary text-white rounded-md">计算</button>
+        </div>
+        <canvas id="heat" class="demo-canvas mb-3" width="720" height="420"></canvas>
+        <p id="explain" class="text-sm text-gray-500 mb-4">点某一行，看该词把权重分给哪些位置。</p>
+        <p class="text-sm"><a class="text-primary" href="../../llm/007-attention.html">对照精读：注意力</a> · <a class="text-primary" href="../../llm/015-transformer.html">Transformer</a></p>
+    </main>
+    <div id="site-footer"></div>
+    <script src="../../js/site-config.js"></script>
+    <script src="../../js/site-chrome.js"></script>
+    <script>
+        SeriesChrome.mount({ root: '../../', active: 'llm' });
+        let tokens = [], weights = [], selected = 0;
+        function softmax(rows) {
+            return rows.map((row) => {
+                const m = Math.max.apply(null, row);
+                const ex = row.map((v) => Math.exp(v - m));
+                const s = ex.reduce((a, b) => a + b, 0);
+                return ex.map((v) => v / s);
+            });
+        }
+        function embed(tokens) {
+            const d = 12;
+            return tokens.map((tok, i) => {
+                const v = new Array(d).fill(0);
+                for (let k = 0; k < tok.length; k += 1) v[k % d] += tok.charCodeAt(k) / 120;
+                for (let k = 0; k < d; k += 2) {
+                    const ang = (i + 1) / Math.pow(30, k / d);
+                    v[k] += Math.sin(ang);
+                    v[k + 1] += Math.cos(ang);
+                }
+                return v;
+            });
+        }
+        function dot(a, b) { return a.reduce((s, v, i) => s + v * b[i], 0); }
+        function compute() {
+            tokens = document.getElementById('sentence').value.trim().split(/\s+/).slice(0, 12);
+            const E = embed(tokens);
+            const d = E[0].length;
+            const scores = E.map((q) => E.map((k) => dot(q, k) / Math.sqrt(d)));
+            weights = softmax(scores);
+            selected = 0;
+            draw();
+        }
+        function draw() {
+            const canvas = document.getElementById('heat');
+            const ctx = canvas.getContext('2d');
+            const n = tokens.length;
+            const pad = 70, size = Math.min((canvas.width - pad - 20) / n, (canvas.height - pad - 20) / n);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.font = '12px sans-serif';
+            ctx.fillStyle = '#64748b';
+            tokens.forEach((tok, i) => {
+                ctx.fillText(tok, pad + i * size + 4, 24);
+                ctx.fillText(tok, 8, pad + i * size + size * 0.65);
+            });
+            for (let i = 0; i < n; i += 1) {
+                for (let j = 0; j < n; j += 1) {
+                    const w = weights[i][j];
+                    ctx.fillStyle = `rgba(37,99,235,${0.12 + w * 0.88})`;
+                    ctx.fillRect(pad + j * size, pad + i * size, size - 2, size - 2);
+                    ctx.fillStyle = w > 0.45 ? '#fff' : '#0f172a';
+                    ctx.fillText(w.toFixed(2), pad + j * size + 4, pad + i * size + size * 0.6);
+                }
+            }
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(pad, pad + selected * size, size * n, size);
+            const top = weights[selected].map((w, j) => ({ w, j })).sort((a, b) => b.w - a.w).slice(0, 3)
+                .map((item) => tokens[item.j] + ' ' + item.w.toFixed(2)).join('，');
+            document.getElementById('explain').textContent = `查询词「${tokens[selected]}」主要读取：${top}`;
+        }
+        document.getElementById('heat').onclick = (event) => {
+            const n = tokens.length;
+            const pad = 70, size = Math.min((720 - pad - 20) / n, (420 - pad - 20) / n);
+            const y = event.offsetY;
+            const i = Math.floor((y - pad) / size);
+            if (i >= 0 && i < n) { selected = i; draw(); }
+        };
+        document.getElementById('run').onclick = compute;
+        compute();
+    </script>
+</body>
+</html>

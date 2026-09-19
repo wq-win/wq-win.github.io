@@ -5,26 +5,39 @@
         let activeEra = 'all';
         let query = '';
 
+        function postKind(post) {
+            if (post.kind) return post.kind;
+            const slug = String(post.slug || '');
+            if (slug.indexOf('timeline') !== -1) return 'overview';
+            if (slug.indexOf('epilogue') !== -1) return 'epilogue';
+            return 'paper';
+        }
+
+        function postTitle(post) {
+            return post.cardTitle || post.shortTitle || post.title || post.slug;
+        }
+
         function matches(post) {
             if (activeEra !== 'all' && post.eraId !== activeEra) return false;
             if (!query.trim()) return true;
             const q = query.toLowerCase();
-            return [post.title, post.cardTitle, post.question, String(post.year || ''), post.excerpt, post.eraLabel]
+            return [post.title, post.cardTitle, post.shortTitle, post.question, String(post.year || ''), post.excerpt, post.eraLabel]
                 .join(' ')
                 .toLowerCase()
                 .includes(q);
         }
 
         function extras() {
-            return posts.filter((post) => post.kind !== 'paper');
+            return posts.filter((post) => postKind(post) !== 'paper');
         }
 
         function papers() {
-            return posts.filter((post) => post.kind === 'paper');
+            return posts.filter((post) => postKind(post) === 'paper');
         }
 
         function renderFilters() {
-            const root = document.getElementById('series-era-filters');
+            const root = document.getElementById('series-era-filters') || document.getElementById('rl-era-filters');
+            if (!root) return;
             root.innerHTML = eraOrder.map((era) => `
                 <button data-era="${era.id}" class="rl-era-chip px-3 py-1 rounded-full text-sm font-medium ${era.id === activeEra ? 'active bg-primary text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
                     ${era.label}
@@ -40,11 +53,15 @@
         }
 
         function renderCatalog() {
-            const root = document.getElementById('series-catalog');
+            const root = document.getElementById('series-catalog') || document.getElementById('rl-catalog');
+            const count = document.getElementById('series-count') || document.getElementById('rl-count');
+            if (!root) return;
             const specials = extras().filter(matches);
             const list = papers().filter(matches);
-            document.getElementById('series-count').textContent =
-                `显示 ${list.length} 篇论文精读${specials.length ? `，另有 ${specials.length} 篇导读／收尾` : ''}`;
+            if (count) {
+                count.textContent =
+                    `显示 ${list.length} 篇论文精读${specials.length ? `，另有 ${specials.length} 篇导读／收尾` : ''}`;
+            }
 
             const groups = [];
             if (specials.length && (activeEra === 'all' || query)) {
@@ -55,9 +72,10 @@
             list.forEach((post) => {
                 let group = eraSeen.find((item) => item.id === post.eraId);
                 if (!group) {
+                    const years = post.eraYears || post.eraRange || '';
                     group = {
                         id: post.eraId,
-                        title: post.eraYears ? `${post.eraYears} ${post.eraLabel}` : post.eraLabel,
+                        title: years ? `${years} ${post.eraLabel}` : post.eraLabel,
                         posts: []
                     };
                     eraSeen.push(group);
@@ -78,17 +96,20 @@
                         ${group.posts.map((post) => `
                             <a href="${post.slug}.html" class="article-card block bg-white rounded-lg shadow-card hover:shadow-card-hover p-5">
                                 <div class="flex justify-between items-start gap-3 mb-2">
-                                    <span class="px-2 py-1 ${post.kind === 'paper' ? 'bg-indigo-100 text-indigo-800' : 'bg-amber-100 text-amber-900'} rounded-full text-xs font-medium">
-                                        ${post.kind === 'paper' ? `第 ${String(post.day).padStart(3, '0')} 篇 · ${post.year}` : post.eraLabel}
+                                    <span class="px-2 py-1 ${postKind(post) === 'paper' ? 'bg-indigo-100 text-indigo-800' : 'bg-amber-100 text-amber-900'} rounded-full text-xs font-medium">
+                                        ${postKind(post) === 'paper' ? `第 ${String(post.day).padStart(3, '0')} 篇 · ${post.year}` : post.eraLabel}
                                     </span>
                                 </div>
-                                <h4 class="text-lg font-bold text-gray-800 mb-1">${post.cardTitle}</h4>
+                                <h4 class="text-lg font-bold text-gray-800 mb-1">${postTitle(post)}</h4>
                                 <p class="text-sm text-gray-500">${post.question || ''}</p>
                             </a>
                         `).join('')}
                     </div>
                 </div>
             `).join('');
+            if (global.SeriesReader) {
+                global.SeriesReader.decorateCatalog(config.active);
+            }
         }
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -96,7 +117,11 @@
                 global.AOS.init({ duration: 700, once: true });
             }
             if (global.mermaid) {
-                global.mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+                global.mermaid.initialize({
+                    startOnLoad: false,
+                    theme: document.documentElement.classList.contains('dark') ? 'dark' : 'neutral',
+                    securityLevel: 'loose'
+                });
                 global.mermaid.run();
             }
             if (global.SeriesChrome) {
@@ -108,7 +133,10 @@
             }
             renderFilters();
             renderCatalog();
-            const search = document.getElementById('series-search');
+            if (global.SeriesReader) {
+                global.SeriesReader.renderHubProgress(posts, config.active);
+            }
+            const search = document.getElementById('series-search') || document.getElementById('rl-search');
             if (search) {
                 search.addEventListener('input', (event) => {
                     query = event.target.value;
