@@ -14,6 +14,9 @@
         ],
         demos: [
             { group: '休闲', href: 'game/sudoku.html', title: 'Sudoku' },
+            { group: '休闲', href: 'game/spider.html', title: '蜘蛛纸牌' },
+            { group: '休闲', href: 'game/doudizhu.html', title: '斗地主残局' },
+            { group: '休闲', href: 'game/paodekuai.html', title: '跑得快' },
             { group: '休闲', href: 'game/jianghu-slay.html', title: '江湖 Slay' },
             { group: '强化学习', cat: 'rl', file: 'q-learning', href: 'game/rl/q-learning.html', title: 'Q-learning 迷宫' },
             { group: '强化学习', cat: 'rl', file: 'value-iteration', href: 'game/rl/value-iteration.html', title: '价值迭代' },
