@@ -57,6 +57,27 @@
         return '';
     }
 
+    const LOOK = {
+        cursor: ['system', 'dot', 'comet', 'spark'],
+        bg: ['static', 'drift']
+    };
+
+    function readPref(key, fallback) {
+        try {
+            return localStorage.getItem(key) || fallback;
+        } catch (error) {
+            return fallback;
+        }
+    }
+
+    function writePref(key, value) {
+        try {
+            localStorage.setItem(key, value);
+        } catch (error) {
+            /* ignore */
+        }
+    }
+
     function applyStoredTheme() {
         try {
             if (localStorage.getItem('mylog-theme') === 'dark') {
@@ -69,7 +90,330 @@
         }
     }
 
+    function applyStoredLook() {
+        const cursor = LOOK.cursor.indexOf(readPref('mylog-cursor', 'system')) >= 0
+            ? readPref('mylog-cursor', 'system')
+            : 'system';
+        const bg = LOOK.bg.indexOf(readPref('mylog-bg', 'static')) >= 0
+            ? readPref('mylog-bg', 'static')
+            : 'static';
+        const fancy = (cursor === 'comet' || cursor === 'spark') && fxEnabled();
+        if (cursor === 'system') document.documentElement.removeAttribute('data-cursor');
+        else if ((cursor === 'comet' || cursor === 'spark') && !fancy) document.documentElement.dataset.cursor = 'dot';
+        else document.documentElement.dataset.cursor = cursor;
+        if (bg === 'static') document.documentElement.removeAttribute('data-bg');
+        else document.documentElement.dataset.bg = bg;
+        if (document.body) setCursorFX(fancy ? cursor : '');
+        return { cursor: cursor, bg: bg };
+    }
+
+    function ensureBgLayer() {
+        if (document.getElementById('site-bg') || !document.body) return;
+        const el = document.createElement('div');
+        el.id = 'site-bg';
+        el.setAttribute('aria-hidden', 'true');
+        document.body.insertBefore(el, document.body.firstChild);
+    }
+
+    const cursorFX = {
+        mode: '',
+        canvas: null,
+        ctx: null,
+        raf: 0,
+        x: -80,
+        y: -80,
+        trail: [],
+        sparks: [],
+        hover: 0,
+        down: 0,
+        visible: false,
+        text: false,
+        bound: false,
+        boom: 0
+    };
+
+    function fxEnabled() {
+        return window.matchMedia('(pointer: fine)').matches
+            && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+
+    function fxPalette() {
+        const dark = document.documentElement.classList.contains('dark');
+        return dark
+            ? { core: '#e0f2fe', glow: '#38bdf8', tail: '#a78bfa', spark: '#fbbf24' }
+            : { core: '#1d4ed8', glow: '#3b82f6', tail: '#6366f1', spark: '#f59e0b' };
+    }
+
+    function isTextCursorTarget(node) {
+        if (!node) return false;
+        const el = node.nodeType === 1 ? node : node.parentElement;
+        if (!el || !el.closest) return false;
+        if (el.closest('input, textarea, select, [contenteditable="true"]')) return true;
+        const tag = (el.tagName || '').toLowerCase();
+        return tag === 'input' || tag === 'textarea';
+    }
+
+    function isHoverCursorTarget(node) {
+        if (!node) return false;
+        const el = node.nodeType === 1 ? node : node.parentElement;
+        if (!el || !el.closest) return false;
+        return !!el.closest('a, button, [role="button"], label, summary, select');
+    }
+
+    function spawnSparks(n, speed) {
+        const palSpread = speed == null ? 2.4 : speed;
+        for (let i = 0; i < n; i += 1) {
+            const a = Math.random() * Math.PI * 2;
+            const s = (0.6 + Math.random()) * palSpread;
+            cursorFX.sparks.push({
+                kind: 'dot',
+                x: cursorFX.x,
+                y: cursorFX.y,
+                vx: Math.cos(a) * s,
+                vy: Math.sin(a) * s,
+                life: 1,
+                decay: 0.91,
+                r: 1.1 + Math.random() * 1.8,
+                warm: Math.random() > 0.55
+            });
+        }
+    }
+
+    const SPARKLER_BURST = ['#fde68a', '#fb7185', '#7dd3fc', '#fb923c', '#e879f9', '#fef3c7'];
+
+    function spawnEmber() {
+        const a = Math.random() * Math.PI * 2;
+        const speed = 1.1 + Math.random() * 3.6;
+        const roll = Math.random();
+        cursorFX.sparks.push({
+            kind: 'ember',
+            x: cursorFX.x + (Math.random() - 0.5) * 3,
+            y: cursorFX.y + (Math.random() - 0.5) * 3,
+            vx: Math.cos(a) * speed,
+            vy: Math.sin(a) * speed * 0.72 - 1.1 - Math.random() * 1.4,
+            life: 0.75 + Math.random() * 0.45,
+            decay: 0.955 + Math.random() * 0.02,
+            r: 0.7 + Math.random() * 1.3,
+            tone: roll < 0.22 ? '#fff' : (roll < 0.62 ? '#fde68a' : '#fb923c')
+        });
+    }
+
+    function spawnFirework(x, y, n) {
+        const color = SPARKLER_BURST[Math.floor(Math.random() * SPARKLER_BURST.length)];
+        for (let i = 0; i < n; i += 1) {
+            const a = (Math.PI * 2 * i) / n + (Math.random() - 0.5) * 0.35;
+            const s = 1.2 + Math.random() * 2.6;
+            cursorFX.sparks.push({
+                kind: 'burst',
+                x: x,
+                y: y,
+                vx: Math.cos(a) * s,
+                vy: Math.sin(a) * s,
+                life: 1,
+                decay: 0.93 + Math.random() * 0.03,
+                r: 1.1 + Math.random() * 1.3,
+                tone: Math.random() > 0.82 ? '#fff' : color
+            });
+        }
+    }
+
+    function tickSparkler(fx) {
+        if (!fx.visible || fx.text) return;
+        const spray = 3 + (fx.down > 0.2 ? 2 : 0);
+        for (let i = 0; i < spray; i += 1) spawnEmber();
+        fx.boom += 1;
+        if (fx.boom < 18) return;
+        fx.boom = 0;
+        const a = Math.random() * Math.PI * 2;
+        const d = 16 + Math.random() * 42;
+        spawnFirework(fx.x + Math.cos(a) * d, fx.y + Math.sin(a) * d - 10, 14 + Math.floor(Math.random() * 6));
+    }
+
+    function drawCursorFX() {
+        const fx = cursorFX;
+        if (!fx.mode || !fx.ctx) return;
+        const ctx = fx.ctx;
+        const pal = fxPalette();
+        const w = fx.canvas.clientWidth;
+        const h = fx.canvas.clientHeight;
+        ctx.clearRect(0, 0, w, h);
+        fx.hover += (((fx.visible && !fx.text && isHoverCursorTarget(fx.target)) ? 1 : 0) - fx.hover) * 0.22;
+        fx.down *= 0.86;
+
+        if (fx.mode === 'spark') tickSparkler(fx);
+
+        if (fx.mode === 'comet' && fx.visible && !fx.text) {
+            const last = fx.trail[fx.trail.length - 1];
+            if (!last || last.x !== fx.x || last.y !== fx.y) {
+                fx.trail.push({ x: fx.x, y: fx.y });
+                if (fx.trail.length > 18) fx.trail.shift();
+            } else if (fx.trail.length > 2) {
+                fx.trail.shift();
+            }
+        } else if (fx.trail.length) {
+            fx.trail.shift();
+        }
+
+        if (fx.trail.length > 1) {
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            for (let i = 1; i < fx.trail.length; i += 1) {
+                const t = i / (fx.trail.length - 1);
+                ctx.beginPath();
+                ctx.moveTo(fx.trail[i - 1].x, fx.trail[i - 1].y);
+                ctx.lineTo(fx.trail[i].x, fx.trail[i].y);
+                ctx.strokeStyle = pal.tail;
+                ctx.globalAlpha = 0.12 + t * 0.42;
+                ctx.lineWidth = 1.4 + t * 8;
+                ctx.stroke();
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        ctx.lineCap = 'round';
+        fx.sparks = fx.sparks.filter((p) => p.life > 0.04);
+        if (fx.sparks.length > 260) fx.sparks.splice(0, fx.sparks.length - 260);
+        fx.sparks.forEach((p) => {
+            const px = p.x;
+            const py = p.y;
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += p.kind === 'burst' ? 0.018 : 0.055;
+            p.vx *= 0.985;
+            p.life *= p.decay || 0.91;
+            ctx.globalAlpha = Math.max(0, Math.min(1, p.life));
+            if (p.kind === 'ember' || p.kind === 'burst') {
+                ctx.strokeStyle = p.tone;
+                ctx.lineWidth = Math.max(0.6, p.r * p.life);
+                ctx.beginPath();
+                ctx.moveTo(px, py);
+                ctx.lineTo(p.x, p.y);
+                ctx.stroke();
+                return;
+            }
+            ctx.beginPath();
+            ctx.fillStyle = p.warm ? pal.spark : pal.glow;
+            ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+
+        if (fx.visible && !fx.text) {
+            const flicker = fx.mode === 'spark' ? 0.65 + Math.sin(performance.now() / 38) * 0.35 : 0;
+            const r = 4 + fx.hover * 2.6 + fx.down * 3.5 + flicker;
+            const glow = fx.mode === 'spark' ? '#fbbf24' : pal.glow;
+            const core = fx.mode === 'spark' ? '#fff7ed' : pal.core;
+            ctx.beginPath();
+            ctx.globalAlpha = fx.mode === 'spark' ? 0.28 : 0.22 + fx.hover * 0.12;
+            ctx.fillStyle = glow;
+            ctx.arc(fx.x, fx.y, r * (fx.mode === 'spark' ? 4.2 : 3.4), 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            if (fx.hover > 0.08 && fx.mode !== 'spark') {
+                ctx.beginPath();
+                ctx.strokeStyle = pal.glow;
+                ctx.lineWidth = 1.6;
+                ctx.globalAlpha = fx.hover;
+                ctx.arc(fx.x, fx.y, 11 + fx.hover * 4, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            }
+            ctx.beginPath();
+            ctx.fillStyle = core;
+            ctx.arc(fx.x, fx.y, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.fillStyle = '#fff';
+            ctx.globalAlpha = 0.9;
+            ctx.arc(fx.x - 1.1, fx.y - 1.2, Math.max(1.1, r * 0.32), 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+        fx.raf = requestAnimationFrame(drawCursorFX);
+    }
+
+    function resizeCursorFX() {
+        const canvas = cursorFX.canvas;
+        if (!canvas || !cursorFX.ctx) return;
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        cursorFX.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function onCursorPointer(event) {
+        cursorFX.x = event.clientX;
+        cursorFX.y = event.clientY;
+        cursorFX.target = event.target;
+        cursorFX.visible = true;
+        cursorFX.text = isTextCursorTarget(event.target);
+        document.documentElement.classList.toggle('cursor-text', cursorFX.text);
+    }
+
+    function bindCursorFX() {
+        if (cursorFX.bound) return;
+        cursorFX.bound = true;
+        window.addEventListener('pointermove', (event) => {
+            if (event.pointerType === 'touch') return;
+            onCursorPointer(event);
+        }, { passive: true });
+        window.addEventListener('pointerdown', (event) => {
+            if (event.pointerType !== 'mouse') return;
+            onCursorPointer(event);
+            if (!cursorFX.mode || cursorFX.text) return;
+            cursorFX.down = 1;
+            if (cursorFX.mode === 'spark') {
+                spawnFirework(cursorFX.x, cursorFX.y, 26);
+                spawnFirework(cursorFX.x, cursorFX.y - 6, 14);
+            } else {
+                spawnSparks(8, 2.2);
+            }
+        });
+        window.addEventListener('pointerleave', () => {
+            cursorFX.visible = false;
+            document.documentElement.classList.remove('cursor-text');
+        });
+        window.addEventListener('blur', () => { cursorFX.visible = false; });
+        window.addEventListener('resize', resizeCursorFX);
+    }
+
+    function setCursorFX(mode) {
+        const want = (mode === 'comet' || mode === 'spark') && fxEnabled() ? mode : '';
+        if (!want) {
+            cursorFX.mode = '';
+            if (cursorFX.raf) {
+                cancelAnimationFrame(cursorFX.raf);
+                cursorFX.raf = 0;
+            }
+            if (cursorFX.canvas) cursorFX.canvas.style.display = 'none';
+            document.documentElement.classList.remove('cursor-text');
+            return;
+        }
+        if (!document.body) return;
+        if (!cursorFX.canvas) {
+            const canvas = document.createElement('canvas');
+            canvas.id = 'site-cursor';
+            canvas.setAttribute('aria-hidden', 'true');
+            document.body.appendChild(canvas);
+            cursorFX.canvas = canvas;
+            cursorFX.ctx = canvas.getContext('2d');
+        }
+        cursorFX.canvas.style.display = 'block';
+        cursorFX.mode = want;
+        cursorFX.trail = [];
+        cursorFX.sparks = [];
+        cursorFX.boom = 0;
+        bindCursorFX();
+        resizeCursorFX();
+        if (!cursorFX.raf) cursorFX.raf = requestAnimationFrame(drawCursorFX);
+    }
+
     applyStoredTheme();
+    applyStoredLook();
 
     function navLink(href, label, extraClass) {
         const cls = extraClass || 'text-gray-700 hover:text-primary transition-all-300 font-medium';
@@ -134,6 +478,30 @@
                 <button id="site-search-button" class="w-9 h-9 rounded-full border border-gray-200 text-gray-600 hover:text-primary hover:border-primary" title="搜索全站" aria-label="搜索全站">
                     <i class="fa fa-search"></i>
                 </button>
+                <div class="look-wrap">
+                    <button id="look-toggle" class="w-9 h-9 rounded-full border border-gray-200 text-gray-600 hover:text-primary hover:border-primary" title="外观：鼠标与背景" aria-label="外观：鼠标与背景" aria-expanded="false" aria-haspopup="true">
+                        <i class="fa fa-paint-brush"></i>
+                    </button>
+                    <div id="look-panel" class="look-panel hidden" role="menu">
+                        <h3>外观</h3>
+                        <div class="look-row">
+                            <span>鼠标</span>
+                            <div class="look-chips look-chips-grid" data-look="cursor">
+                                <button type="button" data-cursor="system">系统</button>
+                                <button type="button" data-cursor="dot">圆点</button>
+                                <button type="button" data-cursor="comet">彗星</button>
+                                <button type="button" data-cursor="spark">仙女棒</button>
+                            </div>
+                        </div>
+                        <div class="look-row">
+                            <span>背景</span>
+                            <div class="look-chips" data-look="bg">
+                                <button type="button" data-bg="static">静态</button>
+                                <button type="button" data-bg="drift">光斑</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <button id="theme-toggle" class="w-9 h-9 rounded-full border border-gray-200 text-gray-600 hover:text-primary hover:border-primary" title="切换深色模式" aria-label="切换深色模式">
                     <i class="fa fa-moon-o"></i>
                 </button>
@@ -226,7 +594,58 @@
         }
     }
 
+    function syncLookPanel() {
+        const look = applyStoredLook();
+        document.querySelectorAll('#look-panel [data-cursor]').forEach((btn) => {
+            btn.classList.toggle('is-on', btn.getAttribute('data-cursor') === look.cursor);
+        });
+        document.querySelectorAll('#look-panel [data-bg]').forEach((btn) => {
+            btn.classList.toggle('is-on', btn.getAttribute('data-bg') === look.bg);
+        });
+    }
+
+    function setLookPanelOpen(open) {
+        const panel = document.getElementById('look-panel');
+        const toggle = document.getElementById('look-toggle');
+        if (!panel || !toggle) return;
+        panel.classList.toggle('hidden', !open);
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    function bindLook() {
+        const toggle = document.getElementById('look-toggle');
+        const panel = document.getElementById('look-panel');
+        if (!toggle || !panel || toggle.dataset.bound) return;
+        toggle.dataset.bound = '1';
+        syncLookPanel();
+        toggle.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setLookPanelOpen(panel.classList.contains('hidden'));
+        });
+        panel.addEventListener('click', (event) => {
+            const cursorBtn = event.target.closest('[data-cursor]');
+            const bgBtn = event.target.closest('[data-bg]');
+            if (cursorBtn) {
+                writePref('mylog-cursor', cursorBtn.getAttribute('data-cursor'));
+                syncLookPanel();
+            }
+            if (bgBtn) {
+                writePref('mylog-bg', bgBtn.getAttribute('data-bg'));
+                syncLookPanel();
+            }
+        });
+        document.addEventListener('click', (event) => {
+            if (!panel.classList.contains('hidden') && !event.target.closest('.look-wrap')) {
+                setLookPanelOpen(false);
+            }
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') setLookPanelOpen(false);
+        });
+    }
+
     function bindChrome() {
+        ensureBgLayer();
         const mobileMenu = document.getElementById('mobile-menu');
         const backToTopButton = document.getElementById('back-to-top');
         const openMenu = document.getElementById('mobile-menu-button');
@@ -247,6 +666,7 @@
             themeToggle.addEventListener('click', toggleTheme);
             syncThemeIcon();
         }
+        bindLook();
         if (backToTopButton) {
             window.addEventListener('scroll', () => {
                 if (window.pageYOffset > 300) {
@@ -313,5 +733,5 @@
         loadExtras(root);
     }
 
-    global.SeriesChrome = { mount, SERIES, applyStoredTheme };
+    global.SeriesChrome = { mount, SERIES, applyStoredTheme, applyStoredLook };
 })(window);
