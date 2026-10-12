@@ -7,7 +7,7 @@
     <title>067 · Toolformer：用后文预测损失筛选值得学习的工具调用 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,134 @@
                 <span class="text-gray-500">067 · Toolformer：用后文预测损失筛选值得学习的工具调用</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="b65c9d1a5898df374a5821b48b7adaf8118d35b5c866bd3e9c4da94951d88de1"><h1>067 · Toolformer：用后文预测损失筛选值得学习的工具调用</h1>
+<p><a href="index.html">返回目录</a> · <a href="066-blip2.html">上一篇：BLIP-2</a> · <a href="068-llama.html">下一篇：LLaMA</a></p>
+<p>论文：Timo Schick等，<em>Toolformer: Language Models Can Teach Themselves to Use Tools</em>，2023年。<a href="https://arxiv.org/abs/2302.04761">原始论文</a> · <a href="https://arxiv.org/html/2302.04761v1">v1正文</a>。阅读范围为调用生成与筛选方法、五类API、主实验、解码消融及附录B训练设置；未复现历史工具后端。论文v1将基础GPT-J记为6.7B，本文以模型名称识别配置，不据此推算精确参数成本。</p>
+<h2 id="一分钟理解">一分钟理解</h2>
+<p>教模型使用工具，不只要教它生成正确格式，还要教它什么时候该调用、输入什么，以及怎样利用结果。逐条人工标注这些决定很贵。Toolformer尝试让模型自己生成候选调用，再看工具结果是否帮助预测原文后续内容。</p>
+<p>如果调用后更容易续写正确文本，就把这条调用插回训练语料，用普通语言建模训练。它让“工具是否有用”成为一个可以从现成文本自动估计的信号，不需要对每条调用单独打人工分。</p>
+<p>在可通过文本API补充事实、计算或时间信息的场景下，通过候选调用与预测损失筛选，改善零样本任务表现；代价是数据生成效率有限，而且局部续写收益不等于任务长期收益或成本最优。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>API</strong>以约定格式接收参数并返回结果；<strong>自训练</strong>用模型生成数据继续训练；<strong>交叉熵</strong>衡量目标token的预测代价；<strong>消融</strong>移除功能以分析贡献；<strong>信用分配</strong>判断哪些早期行动促成最终收益。</p>
+<h2 id="背景会写api格式还不够">背景：会写API格式还不够</h2>
+<p>一个模型可以正确输出 <code>Calculator(17*24)</code>，却在完全不需要计算时反复调用；也可能需要搜索时不搜索。工具使用至少有四个决定：选工具、选时机、构造参数、吸收返回结果。</p>
+<p>Toolformer将这些决定统一表示为文本。调用包含API名、参数和返回内容，插在普通文本之间。推理时，模型写到结果分隔符，宿主程序暂停生成、执行API、插入结果，再恢复生成。因此工具结果来自外部执行，不是让模型继续伪造一个返回值。</p>
+<p>与PAL主要通过提示要求生成程序不同，Toolformer会更新模型参数，把调用模式写入模型。与ReAct的多步观察行动相比，论文实际评价限制每个输入最多一次API调用；它不是成熟的多工具规划系统，也不能因为名称中有“工具”就把后来Agent的所有能力归给它。</p>
+<h2 id="方法先构造候选再估计信息增益">方法：先构造候选，再估计信息增益</h2>
+<p>给定已有文本 <span class="reading-math" data-tex="x_1,\ldots,x_n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mn>1</mn></msub><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><msub><mi>x</mi><mi>n</mi></msub></mrow><annotation encoding="application/x-tex">x_1,\ldots,x_n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，通过少量人工示例提示模型，在可能有用的位置生成候选调用 <span class="reading-math" data-tex="c_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>c</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">c_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。候选生成可以查看完整示例文本来做离线标注，但最终模型要学会只根据当前位置的前缀决定是否调用。离线看后文不是推理时获得未来答案，而是一种生成训练监督的方式。</p>
+<p>执行调用得到结果 <span class="reading-math" data-tex="r_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>r</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">r_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 后，测量它是否降低后续原文的加权交叉熵。定义</p>
+<p><span class="reading-math" data-tex="L_i(z)=-\sum_{j=i}^{n}w_{j-i}
+\log P_M(x_j\mid z,x_{1:j-1})."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo><mo>=</mo><mo>−</mo><munderover><mo>∑</mo><mrow><mi>j</mi><mo>=</mo><mi>i</mi></mrow><mi>n</mi></munderover><msub><mi>w</mi><mrow><mi>j</mi><mo>−</mo><mi>i</mi></mrow></msub><mi>log</mi><mo>⁡</mo><msub><mi>P</mi><mi>M</mi></msub><mo stretchy="false">(</mo><msub><mi>x</mi><mi>j</mi></msub><mo>∣</mo><mi>z</mi><mo separator="true">,</mo><msub><mi>x</mi><mrow><mn>1</mn><mo>:</mo><mi>j</mi><mo>−</mo><mn>1</mn></mrow></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_i(z)=-\sum_{j=i}^{n}w_{j-i}
+\log P_M(x_j\mid z,x_{1:j-1}).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.0652em;vertical-align:-1.4138em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.6514em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="mrel mtight">=</span><span class="mord mathnormal mtight">i</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="mbin mtight">−</span><span class="mord mathnormal mtight">i</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.10903em;">M</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1</span><span class="mrel mtight">:</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>z</mi></mrow><annotation encoding="application/x-tex">z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span></span></span></span></span> 是提供给模型的额外调用上下文，<span class="reading-math" data-tex="w"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>w</mi></mrow><annotation encoding="application/x-tex">w</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span></span></span></span></span> 让靠近插入点的token权重更高。论文使用随距离线性下降并归一化的权重，重点关注紧邻后文，而非整篇文章的长期任务回报。</p>
+<p>然后比较</p>
+<p><span class="reading-math" data-tex="L_i^+=L_i(e(c_i,r_i)),\qquad
+L_i^-=\min\{L_i(\varnothing),L_i(e(c_i,\varnothing))\}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msubsup><mi>L</mi><mi>i</mi><mo>+</mo></msubsup><mo>=</mo><msub><mi>L</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi>e</mi><mo stretchy="false">(</mo><msub><mi>c</mi><mi>i</mi></msub><mo separator="true">,</mo><msub><mi>r</mi><mi>i</mi></msub><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><msubsup><mi>L</mi><mi>i</mi><mo>−</mo></msubsup><mo>=</mo><mi>min</mi><mo>⁡</mo><mo stretchy="false">{</mo><msub><mi>L</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi mathvariant="normal">∅</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><msub><mi>L</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi>e</mi><mo stretchy="false">(</mo><msub><mi>c</mi><mi>i</mi></msub><mo separator="true">,</mo><mi mathvariant="normal">∅</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo stretchy="false">}</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_i^+=L_i(e(c_i,r_i)),\qquad
+L_i^-=\min\{L_i(\varnothing),L_i(e(c_i,\varnothing))\}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0883em;vertical-align:-0.267em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8213em;"><span style="top:-2.433em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.267em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0883em;vertical-align:-0.267em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">e</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">))</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8213em;"><span style="top:-2.433em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">−</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.267em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">min</span><span class="mopen">{</span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord amsrm">∅</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">e</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord amsrm">∅</span><span class="mclose">))}</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>保留满足 <span class="reading-math" data-tex="L_i^- - L_i^+\ge\tau_f"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>L</mi><mi>i</mi><mo>−</mo></msubsup><mo>−</mo><msubsup><mi>L</mi><mi>i</mi><mo>+</mo></msubsup><mo>≥</mo><msub><mi>τ</mi><mi>f</mi></msub></mrow><annotation encoding="application/x-tex">L_i^- - L_i^+\ge\tau_f</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0883em;vertical-align:-0.2769em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8115em;"><span style="top:-2.4231em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.1031em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">−</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2769em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0883em;vertical-align:-0.2769em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8115em;"><span style="top:-2.4231em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.1031em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2769em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≥</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1132em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 的调用。<span class="reading-math" data-tex="e"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>e</mi></mrow><annotation encoding="application/x-tex">e</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">e</span></span></span></span></span> 是调用序列化方式，<span class="reading-math" data-tex="\tau_f"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>τ</mi><mi>f</mi></msub></mrow><annotation encoding="application/x-tex">\tau_f</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1132em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是最低收益阈值。取两种基线的最小值很重要：工具结果必须优于“完全没调用”和“只给调用参数但没结果”两种情况，避免把参数文字本身提供的提示误认为执行收益。</p>
+<p>还有一个实现细节：筛选时，调用信息放在整段文本前面，以免未见过调用格式的基础模型被中途插入打断；训练数据中才将保留调用插到对应位置。这两个阶段的位置安排不同，不能机械地用最终训练格式复述筛选公式。</p>
+<pre><code class="language-text">输入：普通语料C，基础模型M，各API少量示例
+对每个工具和候选文本：
+    预测适合插入API的位置
+    在这些位置采样调用参数，丢弃格式不完整者
+    执行调用，取得真实返回r
+    计算有结果、无调用、只有参数三种后文损失
+    若结果带来的收益超过阈值：保留
+合并各工具调用，插入原文，得到C*
+用标准语言建模损失微调M
+推理时：
+    生成调用到结果分隔符 -&gt; 执行API -&gt; 插入结果 -&gt; 继续生成
+</code></pre>
+<p>数学损失仍然是下一token预测。机制变化在数据构造与推理执行；实验改善的是任务答对比例。不能把“预测损失下降”改称为已验证的用户满意度奖励，也没有一个学习工具调用成本的价值函数。</p>
+<h2 id="工具数据与实验预算">工具、数据与实验预算</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文设置与意义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>工具</td>
+<td>Atlas问答、BM25维基搜索、四则计算、NLLB翻译、当前日期</td>
+</tr>
+<tr>
+<td>基础语料</td>
+<td>CCNet子集；用启发式筛选更可能需要某工具的文档</td>
+</tr>
+<tr>
+<td>数据上限</td>
+<td>每种API最多25K例；筛选后不足则不能按上限当实际数量</td>
+</tr>
+<tr>
+<td>微调</td>
+<td>最长1024 token，batch 128，学习率1e-5，前10% warmup</td>
+</tr>
+<tr>
+<td>资源</td>
+<td>八张40GB A100、BF16、ZeRO-3，最多2K步</td>
+</tr>
+<tr>
+<td>检查点</td>
+<td>每500步在1000例CCNet开发集测困惑度并选择检查点</td>
+</tr>
+<tr>
+<td>对照</td>
+<td>原GPT-J、只微调普通CCNet、Toolformer禁用API、启用API</td>
+</tr>
+<tr>
+<td>解码</td>
+<td>API标记进入前十候选即优先调用；每输入最多一次</td>
+</tr>
+</tbody></table></div>
+<p>工具本身带有外部能力与训练数据：Atlas是检索增强问答模型，翻译由专门模型完成。系统答对更多，不等于GPT-J内部突然学会全部知识。论文也在不同任务禁用可能带来明显不公平优势的工具：LAMA禁维基搜索，问答任务禁已用NQ训练的问答API。</p>
+<p>评价不是统一严格exact match：LAMA检查前五词是否包含答案，开放问答检查前二十词，多语言任务检查前十词。阅读分数时应保留这些规则，不能直接与另一篇不同输出格式和评分器的数字合并排名。</p>
+<h2 id="五处证据收益与局限同时出现">五处证据：收益与局限同时出现</h2>
+<p><strong>证据一：表4，计算工具的作用。</strong> ASDiv上禁用API为14.8，启用为40.4；SVAMP从6.3到29.4。这支持工具执行在同一模型上的贡献，但不能证明多步数学推理已普遍解决。</p>
+<p><strong>证据二：表5，事实问答。</strong> WebQS从禁用时18.9到26.3，仍低于GPT-3的29.0；TriviaQA为48.8对65.9。搜索有用，但不能弥补所有知识、检索和阅读差距。</p>
+<p><strong>证据三：表6，多语言负结果。</strong> 启用工具比同一Toolformer禁用时更好，但德语13.5低于原GPT-J的16.5，中文16.8低于18.2。工具收益与语料微调导致的分布变化可以同时存在，不能只挑有利基线。</p>
+<p><strong>证据四：表8，语言建模是否保持。</strong> WikiText困惑度原GPT-J为9.9，普通CCNet微调与禁用API的Toolformer均为10.3；CCNet分别为10.6、10.5、10.5。支持的是API增强没有在该对照上额外恶化，而不是相对原模型所有数据都不退步。</p>
+<p><strong>证据五：表9，调用由什么决定。</strong> WebQS将调用标记阈值从普通贪心的前一位放宽到前十位，调用率由8.5%升到100%，表现由19.3到26.3。实验能力由模型与解码规则共同产生；“自主决定”不能被误读为完全没有人为调用偏置。</p>
+<p>表2还说明筛选成本：在阈值0.5时，维基搜索有207,241例，计算器仅3,680例。候选规模大并不自动形成平衡的工具训练集；某类工具的有用调用可能非常稀少。</p>
+<h2 id="贡献代价与适用边界">贡献、代价与适用边界</h2>
+<p>核心贡献是把“工具有帮助”转化为可自动计算的数据筛选条件。它利用原文作为续写目标，不需要逐条人工标注调用时机。这使模型能在标准语言建模训练中学习工具格式与使用模式。</p>
+<p>这种监督有鲜明偏好：立即帮助预测附近token的调用容易被保留，需要先探索、之后很久才有收益的行动不容易得到信号。第7节也明确指出不能链式组合工具、不能互动式改写搜索、没有把工具费用纳入调用决定。</p>
+<p>我的分析是，局部预测收益可能偏爱“复述已有答案”的工具结果，而不奖励真正改变任务状态的操作。例如先创建一个日程、随后检查冲突，价值不一定体现在原文下几个token上。因此要把方法扩到有副作用的工作流，需要新的结果评价和权限边界，不能只换API名称。</p>
+<p>工具可靠性也决定上限。错误检索、翻译失误或两位小数舍入，都可能传到最终回答。模型读到结果不等于已经验证来源。原方法训练的是利用工具，并未系统训练证据冲突处理、重试或独立核验。</p>
+<h2 id="自构例子与前置概念">自构例子与前置概念</h2>
+<p>原文是“每盒17元，买24盒，总计408元”。模型提议计算17乘24，结果408让后文数字更容易预测，因而调用被保留。若候选只是把“总计408”写进参数，但执行结果没有新信息，只有参数的基线可帮助识别这种虚假收益。</p>
+<p>再换成“先查询库存，再决定采购量”，第一次查询的价值可能要经过后续决策才体现。局部后文损失未必能充分奖励这种链式流程。这两个自构例子分别说明方法擅长的直接信息补充，以及它缺少的长期信用分配。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>人工标注工具、时机与参数昂贵</td>
+<td>自生成候选，以真实返回降低后文损失筛选，再微调</td>
+<td>将工具信息价值变成自动监督</td>
+<td>表4/5启用禁用对照、表8语言建模、表9解码消融</td>
+<td>局部目标、样本效率低、调用成本未建模，原实验不能链式互动</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测能够回答才算理解">自测：能够回答，才算理解</h2>
+<p><strong>1. 为什么筛选要同时比较无调用与只有调用参数两种基线？</strong></p>
+<p>答案：参数文本可能已经泄露或提示后文。若只与无调用比较，会把提示效应误当成工具执行价值。要求带结果的损失低于两种基线，才能更有把握把收益归给返回信息。</p>
+<p><strong>2. Toolformer是强化学习算法吗？</strong></p>
+<p>答案：这篇方法不是。它用预测损失筛选离线生成的数据，再用标准语言建模微调，没有通过环境长期回报更新策略的RL步骤。工具调用看起来像动作，不代表训练方式一定是强化学习。</p>
+<p><strong>3. 如何证明模型学会按需要调用，而不是被解码规则推着到处调用？</strong></p>
+<p>答案：应固定模型改变调用阈值，报告调用率、答对率、无需工具任务的误调用和实际成本。表9说明阈值明显影响行为。还需要在确实不需工具和调用代价不同的任务上测试，单看启用后的最高分不足以证明选择最优。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 067 · Toolformer：用后文预测损失筛选值得学习的工具调用
+    <textarea id="md-source" hidden readonly># 067 · Toolformer：用后文预测损失筛选值得学习的工具调用
 
 [返回目录](README.md) · [上一篇：BLIP-2](066-blip2.md) · [下一篇：LLaMA](068-llama.md)
 
@@ -103,7 +226,7 @@ $$
 合并各工具调用，插入原文，得到C*
 用标准语言建模损失微调M
 推理时：
-    生成调用到结果分隔符 -> 执行API -> 插入结果 -> 继续生成
+    生成调用到结果分隔符 -&gt; 执行API -&gt; 插入结果 -&gt; 继续生成
 ```
 
 数学损失仍然是下一token预测。机制变化在数据构造与推理执行；实验改善的是任务答对比例。不能把“预测损失下降”改称为已验证的用户满意度奖励，也没有一个学习工具调用成本的价值函数。
@@ -175,9 +298,9 @@ $$
 
 答案：应固定模型改变调用阈值，报告调用率、答对率、无需工具任务的误调用和实际成本。表9说明阈值明显影响行为。还需要在确实不需工具和调用代价不同的任务上测试，单看启用后的最高分不足以证明选择最优。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

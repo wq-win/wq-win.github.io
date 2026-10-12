@@ -7,7 +7,7 @@
     <title>011｜BPE 子词翻译：有限词表怎样生成没见过的词 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,114 @@
                 <span class="text-gray-500">BPE 子词翻译：有限词表怎样生成没见过的词</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="03d5c71dbd2e24f6a054afad7c7ba35025ba312a28b079e7a3e11c7409f81fc9"><h1>011｜BPE 子词翻译：有限词表怎样生成没见过的词</h1>
+<p><a href="index.html">目录</a> · <a href="010-distillation.html">上一篇</a> · <a href="012-layernorm.html">下一篇</a></p>
+<p><strong>论文</strong>：Rico Sennrich、Barry Haddow、Alexandra Birch，<em>Neural Machine Translation of Rare Words with Subword Units</em>，2015 年预印本、ACL 2016。<a href="https://arxiv.org/abs/1508.07909">原文</a> · <a href="https://arxiv.org/pdf/1508.07909">PDF</a>。讨论的是将压缩算法 BPE 适配为子词分割，而不是声称本文发明了 BPE 压缩，也不是现代所有 byte-level tokenizer 的统一说明。</p>
+<h2 id="一分钟理解">一分钟理解</h2>
+<p>完整单词词表再大，也会遇到新名字、复合词与变形。把未知词统一写成 UNK，模型便丢失了其内部结构。本文用可复用子词表示单词，让新词能够由已知片段组成，再由翻译网络学习复制、音译和组合关系。</p>
+<p>核心贡献是把开放词汇问题放回神经生成模型内部，而不是完全依赖外部词典补救。作者在英德、英俄翻译中验证效果。代价是序列变长、分割不一定符合词素，以及能够编码新词并不等于能够理解或正确翻译它。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念是词表、OOV、字符组合、贪心合并与可逆解码。理解这些就能进一步比较 BPE、字节级编码与其他分词目标，而不会只凭“使用 BPE”推断完全相同的输入分布。</p>
+<h2 id="背景未知词有不同成因">背景：未知词有不同成因</h2>
+<p>新名字可能需要复制或音译，复合词需要组合翻译，带词缀的变形需要识别共享词根。这些情况都不适合简单把整个词替换成一个无差别符号。更大的单词词表能减少部分未知项，却增加输出层并仍无法覆盖未来所有构词。</p>
+<p>纯字符模型具有更强覆盖，但每个词被拆成许多步骤，学习距离与计算增加。子词处于单词和字符之间：频繁组合成为较长单位，罕见表达回退为更细片段。因此词表大小与序列长度形成实际取舍，而不是越细或越粗都更好。</p>
+<p>本论文使用带注意力的循环翻译模型，分词是其输入输出接口。数学上的翻译似然目标并未因为 BPE 自动改变为语义监督；改变的是 token 序列、词表和模型可以生成的组合空间。</p>
+<h2 id="方法从字符开始逐步合并常见相邻符号">方法：从字符开始，逐步合并常见相邻符号</h2>
+<p>先把训练词拆成字符并标记词边界，统计相邻符号对在语料中的频率。每一步选择最常见对，把其合并为一个新符号，重复预定次数。合并规则形成有序列表；处理新词时按同一规则应用，剩余部分保留为更小单位。</p>
+<p>可以把一次规则选择写成：</p>
+<p><span class="reading-math" data-tex="(a^*,b^*)=\arg\max_{a,b}\sum_w f(w)\,N_{ab}(w)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mo stretchy="false">(</mo><msup><mi>a</mi><mo>∗</mo></msup><mo separator="true">,</mo><msup><mi>b</mi><mo>∗</mo></msup><mo stretchy="false">)</mo><mo>=</mo><mi>arg</mi><mo>⁡</mo><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mrow><mi>a</mi><mo separator="true">,</mo><mi>b</mi></mrow></munder><munder><mo>∑</mo><mi>w</mi></munder><mi>f</mi><mo stretchy="false">(</mo><mi>w</mi><mo stretchy="false">)</mo><mtext> </mtext><msub><mi>N</mi><mrow><mi>a</mi><mi>b</mi></mrow></msub><mo stretchy="false">(</mo><mi>w</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">(a^*,b^*)=\arg\max_{a,b}\sum_w f(w)\,N_{ab}(w).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3em;vertical-align:-1.25em;"></span><span class="mop">ar<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.4306em;"><span style="top:-2.3479em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">b</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">max</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8882em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">ab</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="f(w)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>f</mi><mo stretchy="false">(</mo><mi>w</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">f(w)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="mclose">)</span></span></span></span></span> 是训练词频，<span class="reading-math" data-tex="N_{ab}(w)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>N</mi><mrow><mi>a</mi><mi>b</mi></mrow></msub><mo stretchy="false">(</mo><mi>w</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">N_{ab}(w)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">ab</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="mclose">)</span></span></span></span></span> 是当前分割中相邻对出现次数。这里优化的是局部频率贪心选择，不是通过翻译损失端到端学出的最优词表。合并步数控制粒度，但同样步数在不同语料上会形成不同片段。</p>
+<p>论文还比较分别学习与联合学习源目标分割。联合规则可以让共享字形获得更一致的切分，但字母表和语言差异会影响适用性。它不意味着两个语言的同形片段一定同义，也不保证每种测试字符都已经被训练词表覆盖。</p>
+<pre><code class="language-text">输入：带词频的训练词表、合并次数 M
+将每个词表示为字符序列与词尾标记
+规则表 ← 空
+重复 M 次：
+    统计当前所有相邻符号对的加权频率
+    选最高频对 (a,b)
+    在词内将 (a,b) 合并为新符号 ab
+    将该规则追加到有序规则表
+用规则表切分训练、验证和测试文本
+训练子词翻译模型；生成后按边界规则拼回词
+输出：固定子词表、确定的编码解码规则与翻译模型
+</code></pre>
+<p>词边界规则是可逆重建的重要部分。若把训练时使用的边界标记丢掉，输出片段可能无法正确恢复空格或单词。分词器并非只有一个词表文件，还包含规范化、规则顺序和解码约定。</p>
+<h2 id="实验设置与证据">实验设置与证据</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>任务</td>
+<td>WMT 2015 英语到德语、英语到俄语</td>
+</tr>
+<tr>
+<td>对照</td>
+<td>单词模型 UNK、词典回退、字符 n-gram 与 BPE 子词方案</td>
+</tr>
+<tr>
+<td>数据处理</td>
+<td>比较词表大小、token 数量和未知项，另列联合 BPE</td>
+</tr>
+<tr>
+<td>指标</td>
+<td>BLEU、CHRF3、全部词及稀有/OOV 词的 unigram F1</td>
+</tr>
+<tr>
+<td>集成</td>
+<td>单模型与 8 模型集成分列，不混为同一预算</td>
+</tr>
+<tr>
+<td>随机性</td>
+<td>表格不是完整多种子分布；集成数量不等于统计重复次数</td>
+</tr>
+</tbody></table></div>
+<p>**证据一，第 3 节与分割算法。**说明不同未知词类别为什么可能由较小单位处理，并给出 BPE 适配。它支持构词机制的动机，不保证任意分割都语义透明。</p>
+<p>**证据二，表 1。**德语语料在不分割、字符、BPE 等方案下的 token 与类型数明显不同。它直接显示词表压缩和序列增长的取舍；不能只取“词表更小”而不计算序列长度带来的成本。</p>
+<p>**证据三，表 2—3。**英德表中，集成条件下稀有词 F1 从词典回退的 36.8% 到联合 BPE 的 41.8%；但 OOV 子项并非所有子词方案都更高。整体改善与每个细分指标改善不是同一结论。</p>
+<p>这类实验应特别关注“rare”和“OOV”的定义。稀有可以指不在最常见五万词中，OOV 则可能指训练集中从未出现，两者难度不同。分词后能够表示一个 OOV 词，只说明输出空间允许它，不能证明它的训练语义已被获得。</p>
+<h2 id="教学推演新的词为何仍然可读">教学推演：新的词为何仍然可读</h2>
+<p>构造训练词“play”“played”“playing”。若规则形成“play”和常见词尾，新组合可能继续拆成这些共享单位。模型能够通过已知部分处理一个较少出现的形态，而不必为每种变化单独学习完整词向量。</p>
+<p>但 BPE 是频率合并，不是词素分析器。一个片段可能跨越人类认为的语义边界，甚至只是拼写上的常见组合。只要模型有足够数据，它仍可学习这些单位的作用；若数据很少，错误分割可能增加学习负担。这就是“可编码”和“易学习”的差别。</p>
+<p>再考虑一串随机序列号。字符层覆盖让系统可以输出它，但 token 分割方式可能使精确复制变难。对需要逐字符精确性的任务，应另外测量复制正确率与长度，而不是仅用自然语言 BLEU 判断分词好坏。</p>
+<h2 id="成本与评价的细节">成本与评价的细节</h2>
+<p>词表较小会减少某些嵌入和输出计算，却可能产生更多解码步骤。对自回归系统，步骤数量直接影响延迟；对注意力系统，序列长度还影响交互成本。因此两个 tokenizer 的比较应固定文本内容，再报告 token 数、覆盖、训练与推理开销，而非只匹配“相同 token 数”。</p>
+<p>跨语言场景更需要小心。同一字数的两种语言，可能因训练语料比例不同得到截然不同的 token 长度。这样一来，相同上下文窗口能容纳的信息量也不同。这个分析是从分词接口推导的后续含义，不是原论文已经完整测量的现代多语言结论。</p>
+<h2 id="贡献与边界">贡献与边界</h2>
+<p>本文使子词成为开放词汇神经翻译的实用途径，减少对词典补救的依赖。限制包括新字符、规则语料偏差、非语义分割和更长序列。它处理的是表示单位，不是事实知识、推理或译文忠实性本身。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>固定整词词表难翻译罕见词与未登录词</td>
+<td>将BPE合并规则用于子词分割，并比较联合学习分割</td>
+<td>常见片段可共享统计，陌生词仍能由已有单位表示</td>
+<td>表1词表/长度取舍，表2–3翻译及稀有词评价</td>
+<td>序列可能变长；统计片段不等于语言学词素，OOV各子项不保证同时改善</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测与参考答案">自测与参考答案</h2>
+<p><strong>1. BPE 能拆开新词，是否表示模型理解了新词？</strong></p>
+<p>不是。可表示意味着输入输出有合法符号序列；理解还依赖训练中是否学到这些片段的组合关系。新名字或随机串可以被编码，却可能被误译或复制错误。</p>
+<p><strong>2. 更小词表为什么不一定更快？</strong></p>
+<p>更小输出层可能节约计算，但更细分割增加序列与解码步数。最终成本取决于两者，以及具体架构和硬件。应按同样原始文本比较，而不只比较词表参数量。</p>
+<p><strong>3. 为什么训练与测试必须共享完全相同的分词规则？</strong></p>
+<p>模型的每个 token ID 对应训练时学到的含义。规则顺序、规范化或边界改变会导致不同序列甚至不可逆输出，相当于改变输入接口。只有词表名称相同并不足以保证兼容。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 011｜BPE 子词翻译：有限词表怎样生成没见过的词
+    <textarea id="md-source" hidden readonly># 011｜BPE 子词翻译：有限词表怎样生成没见过的词
 
 [目录](README.md) · [上一篇](010-distillation.md) · [下一篇](012-layernorm.md)
 
@@ -154,9 +257,9 @@ $f(w)$ 是训练词频，$N_{ab}(w)$ 是当前分割中相邻对出现次数。�
 
 模型的每个 token ID 对应训练时学到的含义。规则顺序、规范化或边界改变会导致不同序列甚至不可逆输出，相当于改变输入接口。只有词表名称相同并不足以保证兼容。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

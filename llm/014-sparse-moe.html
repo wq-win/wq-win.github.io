@@ -7,7 +7,7 @@
     <title>014｜稀疏 MoE：让模型拥有更多参数，却只为当前输入激活一部分 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,111 @@
                 <span class="text-gray-500">稀疏 MoE：让模型拥有更多参数，却只为当前输入激活一部分</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="e0ed85f414591f63fe3eceaf9d016de0ab642ff3508c8494cee5642848705609"><h1>014｜稀疏 MoE：让模型拥有更多参数，却只为当前输入激活一部分</h1>
+<p><a href="index.html">目录</a> · <a href="013-fasttext.html">上一篇</a> · <a href="015-transformer.html">下一篇</a></p>
+<p><strong>论文</strong>：Noam Shazeer 等，<em>Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer</em>，2017。<a href="https://arxiv.org/abs/1701.06538">原文</a> · <a href="https://arxiv.org/pdf/1701.06538">PDF</a>。本文讨论稀疏门控专家层，不把后来的 Switch 单专家路由、现代推理系统或所有 MoE 配方归为原版细节。</p>
+<h2 id="一分钟理解">一分钟理解</h2>
+<p>稠密网络每个输入都计算几乎全部参数，扩大容量通常也扩大单样本计算。MoE 放置许多专家网络，由路由器为当前输入选择少数专家，只计算被选部分，再组合输出。总参数因此可以很大，而激活计算增长较慢。</p>
+<p>难点不只是选专家：如果所有输入都涌向少数专家，其他参数学不到，负载也失衡。论文用带噪门控与平衡目标帮助分配。实验展示语言建模和翻译中的容量—计算取舍，但总参数、激活 FLOPs、显存和通信不是同一资源。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>理解本篇的五个概念是条件计算、top-<span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 路由、专家容量、辅助平衡损失和通信成本。它们分别回答哪些参数被运行、怎样选择、总知识容量如何增长、训练如何避免偏斜以及稀疏为何未必更快。</p>
+<h2 id="背景容量与每次计算能否分开增长">背景：容量与每次计算能否分开增长</h2>
+<p>语言中不同输入可能需要不同处理。条件计算希望根据输入选择子网络，让模型拥有更丰富规则，而不每次执行所有规则。但如果选择本身昂贵或造成大量设备通信，纸面 FLOPs 节约未必变成真实加速。</p>
+<p>专家不是预先标注的“数学专家”“文学专家”。它们是具有相同或相近结构的参数模块，分工由训练形成。即使观察到某些输入聚类，也不能自动赋予稳定人类语义标签。路由器只接受模型目标和辅助约束的反馈。</p>
+<p>原论文把专家层嵌入相应序列模型，周围仍有稠密计算。不能把整套系统的每步成本简化为一个专家层，也不能仅拿非嵌入参数量与另一个全模型参数量直接比较。</p>
+<h2 id="方法稀疏选择与加权专家输出">方法：稀疏选择与加权专家输出</h2>
+<p>基本形式为：</p>
+<p><span class="reading-math" data-tex="y(x)=\sum_{i=1}^{n}G_i(x)E_i(x)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>y</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></munderover><msub><mi>G</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><msub><mi>E</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">y(x)=\sum_{i=1}^{n}G_i(x)E_i(x).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.9291em;vertical-align:-1.2777em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.6514em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="E_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>E</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">E_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 为第 <span class="reading-math" data-tex="i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span></span> 个专家，<span class="reading-math" data-tex="G_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>G</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">G_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 为门控权重。门控对输入产生分数，加入可学习尺度的噪声，再保留 top-<span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 项并归一化。未选专家权重为零，因此可以跳过其前向计算。稀疏是计算路径属性，不只是参数中零元素较多。</p>
+<p>训练的主损失仍是语言建模或翻译损失，此外加入关于专家重要性和负载的平衡项。一个专家权重总和很高，与收到很多样本不是完全同一量，因此论文区分相关平衡信号。仅惩罚一种平均分配，未必消除实际计算拥塞。</p>
+<p>噪声鼓励探索不同专家，减轻早期赢家持续吸收所有样本的反馈。但噪声也引入随机性，训练与评估门控可能不同。top-<span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 的离散边界使路由变化不完全平滑，不能简单把它当成无约束稠密加权层。</p>
+<pre><code class="language-text">输入：一批隐藏表示 x、专家集合、稀疏选择数 k
+为各输入计算路由分数，训练时按协议加入噪声
+保留 top-k 专家并对保留分数归一化
+按专家将输入分组并发送到对应设备
+各专家仅处理分配给自己的输入
+将结果按门控权重组合回原输入顺序
+loss ← 任务损失 + 重要性平衡项 + 负载平衡项
+联合更新被访问专家及路由相关参数
+输出：专家层结果和用于监测的负载统计
+</code></pre>
+<p>数学上优化任务加辅助目标，机制上实施输入相关稀疏计算，实验指标包括困惑度和计算预算。平衡负载是训练与系统条件，不是语言质量本身；均匀路由也不代表专家已经学到有用分工。</p>
+<h2 id="实验与三类证据">实验与三类证据</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>任务</td>
+<td>大规模语言建模与机器翻译相关实验</td>
+</tr>
+<tr>
+<td>容量变化</td>
+<td>专家数量和结构，以及低、中、高计算预算模型</td>
+</tr>
+<tr>
+<td>指标</td>
+<td>测试困惑度、训练时间、每步运算与设备效率</td>
+</tr>
+<tr>
+<td>资源</td>
+<td>表 1 使用 K40 GPU 配置，参数统计明确排除部分层</td>
+</tr>
+<tr>
+<td>平衡</td>
+<td>检查专家重要性与负载，避免少量专家吸收大部分输入</td>
+</tr>
+<tr>
+<td>重复</td>
+<td>不能从配置表推断未报告的多种子可靠性</td>
+</tr>
+</tbody></table></div>
+<p>**证据一，第 2—4 节的门控与系统设计。**说明稀疏选择如何落地，以及为何通信、batch 分组和负载必须一起考虑。它支持可计算方案，而不仅是理论上少用参数。</p>
+<p>**证据二，表 1。**在列出的 10 epoch 条件下，低预算 MoE 测试困惑度 34.1，而所列既有最好结果为 34.7；表内非嵌入等排除条件后的参数为数十亿，运算却低得多。这说明容量与激活计算可分离，但不能把该表的参数口径套到现代全模型统计。</p>
+<p>**证据三，图 2 与附录 C。**不同预算与容量的曲线、具体模型配置共同支撑取舍。只截取最大参数模型或最快模型，会丢掉质量、时间和硬件利用率之间的变化。</p>
+<p>表中跨模型训练使用不同设备数量和时间，真实成本不能只看“小时”。更全面的比较需要 GPU 小时、通信、内存与质量阈值。原文也报告 TFLOPS/GPU，说明作者并未将理论稀疏直接等同于硬件效率。</p>
+<h2 id="教学例子为什么会发生专家坍缩">教学例子：为什么会发生专家坍缩</h2>
+<p>构造四个专家，初始化时第一位碰巧稍好。路由把更多输入送给它，它得到更多训练，再变得更好，形成正反馈。其他专家数据不足，参数容量虽然存在却没有被有效利用。辅助平衡目标试图打断这一过程。</p>
+<p>但若强迫每个 batch 完全均匀，也可能把本该由同一模块处理的相似输入拆散。负载均衡与任务最优路由之间需要取舍，因此辅助项权重不是纯系统参数。可以同时绘制质量与专家分配熵，观察均匀化是否真正带来有用容量。</p>
+<p>再把专家放在不同设备。一次 token 只算两个专家，FLOPs 不多，却要传输输入输出；batch 很小时通信占比可能很高。这解释了为什么大 batch、专家放置和互联对实际收益至关重要。</p>
+<h2 id="贡献与边界">贡献与边界</h2>
+<p>还有一个容易漏掉的维度是每个专家的有效样本量。增加专家总数、保持训练 token 总量和每 token 激活数不变时，每个专家平均看到的样本可能变少。容量更大与单参数训练更充分之间因此存在张力。可以固定总激活计算，逐步增加专家数，同时记录路由覆盖、各专家更新次数和验证损失；若质量停止改善，不能只解释为硬件问题，也可能是分配到各参数的数据不足。这一实验是本文提出的检查方式，不是原文补充结果。</p>
+<p>本文证明稀疏条件计算可以在大规模神经序列任务中落地，提供了一条扩展总容量的路径。它不意味着拥有相同激活参数量的稀疏模型与稠密模型成本完全相等，也不意味着专家天然可解释。</p>
+<p>限制包括路由不稳定、负载不均、跨设备通信、总权重存储和较小 batch 效率。推理服务还可能面对动态请求和专家访问偏斜，这些实际条件不能仅凭训练实验推断已经解决。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>稠密扩大网络容量往往同步提高每个输入的计算</td>
+<td>用可训练稀疏门控激活少数专家，并处理负载分配</td>
+<td>将总参数容量与单次执行路径部分分开</td>
+<td>表1语言建模，图2与附录C的预算/配置分析</td>
+<td>权重仍需存储，专家不均衡与跨设备通信可能吞掉理论计算收益</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测与参考答案">自测与参考答案</h2>
+<p><strong>1. 总参数增加十倍，为什么每个 token 的运算可以只增加少量？</strong></p>
+<p>路由只激活少数专家，未选专家不执行前向。总容量与本次路径分离。但所有权重仍需存储或调度，路由和通信也有成本，不能据此说资源几乎不变。</p>
+<p><strong>2. 负载均匀是否说明专家分工优秀？</strong></p>
+<p>不说明。均匀只描述输入分配，随机平均路由也可能均匀。要判断有用分工，需要任务质量、路由消融以及对输入变化的分析，而不是单一负载指标。</p>
+<p><strong>3. 为什么小 batch 可能削弱 MoE 的速度优势？</strong></p>
+<p>每个专家收到的样本更少，矩阵运算利用率下降，跨设备通信和调度占比增加。实际速度取决于数据分组与硬件，纸面激活 FLOPs 不能直接预测延迟。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 014｜稀疏 MoE：让模型拥有更多参数，却只为当前输入激活一部分
+    <textarea id="md-source" hidden readonly># 014｜稀疏 MoE：让模型拥有更多参数，却只为当前输入激活一部分
 
 [目录](README.md) · [上一篇](013-fasttext.md) · [下一篇](015-transformer.md)
 
@@ -150,9 +250,9 @@ loss ← 任务损失 + 重要性平衡项 + 负载平衡项
 
 每个专家收到的样本更少，矩阵运算利用率下降，跨设备通信和调度占比增加。实际速度取决于数据分组与硬件，纸面激活 FLOPs 不能直接预测延迟。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

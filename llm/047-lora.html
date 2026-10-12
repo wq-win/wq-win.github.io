@@ -7,7 +7,7 @@
     <title>047 · LoRA：冻结大矩阵，只学习低秩改动 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,143 @@
                 <span class="text-gray-500">047 · LoRA：冻结大矩阵，只学习低秩改动</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="d294180fca81447f3e5f0257c6179c1d03db29ffd0b59fafc4669a374522119e"><h1>047 · LoRA：冻结大矩阵，只学习低秩改动</h1>
+<p><a href="index.html">返回目录</a> · <a href="046-rope.html">上一篇：RoFormer</a> · <a href="048-codex.html">下一篇：Codex</a></p>
+<p>论文：Edward J. Hu等，<em>LoRA: Low-Rank Adaptation of Large Language Models</em>，2021年公开，ICLR 2022。<a href="https://arxiv.org/pdf/2106.09685">原始论文</a>。依据§4方法、§5实验、§7秩与矩阵选择分析及附录D；未复现175B训练。</p>
+<h2 id="一分钟理解">一分钟理解</h2>
+<p>适配大模型，不一定需要让每个参数都自由变化。LoRA保留原权重，只训练两个较小矩阵，它们的乘积形成权重增量。只要任务所需的调整集中在少数方向上，小增量也可能足够。</p>
+<p>它还有一个实用特点：推理时可以把增量加回原矩阵，不额外增加网络层。这里压缩的是训练时的更新表示与任务检查点，不是把原模型本身压缩成小模型；运行时仍然需要完整主干。</p>
+<p>一句话：在预训练语言模型的任务适配中，通过低秩分解约束权重更新，减少优化器状态和每任务参数，在所测任务上达到有竞争力的质量，代价是秩与目标层选择，以及受限更新空间可能无法覆盖大幅领域改变。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>矩阵秩</strong>衡量独立方向数；<strong>低秩分解</strong>用两个瘦矩阵表示更新；<strong>优化器状态</strong>是Adam等为每参数保存的历史统计；<strong>参数合并</strong>把线性增量提前加入权重；<strong>验证集选模</strong>选择适配配置而非提供无偏最终测试结论。</p>
+<h2 id="方法解决什么成本">方法解决什么成本</h2>
+<p>全量微调需要原权重、梯度和优化器状态。Adapter节约训练参数，却在推理路径增加模块；连续提示避免改动主干，但占用额外上下文或状态。LoRA在原线性投影旁加入可合并的线性分支，使最终计算图仍可恢复为一个矩阵乘法。</p>
+<p>论文的任务包括分类、表格描述、文本转SQL和对话摘要，均使用监督任务数据。没有新的RL奖励；LoRA是一种参数化方法，理论上可配合不同训练目标，但原文这些结果不能直接证明它在后来RL对齐中同样好。</p>
+<p>原文主要研究注意力投影矩阵，冻结前馈模块。后来常见的“所有线性层都加LoRA”属于具体训练配方的扩展，不能倒灌成原始实验的统一设置。</p>
+<h2 id="核心公式与初始化">核心公式与初始化</h2>
+<p>设原矩阵 <span class="reading-math" data-tex="W_0\in\mathbb R^{d\times k}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>W</mi><mn>0</mn></msub><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><mi>d</mi><mo>×</mo><mi>k</mi></mrow></msup></mrow><annotation encoding="application/x-tex">W_0\in\mathbb R^{d\times k}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8491em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mbin mtight">×</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span></span></span></span></span></span>，定义：</p>
+<p><span class="reading-math" data-tex="W=W_0+\Delta W,
+\qquad \Delta W=\frac\alpha r BA,
+\qquad B\in\mathbb R^{d\times r},\quad A\in\mathbb R^{r\times k}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>W</mi><mo>=</mo><msub><mi>W</mi><mn>0</mn></msub><mo>+</mo><mi mathvariant="normal">Δ</mi><mi>W</mi><mo separator="true">,</mo><mspace width="2em"/><mi mathvariant="normal">Δ</mi><mi>W</mi><mo>=</mo><mfrac><mi>α</mi><mi>r</mi></mfrac><mi>B</mi><mi>A</mi><mo separator="true">,</mo><mspace width="2em"/><mi>B</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><mi>d</mi><mo>×</mo><mi>r</mi></mrow></msup><mo separator="true">,</mo><mspace width="1em"/><mi>A</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><mi>r</mi><mo>×</mo><mi>k</mi></mrow></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">W=W_0+\Delta W,
+\qquad \Delta W=\frac\alpha r BA,
+\qquad B\in\mathbb R^{d\times r},\quad A\in\mathbb R^{r\times k}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord">Δ</span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">Δ</span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.7936em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.1076em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mord mathnormal">A</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0935em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mbin mtight">×</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">A</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8991em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span><span class="mbin mtight">×</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="r"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi></mrow><annotation encoding="application/x-tex">r</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span></span></span></span> 是秩上限，<span class="reading-math" data-tex="\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span> 控制增量尺度。对输入 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span>：</p>
+<p><span class="reading-math" data-tex="h=W_0x+\frac\alpha r B(Ax)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>h</mi><mo>=</mo><msub><mi>W</mi><mn>0</mn></msub><mi>x</mi><mo>+</mo><mfrac><mi>α</mi><mi>r</mi></mfrac><mi>B</mi><mo stretchy="false">(</mo><mi>A</mi><mi>x</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">h=W_0x+\frac\alpha r B(Ax).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">h</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.7936em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.1076em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mopen">(</span><span class="mord mathnormal">A</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>训练参数从 <span class="reading-math" data-tex="dk"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mi>k</mi></mrow><annotation encoding="application/x-tex">dk</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 变为 <span class="reading-math" data-tex="r(d+k)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi><mo stretchy="false">(</mo><mi>d</mi><mo>+</mo><mi>k</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">r(d+k)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mopen">(</span><span class="mord mathnormal">d</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mclose">)</span></span></span></span></span>。低秩的是 <span class="reading-math" data-tex="\Delta W"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">Δ</mi><mi>W</mi></mrow><annotation encoding="application/x-tex">\Delta W</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">Δ</span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span></span></span></span></span>，原权重与合并后权重都不必低秩。LoRA也不是先完成全量微调再做SVD，而是从训练开始就在因子化空间优化。</p>
+<p>原文将 <span class="reading-math" data-tex="A"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span> 随机初始化、<span class="reading-math" data-tex="B"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>B</mi></mrow><annotation encoding="application/x-tex">B</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span></span></span></span></span> 初始化为零，使初始增量为零，保留预训练函数。如果两者都设零，链式求导会让两者初始梯度都为零，无法启动这条分支；只将一个因子置零可避免这一问题。</p>
+<p>设训练样本为 <span class="reading-math" data-tex="(x,y)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>x</mi><mo separator="true">,</mo><mi>y</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(x,y)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span></span></span></span></span>，任务损失仍是负对数似然或相应分类损失：</p>
+<p><span class="reading-math" data-tex="\min_{A,B}\;L\left(y,f_{W_0+(\alpha/r)BA}(x)\right),
+\qquad W_0\text{固定}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mrow><mi>A</mi><mo separator="true">,</mo><mi>B</mi></mrow></munder><mtext>  </mtext><mi>L</mi><mrow><mo fence="true">(</mo><mi>y</mi><mo separator="true">,</mo><msub><mi>f</mi><mrow><msub><mi>W</mi><mn>0</mn></msub><mo>+</mo><mo stretchy="false">(</mo><mi>α</mi><mi mathvariant="normal">/</mi><mi>r</mi><mo stretchy="false">)</mo><mi>B</mi><mi>A</mi></mrow></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo fence="true">)</mo></mrow><mo separator="true">,</mo><mspace width="2em"/><msub><mi>W</mi><mn>0</mn></msub><mtext>固定</mtext><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\min_{A,B}\;L\left(y,f_{W_0+(\alpha/r)BA}(x)\right),
+\qquad W_0\text{固定}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.7304em;vertical-align:-0.8804em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3557em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">A</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05017em;">B</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8804em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size1">(</span></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.5198em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3173em;"><span style="top:-2.357em;margin-left:-0.1389em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span><span class="mbin mtight">+</span><span class="mopen mtight">(</span><span class="mord mathnormal mtight" style="margin-right:0.0037em;">α</span><span class="mord mtight">/</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span><span class="mclose mtight">)</span><span class="mord mathnormal mtight" style="margin-right:0.05017em;">B</span><span class="mord mathnormal mtight">A</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3552em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size1">)</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord text"><span class="mord cjk_fallback">固定</span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>所谓低“内在秩”是对有效更新的经验假设。论文用不同秩及子空间分析支持它在部分任务中的合理性，没有证明所有任务的最优更新都天然低秩。</p>
+<pre><code class="language-text">输入：预训练模型、目标线性层集合、秩 r、系数 alpha
+冻结主模型
+每个目标矩阵 W0：初始化 A 为随机值，B 为零
+重复抽取任务样本：
+  用 W0*x + (alpha/r)*B*(A*x) 进行前向计算
+  计算正常任务损失
+  反向传播，只更新 A、B 及明确声明的任务参数
+按验证集选检查点，保存低秩因子与配置
+单任务部署可合并：Wdeploy = W0 + (alpha/r)*B*A
+输出：具有任务能力的完整模型，或可加载的任务增量
+</code></pre>
+<p>合并等价基于线性加法，推理时需关闭训练dropout并使用正确缩放与基础权重。若同时服务多个任务，预先合并一个任务并不能自动让同一矩阵处理其他任务；保留分支动态选择会改变性能取舍。</p>
+<h2 id="实验设置与公平比较">实验设置与公平比较</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文报告</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>模型</td>
+<td>RoBERTa base/large、DeBERTa XXL、GPT-2 medium/large、GPT-3 175B</td>
+</tr>
+<tr>
+<td>数据任务</td>
+<td>GLUE理解任务，E2E/WebNLG/DART生成，WikiSQL、MNLI、SAMSum</td>
+</tr>
+<tr>
+<td>GPT-2训练</td>
+<td>附录D.3与表11：5 epoch、批量8、AdamW、学习率2×10⁻⁴、预热500步；Q/V秩4，alpha32</td>
+</tr>
+<tr>
+<td>GPT-2解码</td>
+<td>表11：beam10、长度惩罚按数据集设置；不是与所有引用基线完全相同的解码配方</td>
+</tr>
+<tr>
+<td>GPT-3训练</td>
+<td>附录D.4：2 epoch、批量128、权重衰减0.1；长度WikiSQL384、MNLI768、SAMSum2048</td>
+</tr>
+<tr>
+<td>重复报告</td>
+<td>GPT-2为3随机种子均值；175B只给任务典型标准差，而非每行独立误差条</td>
+</tr>
+<tr>
+<td>特殊对照条件</td>
+<td>表2带†运行匹配Adapter的长度128与初始化口径；其他微调基线可能先经MNLI适配</td>
+</tr>
+<tr>
+<td>数据规模边界</td>
+<td>任务数据集名称与版本应按原附录锁定；主结果表没有统一逐任务token消费量，不能假装严格等token</td>
+</tr>
+</tbody></table></div>
+<p>论文报告显存由1.2TB降到350GB、指定配置检查点由350GB降到35MB，并观察到175B训练约25%加速。它们分别衡量训练显存、增量存储和速度，三个倍率不同。35MB任务文件仍依赖大模型，不能独立运行。</p>
+<h2 id="五项具体证据">五项具体证据</h2>
+<p><strong>证据一：表1，推理延迟。</strong> GPT-2 medium在RTX8000上，批量1、长度128时，全量微调/合并LoRA前向平均19.8毫秒，两个Adapter变体23.9和25.8毫秒，100次计时。支持的是该硬件与形状下合并后的无额外分支开销，不是任何LoRA服务系统都永远零延迟。</p>
+<p><strong>证据二：表3，E2E生成。</strong> GPT-2 medium的LoRA用0.35M任务参数达到BLEU70.4±0.1；引用的同参数量逐层前缀为69.7。GPT-2 large的LoRA为70.4±0.1，前缀70.3。后一个差距很小，且部分数据引用前作，不能把它描述为全面压倒性胜利。</p>
+<p><strong>证据三：表4，175B任务。</strong> 4.7M参数LoRA的MNLI-m为91.7，全量89.5，差2.2个百分点；SAMSum ROUGE-L为45.9对44.5。但WikiSQL为73.4对73.8，略低于全量，且该任务典型波动约±0.5。较大37.7M LoRA的WikiSQL为74.0，也不能将0.2差异夸成稳定优势。</p>
+<p><strong>证据四：表5，固定约18M参数预算。</strong> 只调Q、秩8的WikiSQL为70.4，同时调Q/V、各秩4为73.7。说明在此预算下，把自由度分配到哪些映射，可能比单纯增加某一矩阵的秩更重要。四种投影一起调也有竞争力，因此“只调Q/V是唯一最优”同样超出表格。</p>
+<p><strong>证据五：表6与§7.2。</strong> Q/V秩1、8、64的WikiSQL分别为73.4、73.8、73.5，并非秩越高越好。原文脚注明确不期待小秩适用于所有任务，例如语言变化很大时可能需要更强更新。这个限制比把rank设成固定经验常数更值得记住。</p>
+<h2 id="代价与教学例子">代价与教学例子</h2>
+<p>LoRA减少的是可训练状态，不消除前向激活、主模型权重或数据处理开销。秩小可能优化更容易，也可能欠拟合；秩大增加容量但不保证泛化。要区分“低秩约束足以完成该任务”和“所有全量微调梯度都低秩”，后者并未被前者证明。</p>
+<p><strong>自构例子：</strong> 一个1024×1024投影有1048576个参数，秩8的两个因子共16384个参数，约为原矩阵的1/64。若模型只需增强少数与情感判断相关的方向，这种限制可能足够；若需要大幅改造所有语言表示，局部低秩调整可能不够。这里的维度与解释是教学构造，不是论文特定模型测得的有效秩。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>全量梯度与优化器状态昂贵</td>
+<td>冻结主干，学习BA</td>
+<td>部分任务只需少量更新方向</td>
+<td>表2–4与显存报告</td>
+<td>完整主干仍在，可能欠拟合</td>
+</tr>
+<tr>
+<td>新模块增加推理路径</td>
+<td>线性增量可合并</td>
+<td>合并后恢复原矩阵乘法</td>
+<td>表1延迟</td>
+<td>多任务动态切换与合并存在取舍</td>
+</tr>
+<tr>
+<td>参数预算如何分配不清楚</td>
+<td>比较投影集合与秩</td>
+<td>控制不同映射比单纯增秩更有效</td>
+<td>表5、表6</td>
+<td>结果依任务，不能固定唯一rank</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测与答案">自测与答案</h2>
+<p><strong>1. LoRA是否假定预训练权重是低秩的？</strong></p>
+<p>不是。假设针对任务所需增量，<span class="reading-math" data-tex="W_0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>W</mi><mn>0</mn></msub></mrow><annotation encoding="application/x-tex">W_0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>可以满秩，<span class="reading-math" data-tex="W_0+BA"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>W</mi><mn>0</mn></msub><mo>+</mo><mi>B</mi><mi>A</mi></mrow><annotation encoding="application/x-tex">W_0+BA</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mord mathnormal">A</span></span></span></span></span>也可以满秩。低秩因子只是限制可训练的改动方向，因此小检查点不代表小完整模型。</p>
+<p><strong>2. 为什么常见初始化是一个因子随机、另一个为零？</strong></p>
+<p>乘积为零确保初始模型保持预训练行为；随机因子又能让零因子得到非零梯度。若A和B都为零，双方梯度都含另一个零因子，训练无法启动。第一步随机因子的梯度可能为零，不妨碍另一个先更新。</p>
+<p><strong>3. 如果增大rank没有改善，该怎么判断原因？</strong></p>
+<p>先看训练损失是否仍下降、验证表现是否波动，再控制学习率、alpha、目标层与预算。可能是小秩已足够、额外容量过拟合，也可能优化配方不合适。表5提示改目标层集合也值得比较，不能仅凭一次rank曲线宣布任务真实内在秩。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 047 · LoRA：冻结大矩阵，只学习低秩改动
+    <textarea id="md-source" hidden readonly># 047 · LoRA：冻结大矩阵，只学习低秩改动
 
 [返回目录](README.md) · [上一篇：RoFormer](046-rope.md) · [下一篇：Codex](048-codex.md)
 
@@ -167,9 +299,9 @@ LoRA减少的是可训练状态，不消除前向激活、主模型权重或数�
 
 先看训练损失是否仍下降、验证表现是否波动，再控制学习率、alpha、目标层与预算。可能是小秩已足够、额外容量过拟合，也可能优化配方不合适。表5提示改目标层集合也值得比较，不能仅凭一次rank曲线宣布任务真实内在秩。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

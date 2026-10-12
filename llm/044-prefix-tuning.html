@@ -7,7 +7,7 @@
     <title>044 · Prefix-Tuning：把任务知识放进每层的虚拟上下文 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,159 @@
                 <span class="text-gray-500">044 · Prefix-Tuning：把任务知识放进每层的虚拟上下文</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="9a412a3622b5c424c873303917de523c16828c4f8b43dbcfce2d1f8ddd39c004"><h1>044 · Prefix-Tuning：把任务知识放进每层的虚拟上下文</h1>
+<p><a href="index.html">返回目录</a> · <a href="043-clip.html">上一篇：CLIP</a> · <a href="045-prompt-tuning.html">下一篇：Prompt Tuning</a></p>
+<p>论文：Xiang Lisa Li、Percy Liang，<em>Prefix-Tuning: Optimizing Continuous Prompts for Generation</em>，2021。<a href="https://arxiv.org/pdf/2101.00190">原始论文</a>。依据§3–7、表1–5及附录的训练设置和外推实例；未独立复现。</p>
+<h2 id="一分钟理解">一分钟理解</h2>
+<p>全量微调像给每个任务保存一本改写后的大字典。Prefix-Tuning提出：能否保留同一本大字典，只为每个任务学习一小段引导信息？这段信息不是人能读懂的提示词，而是可优化的连续向量，并且直接进入Transformer各层的注意力上下文。</p>
+<p>论文在表格转文本任务中用很少的任务参数得到接近全量微调的表现，在低数据与部分未见类别上更好。但摘要生成存在明确损失，所以“只训练0.1%参数就和全量一样”不是覆盖全文实验的结论。</p>
+<p>一句话：在预训练生成模型的任务适配中，通过冻结主模型并优化逐层前缀状态，减少每个任务需要保存的参数，在若干生成任务上保留较高质量，代价是受限的适配空间、前缀计算与对任务和初始化的依赖。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>条件生成</strong>用输入约束输出分布；<strong>教师强制</strong>用真实历史token训练下一步；<strong>KV缓存</strong>保存注意力可读取的键和值；<strong>参数冻结</strong>禁止更新权重但不必阻断输入梯度；<strong>重参数化</strong>通过另一组变量生成实际被使用的参数，以改善优化。</p>
+<h2 id="研究问题与参照方法">研究问题与参照方法</h2>
+<p>论文研究监督式条件生成：输入 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 是线性化表格或新闻，输出 <span class="reading-math" data-tex="y"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">y</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span></span></span></span> 是描述或摘要。GPT-2负责表格转文本，BART负责摘要。没有强化学习奖励；结束由生成终止符和解码限制控制，训练则使用目标序列似然。</p>
+<p>全量微调更新预训练参数 <span class="reading-math" data-tex="\phi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϕ</mi></mrow><annotation encoding="application/x-tex">\phi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ϕ</span></span></span></span></span>，每个任务都需要独立权重。Adapter只添加较小模块，但模块仍嵌入计算路径。Prefix-Tuning选择另一种控制位置：让输入与输出token都能够注意到一组可学习的“历史状态”。它沿用主模型的注意力、前馈层和语言建模输出头，改变可训练参数及条件信息的提供方式。</p>
+<p>关键假设是预训练模型已经具有足够生成能力，小规模连续控制就能调用这些能力。冻结权重可能减少小数据过拟合，但也可能限制对新任务的改造幅度；这是需要实验判定的取舍，不是先验保证。</p>
+<h2 id="连续前缀到底是什么">连续前缀到底是什么</h2>
+<p>对自回归模型，设 <span class="reading-math" data-tex="P_\theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>P</mi><mi>θ</mi></msub></mrow><annotation encoding="application/x-tex">P_\theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是包含各层前缀状态的矩阵，普通位置的隐状态仍由冻结网络产生：</p>
+<p><span class="reading-math" data-tex="h_i=\begin{cases}
+P_\theta[i,:],&amp;i\in P_{\rm idx},\\
+\mathrm{LM}_{\phi}(z_i,h_{&lt;i}),&amp;\text{其他位置}.
+\end{cases}"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>h</mi><mi>i</mi></msub><mo>=</mo><mrow><mo fence="true">{</mo><mtable rowspacing="0.36em" columnalign="left left" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><msub><mi>P</mi><mi>θ</mi></msub><mo stretchy="false">[</mo><mi>i</mi><mo separator="true">,</mo><mo>:</mo><mo stretchy="false">]</mo><mo separator="true">,</mo></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>i</mi><mo>∈</mo><msub><mi>P</mi><mrow><mi mathvariant="normal">i</mi><mi mathvariant="normal">d</mi><mi mathvariant="normal">x</mi></mrow></msub><mo separator="true">,</mo></mrow></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><msub><mrow><mi mathvariant="normal">L</mi><mi mathvariant="normal">M</mi></mrow><mi>ϕ</mi></msub><mo stretchy="false">(</mo><msub><mi>z</mi><mi>i</mi></msub><mo separator="true">,</mo><msub><mi>h</mi><mrow><mo>&lt;</mo><mi>i</mi></mrow></msub><mo stretchy="false">)</mo><mo separator="true">,</mo></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mtext>其他位置</mtext><mi mathvariant="normal">.</mi></mrow></mstyle></mtd></mtr></mtable></mrow></mrow><annotation encoding="application/x-tex">h_i=\begin{cases}
+P_\theta[i,:],&amp;i\in P_{\rm idx},\\
+\mathrm{LM}_{\phi}(z_i,h_{&lt;i}),&amp;\text{其他位置}.
+\end{cases}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3em;vertical-align:-1.25em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size4">{</span></span><span class="mord"><span class="mtable"><span class="col-align-l"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.69em;"><span style="top:-3.69em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord mathnormal">i</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">:</span><span class="mclose">]</span><span class="mpunct">,</span></span></span><span style="top:-2.25em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord"><span class="mord"><span class="mord mathrm">LM</span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">ϕ</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight">i</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.19em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:1em;"></span><span class="col-align-l"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.69em;"><span style="top:-3.69em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord mathnormal">i</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">idx</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span></span></span><span style="top:-2.25em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord text"><span class="mord cjk_fallback">其他位置</span></span><span class="mord">.</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.19em;"><span></span></span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span></span></p>
+<p>这里的 <span class="reading-math" data-tex="h_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>h</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">h_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 汇总各层状态；在实现注意力缓存的视角下，前缀提供每层的key/value。它不是仅在最底层加几个可训练词向量：后者的高层状态仍完全受冻结模型映射约束，论文把它作为较弱的消融。</p>
+<p>一种便于理解的单层表达为：</p>
+<p><span class="reading-math" data-tex="H'=\operatorname{softmax}\left(
+\frac{Q[K_P;K_x]^\top}{\sqrt{d_k}}
+\right)[V_P;V_x]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>H</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>=</mo><mi mathvariant="normal">softmax</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><mfrac><mrow><mi>Q</mi><mo stretchy="false">[</mo><msub><mi>K</mi><mi>P</mi></msub><mo separator="true">;</mo><msub><mi>K</mi><mi>x</mi></msub><msup><mo stretchy="false">]</mo><mi mathvariant="normal">⊤</mi></msup></mrow><msqrt><msub><mi>d</mi><mi>k</mi></msub></msqrt></mfrac><mo fence="true">)</mo></mrow><mo stretchy="false">[</mo><msub><mi>V</mi><mi>P</mi></msub><mo separator="true">;</mo><msub><mi>V</mi><mi>x</mi></msub><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">H&#x27;=\operatorname{softmax}\left(
+\frac{Q[K_P;K_x]^\top}{\sqrt{d_k}}
+\right)[V_P;V_x].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8019em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4761em;vertical-align:-0.95em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">(</span></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.5261em;"><span style="top:-2.2528em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8572em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8172em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1828em;"><span></span></span></span></span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">;</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose"><span class="mclose">]</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.93em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">)</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">;</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">]</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="K_P,V_P"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>K</mi><mi>P</mi></msub><mo separator="true">,</mo><msub><mi>V</mi><mi>P</mi></msub></mrow><annotation encoding="application/x-tex">K_P,V_P</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是前缀，<span class="reading-math" data-tex="K_x,V_x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>K</mi><mi>x</mi></msub><mo separator="true">,</mo><msub><mi>V</mi><mi>x</mi></msub></mrow><annotation encoding="application/x-tex">K_x,V_x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是正常上下文，分号表示沿序列维拼接。后续词既可读取真实输入，也可读取任务前缀。这个表达说明控制如何进入注意力，并非把论文所有编码器、解码器接口压成完全相同的实现。</p>
+<p>目标仍是：</p>
+<p><span class="reading-math" data-tex="\min_\theta -\sum_t\log p_{\phi,\theta}(y_t\mid x,y_{&lt;t}),
+\qquad \phi\text{固定}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mi>θ</mi></munder><mo>−</mo><munder><mo>∑</mo><mi>t</mi></munder><mi>log</mi><mo>⁡</mo><msub><mi>p</mi><mrow><mi>ϕ</mi><mo separator="true">,</mo><mi>θ</mi></mrow></msub><mo stretchy="false">(</mo><msub><mi>y</mi><mi>t</mi></msub><mo>∣</mo><mi>x</mi><mo separator="true">,</mo><msub><mi>y</mi><mrow><mo>&lt;</mo><mi>t</mi></mrow></msub><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><mi>ϕ</mi><mtext>固定</mtext><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\min_\theta -\sum_t\log p_{\phi,\theta}(y_t\mid x,y_{&lt;t}),
+\qquad \phi\text{固定}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.3em;vertical-align:-1.25em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3479em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7521em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">ϕ</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">ϕ</span><span class="mord text"><span class="mord cjk_fallback">固定</span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>§4还使用较小向量经过MLP生成完整前缀的重参数化以利优化。训练后可以只保存生成出的前缀并去掉MLP。因此训练期间参与优化的参数与最终每任务存储量要分别计算，不能只拿部署前缀大小推算训练内存。</p>
+<pre><code class="language-text">输入：预训练模型 φ、训练对 (x,y)、前缀长度 m
+冻结 φ，初始化前缀生成参数 θ
+重复：
+  P = MLPθ(较小前缀表示)
+  为所需注意力层构造前缀 K/V
+  将前缀与输入状态组合，教师强制预测 y
+  loss = 目标 token 的负对数似然
+  梯度穿过冻结网络，但只更新 θ
+训练完成后保存 P；推理时加载同一 φ 与任务 P
+输出：按指定 beam search 解码的描述或摘要
+</code></pre>
+<p>冻结网络并不意味着可以把所有前向过程都放在无梯度模式中：损失必须经网络传回前缀。节省主要来自任务参数、梯度与优化器状态，而不是把大模型的运算全部删掉。</p>
+<h2 id="实验设置与预算">实验设置与预算</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文设置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>表格生成数据</td>
+<td>§5.1，E2E约50K样例、WebNLG约22K、DART约82K；这些是论文的数据集规模口径</td>
+</tr>
+<tr>
+<td>摘要数据</td>
+<td>XSUM约225K，BART-large；输入截断至512个BPE token</td>
+</tr>
+<tr>
+<td>主对照</td>
+<td>全量微调、只调顶部两层、Adapter；0.1% Adapter用于接近参数预算比较</td>
+</tr>
+<tr>
+<td>前缀训练配方</td>
+<td>表5，E2E为5 epoch/批量10/长度5；WebNLG为5 epoch/批量5/长度5；DART为10 epoch/批量5/长度10</td>
+</tr>
+<tr>
+<td>摘要配方</td>
+<td>表5，30 epoch、批量14、前缀长度100、学习率5×10⁻⁵</td>
+</tr>
+<tr>
+<td>墙钟报告</td>
+<td>§5.3，22K样例每epoch前缀约0.2小时、全量约0.3小时；指定TITAN硬件上的局部结果</td>
+</tr>
+<tr>
+<td>解码</td>
+<td>表格任务beam=5；摘要beam=6并使用长度归一化</td>
+</tr>
+<tr>
+<td>低数据与泛化</td>
+<td>抽取小训练集并用开发集选参；WebNLG训练9类、测试另5类，XSUM另构造主题变化划分</td>
+</tr>
+</tbody></table></div>
+<p>不同方法表5的epoch、批量和学习率并不完全相同，不能把主表称为逐步数、逐算力严格等预算试验。BLEU和ROUGE衡量与参考文本的匹配，不能单独证明没有漏写或幻觉；附录的定性实例也提示这两种失败仍存在。</p>
+<h2 id="四组关键证据">四组关键证据</h2>
+<p><strong>证据一：表1，GPT-2 medium表格生成。</strong> E2E BLEU全量微调68.2，Prefix为69.7，差1.5分；WebNLG总体BLEU为46.5对55.1。更值得拆分的是已见类别64.2对62.9，未见类别27.7对45.6：总体优势主要不能解释为训练分布内一律更好。0.1% Adapter的E2E为66.3，说明放置可训练自由度的位置也重要。</p>
+<p><strong>证据二：表2，XSUM摘要。</strong> 全量ROUGE-L为37.25，2%前缀为36.05，0.1%前缀为35.05。对应绝对下降1.20和2.20分。作者讨论任务复杂度与数据量可能影响结果，但这些因素没有被完全独立控制，不能说已经证明“摘要需要多少参数”的普遍规律。</p>
+<p><strong>证据三：表4与图4，结构消融。</strong> E2E完整前缀BLEU69.7，仅调10个输入嵌入为62.2。图4显示前缀长度增加到一定程度后测试表现略降，即使训练损失更低。支持逐层干预和容量选择在这些配置中重要；不能据此断言输入层提示在更大模型上永远无效，下一篇恰好研究这一规模条件。</p>
+<p><strong>证据四：图3、表3与附录A.4。</strong> 小数据曲线偏向前缀；XSUM新闻到体育的ROUGE-L为31.51，全量为30.26。外推改善有真实主题划分依据，但附录指出前缀仍会遗漏表格内容，全量微调则常出现不符事实的生成。高自动指标并不能消除这两类风险。</p>
+<h2 id="贡献与教学例子">贡献与教学例子</h2>
+<p>新意是把任务适配变成可学习的逐层条件状态，而不是换一种输出损失。作者提出的保留预训练参数有利外推，是与实验相符的解释；参数冻结、参数数量和优化路径同时变化，尚不能把收益完全归于单一原因。</p>
+<p><strong>自构例子：</strong> 输入为“店名=青禾；菜系=川菜；价格=中等”。两个任务共享GPT-2：一个前缀学到简短介绍，另一个学到只列菜系和价格。前缀不应储存每家店的事实，而应改变如何使用当前表格。若输出捏造“可停车”，说明调节生成风格没有保证事实约束，需在评价中单独检查槽位覆盖和错误添加。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>每任务保存整模型</td>
+<td>冻结主干并保存逐层前缀</td>
+<td>复用生成能力，以少量状态控制任务</td>
+<td>表1少量参数保持表格生成质量</td>
+<td>训练仍穿过大模型，存储节省不等于同倍率加速</td>
+</tr>
+<tr>
+<td>输入提示控制能力有限</td>
+<td>直接调整多层前缀K/V</td>
+<td>不受单层嵌入映射的同等约束</td>
+<td>表4完整69.7对EMB-10的62.2</td>
+<td>前缀长度和初始化敏感</td>
+</tr>
+<tr>
+<td>小数据与未见类别适配</td>
+<td>限制可训练自由度</td>
+<td>可能减轻任务过拟合</td>
+<td>图3、表3、WebNLG未见类别</td>
+<td>XSUM主结果下降，外推仍会漏写</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测与答案">自测与答案</h2>
+<p><strong>1. Prefix-Tuning和只学习几个输入词向量为什么不相同？</strong></p>
+<p>输入向量只能经冻结层逐层传播；Prefix-Tuning直接为多层注意力提供可训练上下文，拥有不同的控制自由度。表4在GPT-2表格生成上显示差异，但不构成所有规模和任务上的优劣定理。</p>
+<p><strong>2. 可训练参数只有0.1%，训练就会快1000倍吗？</strong></p>
+<p>不会。大模型仍需前向计算，且需要将梯度传到前缀。0.1%还涉及任务参数的统计口径，重参数化训练模块与最终存储不同。论文局部计时是每epoch约0.3小时到0.2小时，远非千倍。</p>
+<p><strong>3. 怎么判断前缀在WebNLG上改善的是记忆还是泛化？</strong></p>
+<p>分开看训练出现的9类和未出现的5类，而不是只看总体。medium结果已见类别略降、未见类别明显上升，支持该类别变化下的外推收益。仍需检查类别难度、内容覆盖和事实错误，不能把这一个划分推广为任意领域迁移。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 044 · Prefix-Tuning：把任务知识放进每层的虚拟上下文
+    <textarea id="md-source" hidden readonly># 044 · Prefix-Tuning：把任务知识放进每层的虚拟上下文
 
 [返回目录](README.md) · [上一篇：CLIP](043-clip.md) · [下一篇：Prompt Tuning](045-prompt-tuning.md)
 
@@ -74,8 +222,8 @@
 
 $$
 h_i=\begin{cases}
-P_\theta[i,:],&i\in P_{\rm idx},\\
-\mathrm{LM}_{\phi}(z_i,h_{<i}),&\text{其他位置}.
+P_\theta[i,:],&amp;i\in P_{\rm idx},\\
+\mathrm{LM}_{\phi}(z_i,h_{&lt;i}),&amp;\text{其他位置}.
 \end{cases}
 $$
 
@@ -94,7 +242,7 @@ $K_P,V_P$ 是前缀，$K_x,V_x$ 是正常上下文，分号表示沿序列维拼
 目标仍是：
 
 $$
-\min_\theta -\sum_t\log p_{\phi,\theta}(y_t\mid x,y_{<t}),
+\min_\theta -\sum_t\log p_{\phi,\theta}(y_t\mid x,y_{&lt;t}),
 \qquad \phi\text{固定}.
 $$
 
@@ -168,9 +316,9 @@ $$
 
 分开看训练出现的9类和未出现的5类，而不是只看总体。medium结果已见类别略降、未见类别明显上升，支持该类别变化下的外推收益。仍需检查类别难度、内容覆盖和事实错误，不能把这一个划分推广为任意领域迁移。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

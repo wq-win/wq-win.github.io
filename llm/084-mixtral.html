@@ -7,7 +7,7 @@
     <title>084｜Mixtral：用更多参数储存能力，用少数专家处理每个 token | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,133 @@
                 <span class="text-gray-500">Mixtral：用更多参数储存能力，用少数专家处理每个 token</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="d5d5d374d0239a9c1dc86882df600a6c031d98954e9e8e4bbd502d9f17f9c736"><h1>084｜Mixtral：用更多参数储存能力，用少数专家处理每个 token</h1>
+<p><a href="index.html">返回目录</a> · <a href="00-timeline.html">发展时间线</a></p>
+<p>论文：Albert Q. Jiang 等，<em>Mixtral of Experts</em>，2024。本文依据<a href="https://arxiv.org/html/2401.04088v1">论文首版</a>的架构、评价、指令微调和路由分析全文；官方实现见<a href="https://github.com/mistralai/mistral-src">代码仓库</a>。论文是较短的模型报告，预训练数据总量、完整优化配置等未披露，不能把架构可运行误称为训练可完整重建。</p>
+<h2 id="一分钟理解87b-不等于八个完整助手投票">一分钟理解：8×7B 不等于八个完整助手投票</h2>
+<p>如果每个 token 都使用模型全部参数，增加容量通常也会增加计算。稀疏专家模型把一些子网络复制成多个专家，每次仅激活其中少数，让参数容量与每 token 计算量部分分离。</p>
+<p>Mixtral 在每个 Transformer 层的前馈部分放置 8 个专家，由路由器为每个 token 选择 2 个，其输出加权相加。注意力等部分共享，并不是先让八个独立的 7B 聊天模型各写答案，再举行投票。</p>
+<p>作者展示较强的数学、代码和多语言能力。证据支持它在所比较的多项基准上，以较少活跃参数达到大型稠密模型的水平；不支持把“约五倍更少活跃参数”直接翻译成“所有设备上五倍更快或五倍更省显存”。</p>
+<p>一句话：在大容量语言建模中，通过 token 级稀疏前馈路由，提高容量与活跃计算的比值，代价是总权重存储、路由调度和专家负载不均。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>MoE</strong>用多个参数分支扩展容量；<strong>路由器</strong>按输入选择分支；<strong>活跃参数</strong>描述一次前向实际用到的参数；<strong>专家并行</strong>把不同专家分布到设备；<strong>多数投票解码</strong>用多次候选提高答案选择效果并增加推理成本。</p>
+<h2 id="背景三个不同的模型大小">背景：三个不同的“模型大小”</h2>
+<p>理解 Mixtral，先分清总参数、活跃参数和运行显存。总参数决定要存多少权重；活跃参数近似描述处理一个 token 时访问哪些计算路径；运行显存还包含 KV cache、激活、通信缓冲和框架开销。</p>
+<p>论文给出的数量级是约 47B 总参数、约 13B 活跃参数。不是 <span class="reading-math" data-tex="8\times7=56"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>8</mn><mo>×</mo><mn>7</mn><mo>=</mo><mn>56</mn></mrow><annotation encoding="application/x-tex">8\times7=56</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">8</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">7</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">56</span></span></span></span></span>B，因为没有复制八套完整注意力和嵌入；也不是 <span class="reading-math" data-tex="2\times7=14"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mo>×</mo><mn>7</mn><mo>=</mo><mn>14</mn></mrow><annotation encoding="application/x-tex">2\times7=14</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">7</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">14</span></span></span></span></span>B 的精确活跃量，因为共享与专家组件的比例不同。</p>
+<p>这是无环境交互的语言预训练及后续指令/偏好微调，不是机器人式在线强化学习。路由器选择的是内部计算分支，不能把它直接当作外部动作策略；专家输出是向量，不是完整自然语言答案。</p>
+<p>与早期 MoE 论文的关系也很具体：Mixtral 沿用稀疏路由思想，报告其在开放权重、实用语言模型规模上的效果。它不是 MoE 的发明者。其意义在架构、能力和可部署实现的组合。</p>
+<h2 id="方法token-每过一层都重新选择专家">方法：token 每过一层，都重新选择专家</h2>
+<p>令当前 token 的隐藏向量为 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span>，路由参数为 <span class="reading-math" data-tex="W_g"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>W</mi><mi>g</mi></msub></mrow><annotation encoding="application/x-tex">W_g</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>。先计算 8 个分数，只保留最大的两个，再做 softmax：</p>
+<p><span class="reading-math" data-tex="g(x)=\operatorname{softmax}(\operatorname{Top2}(xW_g)),\qquad
+y=\sum_{i=1}^{8}g_i(x)E_i(x)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>g</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="normal">softmax</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi mathvariant="normal">Top2</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>x</mi><msub><mi>W</mi><mi>g</mi></msub><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><mi>y</mi><mo>=</mo><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mn>8</mn></munderover><msub><mi>g</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><msub><mi>E</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">g(x)=\operatorname{softmax}(\operatorname{Top2}(xW_g)),\qquad
+y=\sum_{i=1}^{8}g_i(x)E_i(x).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span><span class="mopen">(</span><span class="mop"><span class="mord mathrm">Top2</span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">))</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.0788em;vertical-align:-1.2777em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8011em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">8</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>未被选中的 logits 视为负无穷，对应权重为零，所以无需计算这些专家。<span class="reading-math" data-tex="E_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>E</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">E_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是独立参数的 SwiGLU 前馈网络；<span class="reading-math" data-tex="g_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>g</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">g_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是组合权重。被选专家不是每段对话固定一次，也不是按任务标题永久分配，而是随 token、层和上下文变化。</p>
+<p>SwiGLU 专家可抽象为</p>
+<p><span class="reading-math" data-tex="E_i(x)=W_{o,i}\left[\operatorname{SiLU}(W_{a,i}x)\odot(W_{b,i}x)\right]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>E</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><msub><mi>W</mi><mrow><mi>o</mi><mo separator="true">,</mo><mi>i</mi></mrow></msub><mrow><mo fence="true">[</mo><mi mathvariant="normal">SiLU</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>W</mi><mrow><mi>a</mi><mo separator="true">,</mo><mi>i</mi></mrow></msub><mi>x</mi><mo stretchy="false">)</mo><mo>⊙</mo><mo stretchy="false">(</mo><msub><mi>W</mi><mrow><mi>b</mi><mo separator="true">,</mo><mi>i</mi></mrow></msub><mi>x</mi><mo stretchy="false">)</mo><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">E_i(x)=W_{o,i}\left[\operatorname{SiLU}(W_{a,i}x)\odot(W_{b,i}x)\right].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">i</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;">[</span><span class="mop"><span class="mord mathrm">SiLU</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">i</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊙</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">b</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">i</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mclose delimcenter" style="top:0em;">]</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这个形式把非线性门控与通道变换结合。不同专家有自己的矩阵，注意力子层仍负责 token 之间的交互；MoE 前馈子层在得到上下文化表示后逐 token 处理。</p>
+<p>表 1 的架构为 32 层、隐藏维度 4,096、32 个查询头、8 个 KV 头、头维度 128、专家中间维度 14,336、词表 32,000，支持 32,768 的稠密上下文。GQA 节省 KV，MoE 控制前馈活跃计算，它们的收益来自不同位置。</p>
+<pre><code class="language-text">输入：token 序列和当前层隐藏状态
+对每个 Transformer 层：
+    用共享注意力处理上下文，获得逐 token 表示
+    对每个 token 计算 8 个路由 logits
+    选出 Top-2 专家，将两项权重归一化
+    按专家分组/分发 token，批量运行对应 SwiGLU
+    将专家输出送回原 token 位置并加权相加
+    完成残差等常规层操作
+语言模型头产生下一 token 分布
+训练时：依据语言建模目标反向传播
+输出：token 分布；每 token、每层仅激活两个专家
+</code></pre>
+<p>这段伪代码解释计算路径，不补写论文未报告的负载平衡损失、容量系数或 token 丢弃规则。MoE 训练常见某类技巧，不代表 Mixtral 报告明确采用了同一配置。</p>
+<p>若专家分布在不同 GPU，输入要发到相应设备再取回，形成专家并行。某一批 token 集中选中少数专家时，设备负载可能失衡；如果各专家收到的 token 太少，矩阵运算也难以充分利用 GPU。稀疏 FLOPs 不自动转化为等比例墙钟收益。</p>
+<p>指令版另外执行 SFT 和 DPO。二者改变模型行为，但论文没有给完整数据、超参数和模块消融，因此不能从指令成绩反推 DPO 独自贡献了多少。</p>
+<h2 id="实验设置别把不同解码口径的分数拼在一起">实验设置：别把不同解码口径的分数拼在一起</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>论文设置与未披露部分</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>预训练</td>
+<td>多语言语料，训练上下文 32K；总 token、完整数据混合、训练步数和算力未报告</td>
+</tr>
+<tr>
+<td>主基线</td>
+<td>Mistral 7B、多个 LLaMA/Llama 2；作者用自己的管线重新评估</td>
+</tr>
+<tr>
+<td>数学表 2</td>
+<td>GSM8K：8-shot、maj@8；MATH：4-shot、maj@4，不是单次贪心准确率</td>
+</tr>
+<tr>
+<td>代码</td>
+<td>HumanEval 0-shot；MBPP 3-shot，采用人工核验子集</td>
+</tr>
+<tr>
+<td>表 3</td>
+<td>单独列出与 GPT-3.5 的比较，GSM8K 标注 5-shot；不能与表 2 的 74.4 直接混算</td>
+</tr>
+<tr>
+<td>多语言</td>
+<td>法语、德语、西班牙语、意大利语的 ARC、HellaSwag、MMLU</td>
+</tr>
+<tr>
+<td>长上下文</td>
+<td>passkey 提取与 proof-pile 子集困惑度；没有覆盖所有长文推理类型</td>
+</tr>
+<tr>
+<td>指令版</td>
+<td>MT-Bench 与 2023-12-22 的 Arena 快照；并非当前排行榜</td>
+</tr>
+<tr>
+<td>随机性与预算</td>
+<td>未报告所有基准重复训练/评估的完整置信区间，也未给端到端硬件实测吞吐表</td>
+</tr>
+</tbody></table></div>
+<p>表 2 的 MATH 28.4 与 GSM8K 74.4 尤其容易被误引，因为多数投票增加了推理计算。比较不同论文的结果时，模型名字只是必要条件之一，还要核对候选数量、示范、答案解析和测试子集。</p>
+<h2 id="四组证据能力提升与计算代价分开阅读">四组证据：能力提升与计算代价分开阅读</h2>
+<p><strong>证据一｜表 2：数学和代码强，但不是逐项胜出。</strong> Mixtral 与 Llama 2 70B 的 HumanEval 为 40.2 对 29.3，MATH 为 28.4 对 13.8，GSM8K 为 74.4 对 69.6，均遵循本表口径。WinoGrande 则为 77.2 对 80.4，TriviaQA 为 71.5 对 73.0。应写成“多数基准相当或更强”，不能照摘要简化成所有任务都赢。</p>
+<p><strong>证据二｜表 3—4：更完整地限定比较条件。</strong> 表 3 的 5-shot GSM8K 为 Mixtral 58.4、GPT-3.5 57.1、Llama 2 70B 53.6；MT-Bench 则为 8.30 对 GPT-3.5 的 8.32。表 4 的德语 MMLU 为 71.5 对 Llama 2 70B 的 64.2，相差 7.3 个百分点。多语言增益与上采样多语言数据同时发生，不能将全部提升归给专家结构。</p>
+<p><strong>证据三｜图 4：长上下文提取成功，不等于复杂长文理解解决。</strong> Passkey 实验在所测位置和长度上达到 100%，proof-pile 困惑度随上下文增长下降。前者测定位并复述指定信息，后者测平均预测损失；都没有直接测跨许多证据的复杂归纳、冲突消解或错误来源识别。它们是有价值的长上下文证据，但不是无条件可靠性证明。</p>
+<p><strong>证据四｜图 7—8、表 5：专家并没有显现简单的学科分工。</strong> 路由分布在 arXiv、PubMed、PhilPapers 等领域较接近，作者没有观察到明显的按主题分配。代码缩进和某些词的路由表现更像语法局部模式。表 5 中 arXiv 第 15 层相邻 token 第一专家相同为 27.9%，随机基线 12.5%，支持局部性；但总体频率相似不能证明专家完全没有语义功能，仍需因果干预等更细分析。</p>
+<p>指令版 Arena 快照 Elo 1121，相比部分基线 1117 数字略高，但正文未给可在此核查的成对显著性分析。历史排名不能直接变成稳定优势，也不能同 MT-Bench 的模型评审分数混为一个“人类胜率”。</p>
+<h2 id="贡献局限与一个参数算例">贡献、局限与一个参数算例</h2>
+<p>主要贡献是展示稀疏专家在实用开放语言模型中的能力/活跃参数优势，并给出可供研究的路由观察。论文提供架构和权重入口，但训练配方披露程度有限，属于理解与复现之间的重要边界。</p>
+<p><strong>自构算例。</strong> 假设一个模型共享部分有 3 个单位参数，每套专家跨层合计 5 个单位，则 8 专家总参数为 <span class="reading-math" data-tex="3+8\times5=43"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>3</mn><mo>+</mo><mn>8</mn><mo>×</mo><mn>5</mn><mo>=</mo><mn>43</mn></mrow><annotation encoding="application/x-tex">3+8\times5=43</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">3</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">8</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">5</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">43</span></span></span></span></span>，Top-2 活跃量为 <span class="reading-math" data-tex="3+2\times5=13"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>3</mn><mo>+</mo><mn>2</mn><mo>×</mo><mn>5</mn><mo>=</mo><mn>13</mn></mrow><annotation encoding="application/x-tex">3+2\times5=13</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">3</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">5</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">13</span></span></span></span></span>。这说明总量和活跃量如何分离，不是 Mixtral 的精确参数拆分。若全部专家常驻设备，43 个单位仍要存储；不能因为一次只算 13 就只准备 13 的权重内存。</p>
+<p>再设两个 token 都选择专家 1、2，另两个选择专家 7、8：系统可以按专家把 token 合批。若一整批都选择专家 1，分布式设备可能一边拥堵一边空闲。有效部署需要看路由分布和硬件，而不只是 Top-k。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>稠密扩容让全部参数参与每 token 计算</td>
+<td>每层 8 个 SwiGLU 专家、Top-2 路由，结合共享注意力</td>
+<td>总容量增加，而活跃前馈计算只使用部分分支</td>
+<td>表 2—4 能力，图 4 长上下文，图 7—8/表 5 路由</td>
+<td>总权重仍需存储，负载与通信开销，训练配方未完整披露，多数投票预算与数据变化限制归因</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测能否避免-moe-的三个常见误读">自测：能否避免 MoE 的三个常见误读</h2>
+<p><strong>1. 为什么 8×7B 不是八个完整 7B 模型的集成？</strong></p>
+<p>答案：复制的是每层前馈专家，注意力等组件共享；每个 token 在每层由路由器选两个向量变换分支。系统没有生成八份完整答案再投票。因此总参数不是简单56B，活跃参数也不是简单14B。</p>
+<p><strong>2. 约13B活跃参数是否意味着与13B稠密模型相同显存和速度？</strong></p>
+<p>答案：不能。总专家权重仍约47B，常驻存储、缓存和路由通信都占资源；同一批次可能访问很多不同专家。活跃参数主要描述计算路径，实际速度还取决于批量、专家负载、内核和互联。</p>
+<p><strong>3. 为什么表2的GSM8K 74.4不能直接与表3的58.4比较出退步？</strong></p>
+<p>答案：二者评价协议不同，表2使用8-shot与maj@8，表3标注5-shot。示范和多候选聚合改变推理预算及答案选择。必须锁定同一设置后比较模型，否则只是把不同测量当作同一能力的变化。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 084｜Mixtral：用更多参数储存能力，用少数专家处理每个 token
+    <textarea id="md-source" hidden readonly># 084｜Mixtral：用更多参数储存能力，用少数专家处理每个 token
 
 [返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
 
@@ -169,9 +291,9 @@ $$
 
 答案：二者评价协议不同，表2使用8-shot与maj@8，表3标注5-shot。示范和多候选聚合改变推理预算及答案选择。必须锁定同一设置后比较模型，否则只是把不同测量当作同一能力的变化。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

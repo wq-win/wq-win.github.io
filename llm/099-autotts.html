@@ -7,7 +7,7 @@
     <title>099｜AutoTTS：让 Agent 搜索怎样分配推理计算 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,138 @@
                 <span class="text-gray-500">AutoTTS：让 Agent 搜索怎样分配推理计算</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="1e6c0ff7e2d8d20aff8d409e47eaaa95bf75ebb843cb9e86222749d0d100ed00"><h1>099｜AutoTTS：让 Agent 搜索怎样分配推理计算</h1>
+<p><a href="index.html">返回目录</a> · <a href="00-timeline.html">发展时间线</a></p>
+<p><strong>论文</strong>：Zheng 等，<em>LLMs Improving LLMs: Agentic Discovery for Test-Time Scaling</em>，2026。<a href="https://arxiv.org/abs/2605.08083">原文</a> · <a href="https://arxiv.org/html/2605.08083v1">正文 v1</a> · <a href="https://github.com/zhengkid/AutoTTS">作者代码入口</a>。本文核对主文、控制器机制与局限，解释其离线回放实验；没有执行作者控制器或在线复现，文中伪代码是机制整理而非完整代码转录。</p>
+<h2 id="一一分钟理解">一、一分钟理解</h2>
+<p>当模型有十份计算预算，应该生成十条短思路，还是把一条思路想十倍长？答案往往取决于当前候选是否一致、某条路径是否还在取得进展。以往这些规则大多由研究者手工写出。</p>
+<p>AutoTTS 让编码 Agent 提出控制程序，再放进可快速回放的实验环境中比较准确率与计算消耗。它搜索的是何时分支、继续、探测、剪枝和停止，不是训练基础模型的新参数。作者预先生成推理轨迹，因而搜索过程中不必为每个候选程序重复调用解题模型。</p>
+<p>一句话总结：在固定轨迹池覆盖的推理分配空间中，通过代码搜索与细粒度执行反馈，发现有竞争力的控制策略，代价是轨迹预采集、回放假设和在线成本仍需进一步验证。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>控制器合成</strong> 搜索执行决策的程序；<strong>离线回放</strong> 用预存路径模拟行动结果；<strong>探针</strong> 查询当前前缀的暂定答案；<strong>Pareto 前沿</strong> 表示没有另一方案同时更准又更省；<strong>指数滑动平均</strong> 平滑信号并保留近期变化。</p>
+<h2 id="二问题定义搜索控制规则而非重新训练模型">二、问题定义：搜索控制规则，而非重新训练模型</h2>
+<p>设一条推理分支按固定长度切成多个片段。控制器知道已创建哪些分支、各自到多深、哪些探针答案已经被观察，以及剩余预算。尚未探测的答案不在其可见状态中，正确标签只用于评估控制器结果，不能供控制器作弊选择答案。</p>
+<p>动作有五类：BRANCH 新建分支，CONTINUE 延长某条分支，PROBE 读取当前位置的暂定答案，PRUNE 放弃分支，ANSWER 聚合已见信号并提交。新分支从原问题开始，并非自动在任意中间前缀长出搜索树。因此作者的宽度—深度空间覆盖若干常见方法，但没有涵盖所有工具调用或树搜索。</p>
+<p>程序发现可以表达成策略搜索，环境也有状态和动作，却不意味着本文使用 PPO 或 GRPO 训练这个控制器。实际方法是编码 Agent 改代码、运行评估、读历史、继续改代码。</p>
+<h2 id="三方法怎样让搜索既便宜又不失真">三、方法：怎样让搜索既便宜又不失真</h2>
+<h3 id="回放环境">回放环境</h3>
+<p>每个模型与问题组合预先生成 128 条推理轨迹，按 500 token 间隔获取探针信号。候选控制器采取动作时，只读取已经存储的对应片段或答案。相同数据与动作路径可以重复评估，便于比较程序变化。</p>
+<p>成本模型是：</p>
+<p><span class="reading-math" data-tex="C(s)=\sum_{i=1}^{m}\ell_i+\kappa_{probe}|\Omega|."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>C</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>=</mo><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>m</mi></munderover><msub><mi mathvariant="normal">ℓ</mi><mi>i</mi></msub><mo>+</mo><msub><mi>κ</mi><mrow><mi>p</mi><mi>r</mi><mi>o</mi><mi>b</mi><mi>e</mi></mrow></msub><mi mathvariant="normal">∣</mi><mi mathvariant="normal">Ω</mi><mi mathvariant="normal">∣</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">C(s)=\sum_{i=1}^{m}\ell_i+\kappa_{probe}|\Omega|.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">C</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.9291em;vertical-align:-1.2777em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.6514em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">m</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord">ℓ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">κ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="mord mathnormal mtight">ro</span><span class="mord mathnormal mtight">b</span><span class="mord mathnormal mtight">e</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">∣Ω∣.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="\ell_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="normal">ℓ</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">\ell_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord">ℓ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是第 <span class="reading-math" data-tex="i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span></span> 条分支已消耗的片段数，<span class="reading-math" data-tex="\Omega"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">Ω</mi></mrow><annotation encoding="application/x-tex">\Omega</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">Ω</span></span></span></span></span> 是已读取探针的集合，<span class="reading-math" data-tex="\kappa_{probe}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>κ</mi><mrow><mi>p</mi><mi>r</mi><mi>o</mi><mi>b</mi><mi>e</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\kappa_{probe}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">κ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="mord mathnormal mtight">ro</span><span class="mord mathnormal mtight">b</span><span class="mord mathnormal mtight">e</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 表示一次探针的相对成本。被剪掉的分支已经生成的片段仍须计入，不能事后抹掉沉没成本。回放实例中读取预存探针不触发新的生成；在线系统获取探针的费用需要另算。</p>
+<h3 id="单参数控制搜索复杂度">单参数控制搜索复杂度</h3>
+<p>每个程序只向外暴露一个 <span class="reading-math" data-tex="\beta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>β</mi></mrow><annotation encoding="application/x-tex">\beta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span></span></span></span></span>，内部阈值由编码 Agent 写出的函数映射得到。作者要求更大的 <span class="reading-math" data-tex="\beta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>β</mi></mrow><annotation encoding="application/x-tex">\beta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span></span></span></span></span> 对应更大的预算倾向，防止候选程序出现十几个任意可调参数，使有限搜索轮次难以比较。</p>
+<p>这是一种限制搜索空间的设计，并不能在数学上消灭过拟合。程序结构和映射函数本身仍然复杂，单个标量的存在也不自动保证实际路径消耗严格单调。</p>
+<p>论文的概括目标为：</p>
+<p><span class="reading-math" data-tex="\max_{\pi,\beta}\mathbb E[\mathbf1\{\hat y_{\pi,\beta}=y\}-\gamma C_{\pi,\beta}]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mrow><mi>π</mi><mo separator="true">,</mo><mi>β</mi></mrow></munder><mi mathvariant="double-struck">E</mi><mo stretchy="false">[</mo><mn mathvariant="bold">1</mn><mo stretchy="false">{</mo><msub><mover accent="true"><mi>y</mi><mo>^</mo></mover><mrow><mi>π</mi><mo separator="true">,</mo><mi>β</mi></mrow></msub><mo>=</mo><mi>y</mi><mo stretchy="false">}</mo><mo>−</mo><mi>γ</mi><msub><mi>C</mi><mrow><mi>π</mi><mo separator="true">,</mo><mi>β</mi></mrow></msub><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\max_{\pi,\beta}\mathbb E[\mathbf1\{\hat y_{\pi,\beta}=y\}-\gamma C_{\pi,\beta}].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.6382em;vertical-align:-0.8882em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.4306em;"><span style="top:-2.3479em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05278em;">β</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">max</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8882em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathbb">E</span><span class="mopen">[</span><span class="mord mathbf">1</span><span class="mopen">{</span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05278em;">β</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">}</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05278em;">β</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">]</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>π</mi></mrow><annotation encoding="application/x-tex">\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span></span></span></span></span> 是代码控制器，<span class="reading-math" data-tex="\gamma"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi></mrow><annotation encoding="application/x-tex">\gamma</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span></span></span></span></span> 表示成本偏好。要区分目标阐述与实际选择：§3.2、§4 明确说最终按搜索集最高准确率选择控制器，再展示预算曲线，不应把它说成已经求出了该拉格朗日目标的全局最优解。</p>
+<pre><code class="language-text">输入：预采样轨迹与探针、搜索任务、保留评估任务
+初始化候选历史 H
+重复五轮：
+    编码 Agent 阅读候选代码、准确率/成本与执行轨迹
+    提出只暴露一个 beta 的新控制程序
+    对若干 beta 在搜索环境回放
+    记录分支、继续、探测、剪枝、停止的具体路径
+    将评估结果与失败轨迹加入 H
+依据搜索集选择控制器并冻结代码
+在未参与搜索的任务环境评估准确率与总 token
+输出：一个推理控制程序及其预算曲线
+</code></pre>
+<h3 id="发现出的控制器做了什么">发现出的控制器做了什么</h3>
+<p>附录 D 描述 Confidence Momentum Controller：它追踪候选池置信度的指数滑动平均，不只看当前瞬时值；只有平均水平高且趋势没有恶化时才考虑停止。若信心持续改善，减少新增分支；若停滞或下降，倾向拓宽搜索。</p>
+<p>与当前共识一致的分支获得更多延长机会，持续偏离的分支经过耐心窗口才放弃，并至少保留两条活跃分支。其直觉是兼顾已有证据与异议，但共识本身可能错误，不能把分支一致性当成外部验证。</p>
+<h2 id="四实验设置">四、实验设置</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文配置及含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>主要基础模型</td>
+<td>Qwen3 0.6B、1.7B、4B、8B；基础模型参数不在搜索中更新</td>
+</tr>
+<tr>
+<td>轨迹池</td>
+<td>每模型每题 128 条，温度 0.7，探针间隔 500 token</td>
+</tr>
+<tr>
+<td>重复评估</td>
+<td>从固定池随机抽子集，控制器评估 64 次取平均；不是 64 次独立生成全新池</td>
+</tr>
+<tr>
+<td>搜索数据</td>
+<td>AIME24，联合四个模型环境；这些模型规模均参与了搜索</td>
+</tr>
+<tr>
+<td>保留数据</td>
+<td>AIME25 与 HMMT25 未参与发现和选择</td>
+</tr>
+<tr>
+<td>发现过程</td>
+<td>Claude Code 编码 Agent，五轮；原文没有在该配置描述中明确底层模型精确版本</td>
+</tr>
+<tr>
+<td>对照</td>
+<td>SC@64、ASC、ESC、Parallel-Probe，比较总 token 与准确率</td>
+</tr>
+<tr>
+<td>额外泛化</td>
+<td>R1-Distill-Llama-8B 的 HMMT25、Qwen3-1.7B 的 GPQA Diamond</td>
+</tr>
+<tr>
+<td>发现费用</td>
+<td>作者报告约 39.9 美元、160 分钟；属于已有回放环境上的发现开销</td>
+</tr>
+<tr>
+<td>证据限制</td>
+<td>实验全部采用离线回放，未提供充分在线吞吐、工具延迟或完整预采集费用对照</td>
+</tr>
+</tbody></table></div>
+<h2 id="五结果不要只看相对-sc64-的节省">五、结果：不要只看相对 SC@64 的节省</h2>
+<p><strong>证据 1：表 1，1.7B 的明显收益。</strong> 两个保留任务平均，SC@64 为 34.3、1093.5K token；AutoTTS 在 <span class="reading-math" data-tex="\beta=0.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>β</mi><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">\beta=0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span> 时为 38.6、343.5K，在 <span class="reading-math" data-tex="\beta=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>β</mi><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\beta=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span> 时为 40.6、646.1K。它在这一设置下同时改善质量和 token 消耗，支持控制规则比固定全预算投票更有效。</p>
+<p><strong>证据 2：表 1，8B 的反例。</strong> 保留任务平均，ASC 为 62.8、485.7K；AutoTTS 的 <span class="reading-math" data-tex="\beta=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>β</mi><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\beta=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span> 为 62.7、710.8K，质量略低而 token 更多。较低预算的 AutoTTS 为 61.1、379.0K。由此不能说自动发现程序在所有模型上支配所有人工规则；选择何种基线会改变结论。</p>
+<p><strong>证据 3：表 2，跨模型和任务。</strong> Llama 系蒸馏模型 HMMT25，SC@64 为 26.7、985.7K，AutoTTS <span class="reading-math" data-tex="\beta=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>β</mi><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\beta=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span> 为 27.2、533.9K；GPQA 上低预算 AutoTTS 为 41.6、151.0K，对照 ASC 为 41.0、186.3K。它提供额外迁移实例，但任务与模型组合仍很少，不能概括所有领域。</p>
+<p><strong>证据 4：表 3，搜索约束与反馈。</strong> 完整方法表中平均准确率 53.1、575.5K token；无单参数约束为 49.0、93.3K；无执行轨迹反馈为 51.6、824.3K。第一组是大幅省计算同时降分，不能只凭降分证明过拟合；应进一步做预算配平。表的平均包括搜索集 AIME24，正文将 53.1→49.0 称为保留集结果并不准确，引用时保留表格范围。</p>
+<p><strong>证据 5：图 4、§5.5，发现过程。</strong> 候选程序先过度省 token，随后提高预算恢复正确率，再寻找折中；并非每轮都同时提高两项指标。39.9 美元、160 分钟说明固定回放上的搜索可负担，不证明搭建整个实验只花这个数。首次生成 128 条轨迹及探针的成本没有凭空消失。</p>
+<h2 id="六贡献与局限">六、贡献与局限</h2>
+<p>论文将研究对象从一条手写启发式提升为可重复使用的控制空间与反馈环境。执行轨迹比单一总分更能告诉编码 Agent 何时剪枝过早、何时延长无效，这是可迁移的工程思路。</p>
+<p>作者承认当前动作空间有限，也依赖强编码 Agent。本文进一步分析：离线回放的可信度依赖控制器动作不改变原轨迹后续生成分布。若未来动作会加入新提示、交换分支信息或调用工具，预先录好的路径就未必代表真实在线行为。</p>
+<p>四种 Qwen 规模全部参与搜索，因此主表是跨保留任务泛化，不是这四种规模均从未见过。64 次抽样也共享同一 128 轨迹池，不能当成对所有可能随机生成的无界保证。实际部署前需要测试新轨迹、真实探针成本与不同提示版本。</p>
+<h2 id="七建立理解">七、建立理解</h2>
+<p><strong>自构例子。</strong> 三条轨迹暂时给出答案 A、A、B。普通投票立即选 A；控制器发现 A 的信心正在下降，而 B 仍在快速取得新信息，可能继续观察而非剪掉 B。若三条路径都共享同一错误公式，任何内部共识规则都可能失败，必须另引入验证信号。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>推理宽度、深度与停止规则依赖手调</td>
+<td>回放环境中的编码 Agent 搜索、单参数预算与轨迹反馈</td>
+<td>快速比较候选并定位资源分配错误</td>
+<td>表 1—3 与图 4</td>
+<td>8B 上有人工规则更优；离线探针成本与在线不同；预采集成本和泛化范围有限</td>
+</tr>
+</tbody></table></div>
+<h2 id="八自测与答案">八、自测与答案</h2>
+<p><strong>1. AutoTTS 是在训练一个新语言模型吗？</strong></p>
+<p>答：主要不是。基础模型提供预生成轨迹，编码 Agent 修改推理控制程序。搜索改变何时使用哪些计算，语言模型权重保持不变；它与使用策略梯度更新基础模型的 RL 是不同路径。</p>
+<p><strong>2. 为什么预存了所有探针，不应允许控制器随便读取？</strong></p>
+<p>答：在线系统只有采取探测动作后才获得相应信息。若回放直接泄漏未来答案或正确标签，就给予部署时不存在的特权，测到的是作弊选择而非可实现的控制策略。</p>
+<p><strong>3. 单个 beta 是否足以证明控制器不会过拟合？</strong></p>
+<p>答：不能。程序逻辑和 beta 到阈值的映射仍可能非常复杂，也可能针对搜索题特征设计。必须冻结程序后在未参与搜索的新题、新轨迹和模型上评估，且使用完整预算口径。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 099｜AutoTTS：让 Agent 搜索怎样分配推理计算
+    <textarea id="md-source" hidden readonly># 099｜AutoTTS：让 Agent 搜索怎样分配推理计算
 
 [返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
 
@@ -175,9 +302,9 @@ $\pi$ 是代码控制器，$\gamma$ 表示成本偏好。要区分目标阐述�
 
 答：不能。程序逻辑和 beta 到阈值的映射仍可能非常复杂，也可能针对搜索题特征设计。必须冻结程序后在未参与搜索的新题、新轨迹和模型上评估，且使用完整预算口径。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

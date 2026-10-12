@@ -7,7 +7,7 @@
     <title>037 · GShard：稀疏专家如何真正分布到数千个设备 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,133 @@
                 <span class="text-gray-500">037 · GShard：稀疏专家如何真正分布到数千个设备</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="deae7053e654b4325439fcc8111b214c6c436480f1d5257b29b305e35c570aa0"><h1>037 · GShard：稀疏专家如何真正分布到数千个设备</h1>
+<p><a href="index.html">返回目录</a> · <a href="036-fid.html">上一篇：FiD</a> · <a href="038-bigbird.html">下一篇：BigBird</a></p>
+<p>论文：Dmitry Lepikhin 等，<em>GShard: Scaling Giant Models with Conditional Computation and Automatic Sharding</em>，首次公开2020，ICLR 2021。<a href="https://arxiv.org/pdf/2006.16668">原始论文</a>。依据§2路由、§3编译分片、§4–5训练与系统实验；未复现TPU集群。</p>
+<h2 id="一分钟理解">一分钟理解</h2>
+<p>混合专家可以保存很多参数，却只为每个词调用少数专家。但专家分散在不同设备上以后，词必须被发送、排队、计算并送回。如果路由和通信做不好，理论节省的计算会被等待吃掉。</p>
+<p>GShard 同时研究两层问题：模型使用有容量限制的稀疏专家路由，系统用少量张量分片标注与编译器自动生成分布式计算。最终在多语言翻译中训练了大规模模型，展示质量、样本数、墙钟时间与设备总时间的不同取舍。</p>
+<p>一句话：在大规模多语言模型训练中，通过稀疏专家、分组路由和自动分片，扩大容量并控制每个设备的负担，代价是跨设备通信、路由溢出和复杂的数值及负载管理。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念是：MoE按输入选择子网络，容量限制控制专家缓冲，负载平衡避免拥塞，SPMD用同一程序处理分片，core-years度量累计设备时间。</p>
+<h2 id="问题定义容量与共享之间的矛盾">问题定义：容量与共享之间的矛盾</h2>
+<p>一个模型处理许多语言，高资源语言需要足够容量，低资源语言又依赖与其他语言共享知识。所有任务挤在同一套参数中可能相互干扰；彻底分开训练则放弃迁移。专家网络提供中间选择，让不同token激活不同子网络。</p>
+<p>实际任务是从多种语言翻译成英语，输入源句，输出目标句，优化翻译负对数似然。专家不是人工指定的语言模块，也不是独立智能体；路由由数据学习，不应把某个专家的出现直接解释为语言学概念形成。</p>
+<p>GShard 既是系统接口与编译机制，也是用于检验该系统的大模型实例。把“自动分片”与“MoE算法”混为一个概念，会难以判断后续系统是否使用相同模型，或者只是采用类似编译思路。</p>
+<h2 id="路由容量与目标函数">路由、容量与目标函数</h2>
+<p>设token表示为 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span>，路由概率为 <span class="reading-math" data-tex="g(x)=\operatorname{softmax}(W_gx)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="normal">softmax</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>W</mi><mi>g</mi></msub><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">g(x)=\operatorname{softmax}(W_gx)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span>。候选选择分数最高的两个专家，输出简化表示为：</p>
+<p><span class="reading-math" data-tex="y=\sum_{e\in S(x)}\tilde g_e(x)f_e(x),\qquad |S(x)|\le2."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>y</mi><mo>=</mo><munder><mo>∑</mo><mrow><mi>e</mi><mo>∈</mo><mi>S</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow></munder><msub><mover accent="true"><mi>g</mi><mo>~</mo></mover><mi>e</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><msub><mi>f</mi><mi>e</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><mi mathvariant="normal">∣</mi><mi>S</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mi mathvariant="normal">∣</mi><mo>≤</mo><mn>2.</mn></mrow><annotation encoding="application/x-tex">y=\sum_{e\in S(x)}\tilde g_e(x)f_e(x),\qquad |S(x)|\le2.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.566em;vertical-align:-1.516em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.809em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">e</span><span class="mrel mtight">∈</span><span class="mord mathnormal mtight" style="margin-right:0.05764em;">S</span><span class="mopen mtight">(</span><span class="mord mathnormal mtight">x</span><span class="mclose mtight">)</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.516em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span></span><span style="top:-3.35em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">~</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">e</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">e</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">∣</span><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord">∣</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="f_e"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>f</mi><mi>e</mi></msub></mrow><annotation encoding="application/x-tex">f_e</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">e</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>是专家前馈网络，<span class="reading-math" data-tex="\tilde g_e"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mover accent="true"><mi>g</mi><mo>~</mo></mover><mi>e</mi></msub></mrow><annotation encoding="application/x-tex">\tilde g_e</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8623em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span></span><span style="top:-3.35em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">~</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">e</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>是保留路由后的权重。这个式子还没有表达实际容量约束：每组token可向某个专家发送的数量有限，第二专家还采用随机路由策略，并非每个token始终运行两个专家。</p>
+<p>若整批 <span class="reading-math" data-tex="N"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi></mrow><annotation encoding="application/x-tex">N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span></span> 个token分成 <span class="reading-math" data-tex="G"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span></span></span></span></span> 组，共有 <span class="reading-math" data-tex="E"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi></mrow><annotation encoding="application/x-tex">E</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span></span></span></span></span> 个专家，每组每专家容量约为 <span class="reading-math" data-tex="2N/(GE)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mi>N</mi><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mi>G</mi><mi>E</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">2N/(GE)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="mord">/</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.05764em;">GE</span><span class="mclose">)</span></span></span></span></span>。容量限制让张量尺寸可控，方便并行编译。若两个候选都已满，token在该MoE支路没有专家输出，仍通过残差传递，不能描述成从整个网络中删除了该token。</p>
+<p>总损失由翻译损失与平衡辅助项组成：</p>
+<p><span class="reading-math" data-tex="L=L_{NLL}+\lambda L_{balance},\qquad
+L_{balance}\propto\sum_e m_e f_e^{load}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>L</mi><mo>=</mo><msub><mi>L</mi><mrow><mi>N</mi><mi>L</mi><mi>L</mi></mrow></msub><mo>+</mo><mi>λ</mi><msub><mi>L</mi><mrow><mi>b</mi><mi>a</mi><mi>l</mi><mi>a</mi><mi>n</mi><mi>c</mi><mi>e</mi></mrow></msub><mo separator="true">,</mo><mspace width="2em"/><msub><mi>L</mi><mrow><mi>b</mi><mi>a</mi><mi>l</mi><mi>a</mi><mi>n</mi><mi>c</mi><mi>e</mi></mrow></msub><mo>∝</mo><munder><mo>∑</mo><mi>e</mi></munder><msub><mi>m</mi><mi>e</mi></msub><msubsup><mi>f</mi><mi>e</mi><mrow><mi>l</mi><mi>o</mi><mi>a</mi><mi>d</mi></mrow></msubsup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L=L_{NLL}+\lambda L_{balance},\qquad
+L_{balance}\propto\sum_e m_e f_e^{load}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.10903em;">N</span><span class="mord mathnormal mtight">LL</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">λ</span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">ba</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">an</span><span class="mord mathnormal mtight">ce</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">ba</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">an</span><span class="mord mathnormal mtight">ce</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∝</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3em;vertical-align:-1.25em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">e</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">e</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-2.453em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">e</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="m_e"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>m</mi><mi>e</mi></msub></mrow><annotation encoding="application/x-tex">m_e</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">e</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>表示平均门控概率，<span class="reading-math" data-tex="f_e^{load}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>f</mi><mi>e</mi><mrow><mi>l</mi><mi>o</mi><mi>a</mi><mi>d</mi></mrow></msubsup></mrow><annotation encoding="application/x-tex">f_e^{load}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0961em;vertical-align:-0.247em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-2.453em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">e</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span></span></span></span></span>表示实际路由占比。后者由离散选择得到，论文使用可微概率构造代理，避免所有token拥挤到少数专家。此处只给出结构形式，具体归一化与组内计数应按算法1实现。</p>
+<pre><code class="language-text">输入：token批次、分组规则、专家网络、容量上限
+对每组token并行：
+    计算专家softmax分数，选top-2候选
+    统计并计算负载平衡辅助损失
+    在容量范围内接纳第一专家路由
+    按第二专家权重随机决定是否尝试第二路由
+    容量允许时构建dispatch与combine张量
+跨设备交换token，分专家执行前馈计算
+交换输出并按combine权重还原token顺序
+通过残差接回骨干，优化翻译与辅助损失
+编译器依据张量标注生成所需分片和集合通信
+输出：可分布式训练的稀疏模型
+</code></pre>
+<h2 id="自动分片为什么重要">自动分片为什么重要</h2>
+<p>注意力部分可以按批量分片并复制权重，庞大专家权重则分布到不同设备。计算图在这些布局之间切换，编译器插入相应通信。单程序多数据方式让每个设备运行同一程序形态，避免为每个设备手写不同大图。</p>
+<p>自动生成并不意味着通信消失。专家调用需要all-to-all等数据交换，网络拓扑和消息大小影响效率。辅助损失改善的是负载分配，编译分片改善的是执行方式，翻译BLEU改善来自容量、共享、训练等因素，不能把三个层级的收益混算。</p>
+<h2 id="实验设计">实验设计</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>论文配置与问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数据</td>
+<td>内部网页挖掘平行语料，双向约250亿样本，本文到英语方向约130亿；语言资源极不均衡</td>
+</tr>
+<tr>
+<td>模型族</td>
+<td>表1改变深度12/36层及每MoE层128/512/2048专家，专家层间隔插入</td>
+</tr>
+<tr>
+<td>训练量</td>
+<td>主要质量比较使用处理1万亿token的检查点；部分损失阈值分析训练更久</td>
+</tr>
+<tr>
+<td>基线</td>
+<td>各语言单独训练的双语Transformer，以及96层稠密多语言模型</td>
+</tr>
+<tr>
+<td>设备</td>
+<td>128、512或2048 TPU v3 cores；设备数与每层专家数联动，非纯模型变量对照</td>
+</tr>
+<tr>
+<td>指标</td>
+<td>BLEU及相对双语基线差值、达到损失阈值的token量、步速、墙钟天数、TPU core-years</td>
+</tr>
+<tr>
+<td>不确定性</td>
+<td>巨型配置没有统一多种子置信区间；内部数据也限制第三方严格复现</td>
+</tr>
+</tbody></table></div>
+<p>这里处理1万亿token不是拥有1万亿条独立句对。表2统计达到某个训练损失阈值的数据量，也不等同测试质量。论文明确该处训练交叉熵不包括辅助损失，避免平衡项变化扭曲拟合速度比较。</p>
+<h2 id="三组证据与边界">三组证据与边界</h2>
+<p><strong>证据一：算法1–2与§3，路由能否落地。</strong> 容量、分组和随机第二路由将不规则专家调用变成规则张量操作。它们支持可执行系统设计，但容量限制会使某些token跳过专家支路，必须结合溢出和质量观察，不能只展示平均吞吐。</p>
+<p><strong>证据二：图6与表3，质量和资源同时报告。</strong> 600B、2048专家、36层配置平均BLEU44.3，所列稠密96层模型36.9。600B模型用2048 cores约4天，同时消耗22.4 TPU core-years。4天是等待时间，22.4设备年是累计资源，两者都真实，不能只用前者营造低成本印象。</p>
+<p><strong>证据三：表2与表3，样本效率不等于时间效率。</strong> 128专家12层达到训练交叉熵0.7需995B tokens，36层需321B。更深模型用更少样本达到阈值，但每步工作更多。表3按固定训练量分别列时间与设备成本，正是为了避免把“更少样本”直接译成“更便宜”。</p>
+<p>图6还将语言按数据量排序并平滑趋势，显示增加专家与增加深度的收益分布不同。作者把部分现象解释为容量瓶颈与共享迁移的取舍；这是有实验支持的机制分析，但并非对语言相互作用的完整因果证明。</p>
+<p>§4.3披露1T模型存在数值稳定性问题，未纳入正式质量结果。它可以作为扩展能力探索，不能与600B主结果并列称为同等可靠的已验证系统。</p>
+<h2 id="一个构造例子与诊断方案">一个构造例子与诊断方案</h2>
+<p>自构例子：一批句子大多来自高资源语言，门控把相似token集中送到专家A。即便A最擅长这些输入，容量也会溢出，其他专家却空闲。增加辅助损失可以促使分流，但过强的均衡也可能迫使不合适的专家接收token。</p>
+<p>可做一个未执行的小规模实验：固定专家总容量，改变语言混合比例与平衡权重，测每专家负载、溢出率、逐语言BLEU和通信等待。若平均BLEU改善而低资源语言下降，应报告分组结果；若溢出降低但质量恶化，说明均衡本身不是任务目标。</p>
+<p>还应独立比较同设备数与同墙钟预算。扩大专家同时扩大设备，主要显示可扩展性；在固定硬件上换更大专家模型，则回答部署或训练预算内是否值得。两种结论都重要，但不能互相冒充。</p>
+<h2 id="贡献与阅读衔接">贡献与阅读衔接</h2>
+<p>GShard 将稀疏容量扩展与可编译的分片执行连接起来，证明条件计算要与路由、通信和编译共同设计。代价是大集群需求、内部数据依赖、负载复杂性及极大规模稳定性。后续Switch简化路由、Mixtral探索更易使用的稀疏模型时，都可以回到这些基本约束。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>大容量模型计算与通信难协调</td>
+<td>稀疏top-2、分组容量与自动分片</td>
+<td>限制激活工作并编译规则通信</td>
+<td>算法1–2、§3、表3系统效率</td>
+<td>溢出、通信、数值稳定性</td>
+</tr>
+<tr>
+<td>多语言容量与共享冲突</td>
+<td>分别扩展专家数和深度</td>
+<td>提供容量并保留部分跨语言共享</td>
+<td>图6语言趋势、表2样本效率</td>
+<td>资源配置耦合，内部语料难复现</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测与参考答案">自测与参考答案</h2>
+<p><strong>1. top-2路由意味着每个token一定执行两个专家吗？</strong></p>
+<p>不是。第二路由有随机接纳策略，两个候选都受容量限制。实际激活可能更少，溢出token仍通过残差继续传播。</p>
+<p><strong>2. 为什么4天训练不能简单称为低成本？</strong></p>
+<p>它使用2048个TPU cores并行，累计22.4 core-years。墙钟时间说明完成速度，设备时间更接近资源投入，两者需要同时报告。</p>
+<p><strong>3. 平衡损失越强是否越好？</strong></p>
+<p>不一定。负载均匀可改善吞吐与溢出，但可能破坏任务需要的专家分工。应联合观察逐语言质量、路由分布与等待时间，而非只优化均匀度。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 037 · GShard：稀疏专家如何真正分布到数千个设备
+    <textarea id="md-source" hidden readonly># 037 · GShard：稀疏专家如何真正分布到数千个设备
 
 [返回目录](README.md) · [上一篇：FiD](036-fid.md) · [下一篇：BigBird](038-bigbird.md)
 
@@ -169,9 +291,9 @@ GShard 将稀疏容量扩展与可编译的分片执行连接起来，证明条�
 
 不一定。负载均匀可改善吞吐与溢出，但可能破坏任务需要的专家分工。应联合观察逐语言质量、路由分布与等待时间，而非只优化均匀度。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

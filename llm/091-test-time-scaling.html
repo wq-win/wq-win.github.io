@@ -7,7 +7,7 @@
     <title>091｜Test-Time Scaling：不是一律多想，而是决定把计算花在哪里 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,163 @@
                 <span class="text-gray-500">Test-Time Scaling：不是一律多想，而是决定把计算花在哪里</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="fd04293f1519e29ba0385dcd536bc84cf89ccc93e5d0acc933b38cf2f7e5b128"><h1>091｜Test-Time Scaling：不是一律多想，而是决定把计算花在哪里</h1>
+<p><a href="index.html">返回目录</a> · <a href="00-timeline.html">发展时间线</a></p>
+<p>论文：Charlie Snell、Jaehoon Lee、Kelvin Xu、Aviral Kumar，<em>Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters</em>，2024。依据<a href="https://arxiv.org/html/2408.03314v1">原文 v1</a>的搜索、修订、成本比较与附录。主要模型为 PaLM 2-S*，并非公开权重的完整可复现实验；下文不把图上的估计值写成未经报告的精确成绩。</p>
+<h2 id="一分钟理解同样生成-64-次可以有很多花法">一分钟理解：同样生成 64 次，可以有很多花法</h2>
+<p>面对一道题，可以独立生成 64 个答案，也可以沿一个答案反复修订 64 次，还可以开 8 条路线、每条修订 8 次。即使生成数量相同，这些策略探索的答案分布也不同。</p>
+<p>论文研究两根调节杆：用验证器引导搜索，或训练模型根据先前尝试修订回答。作者发现哪种方法划算取决于题目对当前模型有多难。简单题适合局部改进，中等难题可能需要多路线搜索；最难题则未必能靠增加尝试解决。</p>
+<p>按难度选择策略，在部分曲线中能以约四分之一的所计生成预算达到更好的结果。但难度估计本身很昂贵，原文没有把这部分计入主要比较。这是一项预算分配的潜力研究，还不是完整部署方案的成本保证。</p>
+<p>一句话：在模型已有部分解题能力的数学任务中，通过按难度分配搜索与修订预算，提高推理计算的利用率，代价是验证器训练、难度识别开销以及最难题上的能力上限。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>proposal distribution</strong>决定候选从哪里来；<strong>PRM</strong>评估中间推理前缀；<strong>beam search</strong>按分数保留有限前缀；<strong>交叉验证</strong>把配置选择与效果测量分开；<strong>生命周期 FLOPs</strong>同时考虑一次训练和累计推理需求。</p>
+<h2 id="背景推理预算扩大有两个前提">背景：推理预算扩大有两个前提</h2>
+<p>首先，生成器必须有机会提出有用路径。若它对题目需要的核心方法完全不会，反复采样可能只得到更多错误。其次，系统要能把较好的候选留下；如果评分器容易被骗，更强搜索反而更快找到它的漏洞。</p>
+<p>这里要分清 proposer 与 verifier。前者生成候选，后者评价候选；修订模型通过把历史答案放进输入来改变生成分布，搜索算法通过筛选和扩展来改变最终输出分布。测试时没有为每个问题重新训练所有权重，但前期专门训练了修订和验证能力。</p>
+<p>题目难度也是相对模型定义的。人类标成难题，不代表某模型不会；人类觉得简单，也可能是模型的盲点。作者因此用该模型的成功概率分组，而不单靠 MATH 的人工难度等级。</p>
+<h2 id="方法一验证器引导的搜索">方法一：验证器引导的搜索</h2>
+<h3 id="prm-预测的是后续成功不只是本步逻辑对错">PRM 预测的是后续成功，不只是本步逻辑对错</h3>
+<p>作者从解答中间前缀继续做 Monte Carlo rollout，以最终正确比例训练过程奖励模型。因而某一步的分数近似：</p>
+<p><span class="reading-math" data-tex="V_\pi(h)=\Pr_{o\sim\pi(\cdot\mid h)}(\text{最终答案正确})."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>V</mi><mi>π</mi></msub><mo stretchy="false">(</mo><mi>h</mi><mo stretchy="false">)</mo><mo>=</mo><munder><mrow><mi>Pr</mi><mo>⁡</mo></mrow><mrow><mi>o</mi><mo>∼</mo><mi>π</mi><mo stretchy="false">(</mo><mo>⋅</mo><mo>∣</mo><mi>h</mi><mo stretchy="false">)</mo></mrow></munder><mo stretchy="false">(</mo><mtext>最终答案正确</mtext><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">V_\pi(h)=\Pr_{o\sim\pi(\cdot\mid h)}(\text{最终答案正确}).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">h</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.716em;vertical-align:-0.966em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6833em;"><span style="top:-2.309em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mrel mtight">∼</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span><span class="mopen mtight">(</span><span class="mord mtight">⋅</span><span class="mrel mtight">∣</span><span class="mord mathnormal mtight">h</span><span class="mclose mtight">)</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">Pr</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.966em;"><span></span></span></span></span></span><span class="mopen">(</span><span class="mord text"><span class="mord cjk_fallback">最终答案正确</span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="h"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi></mrow><annotation encoding="application/x-tex">h</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">h</span></span></span></span></span> 是当前推理前缀，<span class="reading-math" data-tex="\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>π</mi></mrow><annotation encoding="application/x-tex">\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span></span></span></span></span> 是生成器。它取决于生成器后续能力，不完全等于“这一步数学推理本身正确”的标签。使用其他模型产生的过程标签可能引入分布偏移。</p>
+<p>基线 best-of-N weighted 生成多条完整解答，以最终步骤的 PRM 分数给整条解答评分，再把相同最终答案的分数相加：</p>
+<p><span class="reading-math" data-tex="\hat a=\arg\max_a\sum_{i:\operatorname{ans}(o_i)=a}V(o_i)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mover accent="true"><mi>a</mi><mo>^</mo></mover><mo>=</mo><mi>arg</mi><mo>⁡</mo><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>a</mi></munder><munder><mo>∑</mo><mrow><mi>i</mi><mo>:</mo><mi mathvariant="normal">ans</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>o</mi><mi>i</mi></msub><mo stretchy="false">)</mo><mo>=</mo><mi>a</mi></mrow></munder><mi>V</mi><mo stretchy="false">(</mo><msub><mi>o</mi><mi>i</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\hat a=\arg\max_a\sum_{i:\operatorname{ans}(o_i)=a}V(o_i).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">a</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.566em;vertical-align:-1.516em;"></span><span class="mop">ar<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.4306em;"><span style="top:-2.4em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">max</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.809em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">:</span><span class="mop mtight"><span class="mord mathrm mtight">ans</span></span><span class="mopen mtight">(</span><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span><span class="mclose mtight">)</span><span class="mrel mtight">=</span><span class="mord mathnormal mtight">a</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.516em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这不同于单纯挑最高分的一条，也不同于一票一权的多数投票。最后一步评分优于最小值和分数乘积，是此处软 rollout 标签下的实验结论，不能复制成所有 PRM 的固定规则。</p>
+<h3 id="搜索选择继续哪些前缀">搜索选择继续哪些前缀</h3>
+<p>Beam search 在每层生成候选，保留高分前缀，再从保留项扩展。论文用 <span class="reading-math" data-tex="N"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi></mrow><annotation encoding="application/x-tex">N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span></span> 表示该轮候选预算、<span class="reading-math" data-tex="M"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi></mrow><annotation encoding="application/x-tex">M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">M</span></span></span></span></span> 表示每个保留项的扩展数，保留 <span class="reading-math" data-tex="N/M"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi><mi mathvariant="normal">/</mi><mi>M</mi></mrow><annotation encoding="application/x-tex">N/M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.10903em;">M</span></span></span></span></span> 项；不要套用其他代码库的 beam-width 命名后改变原算法。</p>
+<p>Lookahead 在评分前再向前模拟若干步，用更晚的价值估计评价当前前缀。它可能看得更远，也消耗更多生成；本文不能作为所有 MCTS 变体的穷尽比较。</p>
+<h2 id="方法二让模型学会根据历史尝试修订">方法二：让模型学会根据历史尝试修订</h2>
+<p>作者并非只加一句“请检查”。先每题采样 64 个答案，将正确答案与若干错误答案组成训练序列，优先使最后一个错误答案在字符编辑距离上接近正确答案。模型学习在错误历史条件下生成正确回答。</p>
+<p>训练最多放入四个错误尝试；测试时可运行更长链，但仅保留最近四次回答。多条链还可以并行运行，最后用验证器或多数投票选答案。</p>
+<p>这里存在分布变化：训练历史都是错误答案，测试历史可能已经正确。论文观察到朴素修订会把约 38% 的正确答案改错，因此“最后一版最好”不是可靠选择规则。候选保存和答案选择是完整方法的一部分。</p>
+<h2 id="方法三按难度选择策略而非求出万能最优">方法三：按难度选择策略，而非求出万能最优</h2>
+<p>令 <span class="reading-math" data-tex="\eta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>η</mi></mrow><annotation encoding="application/x-tex">\eta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">η</span></span></span></span></span> 表示搜索宽度、前瞻长度或顺序与并行比例，预算为 <span class="reading-math" data-tex="B"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>B</mi></mrow><annotation encoding="application/x-tex">B</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span></span></span></span></span>。理想目标是：</p>
+<p><span class="reading-math" data-tex="\eta^*(q,B)=\arg\max_\eta
+\Pr(\text{输出正确}\mid q,B,\eta)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>η</mi><mo>∗</mo></msup><mo stretchy="false">(</mo><mi>q</mi><mo separator="true">,</mo><mi>B</mi><mo stretchy="false">)</mo><mo>=</mo><mi>arg</mi><mo>⁡</mo><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>η</mi></munder><mi>Pr</mi><mo>⁡</mo><mo stretchy="false">(</mo><mtext>输出正确</mtext><mo>∣</mo><mi>q</mi><mo separator="true">,</mo><mi>B</mi><mo separator="true">,</mo><mi>η</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\eta^*(q,B)=\arg\max_\eta
+\Pr(\text{输出正确}\mid q,B,\eta).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">η</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.5861em;vertical-align:-0.8361em;"></span><span class="mop">ar<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.4306em;"><span style="top:-2.4em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">η</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">max</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8361em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">Pr</span><span class="mopen">(</span><span class="mord text"><span class="mord cjk_fallback">输出正确</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">η</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>部署不知道真实答案，不能直接计算这个最优值。论文用五个难度分组近似，对每个组选择较好的配置。Oracle 难度来自 2048 次采样的真实正确率；predicted 难度来自同样规模采样的验证器平均分。</p>
+<p>两者都要花计算，后者只是去掉真实答案依赖，没有去掉费用。原文 §3.2 与附录 C 明确未计这部分成本，并用分组内两折交叉验证减少“同一数据既挑配置又测配置”的偏差。这不等于已证明难度是严格统计意义上的充分统计量。</p>
+<pre><code class="language-text">离线：训练生成器所需的修订能力与验证器
+研究阶段：估计每题难度，分为五组
+对每组和预算，在一折数据上选择搜索或修订配置
+在另一折测效果，再交换两折
+
+部署式流程（需额外实现廉价难度判断）：
+    输入问题与完整计算预算
+    估计难度，并扣除该步骤的成本
+    选择独立采样、搜索、修订或混合比例
+    保留所有候选及验证分数
+    按预定规则选答案，而非默认最后一条
+    记录生成、验证、难度判断和延迟
+</code></pre>
+<p>后半段是面向实现的建议，不是论文已经验证的廉价端到端算法。研究目标、近似机制和未来可部署版本需要明确分层。</p>
+<h2 id="实验如何配置预算">实验如何配置预算</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>设置与预算</th>
+<th>解释</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数据与模型</td>
+<td>MATH 的 12K 训练、500 测试划分；PaLM 2-S* Codey</td>
+<td>以数学推理为对象，不能自动推广所有知识任务</td>
+</tr>
+<tr>
+<td>PRM 数据</td>
+<td>每题 16 条解答；每步 16 次 rollout；按换行分步</td>
+<td>软成功率标签，数据生成本身昂贵</td>
+</tr>
+<tr>
+<td>PRM 训练</td>
+<td>AdamW，学习率 <span class="reading-math" data-tex="3\times10^{-5}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>3</mn><mo>×</mo><mn>1</mn><msup><mn>0</mn><mrow><mo>−</mo><mn>5</mn></mrow></msup></mrow><annotation encoding="application/x-tex">3\times10^{-5}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">3</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">1</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">5</span></span></span></span></span></span></span></span></span></span></span></span></span>、批量 128、dropout 0.05；保留 10% 问题验证</td>
+<td>根据验证损失早停</td>
+</tr>
+<tr>
+<td>修订训练</td>
+<td>每题 64 候选；0–4 个错误历史；学习率 <span class="reading-math" data-tex="10^{-5}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><msup><mn>0</mn><mrow><mo>−</mo><mn>5</mn></mrow></msup></mrow><annotation encoding="application/x-tex">10^{-5}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">1</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">5</span></span></span></span></span></span></span></span></span></span></span></span></span>、批量 128</td>
+<td>正确答案作为监督目标；训练步数与总 GPU 时数未明确列出</td>
+</tr>
+<tr>
+<td>搜索</td>
+<td>最大预算 256；最大扩展 40 轮；前瞻 1 或 3 步等</td>
+<td>前瞻预算按 <span class="reading-math" data-tex="N(k+1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi><mo stretchy="false">(</mo><mi>k</mi><mo>+</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">N(k+1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span> 近似计，不是直接墙钟</td>
+</tr>
+<tr>
+<td>难度与验证</td>
+<td>每题 2048 候选估计难度；五组、两折验证</td>
+<td>主要效率曲线不包含此难度估计成本</td>
+</tr>
+<tr>
+<td>大模型对照</td>
+<td>参数约大 14 倍，固定预训练 token 数，比较近似生命周期 FLOPs</td>
+<td>没有同时优化更大模型的数据与参数比例</td>
+</tr>
+</tbody></table></div>
+<p>设置依据 §3–7、附录 D–J。修订阶段使用适配其输出分布的 ORM；不能把搜索实验的 PRM 原封不动写成所有实验的统一验证器。作者没有报告覆盖所有配置的多随机种子置信区间，500 道题的分组结果也存在有限样本波动。</p>
+<h2 id="证据更多计算何时有效何时被浪费">证据：更多计算何时有效，何时被浪费</h2>
+<p><strong>证据一：图 3，最强搜索不一定最划算。</strong> 小预算时 beam search 优于 best-of-N，预算增大后优势缩小甚至反转；lookahead 在匹配生成预算下通常更差。简单组容易过度优化评分器，中等难度组更受益，最难组各方法进展有限。这支持因题选择算法，而非一律加深搜索。</p>
+<p><strong>证据二：图 4，难度分配可以提高局部预算效率。</strong> 在部分比较点，约 16 次生成的自适应策略接近或超过 64 次 best-of-N 的水平。准确表述是给定所用难度估计与预算口径下的曲线结果；若再加 2048 次难度采样，就不是完整流程节省四倍。</p>
+<p><strong>证据三：图 6–8，顺序与并行互补。</strong> 单条修订链的逐步成功率能提高，但过度坚持一条路线不总是最好。高预算和较难题存在更合适的混合比例；图 8 给出 64 对 256 次生成的效率例子。验证器或投票选择不可省略，因为修订也会破坏正确答案。</p>
+<p><strong>证据四：图 9，大模型与多次推理的交换依赖工作负载。</strong> 论文分别分析推理与预训练 token 比例 <span class="reading-math" data-tex="R=0.16,0.79,22"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>R</mi><mo>=</mo><mn>0.16</mn><mo separator="true">,</mo><mn>0.79</mn><mo separator="true">,</mo><mn>22</mn></mrow><annotation encoding="application/x-tex">R=0.16,0.79,22</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8389em;vertical-align:-0.1944em;"></span><span class="mord">0.16</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.79</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">22</span></span></span></span></span>。简单题或较少推理需求下，小模型加推理更有吸引力；很难的题或很大的推理负载下，增加模型规模更有利。标题中的“can”是条件判断，不是取代预训练的普遍定律。</p>
+<p><strong>证据五：附录 K、图 16，更多自训练也可能损害修订。</strong> 使用 ReST-EM 式数据再训练后，增加顺序修订反而显著变差。作者推测数据中的伪相关被强化。这个反例说明生成训练数据、验证和修订能力之间存在闭环偏差，不能用“自我改进”一词跳过验证。</p>
+<h2 id="成本公式与适用边界">成本公式与适用边界</h2>
+<p>用 <span class="reading-math" data-tex="P"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi></mrow><annotation encoding="application/x-tex">P</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span></span></span></span></span> 表示参数数，<span class="reading-math" data-tex="D_p"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>D</mi><mi>p</mi></msub></mrow><annotation encoding="application/x-tex">D_p</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">p</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 表示预训练 token，<span class="reading-math" data-tex="D_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>D</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">D_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 表示推理 token，论文近似总 FLOPs 为：</p>
+<p><span class="reading-math" data-tex="C\approx6PD_p+2PD_i."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>C</mi><mo>≈</mo><mn>6</mn><mi>P</mi><msub><mi>D</mi><mi>p</mi></msub><mo>+</mo><mn>2</mn><mi>P</mi><msub><mi>D</mi><mi>i</mi></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">C\approx6PD_p+2PD_i.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">C</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord">6</span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">p</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord">2</span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>若大模型参数为小模型的 <span class="reading-math" data-tex="m"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi></mrow><annotation encoding="application/x-tex">m</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">m</span></span></span></span></span> 倍，要给小模型等量总 FLOPs，可把其推理预算乘以：</p>
+<p><span class="reading-math" data-tex="f=m+3\frac{D_p}{D_i}(m-1)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>f</mi><mo>=</mo><mi>m</mi><mo>+</mo><mn>3</mn><mfrac><msub><mi>D</mi><mi>p</mi></msub><msub><mi>D</mi><mi>i</mi></msub></mfrac><mo stretchy="false">(</mo><mi>m</mi><mo>−</mo><mn>1</mn><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">f=m+3\frac{D_p}{D_i}(m-1).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">m</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.1963em;vertical-align:-0.836em;"></span><span class="mord">3</span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3603em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">p</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.836em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mopen">(</span><span class="mord mathnormal">m</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>当推理请求很少，省下的预训练可摊到每题的大量搜索；当请求极多，这种每题额外预算就缩小。公式未完整覆盖注意力长度效应、服务系统效率、串行延迟和难度估计；它是比较尺度，不是发票。</p>
+<p>本文真正的新意是系统分析预算分配和问题难度，而非首次提出采样、beam search 或修订。其主要限制是特定模型、数学数据和不完整端到端成本。过程评分过度优化可生成重复低信息步骤，或极短但高分答案，说明奖励投机也会发生在冻结模型的推理搜索中。</p>
+<h2 id="一个自构例子与五个前置概念">一个自构例子与五个前置概念</h2>
+<p>假设 16 次尝试预算。一道题模型总能列出正确方程，只在末尾加减出错，4 条路线各修订 4 次可能比 16 条从头解答更经济。另一道题必须想到特殊几何构造，反复修改同一错误方程可能没有帮助，独立探索更有价值。</p>
+<p>但系统不知道属于哪种题。若为了判断先生成 200 次，就已经超出预算。这个例子显示调度器本身也是算法，必须计算自己的代价。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>统一采样策略浪费预算</td>
+<td>按模型相对难度选配置</td>
+<td>匹配局部修订或全局探索需要</td>
+<td>图 3–4、7–8</td>
+<td>难度识别费用未计入主曲线</td>
+</tr>
+<tr>
+<td>修订可能把正确答案改错</td>
+<td>专门训练修订并保留候选选择</td>
+<td>将改进概率与最终选择分开</td>
+<td>图 6、约 38% 正确变错观察</td>
+<td>依赖验证器和训练分布</td>
+</tr>
+<tr>
+<td>只比较模型参数忽略推理负载</td>
+<td>匹配训练加推理近似 FLOPs</td>
+<td>反映成本摊销随使用量变化</td>
+<td>图 9</td>
+<td>固定训练数据量、闭源模型及成本近似</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测能否把论文标题讲完整">自测：能否把论文标题讲完整</h2>
+<p><strong>1. 为什么 predicted difficulty 不需要正确答案，却仍然不能算免费部署？</strong></p>
+<p>它通过验证器给大量采样评分估计难度，避免使用真实标签，但论文仍用每题 2048 个样本。生成和评分都要付费，而主要效率曲线未计这部分。真实部署需要廉价预测、在线复用探索结果，或把完整开销加入预算重新比较。</p>
+<p><strong>2. 为什么更深搜索可能降低真实准确率？</strong></p>
+<p>验证器只是近似评分函数，搜索越强越可能找到高分但错误的输出。简单题已有较好候选时，继续追分可能偏向重复步骤或其他伪特征。增加预算的价值受生成器覆盖与验证器可靠性共同限制，不具有必然单调性。</p>
+<p><strong>3. 小模型加推理超过 14 倍大模型，是否说明可以停止扩大预训练？</strong></p>
+<p>不能。结果依赖题目难度、累计推理负载、固定预训练数据量和所计 FLOPs。最难题上小模型往往没有足够候选能力，大推理负载也削弱逐题搜索的成本优势。论文说明两类计算可以部分交换，并指出交换不是一比一和无条件成立。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 091｜Test-Time Scaling：不是一律多想，而是决定把计算花在哪里
+    <textarea id="md-source" hidden readonly># 091｜Test-Time Scaling：不是一律多想，而是决定把计算花在哪里
 
 [返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
 
@@ -206,9 +358,9 @@ $$
 
 不能。结果依赖题目难度、累计推理负载、固定预训练数据量和所计 FLOPs。最难题上小模型往往没有足够候选能力，大推理负载也削弱逐题搜索的成本优势。论文说明两类计算可以部分交换，并指出交换不是一比一和无条件成立。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
