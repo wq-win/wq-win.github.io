@@ -7,7 +7,7 @@
     <title>100｜推理时扩展的评估协议：会找到答案，还要会选答案 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,145 @@
                 <span class="text-gray-500">推理时扩展的评估协议：会找到答案，还要会选答案</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="30896fc0b8dbcd847a3833d8eed074a6180ce89cb56b40319c8cdce6d09531ef"><h1>100｜推理时扩展的评估协议：会找到答案，还要会选答案</h1>
+<p><a href="index.html">系列首页</a> · <a href="00-timeline.html">发展时间线</a> · <a href="101-epilogue.html">系列总结</a></p>
+<p><strong>论文</strong>：Hariri et al., <em>Test-Time Scaling in Reasoning LLMs: Inference Regimes, Evaluation, and Reproducibility</em>，2026。<a href="https://arxiv.org/abs/2608.04001">原始论文</a>；<a href="https://arxiv.org/html/2608.04001v1">正文 v1</a>。阅读范围为正文的方法、评估与实验部分，以及附录 G 的数据和回放协议；没有重新生成响应库或独立审计全部发布记录。</p>
+<h2 id="一分钟理解模型答对过不等于产品会答对">一分钟理解：模型答对过，不等于产品会答对</h2>
+<p>假设一个模型对同一道题生成了十份解答，其中一份正确。研究者看过标准答案后可以说“十次内能做出来”；用户拿到的是系统最终挑出的那一份。如果选择器偏爱错误但流畅的解答，多生成几份甚至可能降低最终正确率。</p>
+<p>这篇论文把推理时扩展拆成三种结构：延长单条思考、生成完整候选后聚合、在未完成的推理前缀之间搜索。它的主要贡献是组织评估对象与证据，而非提出一个新的基础模型训练损失。最值得带走的思想是：模型、提示、采样、选择、验证、停止规则共同决定结果。</p>
+<p>一句话总结：在固定模型的预算化推理场景下，通过区分候选覆盖、答案选择和完整系统成本，改善实验结论的可解释性；代价是需要保存更多运行记录，且固定响应库仍不能替代独立在线复现。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>理解本篇最需要五个概念：<strong>提议分布</strong>是实际解码规则产生的响应分布；<strong>聚合器</strong>将多个候选转成一个输出；<strong>因果停止</strong>只用当前已经看到的信息停止；<strong>条件不确定性</strong>是在固定部分实验条件后剩余的波动；<strong>参考答案泄漏</strong>是在本应未知答案的推理决策中使用答案信息。</p>
+<h2 id="问题定义预算究竟买到了什么">问题定义：预算究竟买到了什么</h2>
+<p>这里主要研究推理阶段，模型参数保持固定。输入是问题，输出是最终答案；中间可以生成文字、调用验证器、扩展候选或停止。它通常不构成一个在测试时更新策略参数的强化学习过程，虽然搜索控制器可以借用决策过程的语言描述。</p>
+<p>三类方法最容易混淆的地方是“样本数”。延长一条响应的两千个 token，与生成十条各两百 token 的响应，文本总量相同，但串行延迟、前缀复用、答案多样性和验证次数都不同。搜索树里共享前缀的十个叶子也不是十次彼此独立的重新作答。</p>
+<p>论文 §2 的预算目标可写为</p>
+<p><span class="reading-math" data-tex="G(B)=\mathbb E[U(\mathcal A_B(x))]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>G</mi><mo stretchy="false">(</mo><mi>B</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="double-struck">E</mi><mo stretchy="false">[</mo><mi>U</mi><mo stretchy="false">(</mo><msub><mi mathvariant="script">A</mi><mi>B</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">G(B)=\mathbb E[U(\mathcal A_B(x))].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">G</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathbb">E</span><span class="mopen">[</span><span class="mord mathnormal" style="margin-right:0.10903em;">U</span><span class="mopen">(</span><span class="mord"><span class="mord mathcal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">B</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">))]</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 是问题，<span class="reading-math" data-tex="\mathcal A_B"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="script">A</mi><mi>B</mi></msub></mrow><annotation encoding="application/x-tex">\mathcal A_B</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathcal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">B</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是预算 <span class="reading-math" data-tex="B"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>B</mi></mrow><annotation encoding="application/x-tex">B</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span></span></span></span></span> 下的完整推理算法，<span class="reading-math" data-tex="U"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>U</mi></mrow><annotation encoding="application/x-tex">U</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">U</span></span></span></span></span> 是最终输出的任务效用。这个函数描述“加预算后系统表现怎样”，没有在定义中保证它必然单调。若验证器会被高分错误答案欺骗，更多候选也可能让选择错误更严重。</p>
+<p>实际工程中，最好保留成本向量：生成 token、验证 token、GPU 时间、墙钟延迟、峰值显存与工具调用次数。把这些指标压成一个标量，需要先声明换算价格或服务约束。例如用户等待时间敏感的服务，不能仅凭总 token 更少就称更便宜。</p>
+<h2 id="方法把生成证据决策和停止分开">方法：把生成、证据、决策和停止分开</h2>
+<p><strong>单轨迹方法</strong>只维护一个未完成响应。追加反思或强制继续可能改变后续内容，但没有同时竞争的前缀。它的长处是控制简单，短处是早期错误可能持续影响后续推导。</p>
+<p><strong>叶级方法</strong>先生成完整答案，再投票或重排。这里有两个独立选择：取什么证据，以及如何使用证据。平均对数概率是一种证据，选择最高分是一种决策；把同一证据用于加权投票又是另一种算法。</p>
+<p><strong>前缀级方法</strong>在答案尚未完成时决定哪些分支继续。它需要估计“从这个中间状态出发还能否成功”，而不是只评价这句话是否流畅。错误剪枝可能永久删除正确路径，因此最终叶子的分布已经受到控制器影响。</p>
+<p>下面是基于上述区分构造的教学伪代码，不是作者软件的逐行复刻：</p>
+<pre><code class="language-text">输入：问题集 Q、固定模型、解码配置、预算、选择规则
+先在开发集冻结所有配置
+for q in Q:
+    bank = []; cost = 0
+    while 预算允许且因果停止规则未触发:
+        y = 按已声明协议生成候选(q)
+        e = 只用在线可得信息计算证据(q, y)
+        bank.append(y, e)
+        cost += 生成成本 + 证据计算成本
+    selected = 选择规则(bank)
+    保存候选、证据、停止时刻、selected、cost
+    # 标准答案到这一行才进入评估
+    记录最终输出是否正确
+    另外计算候选库的覆盖与稳定性诊断
+对问题重采样；另做独立生成运行估计生成波动
+输出：准确率—成本曲线，以及两种不确定性
+</code></pre>
+<p>关键限制在“只用在线可得信息”。如果停止器看到未来第十条会答对，于是在第九条停止或重分配预算，这就不再是可部署的策略。离线回放可以比较选择器，但省去的只是重复生成支出，不能把已经生成的候选当作在线免费资源。</p>
+<h2 id="指标一次成功与持续成功是两种能力">指标：一次成功与持续成功是两种能力</h2>
+<p>设某题在一个固定、独立采样协议下单次成功概率为 <span class="reading-math" data-tex="p"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi></mrow><annotation encoding="application/x-tex">p</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span></span></span></span></span>。以下是独立伯努利尝试的基础概率关系，也能帮助理解论文 §3.4 的指标族：</p>
+<p><span class="reading-math" data-tex="P(\text{至少一次成功})=1-(1-p)^k,\qquad
+P(\text{每次都成功})=p^k."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>P</mi><mo stretchy="false">(</mo><mtext>至少一次成功</mtext><mo stretchy="false">)</mo><mo>=</mo><mn>1</mn><mo>−</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>p</mi><msup><mo stretchy="false">)</mo><mi>k</mi></msup><mo separator="true">,</mo><mspace width="2em"/><mi>P</mi><mo stretchy="false">(</mo><mtext>每次都成功</mtext><mo stretchy="false">)</mo><mo>=</mo><msup><mi>p</mi><mi>k</mi></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">P(\text{至少一次成功})=1-(1-p)^k,\qquad
+P(\text{每次都成功})=p^k.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mopen">(</span><span class="mord text"><span class="mord cjk_fallback">至少一次成功</span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1491em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mopen">(</span><span class="mord text"><span class="mord cjk_fallback">每次都成功</span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0935em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>前者随次数增大，后者通常减小，二者并不矛盾。一个衡量覆盖，另一个衡量重复作答的可靠性。实际有限候选库不能直接把经验成功率代入后假装拥有无限独立样本；从同一库无放回抽取时，需要使用相应的组合计数。</p>
+<p>用 <span class="reading-math" data-tex="S_{k,t}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>S</mi><mrow><mi>k</mi><mo separator="true">,</mo><mi>t</mi></mrow></msub></mrow><annotation encoding="application/x-tex">S_{k,t}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 表示 <span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 次中至少 <span class="reading-math" data-tex="t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>t</mi></mrow><annotation encoding="application/x-tex">t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6151em;"></span><span class="mord mathnormal">t</span></span></span></span></span> 次正确的概率，可以把“偶尔会”到“稳定会”放在同一张曲线上。但这个曲线仍没有告诉我们最终投票结果，因为错误答案是否集中在同一个选项也影响投票。严格过半的正确答案足以获胜；正确答案不足一半时，如果错误互相分散，也可能获胜。</p>
+<p>这里优化目标、算法机制和评价指标必须分开：最终效用是目标，采样与聚合是机制，Pass@k 是候选诊断。不能用一个较高的 Pass@k 直接替代系统提交答案的准确率。</p>
+<h2 id="实验设计与证据">实验设计与证据</h2>
+<p>下表聚焦原文中可明确定位的重复数学实验，避免把不同响应库合成一场统一预算的模型竞赛。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>设置与解释</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>任务与数据</td>
+<td>附录 G.4：四组数学题，共 120 题</td>
+</tr>
+<tr>
+<td>模型配置</td>
+<td>20 个配置，每题 80 个响应，共 192,000 条</td>
+</tr>
+<tr>
+<td>生成预算</td>
+<td>温度 0.6、top-p 0.95、最长 32,768 token</td>
+</tr>
+<tr>
+<td>对照</td>
+<td>相同响应库上的投票、概率重排及验证器重排</td>
+</tr>
+<tr>
+<td>重复与区间</td>
+<td>G.2：中间预算配对子集回放；问题 bootstrap 区间条件于已生成库</td>
+</tr>
+<tr>
+<td>验证信息</td>
+<td>Compass 使用参考答案，只能作为辅助诊断</td>
+</tr>
+<tr>
+<td>全部运行费用</td>
+<td>本表所依据的实验没有给出可直接统一比较的完整费用总账</td>
+</tr>
+</tbody></table></div>
+<p>**证据 1｜图 5、表 11：发现与选择的落差。**Qwen3-30B-A3B-Thinking-2507 在该题集的 Pass@80 为 91.67%，字符串投票为 78.33%。相减得到 13.34 个百分点。这说明正确候选的存在没有充分转化为提交答案；不能推导一个未知的完美验证器必然能无成本填平差距。</p>
+<p>**证据 2｜同表：更多样本可能放大错误偏好。**平均 token 对数概率重排从单样本 75.56% 降至 80 样本 65.83%。它支持对这一选择信号的警惕，不证明所有概率信息无用，也不证明所有模型都会如此。平均分同时受长度、措辞和模型校准影响，需要进一步干预才能区分原因。</p>
+<p>**证据 3｜图 6：成本横轴的边界。**横轴是候选数量，未包含验证计算。因此曲线可用于观察候选增加与聚合效果的关系，不能直接宣称验证器方案在同等总算力下胜出。这是论文自己限定的口径，而不是额外发现一个隐藏训练损失。</p>
+<p>**证据 4｜表 1 与摘要：发布数量有冲突。**表 1 总计 1,948,821 条，正文称超过两百万，摘要写超过二十亿。三个表述不一致；应按逐块统计表描述规模，并等待版本澄清，不把最大数字用于传播。</p>
+<p>上述数值与定位来自 <a href="https://arxiv.org/html/2608.04001v1">v1 正文及附录</a>。区间以问题为单位重采样，主要描述题目组成的不确定性；同一候选库重复抽子集，不能完整估计重新生成候选的波动。这也是为什么“能回放论文图表”和“独立运行得到兼容结论”应当分别报告。</p>
+<h2 id="贡献局限与一个具体例子">贡献、局限与一个具体例子</h2>
+<p>这篇论文的价值在于把此前分散的评估对象放在同一框架里。它没有通过共享响应库消除模型训练差异，也没有把验证器评分变成真值。不同题库、模型快照、解码器与响应长度仍然限制跨实验比较。固定库尤其适合研究聚合，但不天然验证一个改变生成过程的前缀搜索算法。</p>
+<p>**自构例子，未运行。**同一道题的四个答案是“7、8、8、9”，标准答案为 7。覆盖指标是成功，投票却失败。另一道题的四个答案为“7、7、8、9”，若平票规则不影响结果，投票成功。两题都有正确候选，却要求不同的选择能力。若评分器因为“8”的解释更长而给高分，继续生成同类长答案可能强化错误选择。</p>
+<p>现在增加一个只检查单位的工具。它能排除“7 米/秒²”用于速度答案的错误，但不能证明保留下来的数值 7 正确。这解释了验证器覆盖范围的重要性：局部检查通过与完整答案正确之间仍有距离。实验应保存检查失败类型，而不只保存一个总分。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>将多采样能力等同最终正确率</td>
+<td>分开候选诊断与系统输出</td>
+<td>直接暴露选择器损失</td>
+<td>图 5、表 11</td>
+<td>尚需真实部署成本</td>
+</tr>
+<tr>
+<td>不同推理算法共用含糊预算</td>
+<td>区分单轨迹、叶级、前缀级</td>
+<td>明确计算花在哪一步</td>
+<td>§2 与图 2 的结构定义</td>
+<td>混合系统仍需逐项记录</td>
+</tr>
+<tr>
+<td>同库回放被误当独立复现</td>
+<td>区分回放和分布复现</td>
+<td>让误差条对应实际随机来源</td>
+<td>§3.5、附录 G.2</td>
+<td>增加记录与重复运行成本</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测能回答这些问题才真正掌握评估思想">自测：能回答这些问题，才真正掌握评估思想</h2>
+<p><strong>1. Pass@80 为 90%，能否说用户有 90% 的概率得到正确答案？</strong></p>
+<p>不能。它描述候选集中是否出现正确答案，不包含可部署选择器的成功概率。只有系统确实能够识别正确候选，并且相应检查成本与信息条件允许，才可能接近这个覆盖上界。使用标准答案选答案只能计算诊断指标。</p>
+<p><strong>2. 给相同候选库换一个更好的验证器，能否证明整个推理系统更省算力？</strong></p>
+<p>不能直接证明。共享库控制了候选差异，适合估计选择器效果；总算力还要加验证开销，并在线运行相同停止规则。如果验证器需要大量额外 token，准确率提升也可能伴随更高总成本。</p>
+<p><strong>3. 保存随机种子，是否就足以复现推理实验？</strong></p>
+<p>不足。还要固定权重、分词器、提示模板、解码顺序、停止规则、数值精度及执行环境。即便完整保存某次轨迹，也只是支持精确回放；判断结论是否稳定，还需要与真实运行协议匹配的独立重复和不确定性估计。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 100｜推理时扩展的评估协议：会找到答案，还要会选答案
+    <textarea id="md-source" hidden readonly># 100｜推理时扩展的评估协议：会找到答案，还要会选答案
 
 [系列首页](README.md) · [发展时间线](00-发展时间线总览.md) · [系列总结](101-系列总结.md)
 
@@ -172,9 +306,9 @@ P(\text{每次都成功})=p^k.$$
 
 不足。还要固定权重、分词器、提示模板、解码顺序、停止规则、数值精度及执行环境。即便完整保存某次轨迹，也只是支持精确回放；判断结论是否稳定，还需要与真实运行协议匹配的独立重复和不确定性估计。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
