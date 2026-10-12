@@ -7,7 +7,7 @@
     <title>092｜VINS-Mono：让单目视觉与 IMU 组成可以长期运行的定位系统 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,224 @@
                 <span class="text-gray-500">VINS-Mono：让单目视觉与 IMU 组成可以长期运行的定位系统</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="eb78b31f1224a6d5fa5473aa8b3cd46d9c08ab0775deb5fff1eb996cb05564af"><h1>092｜VINS-Mono：让单目视觉与 IMU 组成可以长期运行的定位系统</h1>
+<p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="091-cbfqp.html">上一篇</a> · <a href="093-toppra.html">下一篇</a></p>
+<p><strong>论文</strong>：Tong Qin、Peiliang Li、Shaojie Shen，<em>VINS-Mono: A Robust and Versatile Monocular Visual-Inertial State Estimator</em>，2017 年预印本，2018 年期刊发表。<a href="https://arxiv.org/html/1708.03852">原文</a> · <a href="https://arxiv.org/pdf/1708.03852">PDF</a> · <a href="https://github.com/HKUST-Aerial-Robotics/VINS-Mono">官方代码</a>。</p>
+<p><strong>阅读范围</strong>：核对正文的方法、系统流程、实验与官方项目说明，并对 PDF 第 7 页式 23 做视觉复核；未执行官方程序，未逐项复算 IMU 雅可比。后文小例子与简化公式用于教学。</p>
+<h2 id="一分钟理解不是给相机加一只-imu-就结束了">一分钟理解：不是给相机加一只 IMU 就结束了</h2>
+<p>单目相机能从图像变化推断运动，却很难直接知道一段位移究竟是一米还是十米。IMU 有物理单位，能补充快速运动信息，但积分会受偏置影响而漂移。二者互补，却需要合适的初始尺度、重力方向和偏置，才能放进同一个优化问题。</p>
+<p>VINS-Mono 把这件事扩展成完整系统：初始化、局部视觉惯性优化、故障恢复、回环重定位、全局位姿图，以及不同频率的输出。它的重要性既在数学建模，也在这些模块能否持续配合。</p>
+<p>实验支持的是一套系统能在公开序列、较长手持路线、无人机与手机应用中运行。作者也明确指出，纯 VIO 与 OKVIS 的精度接近；加入回环后的系统优势，不应全部归因于局部估计器更精确。</p>
+<p><strong>一句话</strong>：在具有足够视觉结构和运动激励的单目惯性定位中，通过初始化、滑窗优化及回环协作，改善系统的启动、持续定位与长期漂移，代价是标定、非线性计算和多模块管理，且不能消除所有退化与失效。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：</p>
+<ol>
+<li><strong>尺度模糊</strong>：单目几何可以整体缩放而保持相同投影。</li>
+<li><strong>预积分</strong>：把一段高频惯性信息浓缩为帧间约束及其不确定性。</li>
+<li><strong>紧耦合</strong>：不同传感器的原始测量残差共同约束状态。</li>
+<li><strong>边缘化</strong>：消去旧变量并将其信息压缩成当前优化的先验。</li>
+<li><strong>可观测性</strong>：测量和运动是否足以区分不同状态解释。</li>
+</ol>
+<h2 id="1背景与状态估计什么缺什么">1．背景与状态：估计什么，缺什么</h2>
+<p>这是在线状态估计，没有强化学习策略、奖励和训练回合。输入是连续图像、陀螺仪与加速度计数据；输出是位置、速度、姿态，以及用于修正测量的偏置等状态。</p>
+<p>滑窗里每个时刻的状态可概括为：</p>
+<p><span class="reading-math" data-tex="x_k=(p_k,v_k,q_k,b_{a,k},b_{g,k})."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>x</mi><mi>k</mi></msub><mo>=</mo><mo stretchy="false">(</mo><msub><mi>p</mi><mi>k</mi></msub><mo separator="true">,</mo><msub><mi>v</mi><mi>k</mi></msub><mo separator="true">,</mo><msub><mi>q</mi><mi>k</mi></msub><mo separator="true">,</mo><msub><mi>b</mi><mrow><mi>a</mi><mo separator="true">,</mo><mi>k</mi></mrow></msub><mo separator="true">,</mo><msub><mi>b</mi><mrow><mi>g</mi><mo separator="true">,</mo><mi>k</mi></mrow></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">x_k=(p_k,v_k,q_k,b_{a,k},b_{g,k}).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>窗口还包含相机相对 IMU 的外参，以及视觉特征的逆深度。姿态 <span class="reading-math" data-tex="q_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>q</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">q_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 不是普通四维欧氏变量；更新时必须尊重旋转结构。</p>
+<p>单目视觉的尺度模糊，不等于“任何情况下加 IMU 都立即得到尺度”。纯旋转缺少三角化所需的平移，运动激励不足时，尺度、加速度偏置与重力方向也可能难以区分。初始化要检查信息是否足够，而不能只等固定几帧就宣布成功。</p>
+<p>与只融合两个独立位姿输出的松耦合方案相比，紧耦合直接让特征观测和惯性测量共同约束状态。它保留的信息更丰富，但也更依赖测量模型、时间对应和初值。</p>
+<h2 id="2初始化先找到一个可信的起点">2．初始化：先找到一个可信的起点</h2>
+<p>第 V 节先进行视觉 SfM，得到只有相对尺度的相机轨迹与特征，再与 IMU 预积分对齐。过程包括陀螺仪偏置校准、速度与尺度估计，以及重力方向细化。</p>
+<p>重力大小在设定中已知，方向只有两个自由度，因此可以在单位方向的切平面中更新。这样避免把重力的三个分量当成完全自由变量。</p>
+<p>一个容易漏掉的细节是：初始化阶段不同时强行估计全部惯性偏置。作者说明短时间内加速度偏置与重力耦合，因而先忽略加速度偏置，随后在非线性估计中处理。这是对可观测性的工程选择，不是认为加速度计没有偏置。</p>
+<h2 id="3局部估计三类证据一起优化">3．局部估计：三类证据一起优化</h2>
+<p>将原文式 22 写成更易读的形式：</p>
+<p><span class="reading-math" data-tex="\min_{\mathcal X}\ \|r_{\rm prior}\|^2+
+\sum_k r_{I,k}^{\mathsf T}\Sigma_{I,k}^{-1}r_{I,k}
++\sum_{l,j}\rho\!\left(r_{V,lj}^{\mathsf T}\Sigma_{V,lj}^{-1}r_{V,lj}\right)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mi mathvariant="script">X</mi></munder><mtext> </mtext><mi mathvariant="normal">∥</mi><msub><mi>r</mi><mrow><mi mathvariant="normal">p</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">o</mi><mi mathvariant="normal">r</mi></mrow></msub><msup><mi mathvariant="normal">∥</mi><mn>2</mn></msup><mo>+</mo><munder><mo>∑</mo><mi>k</mi></munder><msubsup><mi>r</mi><mrow><mi>I</mi><mo separator="true">,</mo><mi>k</mi></mrow><mi mathvariant="sans-serif">T</mi></msubsup><msubsup><mi mathvariant="normal">Σ</mi><mrow><mi>I</mi><mo separator="true">,</mo><mi>k</mi></mrow><mrow><mo>−</mo><mn>1</mn></mrow></msubsup><msub><mi>r</mi><mrow><mi>I</mi><mo separator="true">,</mo><mi>k</mi></mrow></msub><mo>+</mo><munder><mo>∑</mo><mrow><mi>l</mi><mo separator="true">,</mo><mi>j</mi></mrow></munder><mi>ρ</mi><mtext> ⁣</mtext><mrow><mo fence="true">(</mo><msubsup><mi>r</mi><mrow><mi>V</mi><mo separator="true">,</mo><mi>l</mi><mi>j</mi></mrow><mi mathvariant="sans-serif">T</mi></msubsup><msubsup><mi mathvariant="normal">Σ</mi><mrow><mi>V</mi><mo separator="true">,</mo><mi>l</mi><mi>j</mi></mrow><mrow><mo>−</mo><mn>1</mn></mrow></msubsup><msub><mi>r</mi><mrow><mi>V</mi><mo separator="true">,</mo><mi>l</mi><mi>j</mi></mrow></msub><mo fence="true">)</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\min_{\mathcal X}\ \|r_{\rm prior}\|^2+
+\sum_k r_{I,k}^{\mathsf T}\Sigma_{I,k}^{-1}r_{I,k}
++\sum_{l,j}\rho\!\left(r_{V,lj}^{\mathsf T}\Sigma_{V,lj}^{-1}r_{V,lj}\right).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.6084em;vertical-align:-0.7443em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3557em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathcal mtight" style="margin-right:0.14643em;">X</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7443em;"><span></span></span></span></span></span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">∥</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3175em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">prior</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.3521em;vertical-align:-1.3021em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3021em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-2.453em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07847em;">I</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathsf mtight">T</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3831em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">Σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.4086em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07847em;">I</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4275em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07847em;">I</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.5882em;vertical-align:-1.4382em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4382em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">ρ</span><span class="mspace" style="margin-right:-0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size2">(</span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-2.453em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.22222em;">V</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathsf mtight">T</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3831em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">Σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.4086em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.22222em;">V</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4275em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.22222em;">V</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size2">)</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>第一项保留移出窗口的历史信息；第二项要求相邻状态与 IMU 预积分一致；第三项要求当前三维结构能解释视觉观测。协方差决定残差尺度，不能把像素、米和角度直接不加区分地相加。</p>
+<h3 id="31-预积分为什么能节省工作">3.1 预积分为什么能节省工作</h3>
+<p>两张图像之间可能有很多 IMU 样本。若优化每更新一次状态，就从头积分所有原始样本，成本很高。预积分把这段信息汇总到相邻帧之间，并传播不确定性。</p>
+<p>偏置稍有变化时，可用雅可比作一阶修正：</p>
+<p><span class="reading-math" data-tex="\Delta p(b+\delta b)\approx\Delta p(b)+J_b\delta b."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Δ</mi><mi>p</mi><mo stretchy="false">(</mo><mi>b</mi><mo>+</mo><mi>δ</mi><mi>b</mi><mo stretchy="false">)</mo><mo>≈</mo><mi mathvariant="normal">Δ</mi><mi>p</mi><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo><mo>+</mo><msub><mi>J</mi><mi>b</mi></msub><mi>δ</mi><mi>b</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\Delta p(b+\delta b)\approx\Delta p(b)+J_b\delta b.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">Δ</span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal">b</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal">b</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">Δ</span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal">b</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">b</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal">b</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这是教学简写，对应第 IV-B 节式 12 的思想。它不是说偏置变化再大也无需重新传播；近似精度有适用范围。</p>
+<h3 id="32-为什么视觉残差放到球面上">3.2 为什么视觉残差放到球面上</h3>
+<p>广角与鱼眼相机不能都当作普通针孔。论文将观测反投影成单位方向，在观测方向的切平面上计算二维残差。这样能用同一种方向几何表达不同相机模型，但仍然需要正确的相机标定。</p>
+<h3 id="33-边缘化保留了信息也冻结了部分选择">3.3 边缘化保留了信息，也冻结了部分选择</h3>
+<p>窗口不能无限增长。第 VI-D 节通过 Schur 补将旧状态的约束转成先验；关键帧选择还要保留足够视差和惯性激励。非关键帧的处理并非“所有测量都边缘化”：相应视觉观测可丢弃，惯性预积分继续连接后续帧。</p>
+<p>作者承认边缘化会固定早期线性化点，可能造成次优估计。这解释了为什么有限窗口能实时，却不能被当作无限历史完整优化的等价替代。</p>
+<h3 id="34-式-23-的核对说明">3.4 式 23 的核对说明</h3>
+<p>原文网页与 PDF 第 7 页式 23 的分段形式不符合标准 Huber 损失：大残差分支被写成常数，另一分支的范围也不对应通常定义。本文不把该式作为可执行公式。以平方残差 <span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span> 为输入、阈值为 1 的标准形式是：</p>
+<p><span class="reading-math" data-tex="\rho(s)=\begin{cases}s,&amp;s\le1,\\2\sqrt{s}-1,&amp;s&gt;1.\end{cases}"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>ρ</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>=</mo><mrow><mo fence="true">{</mo><mtable rowspacing="0.36em" columnalign="left left" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>s</mi><mo separator="true">,</mo></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>s</mi><mo>≤</mo><mn>1</mn><mo separator="true">,</mo></mrow></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mn>2</mn><msqrt><mi>s</mi></msqrt><mo>−</mo><mn>1</mn><mo separator="true">,</mo></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>s</mi><mo>&gt;</mo><mn>1.</mn></mrow></mstyle></mtd></mtr></mtable></mrow></mrow><annotation encoding="application/x-tex">\rho(s)=\begin{cases}s,&amp;s\le1,\\2\sqrt{s}-1,&amp;s&gt;1.\end{cases}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">ρ</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3em;vertical-align:-1.25em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size4">{</span></span><span class="mord"><span class="mtable"><span class="col-align-l"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.69em;"><span style="top:-3.69em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="mpunct">,</span></span></span><span style="top:-2.25em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord">2</span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8003em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord mathnormal">s</span></span></span><span style="top:-2.7603em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2397em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">1</span><span class="mpunct">,</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.19em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:1em;"></span><span class="col-align-l"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.69em;"><span style="top:-3.69em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord">1</span><span class="mpunct">,</span></span></span><span style="top:-2.25em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord">1.</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.19em;"><span></span></span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span></span></p>
+<p>其定义可在 <a href="https://ceres-solver.readthedocs.io/latest/nnls_modeling.html">Ceres 官方损失函数文档</a> 核对。这个版本差异不等于已经证明原实验代码使用了错误损失；论文排版和实际实现需要分别检查。</p>
+<h2 id="4长期运行局部窗口之外还需要什么">4．长期运行：局部窗口之外还需要什么</h2>
+<p>回环首先检索旧地点，再做几何检查。匹配通过后，旧关键帧的特征可以作为额外约束加入当前窗口；重定位时旧帧位姿固定，而历史全局图在另一个线程中优化。</p>
+<p>全局图主要优化三维位置和偏航角，共四个自由度。理由是正常视觉惯性条件下重力提供横滚与俯仰参照，长期自由漂移的方向与纯单目不同。这里的可观测性并不意味着横滚和俯仰没有噪声或估计误差。</p>
+<pre><code class="language-text">输入：带时间戳图像、IMU、相机模型与外参初值
+持续接收数据：
+    跟踪视觉角点；累计两帧之间的 IMU 预积分
+    若尚未初始化：
+        检查特征与视差；运行视觉 SfM
+        对齐视觉轨迹与 IMU，估计尺度、速度、重力与初始陀螺偏置
+        条件不足时继续等待新观测
+    否则：
+        优化窗口内状态、偏置、外参与特征深度
+        根据关键帧状态边缘化或丢弃相应测量
+        检测异常；必要时重新初始化并建立新的图段
+    并行检索回环、几何验证、紧耦合重定位与四自由度图优化
+    用最新优化结果加 IMU 前向传播提供高频输出
+输出：局部状态估计及经过回环修正的全局轨迹
+</code></pre>
+<p>高频输出不代表每次都完成了完整滑窗优化。IMU 前向传播、轻量运动优化、全窗口优化和回环图优化有不同成本与频率。</p>
+<h2 id="5实验设计与比较条件">5．实验设计与比较条件</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验</th>
+<th>数据与设备</th>
+<th>对比和指标</th>
+<th>应当控制的解释</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>EuRoC</td>
+<td>使用左目图像与 IMU；重点展示 MH_03、MH_05</td>
+<td>OKVIS 单目/双目，VIO 与含回环版本；位置、姿态误差曲线</td>
+<td>额外相机和回环是不同信息条件</td>
+</tr>
+<tr>
+<td>室内与室外手持</td>
+<td>重复场景、楼梯、光照与纹理变化</td>
+<td>无回环/有回环轨迹及终点漂移</td>
+<td>部分路线没有全程真值</td>
+</tr>
+<tr>
+<td>校园长程</td>
+<td>5.62 km，持续约 94 分钟</td>
+<td>地图叠加与模块耗时</td>
+<td>卫星图视觉对齐不是全程 ATE</td>
+</tr>
+<tr>
+<td>无人机反馈</td>
+<td>八字轨迹，关闭回环；OptiTrack 真值</td>
+<td>飞行定位与终点漂移</td>
+<td>运行示范不等于大量随机重复</td>
+</tr>
+<tr>
+<td>手机 AR</td>
+<td>iPhone 与 Tango 同架运动</td>
+<td>虚拟物体一致性、回程表现</td>
+<td>硬件、镜头和同步条件不一致</td>
+</tr>
+</tbody></table></div>
+<p>这些都是估计与控制实验，不存在统一策略训练预算。第 IX 节未给出覆盖全部实验的多随机种子置信区间；不能从一条轨迹图推导成功概率。</p>
+<p>公开序列比较还规定了对齐方式：先丢弃部分初始输出，再用随后一段进行对齐，最后比较余下输出。对齐使用多少轨迹会影响误差，因此复现必须保留该口径。</p>
+<h2 id="6结果怎样避免把不同证据合成一个分数">6．结果：怎样避免把不同证据合成一个分数</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>图表</th>
+<th>比较什么 → 观察到什么</th>
+<th>支持的结论</th>
+<th>不能推出的结论</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>图 11–14</td>
+<td>OKVIS、纯 VIO、含回环系统</td>
+<td>回环能约束累计位置漂移</td>
+<td>局部 VIO 在每个姿态分量都更好</td>
+</tr>
+<tr>
+<td>图 17–19</td>
+<td>室内外回环前后轨迹</td>
+<td>系统模块能改善长期一致性</td>
+<td>无真值路段的逐时刻绝对精度</td>
+</tr>
+<tr>
+<td>表 I</td>
+<td>长程实验中不同模块时间</td>
+<td>计算可以分线程、分频率组织</td>
+<td>每帧所有模块均耗时相同或串行相加</td>
+</tr>
+<tr>
+<td>图 22–23</td>
+<td>无人机轨迹与 OptiTrack</td>
+<td>无回环局部估计可用于该飞行反馈</td>
+<td>任意高速动作和光照都能稳定控制</td>
+</tr>
+<tr>
+<td>图 25</td>
+<td>手机 AR 与 Tango 的一段路线</td>
+<td>一般移动硬件上的系统可用性</td>
+<td>在所有局部精度指标上胜过 Tango</td>
+</tr>
+</tbody></table></div>
+<p>无人机路线总长 61.97 m，最终漂移约 0.18 m，论文给出约 0.29% 的终点相对漂移。这个百分比的分母是路线长度，不是每一帧误差的平均值，更不是 ATE 降低 99.71%。</p>
+<p>表 I 中窗口优化约 50 ms、运行频率 10 Hz；高频反馈则利用最新结果做惯性传播。两者能同时成立。作者还明确表示 Tango 的局部估计更准确，因此手机回程案例不能改写成全面精度领先。</p>
+<h2 id="7贡献与局限系统完整性也是研究对象">7．贡献与局限：系统完整性也是研究对象</h2>
+<p>本篇的价值来自已有组件的改进与系统整合，包括偏置修正的预积分、初始化、特征级重定位、四自由度图以及可运行实现。不能把所有组件都视为本篇首次发明，也不能因为用了已有方法就忽略集成中的困难。</p>
+<p>局限包括初始化退化、纹理与光照失效、边缘化近似、回环误检，以及外参与时间条件对结果的影响。作者设计了失败检测与重启，但重启不等于恢复失效期间所有丢失信息。</p>
+<p><strong>本文分析</strong>：定位系统真正影响机器人任务的还包括输出延迟、跳变和恢复时间。ATE 较低的系统若输出严重滞后，仍可能不适合快速反馈；回环修正后的全局位姿若直接进入控制器，也需要处理坐标修正。这些不是本篇已完成的统一对照实验。</p>
+<h2 id="8自构例子与前置概念">8．自构例子与前置概念</h2>
+<p><strong>自构例子，未运行</strong>：拿着手机绕桌子一圈。前半圈相机提供桌角的相对几何，IMU 帮助估计有单位的运动；暂时看向白墙时，惯性传播维持短时间预测，但误差增大；回到桌子前，匹配旧桌角提供回环约束，修正长期漂移。如果开始只绕手机光心旋转，则无法把“拿手机走了一圈”的正常初始化结论直接照搬。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>单目惯性优化难以启动</td>
+<td>视觉 SfM 与预积分对齐</td>
+<td>先恢复合理尺度、重力与速度初值</td>
+<td>第 V 节；公开序列与系统实验</td>
+<td>需要视差和激励</td>
+</tr>
+<tr>
+<td>局部估计不断累计漂移</td>
+<td>特征级重定位加四自由度图</td>
+<td>旧地点观测约束长期自由漂移</td>
+<td>图 11–19</td>
+<td>回环信息条件额外，误检仍需处理</td>
+</tr>
+<tr>
+<td>全量优化难以高频输出</td>
+<td>滑窗、边缘化和惯性传播分工</td>
+<td>控制计算规模并降低输出等待</td>
+<td>表 I、无人机应用</td>
+<td>高频预测不等于高频全量优化</td>
+</tr>
+</tbody></table></div>
+<h2 id="9读懂了吗三个问题与答案">9．读懂了吗？三个问题与答案</h2>
+<h3 id="问题一为什么加入-imu-后仍然需要专门初始化">问题一：为什么加入 IMU 后，仍然需要专门初始化？</h3>
+<p><strong>答案</strong>：IMU 并不直接提供准确位置；加速度包含重力、偏置和运动成分。若尺度、重力与偏置初值错误，非线性融合可能收敛到错误解释。初始化通过视觉轨迹与惯性约束对齐提供起点，而且运动不足时应继续等待，不能强行宣布尺度已知。</p>
+<h3 id="问题二四自由度图优化是否意味着机器人只做四自由度运动">问题二：四自由度图优化是否意味着机器人只做四自由度运动？</h3>
+<p><strong>答案</strong>：不是。局部状态仍描述完整三维运动。四自由度指全局图主要修正位置和偏航的长期漂移；重力为横滚、俯仰提供参照。可观测方向仍有测量噪声，也不代表所有运动条件下估计都可靠。</p>
+<h3 id="问题三含回环版本误差更小能证明它的-imu-预积分比-okvis-更准确吗">问题三：含回环版本误差更小，能证明它的 IMU 预积分比 OKVIS 更准确吗？</h3>
+<p><strong>答案</strong>：不能。回环引入了额外的历史地点约束，提升的是完整系统。要比较预积分本身，需要相同观测、初始化、回环条件和其他模块下的消融。原文对纯 VIO 的评价更谨慎，也指出某些姿态分量 OKVIS 表现更好。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 092｜VINS-Mono：让单目视觉与 IMU 组成可以长期运行的定位系统
+    <textarea id="md-source" hidden readonly># 092｜VINS-Mono：让单目视觉与 IMU 组成可以长期运行的定位系统
 
 [总览](00-发展时间线总览.md) · [目录](README.md) · [上一篇](091-cbfqp.md) · [下一篇](093-toppra.md)
 
@@ -127,7 +340,7 @@ $$
 原文网页与 PDF 第 7 页式 23 的分段形式不符合标准 Huber 损失：大残差分支被写成常数，另一分支的范围也不对应通常定义。本文不把该式作为可执行公式。以平方残差 $s$ 为输入、阈值为 1 的标准形式是：
 
 $$
-\rho(s)=\begin{cases}s,&s\le1,\\2\sqrt{s}-1,&s>1.\end{cases}
+\rho(s)=\begin{cases}s,&amp;s\le1,\\2\sqrt{s}-1,&amp;s&gt;1.\end{cases}
 $$
 
 其定义可在 [Ceres 官方损失函数文档](https://ceres-solver.readthedocs.io/latest/nnls_modeling.html) 核对。这个版本差异不等于已经证明原实验代码使用了错误损失；论文排版和实际实现需要分别检查。
@@ -225,9 +438,9 @@ $$
 
 **答案**：不能。回环引入了额外的历史地点约束，提升的是完整系统。要比较预积分本身，需要相同观测、初始化、回环条件和其他模块下的消融。原文对纯 VIO 的评价更谨慎，也指出某些姿态分量 OKVIS 表现更好。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

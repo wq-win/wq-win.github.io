@@ -7,7 +7,7 @@
     <title>075｜接触隐式轨迹优化：不先规定哪只脚何时落地 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,154 @@
                 <span class="text-gray-500">接触隐式轨迹优化：不先规定哪只脚何时落地</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="84a043689f892bc3750e6f5699ab1f1f33f744ba89b2d0f8a87800317a9be54e"><h1>075｜接触隐式轨迹优化：不先规定哪只脚何时落地</h1>
+<p><a href="00-timeline.html">返回总览</a> · <a href="074-octomap.html">上一篇</a> · <a href="076-lsdslam.html">下一篇</a></p>
+<p><strong>论文</strong>：Michael Posa、Cecilia Cantu、Russ Tedrake，<em>A Direct Method for Trajectory Optimization of Rigid Bodies Through Contact</em>，IJRR 2014，33(1):69—81；2013 年在线发表，前身为 WAFR 2012 工作。<a href="https://dair.seas.upenn.edu/assets/pdf/Posa2014.pdf">作者全文</a> · <a href="https://doi.org/10.1177/0278364913506757">出版记录</a> · <a href="https://doi.org/10.1177/0278364914533878">2014 年勘误</a>。</p>
+<p><strong>阅读范围</strong>：22 页作者预印本的方法、四组应用、讨论及图注，并核对勘误关于先行工作的说明。页码按作者版，章节便于与期刊版对应。没有复现优化、仿真或硬件运行，以下高速运动数字均不作为真机纪录。</p>
+<h2 id="一一分钟理解">一、一分钟理解</h2>
+<p>让机器人走路，通常先决定左脚落地、右脚离地等顺序，再优化每一步怎么走。多指操作、柔性脚趾或带机械限位的腿却有大量接触组合，顺序可能本来就是需要发现的答案。</p>
+<p>本文把接触力也作为待优化变量，用互补约束表达“离开表面时不能获得表面支持”，把运动轨迹与接触模式放入同一个非线性优化问题。它不必先枚举完整模式序列，但仍然依赖候选接触、模型、目标和初始化。</p>
+<p>实验展示了从操作到步态规划的不同数值案例，并观察到优化后的接触顺序与初始猜测不同。这支持方法能够改变接触模式，不证明它能找到所有问题的全局最优动作。</p>
+<p>一句话：在已知刚体和接触模型的运动规划中，通过直接优化状态、控制和接触力，减少预设接触顺序的限制，代价是困难的非凸互补优化，以及离散模型和实际执行之间的差距。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：</p>
+<ol>
+<li>混合系统：连续运动与离散接触模式共同构成的系统。</li>
+<li>互补约束：两个非负量不能同时严格为正。</li>
+<li>直接转录：把连续轨迹问题离散成有限维约束优化。</li>
+<li>冲量：力在时间上的积分，用于描述碰撞造成的动量变化。</li>
+<li>SQP：通过连续二次近似求解非线性约束问题的方法。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>这是模型驱动的轨迹优化，不是强化学习。输入为刚体动力学、接触几何、摩擦、初终状态和任务成本；输出为一段状态、控制、接触力及时间轨迹。不存在训练好的策略网络或数据驱动价值函数。</p>
+<p>传统混合系统描述把支撑、腾空、滑动等视为不同模式，各自有动力学；触地事件触发模式转换。少数模式时很清楚，多接触点和机械限位叠加后，组合迅速增多。若固定错误顺序，优化器只能在受限的问题里努力，即使模型允许更好的动作也发现不了。</p>
+<p>不过，“没有预设顺序”并不等于没有结构性先验。机器人可能碰到哪些表面、间隙如何计算、哪个关节可驱动、摩擦模型是什么，都必须给出。它适合已知任务几何的规划，不能直接解释成对未知环境的自主探索。</p>
+<h2 id="三方法把接触也纳入决策">三、方法：把接触也纳入决策</h2>
+<h3 id="1-接触互补的逻辑">1. 接触互补的逻辑</h3>
+<p>设 <span class="reading-math" data-tex="\phi(q)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϕ</mi><mo stretchy="false">(</mo><mi>q</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\phi(q)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">ϕ</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mclose">)</span></span></span></span></span> 是物体到接触面的非穿透间隙，<span class="reading-math" data-tex="\lambda_n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>λ</mi><mi>n</mi></msub></mrow><annotation encoding="application/x-tex">\lambda_n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是法向支持力，则</p>
+<p><span class="reading-math" data-tex="\phi(q)\ge0,\qquad\lambda_n\ge0,\qquad\phi(q)\lambda_n=0."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>ϕ</mi><mo stretchy="false">(</mo><mi>q</mi><mo stretchy="false">)</mo><mo>≥</mo><mn>0</mn><mo separator="true">,</mo><mspace width="2em"/><msub><mi>λ</mi><mi>n</mi></msub><mo>≥</mo><mn>0</mn><mo separator="true">,</mo><mspace width="2em"/><mi>ϕ</mi><mo stretchy="false">(</mo><mi>q</mi><mo stretchy="false">)</mo><msub><mi>λ</mi><mi>n</mi></msub><mo>=</mo><mn>0.</mn></mrow><annotation encoding="application/x-tex">\phi(q)\ge0,\qquad\lambda_n\ge0,\qquad\phi(q)\lambda_n=0.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">ϕ</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≥</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≥</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">ϕ</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.</span></span></span></span></span></span></p>
+<p>三条约束缺一不可。只有乘积等于零会允许负间隙或吸引力；只有两个非负约束则会允许悬空获得支持。组合起来才表达单边接触。</p>
+<p>尤其注意逻辑方向：<span class="reading-math" data-tex="\lambda_n&gt;0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>λ</mi><mi>n</mi></msub><mo>&gt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\lambda_n&gt;0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span> 要求 <span class="reading-math" data-tex="\phi=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϕ</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\phi=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ϕ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，但 <span class="reading-math" data-tex="\phi=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϕ</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\phi=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ϕ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span> 并不要求 <span class="reading-math" data-tex="\lambda_n&gt;0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>λ</mi><mi>n</mi></msub><mo>&gt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\lambda_n&gt;0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>。刚好接触但不受力是合法边界情形。不能把论文中简略的“当且仅当接触”措辞扩展成所有接触必须承担正载荷。</p>
+<h3 id="2-接触力与状态一起优化">2. 接触力与状态一起优化</h3>
+<p>用教学记号写动力学：</p>
+<p><span class="reading-math" data-tex="M(q)\dot v+b(q,v)=B(q)u+J(q)^T\lambda."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>M</mi><mo stretchy="false">(</mo><mi>q</mi><mo stretchy="false">)</mo><mover accent="true"><mi>v</mi><mo>˙</mo></mover><mo>+</mo><mi>b</mi><mo stretchy="false">(</mo><mi>q</mi><mo separator="true">,</mo><mi>v</mi><mo stretchy="false">)</mo><mo>=</mo><mi>B</mi><mo stretchy="false">(</mo><mi>q</mi><mo stretchy="false">)</mo><mi>u</mi><mo>+</mo><mi>J</mi><mo stretchy="false">(</mo><mi>q</mi><msup><mo stretchy="false">)</mo><mi>T</mi></msup><mi>λ</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">M(q)\dot v+b(q,v)=B(q)u+J(q)^T\lambda.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">M</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mclose">)</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1111em;"><span class="mord">˙</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">b</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mclose">)</span><span class="mord mathnormal">u</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1413em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span><span class="mord mathnormal">λ</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="u"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>u</mi></mrow><annotation encoding="application/x-tex">u</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">u</span></span></span></span></span> 是执行器输入，<span class="reading-math" data-tex="\lambda"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi></mrow><annotation encoding="application/x-tex">\lambda</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">λ</span></span></span></span></span> 是环境接触作用，<span class="reading-math" data-tex="J^T"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>J</mi><mi>T</mi></msup></mrow><annotation encoding="application/x-tex">J^T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8413em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span></span></span></span></span> 把接触力映射为广义力。它们的权限不同：驱动器不能凭空操纵被动自由度，接触力也只能在接触约束允许时出现。</p>
+<p>传统前向模拟给定控制后一步步求状态和接触；直接方法把多个时刻的 <span class="reading-math" data-tex="q,v,u,\lambda"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi><mo separator="true">,</mo><mi>v</mi><mo separator="true">,</mo><mi>u</mi><mo separator="true">,</mo><mi>λ</mi></mrow><annotation encoding="application/x-tex">q,v,u,\lambda</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">u</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">λ</span></span></span></span></span> 一起优化，再用离散动力学等式约束它们必须相容。变量更多，但相邻时刻之间的约束具有稀疏结构。</p>
+<p>一个明确区分力与冲量的教学离散式为</p>
+<p><span class="reading-math" data-tex="M_{k+1}(v_{k+1}-v_k)=h_k(Bu_{k+1}-b_{k+1})+J_{k+1}^T p_{k+1},"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>M</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">(</mo><msub><mi>v</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>−</mo><msub><mi>v</mi><mi>k</mi></msub><mo stretchy="false">)</mo><mo>=</mo><msub><mi>h</mi><mi>k</mi></msub><mo stretchy="false">(</mo><mi>B</mi><msub><mi>u</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>−</mo><msub><mi>b</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">)</mo><mo>+</mo><msubsup><mi>J</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow><mi>T</mi></msubsup><msub><mi>p</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">M_{k+1}(v_{k+1}-v_k)=h_k(Bu_{k+1}-b_{k+1})+J_{k+1}^T p_{k+1},</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">M</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1967em;vertical-align:-0.3053em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-2.453em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3053em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span></span></span></span></span></span></p>
+<p>其中 <span class="reading-math" data-tex="p_{k+1}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">p_{k+1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span> 是这一时间段内的接触冲量。若使用区间平均接触力，则 <span class="reading-math" data-tex="p=h\lambda"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo>=</mo><mi>h</mi><mi>λ</mi></mrow><annotation encoding="application/x-tex">p=h\lambda</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">hλ</span></span></span></span></span>。冲击时不应拿冲量直接当瞬时力。时间步进把短暂碰撞与持续接触统一到积分量里，并不精确恢复每个碰撞时刻的峰值。</p>
+<h3 id="3-摩擦与求解并没有消失">3. 摩擦与求解并没有消失</h3>
+<p>法向互补只解决接触与分离；切向还需要摩擦锥与滑动方向约束。滑动时摩擦应反对运动，粘着时摩擦可以落在允许范围内。只添加 <span class="reading-math" data-tex="\|\lambda_t\|\le\mu\lambda_n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∥</mi><msub><mi>λ</mi><mi>t</mi></msub><mi mathvariant="normal">∥</mi><mo>≤</mo><mi>μ</mi><msub><mi>λ</mi><mi>n</mi></msub></mrow><annotation encoding="application/x-tex">\|\lambda_t\|\le\mu\lambda_n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">∥</span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∥</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">μ</span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 而不处理耗散关系，可能允许不符合库仑摩擦的运动。</p>
+<p>原文将这些条件组成 MPCC，即带互补约束的数学规划。SQP 用连续的二次近似子问题推进，但整体问题不是凸二次规划。作者利用松弛变量和求解器弹性机制改善数值表现；复杂问题还可以先容许小的互补误差，再逐步收紧。</p>
+<pre><code class="language-text">输入刚体模型、摩擦参数、候选接触对、起终约束
+建立各时刻的状态、控制、接触作用及时间变量
+加入离散动力学和任务约束
+对每个候选接触加入：
+    非穿透、单边法向作用、接触互补
+    摩擦范围以及粘着/滑动相容条件
+根据需要加入关节限位和机构约束
+用状态轨迹猜测初始化，初始化控制与接触变量
+求解稀疏非线性问题：
+    若采用互补松弛，逐步收紧允许误差
+    每次更新线性化与二次近似，而非预先枚举模式序列
+检查最终动力学、非穿透、摩擦及互补残差
+读取哪些接触作用非零，得到对应的接触安排
+独立检查细时间步模拟与反馈跟踪，再考虑硬件执行
+</code></pre>
+<p>伪代码最后的独立验证是教学性复现建议，不能据此声称作者每个动作都做过同等验证。数学目标是设计者给出的轨迹成本；机制变化是将接触隐式纳入优化；实验改善则是找到可行运动、改变模式或降低特定名义成本，三者不能混写。</p>
+<h2 id="四实验如何验证">四、实验如何验证</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>论文设置与边界</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>任务</td>
+<td>手指拨动物体、平面抓取、Spring Flamingo 步态和 FastRunner 运动</td>
+</tr>
+<tr>
+<td>数据来源</td>
+<td>已知模型和人工设置的任务、初始轨迹，不是人类示范数据集训练</td>
+</tr>
+<tr>
+<td>对照</td>
+<td>初始与优化轨迹、相关方法的条件性讨论，不是统一排行榜上的全面消融</td>
+</tr>
+<tr>
+<td>求解预算</td>
+<td>简单例子分钟级或更短；复杂 FastRunner 可达约一小时，见 §4 开头</td>
+</tr>
+<tr>
+<td>特殊实现</td>
+<td>Spring Flamingo 用 C++ 动力学与 MATLAB 框架，其他例子的实现成本不能直接同口径比较</td>
+</tr>
+<tr>
+<td>指标</td>
+<td>可行性、接触模式、名义运输成本、求解时间</td>
+</tr>
+<tr>
+<td>重复与不确定性</td>
+<td>未报告覆盖所有案例的独立随机重复统计或置信区间</td>
+</tr>
+<tr>
+<td>额外先验</td>
+<td>抓取中使用中间抓握姿态；步态使用周期、对称或步幅约束</td>
+</tr>
+</tbody></table></div>
+<p>中间姿态尤其重要。只要求球到达空中，优化器可能用手指把球弹起来；这在数学上满足目标，却不是人想要的“抓起”。论文主动讨论了这种目标与意图差异，是理解优化式机器人行为的重要例子。</p>
+<h2 id="五五处证据与读法">五、五处证据与读法</h2>
+<ol>
+<li><p><strong>图 3、§4.1：主动建立接触。</strong> 无重力的示例仍能从无接触初始化发现接触，支持搜索不完全依赖自然动力学把身体推到一起。它不是对所有初始化成功的保证。</p>
+</li>
+<li><p><strong>图 4、§4.2：抓取。</strong> 运动同时处理手和物体动力学，但使用了中间抓握要求。不能概括成无需任务设计的自主灵巧操作。</p>
+</li>
+<li><p><strong>图 5、§4.3：成本下降及副作用。</strong> Spring Flamingo 的名义成本由 0.18 降为 0.04；按这两个报告值计算，相对下降约 77.8%。这是指定名义轨迹成本，不是实际电池能耗下降；图注说明未要求足够抬脚高度，因此得到很低的离地间隙。</p>
+</li>
+<li><p><strong>图 6、8：模式变化。</strong> 初始和优化序列不同，支持互补形式能改变接触安排。超过四百万种可能组合是模型组合数量，不是求解器实际穷举并验证四百万条模式路径。</p>
+</li>
+<li><p><strong>图 7、9、10：复杂模型应用。</strong> 展示高速周期轨迹及已知台阶、落脚约束下的运动变化。它们说明任务约束可以注入优化，不能替代未知地形、扰动恢复或真实硬件的成功率证据。</p>
+</li>
+</ol>
+<p>原文运输成本公式附近的叙述、负功处理和离散时间因子需要谨慎阅读：本文只引用报告的成本对比，不将印刷求和式直接包装为完整电能计算器。真正复现应明确时间积分、力矩单位、负功处理和执行器效率。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p>贡献在于把接触互补、稀疏直接轨迹优化和适合的非线性求解技巧结合，推进到较复杂的机器人模型。<strong>优先权必须结合勘误阅读</strong>：2014 年勘误补充了更早、独立取得类似结果的 MPEC 相关工作，因此不能把本篇写成无人先行的绝对首次。<a href="https://doi.org/10.1177/0278364914533878">勘误原文</a></p>
+<p>减少显式模式枚举不代表消除计算困难。互补可行域非凸且退化，局部求解器可能失败或停在不理想动作。作者承认局部最优和初始化影响；我们的进一步分析是，较粗时间步还可能隐藏穿透、快速反弹或接触峰值问题。</p>
+<p>若暂时松弛互补，迭代中的身体可以在小间隙处得到接触作用，这是数值过渡，不是可执行物理过程。最终容差必须记录；只看求解器返回成功不够。模型允许的低成本擦地步态，也可能在真实地形误差下很脆弱。</p>
+<h2 id="七自构例子与前置知识">七、自构例子与前置知识</h2>
+<p><strong>自构例子，未运行。</strong> 一个 1 kg 物体静止在平面上。间隙大于零时，支持力只能为零，重力会让它下落；间隙为零时，约 9.81 N 的支持可以抵消重力。若允许间隙 0.01 m、支持力 9.81 N 同时存在，乘积为 0.0981 N·m，便出现悬空支持。这个量的单位也提醒我们：松弛阈值不能随意跨单位、跨机器人照搬。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>接触顺序预设限制运动搜索</td>
+<td>同时优化状态、控制和接触作用，加入互补条件</td>
+<td>在同一约束问题里允许接触模式改变</td>
+<td>操作与步态案例、模式对比、名义成本变化</td>
+<td>局部非凸求解、模型与时间离散误差、任务先验和执行验证仍不可少</td>
+</tr>
+</tbody></table></div>
+<h2 id="八自测问题与参考答案">八、自测问题与参考答案</h2>
+<h3 id="问题-1为何仅写接触距离乘支持力等于零不够">问题 1：为何仅写“接触距离乘支持力等于零”不够？</h3>
+<p><strong>答案：</strong> 乘积为零不能排除负间隙或负法向力。必须同时规定非穿透与单边支持。三者合起来才表达分离时零力、贴合时允许非负力，而且接触状态仍允许零力。</p>
+<h3 id="问题-2不预设模式顺序是否意味着与初始化无关">问题 2：不预设模式顺序，是否意味着与初始化无关？</h3>
+<p><strong>答案：</strong> 不是。优化允许改变模式，但仍在非凸问题中做局部搜索，初始化会影响可达的局部解与收敛。它扩大了允许搜索的空间，没有证明任意起点都能找到同一最优动作。</p>
+<h3 id="问题-3为什么最低成本的抓取轨迹可能变成把球弹起来">问题 3：为什么最低成本的抓取轨迹可能变成把球弹起来？</h3>
+<p><strong>答案：</strong> 如果目标只要求球最终到某处，没有要求稳定持握、接触过程或力闭合，弹起也可能满足数学条件。优化器执行的是目标和约束，人的语义意图需要明确编码；这不是单靠更强求解器就会自动解决的问题。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 075｜接触隐式轨迹优化：不先规定哪只脚何时落地
+    <textarea id="md-source" hidden readonly># 075｜接触隐式轨迹优化：不先规定哪只脚何时落地
 
 [返回总览](00-发展时间线总览.md) · [上一篇](074-octomap.md) · [下一篇](076-lsdslam.md)
 
@@ -82,7 +225,7 @@ $$\phi(q)\ge0,\qquad\lambda_n\ge0,\qquad\phi(q)\lambda_n=0.$$
 
 三条约束缺一不可。只有乘积等于零会允许负间隙或吸引力；只有两个非负约束则会允许悬空获得支持。组合起来才表达单边接触。
 
-尤其注意逻辑方向：$\lambda_n>0$ 要求 $\phi=0$，但 $\phi=0$ 并不要求 $\lambda_n>0$。刚好接触但不受力是合法边界情形。不能把论文中简略的“当且仅当接触”措辞扩展成所有接触必须承担正载荷。
+尤其注意逻辑方向：$\lambda_n&gt;0$ 要求 $\phi=0$，但 $\phi=0$ 并不要求 $\lambda_n&gt;0$。刚好接触但不受力是合法边界情形。不能把论文中简略的“当且仅当接触”措辞扩展成所有接触必须承担正载荷。
 
 ### 2. 接触力与状态一起优化
 
@@ -192,9 +335,9 @@ $$M_{k+1}(v_{k+1}-v_k)=h_k(Bu_{k+1}-b_{k+1})+J_{k+1}^T p_{k+1},$$
 
 **答案：** 如果目标只要求球最终到某处，没有要求稳定持握、接触过程或力闭合，弹起也可能满足数学条件。优化器执行的是目标和约束，人的语义意图需要明确编码；这不是单靠更强求解器就会自动解决的问题。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

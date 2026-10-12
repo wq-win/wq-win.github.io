@@ -7,7 +7,7 @@
     <title>062｜RRT*：让随机树在找到路径后继续变好 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,193 @@
                 <span class="text-gray-500">RRT*：让随机树在找到路径后继续变好</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="cec58f73171b905bb4a088af62e0f932f8bfb01f14f4ce165cd0da38d72c1a9e"><h1>062｜RRT*：让随机树在找到路径后继续变好</h1>
+<p><a href="00-timeline.html">返回总览</a> · <a href="061-stomp.html">上一篇：STOMP</a> · <a href="063-g2o.html">下一篇：g2o</a></p>
+<p><strong>论文</strong>：Sertac Karaman、Emilio Frazzoli，<em>Sampling-Based Algorithms for Optimal Motion Planning</em>，2011。<a href="https://arxiv.org/html/1105.1186">原论文</a> · <a href="https://arxiv.org/abs/1105.1186">论文记录</a>。</p>
+<p><strong>阅读范围</strong>：问题定义、PRM*／RRG／RRT* 算法、主定理陈述、复杂度分析和数值实验；附录长证明未逐行复算。另核对 <a href="https://arxiv.org/abs/1909.09688">Solovey 等人的后续论文摘要</a>及<a href="https://www.research-collection.ethz.ch/items/29513524-b114-40a5-999f-0ba59430bd28">正式出版记录</a>，用于注明原 RRT* 证明的后续修订，未将后续结论冒充 2011 年原文内容。</p>
+<h2 id="一一分钟理解">一、一分钟理解</h2>
+<p>普通 RRT 很会“先找到一条路”：随机采样一个位置，让已有树朝那里长一段。但新点通常接在最近的旧点上，早期形成的绕路关系会一直保留。增加很多点，不等于旧路线自动变好。</p>
+<p>RRT* 做了两件小而关键的事：新点加入时，比较邻居中谁能以最低累计成本带它到达；新点加入后，再看看它能否给旧邻居提供更便宜的到达方式。如果可以，就修改旧邻居的父节点，这叫重连。</p>
+<p>本论文并不只提出 RRT*，还系统比较了不同采样图的可行性与最优性，给出 PRM*、RRG 等方法。重要思想是把“找到解”和“不断逼近最优解”变成两个不同的数学问题。</p>
+<p>一句话：<strong>在满足相应几何、采样和成本条件的运动规划中，通过邻域选父和重连持续改善随机树，代价是更多邻域查询和碰撞检查，而且有限运行时间不保证最优。</strong></p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>配置空间</strong>：用所有自由度描述机器人姿态的空间。</li>
+<li><strong>局部连接器</strong>：尝试连接附近状态并检查可行性的工具。</li>
+<li><strong>树与父节点</strong>：每个非根节点只有一个父节点，形成唯一根路径。</li>
+<li><strong>几乎必然收敛</strong>：除概率为零的例外外，随机序列最终满足极限性质。</li>
+<li><strong>同伦路径类别</strong>：粗略理解为绕障方式不同、不能不穿障地连续变成彼此的路线类别。</li>
+</ol>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>最近邻未必有便宜根路径</td>
+<td>比较累计成本选父</td>
+<td>避免继承高成本枝条</td>
+<td>图 12、13</td>
+<td>更多连接检查</td>
+</tr>
+<tr>
+<td>早期绕路被固定</td>
+<td>重连旧节点</td>
+<td>新采样可改善已有子树</td>
+<td>图 15、16</td>
+<td>成本维护；有限时间仍次优</td>
+</tr>
+<tr>
+<td>连接规则缺少理论依据</td>
+<td>分析邻域随样本的尺度</td>
+<td>平衡连接数量与覆盖</td>
+<td>§4 定理与图 18—22</td>
+<td>原 RRT* 证明有后续修订，条件不可省略</td>
+</tr>
+</tbody></table></div>
+<h2 id="二问题与假设">二、问题与假设</h2>
+<h3 id="21-这是几何路径规划">2.1 这是几何路径规划</h3>
+<p>输入包含自由配置空间、起点、目标区域和路径成本。输出是一条不穿障碍物、从起点到达目标区域的曲线。</p>
+<p>路径的参数不一定是真实时间。将空间最短曲线交给汽车，并不代表汽车能够在转向半径限制下沿它行驶。原文的基本结果不应直接扩展到任意动力学约束、动态障碍或接触模式切换。</p>
+<p>它没有训练数据集、策略网络或奖励模型。随机性用于探索空间，而不是用随机梯度训练参数。终止通常由时间或样本预算控制；若找到了可行解，可以随时返回当时最好路径。</p>
+<h3 id="22-三个容易混淆的保证">2.2 三个容易混淆的保证</h3>
+<p><strong>概率完备性</strong>讨论：存在满足条件的可行路径时，失败概率是否随着采样增加趋于零。</p>
+<p><strong>渐近最优性</strong>讨论：最好路径成本是否几乎必然趋于最优成本。</p>
+<p><strong>有限预算性能</strong>讨论：给一秒钟，成功率、路径长度和波动到底怎样。这是部署最关心的问题，却不能仅由前两个极限命题回答。</p>
+<p>理论还要求适当的路径鲁棒性和成本连续性。若唯一通道宽度严格为零，连续随机采样恰好落入其中的概率可能为零；这种退化任务不属于通常的鲁棒可行设定。</p>
+<h2 id="三算法到底改了什么">三、算法到底改了什么</h2>
+<h3 id="31-累计成本比几何距离更重要">3.1 累计成本比几何距离更重要</h3>
+<p>设 <span class="reading-math" data-tex="g(v)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi><mo stretchy="false">(</mo><mi>v</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">g(v)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mclose">)</span></span></span></span></span> 为树根到节点 <span class="reading-math" data-tex="v"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>v</mi></mrow><annotation encoding="application/x-tex">v</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span></span></span></span></span> 的累计成本，<span class="reading-math" data-tex="c(u,v)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi><mo stretchy="false">(</mo><mi>u</mi><mo separator="true">,</mo><mi>v</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">c(u,v)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">c</span><span class="mopen">(</span><span class="mord mathnormal">u</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mclose">)</span></span></span></span></span> 为两点间可行局部连接的成本。新点应比较：</p>
+<p><span class="reading-math" data-tex="v_{\mathrm{parent}}=\arg\min_{v\in\mathcal N}
+\{g(v)+c(v,x_{\mathrm{new}})\}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>v</mi><mrow><mi mathvariant="normal">p</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">n</mi><mi mathvariant="normal">t</mi></mrow></msub><mo>=</mo><mi>arg</mi><mo>⁡</mo><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mrow><mi>v</mi><mo>∈</mo><mi mathvariant="script">N</mi></mrow></munder><mo stretchy="false">{</mo><mi>g</mi><mo stretchy="false">(</mo><mi>v</mi><mo stretchy="false">)</mo><mo>+</mo><mi>c</mi><mo stretchy="false">(</mo><mi>v</mi><mo separator="true">,</mo><msub><mi>x</mi><mrow><mi mathvariant="normal">n</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">w</mi></mrow></msub><mo stretchy="false">)</mo><mo stretchy="false">}</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">v_{\mathrm{parent}}=\arg\min_{v\in\mathcal N}
+\{g(v)+c(v,x_{\mathrm{new}})\}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">parent</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.5217em;vertical-align:-0.7717em;"></span><span class="mop">ar<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3557em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span><span class="mrel mtight">∈</span><span class="mord mathcal mtight" style="margin-right:0.14736em;">N</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7717em;"><span></span></span></span></span></span><span class="mopen">{</span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">c</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight" style="margin-right:0.01389em;">new</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)}</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这与“离新点最近的旧点”不同。一个近邻可能位于已经绕了很远的枝条末端；另一个稍远的邻居可能有很便宜的根路径。</p>
+<p>重连则检查：</p>
+<p><span class="reading-math" data-tex="g(x_{\mathrm{new}})+c(x_{\mathrm{new}},v)&lt;g(v)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>g</mi><mo stretchy="false">(</mo><msub><mi>x</mi><mrow><mi mathvariant="normal">n</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">w</mi></mrow></msub><mo stretchy="false">)</mo><mo>+</mo><mi>c</mi><mo stretchy="false">(</mo><msub><mi>x</mi><mrow><mi mathvariant="normal">n</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">w</mi></mrow></msub><mo separator="true">,</mo><mi>v</mi><mo stretchy="false">)</mo><mo>&lt;</mo><mi>g</mi><mo stretchy="false">(</mo><mi>v</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">g(x_{\mathrm{new}})+c(x_{\mathrm{new}},v)&lt;g(v).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight" style="margin-right:0.01389em;">new</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">c</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight" style="margin-right:0.01389em;">new</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&lt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>若连接无碰撞且成本更低，就改变 <span class="reading-math" data-tex="v"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>v</mi></mrow><annotation encoding="application/x-tex">v</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span></span></span></span></span> 的父节点。工程实现还必须维护受影响后代的累计成本，否则下一轮比较会使用过期数字。</p>
+<h3 id="32-邻域为什么随样本数变化">3.2 邻域为什么随样本数变化</h3>
+<p>原论文算法采用的典型半径为：</p>
+<p><span class="reading-math" data-tex="r_n=\min\left\{\eta,\gamma\left(\frac{\log n}{n}\right)^{1/d}\right\}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>r</mi><mi>n</mi></msub><mo>=</mo><mi>min</mi><mo>⁡</mo><mrow><mo fence="true">{</mo><mi>η</mi><mo separator="true">,</mo><mi>γ</mi><msup><mrow><mo fence="true">(</mo><mfrac><mrow><mi>log</mi><mo>⁡</mo><mi>n</mi></mrow><mi>n</mi></mfrac><mo fence="true">)</mo></mrow><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mi>d</mi></mrow></msup><mo fence="true">}</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">r_n=\min\left\{\eta,\gamma\left(\frac{\log n}{n}\right)^{1/d}\right\}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3em;vertical-align:-1.25em;"></span><span class="mop">min</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size4">{</span></span><span class="mord mathnormal" style="margin-right:0.03588em;">η</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">(</span></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3714em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">n</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">)</span></span></span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:1.7279em;"><span style="top:-3.9029em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1/</span><span class="mord mathnormal mtight">d</span></span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size4">}</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 是样本规模，<span class="reading-math" data-tex="d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi></mrow><annotation encoding="application/x-tex">d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span> 是空间维度，<span class="reading-math" data-tex="\eta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>η</mi></mrow><annotation encoding="application/x-tex">\eta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">η</span></span></span></span></span> 限制局部扩展距离，<span class="reading-math" data-tex="\gamma"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi></mrow><annotation encoding="application/x-tex">\gamma</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span></span></span></span></span> 控制连接范围。这里写的是原算法尺度；RRT* 的严格证明边界见下一小节。</p>
+<p>教学上可以从平均邻居数量理解它：均匀点云中，一个小球包含的点数约与 <span class="reading-math" data-tex="n r_n^d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi><msubsup><mi>r</mi><mi>n</mi><mi>d</mi></msubsup></mrow><annotation encoding="application/x-tex">n r_n^d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0961em;vertical-align:-0.247em;"></span><span class="mord mathnormal">n</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-2.453em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">d</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span></span></span></span></span> 成正比。代入上式得到 <span class="reading-math" data-tex="\log n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>log</mi><mo>⁡</mo><mi>n</mi></mrow><annotation encoding="application/x-tex">\log n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 量级。因此几何半径虽然变小，可比较邻居的数量仍缓慢增长。</p>
+<p>若把半径一直固定为很小的值，或无条件只找固定两个邻居，就不能照搬这套论证。邻域太大又会增加大量昂贵碰撞检查。</p>
+<h3 id="33-教学伪代码">3.3 教学伪代码</h3>
+<pre><code class="language-text">树 T 以起点为根，根成本为 0
+重复直到预算耗尽：
+    随机采样 x_rand
+    找最近树节点 x_nearest
+    用局部扩展得到 x_new
+    若 x_nearest 到 x_new 不可行：跳过
+    按邻域规则查找附近节点 N
+    用 x_nearest 初始化新点父节点和成本
+    对 N 中每个 v：
+        若 v 到 x_new 可行且总成本更低：选 v 为父节点
+    插入 x_new
+    对 N 中每个 v：
+        若经过 x_new 到 v 更便宜且连接可行：
+            把 v 重连到 x_new
+            更新受影响子树成本，保持树结构无环
+    更新到达目标区域的最好解
+返回最好可行路径；若没有则报告预算内未找到
+</code></pre>
+<p>树不是每轮重新训练的模型，而是积累计算结果的数据结构。它保留已探索空间，并通过重连修复过去的决策。</p>
+<h3 id="34-原定理与后续证明修订">3.4 原定理与后续证明修订</h3>
+<p>原文定理 33 陈述标准 RRT 不具渐近最优性，定理 34—39 分别讨论新算法及其近邻变体。理解历史贡献时，应准确表述为“原文给出这些结论及证明”。</p>
+<p>Solovey 等人在 2019 年公开、2020 年正式发表的工作指出原 RRT* 最优性证明存在逻辑缺口，并提供另一套证明，其充分连接尺度考虑采样到达顺序，使用 <span class="reading-math" data-tex="(\log n/n)^{1/(d+1)}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>log</mi><mo>⁡</mo><mi>n</mi><mi mathvariant="normal">/</mi><mi>n</mi><msup><mo stretchy="false">)</mo><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mi>d</mi><mo>+</mo><mn>1</mn><mo stretchy="false">)</mo></mrow></msup></mrow><annotation encoding="application/x-tex">(\log n/n)^{1/(d+1)}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.138em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">n</span><span class="mord">/</span><span class="mord mathnormal">n</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.888em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1/</span><span class="mopen mtight">(</span><span class="mord mathnormal mtight">d</span><span class="mbin mtight">+</span><span class="mord mtight">1</span><span class="mclose mtight">)</span></span></span></span></span></span></span></span></span></span></span></span></span>。这不能简化成“RRT* 已被证明失效”：证明存在缺口、换一组条件可以证明、原尺度是否在更细分析下成立，是不同命题。本文不依据一篇后续摘要断言该理论问题的全部最新状态。</p>
+<h2 id="四实验如何检验">四、实验如何检验</h2>
+<p>以下来自原文 §5 与图 10—22。它是理论算法论文，证据重心包括定理与仿真，而非真实机器人训练成绩。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文设置与需要注意的口径</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>实现与机器</td>
+<td>C 实现，2.66 GHz 处理器、4 GB RAM、Linux</td>
+</tr>
+<tr>
+<td>主要对照</td>
+<td>RRT 与 RRT*；固定近邻 sPRM 与 PRM*</td>
+</tr>
+<tr>
+<td>二维场景</td>
+<td>无障碍、有障碍、空间成本不均匀</td>
+</tr>
+<tr>
+<td>重复与横轴</td>
+<td>主要二维成本曲线 500 次重复，横轴为迭代/样本数</td>
+</tr>
+<tr>
+<td>高维实验</td>
+<td>图 20 五维为 100 次；图 22 十维为 25 次，不能统一写成 100 次</td>
+</tr>
+<tr>
+<td>时间比较</td>
+<td>耗时比随样本数变化；无障碍实验延伸至一百万次迭代并平均 50 次</td>
+</tr>
+<tr>
+<td>指标</td>
+<td>最好路径成本、运行间方差、运行时间比</td>
+</tr>
+<tr>
+<td>未报告事项</td>
+<td>公开种子编号、真实机器人部署成功率、统一调参耗时未报告</td>
+</tr>
+</tbody></table></div>
+<p>若两算法使用同一随机点序列，可以减少“谁碰巧采到好位置”的混杂。但同样本数并不代表同时间预算，因为重连需要额外计算。</p>
+<h2 id="五挑选四组关键证据">五、挑选四组关键证据</h2>
+<h3 id="51-图-1213相同顶点连接方式不同">5.1 图 12、13：相同顶点，连接方式不同</h3>
+<p>无障碍可视化在相同采样序列下比较两棵树。改变的不仅是点分布，而是边怎样组成根路径。成本及方差曲线支持重连带来持续改善。</p>
+<p>原文用接近 <span class="reading-math" data-tex="\sqrt2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msqrt><mn>2</mn></msqrt></mrow><annotation encoding="application/x-tex">\sqrt2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1328em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9072em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;">2</span></span><span style="top:-2.8672em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1328em;"><span></span></span></span></span></span></span></span></span></span> 的成本比例描述该无障碍例子的 RRT 结果。这是特定例子中的现象，不是所有 RRT 问题都具有同一个近似比。</p>
+<h3 id="52-图-1516能够改变绕障路线">5.2 图 15、16：能够改变绕障路线</h3>
+<p>树随着样本增加发现另一类绕障方式，最好成本进一步降低。这里展示了全空间采样和局部重连结合的意义：它不只沿当前路径做小修小补。</p>
+<p>但有限的五百次试验曲线只能支持测试范围内的行为，不能用“曲线接近最优线”替代对所有合格问题的数学证明。</p>
+<h3 id="53-图-17最短距离不是唯一目标">5.3 图 17：最短距离不是唯一目标</h3>
+<p>改变空间成本后，路径倾向避开高成本区域、更多利用低成本区域。这个实验检验目标函数能影响几何选择，而不是证明成本函数与真实风险、能耗一定一致。</p>
+<p>例如人为把湿滑地面成本设低，规划器会忠实地选择危险捷径。优化器正确执行目标，不代表目标设计正确。</p>
+<h3 id="54-图-1822更多计算换更好解">5.4 图 18—22：更多计算换更好解</h3>
+<p>时间比和高维成本曲线帮助评估渐近复杂度分析的实际表现。固定维度下的渐近阶数不能解释成“每台机器人上只慢固定两倍”，也不能消除维度增长带来的常数和搜索难度。</p>
+<p>原文图 14 标题比较 RRT 与 RRT*，末句却把第二个成本标为 RRG。本文不把这两个单次图示数字当作无歧义的 RRT* 定量对照；主要采用正文、重复曲线和算法机制建立结论。</p>
+<h2 id="六贡献与适用边界">六、贡献与适用边界</h2>
+<p><strong>真正的贡献</strong>不仅是加上一个重连循环，而是用随机几何图的尺度分析，解释为什么某些连接规则支持持续逼近最优、另一些规则不支持。</p>
+<p><strong>作者的理论主张</strong>需要连同假设和后续修订阅读。<strong>实验支持</strong>是在给定几何场景中，重连改善成本且额外运行开销可衡量。<strong>本文的工程判断</strong>是：实际使用时，首解时间、固定时间的最好成本和成功率应一起报告。</p>
+<p>几何最优还可能带来尖锐拐角；机械系统需要时间参数化和轨迹平滑。若后处理改变路径，应重新检查碰撞与最终成本，不能直接把处理前的性质转移给处理后的控制指令。</p>
+<p>有限分辨率碰撞检测也可能漏过薄障碍。采样树的理论与碰撞检测器的数值误差是两个层次；把节点数增加十倍并不会自动修复错误地图或漏检逻辑。</p>
+<h2 id="七建立直觉">七、建立直觉</h2>
+<h3 id="自构未运行的选父例子">自构、未运行的选父例子</h3>
+<p>新点附近有 A、B 两个候选父节点。A 距新点 1 米，但根到 A 已走 20 米；B 距新点 3 米，根到 B 只走 5 米。普通最近邻选择 A，总长 21 米；选父比较会选择 B，总长 8 米，前提是该连接无碰撞。</p>
+<p>随后一个旧邻居 C 原成本 15 米，新点到 C 为 2 米。经新点只要 10 米，C 就能重连。C 后面的所有子节点也一起获得 5 米改善，这说明一次局部修改可能影响一整支路线。</p>
+<h2 id="八理解检查三个问题与答案">八、理解检查：三个问题与答案</h2>
+<h3 id="问题-1一个算法概率完备为什么仍可能永远不接近最优">问题 1：一个算法概率完备，为什么仍可能永远不接近最优？</h3>
+<p><strong>答案</strong>：找到任意可行路径只要求某次连接成功；优化则要求坏的早期选择能不断被改进。标准 RRT 可以不断增加点，却保留高成本根路径。两个性质针对的事件不同，前者不推出后者。</p>
+<h3 id="问题-2邻域半径变小为什么平均邻居数量还能变多">问题 2：邻域半径变小，为什么平均邻居数量还能变多？</h3>
+<p><strong>答案</strong>：样本密度也在增加。对原文尺度，<span class="reading-math" data-tex="n r_n^d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi><msubsup><mi>r</mi><mi>n</mi><mi>d</mi></msubsup></mrow><annotation encoding="application/x-tex">n r_n^d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0961em;vertical-align:-0.247em;"></span><span class="mord mathnormal">n</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-2.453em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">d</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span></span></span></span></span> 约为 <span class="reading-math" data-tex="\log n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>log</mi><mo>⁡</mo><mi>n</mi></mrow><annotation encoding="application/x-tex">\log n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">n</span></span></span></span></span>。半径缩小描述几何范围，邻居数量同时取决于里面有多密，不能只看半径。</p>
+<h3 id="问题-3怎样向别人准确解释rrt-渐近最优">问题 3：怎样向别人准确解释“RRT* 渐近最优”？</h3>
+<p><strong>答案</strong>：先说明所用算法、连接规则、问题假设及依据的证明版本，再解释成本随无限采样趋于最优的概率命题。还应注明原证明存在后续修订。它不意味着运行一秒必得最优，也不意味着几何路径直接满足真实机器人的动力学约束。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 062｜RRT*：让随机树在找到路径后继续变好
+    <textarea id="md-source" hidden readonly># 062｜RRT*：让随机树在找到路径后继续变好
 
 [返回总览](00-发展时间线总览.md) · [上一篇：STOMP](061-stomp.md) · [下一篇：g2o](063-g2o.md)
 
@@ -100,7 +282,7 @@ $$
 重连则检查：
 
 $$
-g(x_{\mathrm{new}})+c(x_{\mathrm{new}},v)<g(v).
+g(x_{\mathrm{new}})+c(x_{\mathrm{new}},v)&lt;g(v).
 $$
 
 若连接无碰撞且成本更低，就改变 $v$ 的父节点。工程实现还必须维护受影响后代的累计成本，否则下一轮比较会使用过期数字。
@@ -238,9 +420,9 @@ Solovey 等人在 2019 年公开、2020 年正式发表的工作指出原 RRT* �
 
 **答案**：先说明所用算法、连接规则、问题假设及依据的证明版本，再解释成本随无限采样趋于最优的概率命题。还应注明原证明存在后续修订。它不意味着运行一秒必得最优，也不意味着几何路径直接满足真实机器人的动力学约束。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

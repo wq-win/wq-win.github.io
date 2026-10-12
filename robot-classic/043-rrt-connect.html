@@ -7,7 +7,7 @@
     <title>043｜RRT-Connect：让两棵搜索树主动相遇 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,174 @@
                 <span class="text-gray-500">RRT-Connect：让两棵搜索树主动相遇</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="716018fb4190e017c6c752221f56c0d1f9e867f56331a9b32745d182b440c0b6"><h1>043｜RRT-Connect：让两棵搜索树主动相遇</h1>
+<p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="042-zhang-calibration.html">上一篇</a> · <a href="044-slam-convergence.html">下一篇</a></p>
+<p><strong>论文</strong>：James J. Kuffner, Jr.、Steven M. LaValle，<em>RRT-Connect: An Efficient Approach to Single-Query Path Planning</em>，ICRA 2000。<a href="https://www.kuffner.org/james/papers/kuffner_icra2000.pdf">原文</a> · <a href="https://doi.org/10.1109/ROBOT.2000.844730">DOI</a>。本文依据作者提供的七页会议稿，页码采用该稿的 1–7 页，不混入后来同主题文章的发表年份。</p>
+<p><strong>阅读范围</strong>：已核对全文算法、理论论述、实验与结论。原文的证明为证明梗概；以下说明其前提与结论，不把有限实验扩大为任意场景的运行时间保证。</p>
+<h2 id="一分钟随机探索之后主动走向另一棵树">一分钟：随机探索之后，主动走向另一棵树</h2>
+<p>机械臂从桌子一侧伸到另一侧，可能需要先抬起肘部，再绕过桌沿。只朝目标姿态移动容易撞上障碍；在整个姿态空间提前建好路线图又可能花费过多准备时间。</p>
+<p>RRT 提供了一个探索办法：随机选一个姿态，从树中离它最近的节点向它走一步。RRT-Connect 在起点和终点各建一棵树。第一棵树增加节点后，第二棵树连续朝这个新节点走，直到接上或者遇阻。随后交换两棵树的角色。随机性负责发现绕行方向，连续连接负责快速穿过空旷区域。</p>
+<p>这是一种单次查询的几何规划器。它输出无碰路径，而不是学习到的策略、最短路径或可以直接下发电机的力矩序列。作者报告 Connect 在许多场景中降低搜索耗时，但也明确指出非常拥挤的环境中可能略慢。</p>
+<p>一句话：<strong>在已知静态几何环境的单次路径查询中，通过双向随机树与贪心连接，缩短找到可行路径的时间，代价是路径质量没有最优保证，而且狭窄通道与碰撞检测仍会成为瓶颈。</strong></p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>构型空间</strong>把机器人整体姿态视为点；<strong>局部规划器</strong>连接两个近邻姿态；<strong>Voronoi 区域</strong>解释哪些树节点容易被选中扩展；<strong>概率完备性</strong>描述预算趋向无限时的求解趋势；<strong>时间参数化</strong>给几何路径安排可执行的速度进度。</p>
+<h2 id="问题定义姿态空间里的线段是什么">问题定义：姿态空间里的线段是什么</h2>
+<p>设构型为 <span class="reading-math" data-tex="q\in\mathcal C"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi><mo>∈</mo><mi mathvariant="script">C</mi></mrow><annotation encoding="application/x-tex">q\in\mathcal C</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7335em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathcal" style="margin-right:0.05834em;">C</span></span></span></span></span>，自由空间为 <span class="reading-math" data-tex="\mathcal C_{free}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="script">C</mi><mrow><mi>f</mi><mi>r</mi><mi>e</mi><mi>e</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\mathcal C_{free}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathcal" style="margin-right:0.05834em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0583em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span><span class="mord mathnormal mtight">ree</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>。对于机械臂，<span class="reading-math" data-tex="q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi></mrow><annotation encoding="application/x-tex">q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span></span></span></span> 通常包含各关节角；对于搬运刚体，还要表示平移与旋转。输入是起点 <span class="reading-math" data-tex="q_s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>q</mi><mi>s</mi></msub></mrow><annotation encoding="application/x-tex">q_s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">s</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>、终点 <span class="reading-math" data-tex="q_g"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>q</mi><mi>g</mi></msub></mrow><annotation encoding="application/x-tex">q_g</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>、构型距离 <span class="reading-math" data-tex="\rho"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ρ</mi></mrow><annotation encoding="application/x-tex">\rho</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ρ</span></span></span></span></span> 和几何碰撞检测器，输出连续曲线 <span class="reading-math" data-tex="\sigma:[0,1]\to\mathcal C_{free}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>σ</mi><mo>:</mo><mo stretchy="false">[</mo><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">]</mo><mo>→</mo><msub><mi mathvariant="script">C</mi><mrow><mi>f</mi><mi>r</mi><mi>e</mi><mi>e</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\sigma:[0,1]\to\mathcal C_{free}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">:</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">]</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathcal" style="margin-right:0.05834em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0583em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span><span class="mord mathnormal mtight">ree</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，满足端点条件。</p>
+<p>这里没有奖励、训练集或终止回报。终止条件是树成功连接，或者耗尽搜索预算。失败返回仅表示预算内未找到路径，不能当成不可行证明。</p>
+<p>原文第 2–3 节明确将该算法限定为没有微分约束的构型空间规划。汽车不能侧向移动，即使两姿态之间的直线都不碰撞，也未必能沿该线行驶；这类约束不能靠把构型向量改名为状态向量解决。对于力矩受限机械臂，也还需要时间参数化与控制验证。</p>
+<p>距离函数不是附属细节。把一米平移与一弧度旋转直接相加，会影响最近邻以及搜索偏置；周期角需要合理处理跨越正负边界的距离。论文提出的结构可以复用，但具体度量要与机器人几何相适应。</p>
+<h2 id="方法extend-与-connect-的区别">方法：EXTEND 与 CONNECT 的区别</h2>
+<p>RRT 的基础操作从最近节点 <span class="reading-math" data-tex="q_{near}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>q</mi><mrow><mi>n</mi><mi>e</mi><mi>a</mi><mi>r</mi></mrow></msub></mrow><annotation encoding="application/x-tex">q_{near}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 朝目标样本走不超过步长 <span class="reading-math" data-tex="\epsilon"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϵ</mi></mrow><annotation encoding="application/x-tex">\epsilon</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">ϵ</span></span></span></span></span>。在欧氏坐标中的教学写法是</p>
+<p><span class="reading-math" data-tex="q_{new}=q_{near}+\min\left(1,\frac{\epsilon}{\|q-q_{near}\|}\right)(q-q_{near})."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>q</mi><mrow><mi>n</mi><mi>e</mi><mi>w</mi></mrow></msub><mo>=</mo><msub><mi>q</mi><mrow><mi>n</mi><mi>e</mi><mi>a</mi><mi>r</mi></mrow></msub><mo>+</mo><mi>min</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><mn>1</mn><mo separator="true">,</mo><mfrac><mi>ϵ</mi><mrow><mi mathvariant="normal">∥</mi><mi>q</mi><mo>−</mo><msub><mi>q</mi><mrow><mi>n</mi><mi>e</mi><mi>a</mi><mi>r</mi></mrow></msub><mi mathvariant="normal">∥</mi></mrow></mfrac><mo fence="true">)</mo></mrow><mo stretchy="false">(</mo><mi>q</mi><mo>−</mo><msub><mi>q</mi><mrow><mi>n</mi><mi>e</mi><mi>a</mi><mi>r</mi></mrow></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">q_{new}=q_{near}+\min\left(1,\frac{\epsilon}{\|q-q_{near}\|}\right)(q-q_{near}).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em;"></span><span class="mop">min</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">(</span></span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.1076em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">∥</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∥</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">ϵ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.936em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">)</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>旋转空间应使用相应插值，这个表达式不能直接替代所有流形上的局部规划器。新边通过碰撞检查后加入树。操作返回三种状态：到达目标 Reached；前进但未到达 Advanced；无法前进 Trapped。</p>
+<p>CONNECT 反复调用这个操作，只有 Reached 或 Trapped 才停止。它没有把跨越障碍的长线段直接视为有效，而是连续验证前进过程。在工程实现中，碰撞检查还必须覆盖边内部；只检查端点，细障碍可能落在两个有效端点之间。</p>
+<p>下面是对应原文 Figure 5 的教学伪代码，补充了路径方向与边验证的说明：</p>
+<pre><code class="language-text">输入：起点 qs，终点 qg，距离与插值器，边碰撞检测器，预算 K
+Ta ← 以 qs 为根的树；Tb ← 以 qg 为根的树
+for k = 1 ... K:
+    qrand ← 从构型空间采样
+    status, qnew ← EXTEND(Ta, qrand)
+    if status != Trapped:
+        repeat:
+            result, _ ← EXTEND(Tb, qnew)
+        until result != Advanced
+        if result == Reached:
+            读取两棵树从根到连接点的父指针链
+            按原始起点到原始终点的方向拼接路径
+            return 路径
+    交换 Ta 与 Tb
+return 预算内未找到路径
+
+EXTEND(T, target):
+    near ← 距 target 最近的树节点
+    new ← 从 near 向 target 插值最多 epsilon
+    if 整段 near→new 不能通过碰撞检查:
+        return Trapped, none
+    添加 new 与父边
+    return (Reached if new 到达 target else Advanced), new
+</code></pre>
+<p>交换树后，变量名不再固定代表起点树与终点树。因此实现必须记录根的身份，不能始终把第一棵树的路径接在前面。树结构本身也保证了父指针链的可追溯性，而不是让两个临近节点仅凭位置接近就宣布连接成功。</p>
+<h3 id="为什么贪心连接可能更快">为什么贪心连接可能更快</h3>
+<p>单步扩展每次只走一点，空旷走廊里会反复进行采样与最近邻查询。Connect 对同一目标连续前进，可以摊薄这些开销。原文第 3 节指出，沿同一方向新增节点会成为下一步的最近邻，因此可避免每一个小步都重新做全树搜索。</p>
+<p>但障碍很密时，连续前进很快被截断，收益消失；一次次无效尝试还会增加工作。因而改变的是<strong>搜索调度机制</strong>，评估改善的是<strong>求解耗时</strong>，不是某个显式优化目标下降。算法没有路径长度最小化损失。论文实验又使用路径平滑，平滑后路径的外观不能独自证明原始树搜索产生了短路径。</p>
+<h2 id="理论概率完备不等于按时完成">理论：概率完备不等于按时完成</h2>
+<p>第 4 节先讨论有界开放自由空间中的覆盖，再给出连接分量上的推广与 RRT-Connect 的推论。关键直觉是：如果可行路线有正宽度，可以用有限串相交的小自由球覆盖；采样有机会进入每一段，探索可逐段推进。</p>
+<p>这与“任意零宽度通道也必然找到”不同。几何可行性若只存在于低维接触集合，均匀采样命中的概率可能为零，原证明前提不再直接适用。碰撞检测错误、错误的局部插值或有限精度同样不由理论自动解决。</p>
+<p>作者在这一节明确没有给出收敛速度的理论刻画。概率完备说明预算无限增加时的成功趋势，不告诉我们十毫秒、十秒或者一小时的成功率。对于有实时截止期限的机器人，这个差别决定了是否需要安全停止方案和已有可行路径。</p>
+<h2 id="实验怎样支持结论">实验怎样支持结论</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文设置</th>
+<th>能回答的问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>平台</td>
+<td>第 5 节：270 MHz SGI O2，R12000；RAPID 碰撞库</td>
+<td>给出当时实现的运行时间背景</td>
+</tr>
+<tr>
+<td>低维刚体</td>
+<td>二维运动中的二维、三维构型空间；部分结果按 100 次试验平均</td>
+<td>随机查询重复运行的平均计算负担</td>
+</tr>
+<tr>
+<td>三维搬运</td>
+<td>钢琴模型跨房间；需要转动以避障</td>
+<td>不仅能处理点机器人</td>
+</tr>
+<tr>
+<td>机械臂</td>
+<td>六自由度 PUMA 模型，结合逆运动学拆分搬书任务</td>
+<td>能否支持具有多阶段目标的几何动作生成</td>
+</tr>
+<tr>
+<td>人体动画</td>
+<td>七自由度手臂、棋子操作与狭窄装配场景</td>
+<td>方法的高维应用与困难场景</td>
+</tr>
+<tr>
+<td>基线</td>
+<td>若干 RRT 变体，比较 CONNECT 与 EXTEND 的组合</td>
+<td>贪心连接的作用，而非与所有规划器的统一排名</td>
+</tr>
+<tr>
+<td>指标范围</td>
+<td>墙钟时间与路径演示；曲线置信区间、逐场景完整分布未给出</td>
+<td>可以讨论计算效果，难以判断尾部风险</td>
+</tr>
+</tbody></table></div>
+<p>这不是实体机械臂在真实接触条件下反复抓取的成功率实验。动画中的抓住、搬动、放开属于高层动作安排；抓取稳定性和执行误差不由几何路径规划结果验证。</p>
+<h3 id="五处值得回看原文的证据">五处值得回看原文的证据</h3>
+<ol>
+<li><strong>Figure 5，第 3 页</strong>：直接对照单步扩展和连续连接，支持算法结构的判断；它本身不是速度提升的实验。</li>
+<li><strong>Figure 7 与第 5 节，第 5 页</strong>：展示树与平滑路径，并报告重复试验的平均时间。支持低维实例可快速求解，不能证明路径最短。</li>
+<li><strong>Figure 8，第 6 页</strong>：钢琴跨房间的序列要求改变姿态；第 5 节报告该实例平均 12.5 秒、100 次试验。这个数字属于指定场景和硬件，不是现代机器人的通用延迟。</li>
+<li><strong>Figure 9，第 6 页</strong>：PUMA 模型搬书任务分成接近、搬运、返回。支持几何规划与逆解组合，不能证明力闭合、无滑动或实机控制稳定。</li>
+<li><strong>第 5–6 节</strong>：作者称多数问题中 Connect 常带来数倍加速，同时承认非常拥挤时可能稍慢，并将更广泛的基准研究列为后续工作。证据因此更接近有希望的初步实验，而非跨任务全面胜出。</li>
+</ol>
+<p>原文没有把不同模块的时间全部拆开。最近邻数据结构和碰撞检测都可能改变相对结果，因此复现应同时记录两者调用次数与耗时，而不能只换一个库就把差异全归因于算法。</p>
+<h2 id="贡献代价与边界">贡献、代价与边界</h2>
+<p>真正有用的组合是让随机探索产生新的连接目标，再用贪心局部运动尽可能完成连接。它避免了固定朝终点下降的势场把全局搜索压在同一个局部吸引区域，但没有消除狭窄通道的采样困难。</p>
+<p>原文结论称方法不需要参数调优；这应放在其演示语境中理解。算法描述仍包含步长、距离和碰撞检查方式。把这句话解释成“任何机器人都没有参数选择问题”，会超出正文机制和实验覆盖范围。</p>
+<p>路径中可能出现多余转折，且未考虑速度、加速度、力矩、接触稳定和不确定障碍。后处理可能缩短路径，但必须再次检查整条新边的碰撞；时间参数化还要验证执行约束。路径规划器的快速可行性与运动系统的可靠执行，是两个需要分别验收的层次。</p>
+<h2 id="一个小例子与五个前置概念">一个小例子与五个前置概念</h2>
+<p><strong>自构例子</strong>：两个房间之间有一道偏离起终点直连方向的门。起点树随机探索到门边时，终点树朝这个新节点连续推进，很可能一次跨过自身房间的大块空地；到门框处若受阻，保留已经生成的节点，再换方向探索。Connect 的作用是少重复探索已经畅通的方向，门口仍必须被采样引导发现。</p>
+<p>若把门宽逐渐减小，可以预期耗时方差变大；这是根据采样机制的分析，不是本文额外运行的实验结果。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>单树探索不主动接近另一端</td>
+<td>起终点双树交替扩展</td>
+<td>从两边寻找连通区域</td>
+<td>Figure 5、6</td>
+<td>需要可用的局部连接机制</td>
+</tr>
+<tr>
+<td>空旷区域反复单步查询</td>
+<td>CONNECT 连续前进</td>
+<td>减少重复调度和最近邻开销</td>
+<td>第 5 节变体比较</td>
+<td>拥挤区域收益可能消失</td>
+</tr>
+<tr>
+<td>单次查询不适合昂贵预处理</td>
+<td>查询时构树</td>
+<td>将工作集中在当前目标</td>
+<td>搬运与机械臂例子</td>
+<td>不复用所有后续查询的结构</td>
+</tr>
+<tr>
+<td>可行路径不等于可执行轨迹</td>
+<td>论文处理几何可行性</td>
+<td>明确分离搜索层次</td>
+<td>模型中的无碰路径</td>
+<td>动力学、接触与鲁棒性需另验</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测能否解释机制而不只背算法名字">自测：能否解释机制，而不只背算法名字</h2>
+<p><strong>问题 1：两棵树已经相距很近，为什么不能直接宣布成功？</strong></p>
+<p><strong>参考答案</strong>：构型距离小不保证连接段无碰撞，例如薄墙可能隔开两个近邻姿态。还必须由局部规划器生成并验证有效连接，且拼接的父指针链方向正确。如果存在非完整约束，还需要满足运动方向与系统动力学，单纯几何接近更加不足。</p>
+<p><strong>问题 2：为什么 Connect 在空旷场景通常有利，在拥挤场景却不一定？</strong></p>
+<p><strong>参考答案</strong>：空旷区域允许连续多步向目标前进，能摊薄采样和最近邻查询成本；拥挤区域会很快触发碰撞，长连接被反复截断。它减少的是特定搜索开销，没有保证每一次贪心尝试都带来更好的全局进度。</p>
+<p><strong>问题 3：概率完备的 RRT-Connect 能否保证机械臂在一秒内找到最省力的动作？</strong></p>
+<p><strong>参考答案</strong>：不能。概率完备是满足假设时的渐近可行性性质，不包含一秒成功率；算法没有最省力目标，也没有动力学模型。需要额外的预算实验、轨迹优化和执行约束验证，才能回答时限、能耗与控制可行性问题。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 043｜RRT-Connect：让两棵搜索树主动相遇
+    <textarea id="md-source" hidden readonly># 043｜RRT-Connect：让两棵搜索树主动相遇
 
 [总览](00-发展时间线总览.md) · [目录](README.md) · [上一篇](042-zhang-calibration.md) · [下一篇](044-slam-convergence.md)
 
@@ -189,9 +352,9 @@ EXTEND(T, target):
 
 **参考答案**：不能。概率完备是满足假设时的渐近可行性性质，不包含一秒成功率；算法没有最省力目标，也没有动力学模型。需要额外的预算实验、轨迹优化和执行约束验证，才能回答时限、能耗与控制可行性问题。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

@@ -7,7 +7,7 @@
     <title>037｜视觉伺服：机器人究竟应该追三维位置，还是追图像误差 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,178 @@
                 <span class="text-gray-500">视觉伺服：机器人究竟应该追三维位置，还是追图像误差</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="82856c9e51f14137209e8b4746a22b5859882b6c965afee987a2a34348f27962"><h1>037｜视觉伺服：机器人究竟应该追三维位置，还是追图像误差</h1>
+<p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="036-impulse-contact.html">上一篇</a> · <a href="038-dwa.html">下一篇</a></p>
+<p><strong>论文</strong>：Seth Hutchinson、Gregory D. Hager、Peter I. Corke，<em>A Tutorial on Visual Servo Control</em>，1996，IEEE Transactions on Robotics and Automation 12(5)：651–670，十月期。<a href="https://faculty.cc.gatech.edu/~seth/ResPages/pdfs/HutHagCor96.pdf">作者保存的期刊全文</a>。</p>
+<p><strong>阅读范围</strong>：核对控制系统分类、位置式与图像式视觉伺服、图像雅可比推导和伪逆、点定位例子、跟踪方法及讨论。下面页码均为期刊版。这是一篇教程与方法综述，其应用例子不少来自所引文献；本文不把这些例子合并为作者实施的一套新基准实验。</p>
+<h2 id="一分钟看见偏差以后怎样把像素变成动作">一分钟：看见偏差以后，怎样把像素变成动作</h2>
+<p>相机里目标向右偏了十个像素，机械臂应该向哪个方向移动多少？答案与相机位置、目标深度、所选特征、机械臂姿态和运动坐标系都有关系。视觉检测器只告诉你“看到了什么”，视觉伺服还要回答“为了减小误差应该怎样动”，并在运动后继续看。</p>
+<p>教程整理了两条主要路线。PBVS 从图像估计三维位置或姿态，在三维任务空间中构造误差；IBVS 直接用图像特征与目标特征的差，通过图像雅可比计算运动。两者都利用视觉反馈，区别是反馈误差定义在哪里。</p>
+<p>它的重要贡献是统一符号、分类和推导，使视觉几何、机器人运动学与控制能够在同一框架中接起来。证据主要是解析关系和已有系统的例子，不是证明一种路线在所有条件下优于另一种。</p>
+<p>一句话：在需要视觉持续纠偏的机器人定位任务中，通过建立图像变化与机器人速度的关系闭合控制回路，改善只看一次再执行的误差累积，代价是特征跟踪、几何估计、时延与奇异性的共同约束。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>理解本文最需要五个概念：齐次变换连接坐标系；透视投影把三维点变成图像坐标；雅可比描述局部微小运动关系；伪逆在非方阵映射中求合适的速度；可观测性区分“机器人能动”与“相机能判断这种运动”。</p>
+<h2 id="先分清三个容易混淆的分类">先分清三个容易混淆的分类</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>分类问题</th>
+<th>主要选择</th>
+<th>真正改变的内容</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>相机放在哪里</td>
+<td>末端搭载相机、固定外部相机</td>
+<td>坐标变换和机器人运动如何改变图像</td>
+</tr>
+<tr>
+<td>误差定义在哪里</td>
+<td>三维位置/姿态，或图像特征</td>
+<td>控制器直接消除的量</td>
+</tr>
+<tr>
+<td>视觉作用于哪一层</td>
+<td>视觉给内层控制器设定值，或直接形成驱动控制</td>
+<td>动力学稳定由哪一层承担</td>
+</tr>
+</tbody></table></div>
+<p>这三条轴互不等价。手上装相机并不自动等于 IBVS，固定相机也能使用图像误差。原文 p.655 Fig.2 给出两种相机配置，Fig.3 展示 dynamic look-and-move 的层次结构：视觉估计进入笛卡尔控制环，关节反馈在内部控制机械臂。</p>
+<p>“动态看后再动”容易被译名误导。这里可以是持续视觉反馈的外环，不等于拍一张照片后全程开环。论文还区分是否在图像中直接观测末端与目标：只看目标和同时看末端、目标，误差对标定的依赖不同，但同时跟踪两者会增加视野与识别负担。</p>
+<p>本文讨论的是机器人视觉反馈控制，不是强化学习。输入通常包括目标特征或目标位姿、相机模型与连续图像；输出是期望速度或交给内层控制器的命令。回报函数、训练集规模和策略网络并非这一框架的必要组成。</p>
+<h2 id="pbvs先恢复三维再在任务空间控制">PBVS：先恢复三维，再在任务空间控制</h2>
+<p>PBVS 的输入图像先进入特征提取和几何估计，得到目标相对相机的位姿，再通过已知外参转换为控制所需的坐标。控制误差可以写成位置差与一个适当的旋转误差，随后求期望末端运动。</p>
+<p>这条路线的优点是任务容易解释：沿桌面移动十厘米、保持工具姿态、到达某个三维相对位置。缺点是几何重建误差进入闭环。相机标定、特征对应、目标模型和姿态求解条件都可能影响最后结果。</p>
+<p>原文 p.660 §IV.D 讨论了这些权衡。位姿式方法能够自然处理一般相对位姿任务，但可能依赖准确目标模型；位置估计也可能受标定误差影响。滤波或平均可以降低噪声，却增加响应延迟。因此“估计更平滑”与“闭环更灵敏”不是同一个指标。</p>
+<h2 id="ibvs直接消除图像特征误差">IBVS：直接消除图像特征误差</h2>
+<p>设图像特征向量为 <span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span>，目标为 <span class="reading-math" data-tex="s^*"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>s</mi><mo>∗</mo></msup></mrow><annotation encoding="application/x-tex">s^*</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6887em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6887em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span></span></span></span></span>，误差 <span class="reading-math" data-tex="e=s-s^*"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>e</mi><mo>=</mo><mi>s</mi><mo>−</mo><msup><mi>s</mi><mo>∗</mo></msup></mrow><annotation encoding="application/x-tex">e=s-s^*</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">e</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6887em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6887em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span></span></span></span></span>。图像雅可比或交互矩阵 <span class="reading-math" data-tex="L_s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>L</mi><mi>s</mi></msub></mrow><annotation encoding="application/x-tex">L_s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">s</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 满足</p>
+<p><span class="reading-math" data-tex="\dot s=L_s\xi,"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mover accent="true"><mi>s</mi><mo>˙</mo></mover><mo>=</mo><msub><mi>L</mi><mi>s</mi></msub><mi>ξ</mi><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">\dot s=L_s\xi,</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6679em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">s</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0833em;"><span class="mord">˙</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">s</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.04601em;">ξ</span><span class="mpunct">,</span></span></span></span></span></span></p>
+<p>其中 <span class="reading-math" data-tex="\xi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ξ</mi></mrow><annotation encoding="application/x-tex">\xi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.04601em;">ξ</span></span></span></span></span> 是按固定约定表达的相机或末端速度。最简单的教学控制律为</p>
+<p><span class="reading-math" data-tex="\xi=-\lambda\widehat L_s^+ e,\qquad\lambda&gt;0."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>ξ</mi><mo>=</mo><mo>−</mo><mi>λ</mi><msubsup><mover accent="true"><mi>L</mi><mo stretchy="true">^</mo></mover><mi>s</mi><mo>+</mo></msubsup><mi>e</mi><mo separator="true">,</mo><mspace width="2em"/><mi>λ</mi><mo>&gt;</mo><mn>0.</mn></mrow><annotation encoding="application/x-tex">\xi=-\lambda\widehat L_s^+ e,\qquad\lambda&gt;0.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.04601em;">ξ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1703em;vertical-align:-0.247em;"></span><span class="mord">−</span><span class="mord mathnormal">λ</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9233em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">L</span></span><span class="svg-align" style="width:calc(100% - 0.0556em);margin-left:0.0556em;top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.24em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.24em" viewBox="0 0 1062 239" preserveAspectRatio="none"><path d="M529 0h5l519 115c5 1 9 5 9 10 0 1-1 2-1 3l-4 22
+c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8213em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">s</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mord mathnormal">e</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">λ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.</span></span></span></span></span></span></p>
+<p>帽子表示实际使用的估计矩阵，<span class="reading-math" data-tex="+"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>+</mo></mrow><annotation encoding="application/x-tex">+</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord">+</span></span></span></span></span> 表示伪逆。这个式子试图找到一项运动，让观察到的图像偏差减小。它不是从像素误差直接猜关节力矩：还需要坐标变换、机器人雅可比和内层执行。</p>
+<p>以静止世界点、运动相机、归一化像平面坐标 <span class="reading-math" data-tex="x=X/Z,y=Y/Z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo>=</mo><mi>X</mi><mi mathvariant="normal">/</mi><mi>Z</mi><mo separator="true">,</mo><mi>y</mi><mo>=</mo><mi>Y</mi><mi mathvariant="normal">/</mi><mi>Z</mi></mrow><annotation encoding="application/x-tex">x=X/Z,y=Y/Z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">Y</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span></span></span></span></span> 为教学约定，有</p>
+<p><span class="reading-math" data-tex="L_{xy}=\begin{bmatrix}
+-1/Z&amp;0&amp;x/Z&amp;xy&amp;-(1+x^2)&amp;y\\
+0&amp;-1/Z&amp;y/Z&amp;1+y^2&amp;-xy&amp;-x
+\end{bmatrix}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mrow><mi>x</mi><mi>y</mi></mrow></msub><mo>=</mo><mrow><mo fence="true">[</mo><mtable rowspacing="0.16em" columnalign="center center center center center center" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mo>−</mo><mn>1</mn><mi mathvariant="normal">/</mi><mi>Z</mi></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>0</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>x</mi><mi mathvariant="normal">/</mi><mi>Z</mi></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>x</mi><mi>y</mi></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mo>−</mo><mo stretchy="false">(</mo><mn>1</mn><mo>+</mo><msup><mi>x</mi><mn>2</mn></msup><mo stretchy="false">)</mo></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mi>y</mi></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>0</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mo>−</mo><mn>1</mn><mi mathvariant="normal">/</mi><mi>Z</mi></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>y</mi><mi mathvariant="normal">/</mi><mi>Z</mi></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mn>1</mn><mo>+</mo><msup><mi>y</mi><mn>2</mn></msup></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mo>−</mo><mi>x</mi><mi>y</mi></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mo>−</mo><mi>x</mi></mrow></mstyle></mtd></mtr></mtable><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_{xy}=\begin{bmatrix}
+-1/Z&amp;0&amp;x/Z&amp;xy&amp;-(1+x^2)&amp;y\\
+0&amp;-1/Z&amp;y/Z&amp;1+y^2&amp;-xy&amp;-x
+\end{bmatrix}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">x</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">y</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">[</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">−</span><span class="mord">1/</span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em;"></span><span class="arraycolsep" style="width:0.5em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">0</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">−</span><span class="mord">1/</span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em;"></span><span class="arraycolsep" style="width:0.5em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em;"></span><span class="arraycolsep" style="width:0.5em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em;"></span><span class="arraycolsep" style="width:0.5em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">−</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">−</span><span class="mord mathnormal">x</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em;"></span><span class="arraycolsep" style="width:0.5em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">−</span><span class="mord mathnormal">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>前三列对应平移，后三列对应旋转。原文 p.661 式 (47) 的示例采用固定相机观察运动末端点，并保留焦距记号，所以其符号不能不加转换地与上式逐项拼接。确认“谁相对谁运动”比背住一个矩阵更重要。</p>
+<p>这里深度 <span class="reading-math" data-tex="Z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Z</mi></mrow><annotation encoding="application/x-tex">Z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span></span></span></span></span> 仍然出现。IBVS 避开完整三维位姿重建，不代表完全不需要任何几何信息。深度可以估计、近似或更新，但估计误差会改变实际闭环动力学。</p>
+<p>在理想可逆、矩阵准确的局部情形，代入控制律可以得到误差沿期望方向衰减的关系。然而一般有</p>
+<p><span class="reading-math" data-tex="\dot e=-\lambda L_s\widehat L_s^+e,"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mover accent="true"><mi>e</mi><mo>˙</mo></mover><mo>=</mo><mo>−</mo><mi>λ</mi><msub><mi>L</mi><mi>s</mi></msub><msubsup><mover accent="true"><mi>L</mi><mo stretchy="true">^</mo></mover><mi>s</mi><mo>+</mo></msubsup><mi>e</mi><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">\dot e=-\lambda L_s\widehat L_s^+e,</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6679em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">e</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0833em;"><span class="mord">˙</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1703em;vertical-align:-0.247em;"></span><span class="mord">−</span><span class="mord mathnormal">λ</span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">s</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9233em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">L</span></span><span class="svg-align" style="width:calc(100% - 0.0556em);margin-left:0.0556em;top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.24em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.24em" viewBox="0 0 1062 239" preserveAspectRatio="none"><path d="M529 0h5l519 115c5 1 9 5 9 10 0 1-1 2-1 3l-4 22
+c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8213em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">s</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mord mathnormal">e</span><span class="mpunct">,</span></span></span></span></span></span></p>
+<p>矩阵乘积未必等于单位阵。特征多于可控自由度时，误差还受到图像可实现性的约束；特征不足时，部分运动根本无法由图像判断。这是从控制式推得的局部理解，不能升级为任意初始位姿下的全局收敛保证。</p>
+<h2 id="输入处理和输出的完整链条">输入、处理和输出的完整链条</h2>
+<pre><code class="language-text">输入：期望图像特征 s*，图像流，相机/机器人几何参数
+重复直到误差和速度达到停止阈值：
+    提取并匹配当前特征 s，检查可见性与跟踪可信度
+    计算 e = s - s*
+    估计当前交互矩阵 L，包括需要的深度项
+    检查秩与数值条件，求可控方向上的速度
+    将相机速度转换到末端坐标并映射为关节命令
+    由内层控制器执行一个有限周期
+    获取新图像并重新闭环
+输出：视觉误差收敛后的机器人状态，或失去可观测性的状态报告
+</code></pre>
+<p>这是 IBVS 教学流程，可信度检查和停止阈值是实现解释，不是声称论文给出统一软件接口。PBVS 则把中间部分换成“图像估计位姿→形成三维任务误差→求任务速度”。</p>
+<p>原文 p.662 讨论方阵、过约束和欠约束的图像雅可比。当观测数量少于待控制自由度时，可以写出带零空间项的解；这不意味着那些方向已被视觉观测到。零空间动作还需靠其他任务、传感器或约束安排。</p>
+<h2 id="如何评价这篇教程而不是硬套实验排行榜">如何评价这篇教程，而不是硬套实验排行榜</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>内容</th>
+<th>原文用途</th>
+<th>能回答的问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>系统框图</td>
+<td>区分误差定义、传感与控制层次</td>
+<td>视觉在闭环哪里起作用</td>
+</tr>
+<tr>
+<td>几何与雅可比推导</td>
+<td>说明像素变化与运动关系</td>
+<td>控制矩阵从哪里来</td>
+</tr>
+<tr>
+<td>点到点、点到线任务</td>
+<td>展示如何选择图像约束</td>
+<td>图像目标是否充分表达任务</td>
+</tr>
+<tr>
+<td>跟踪算法实例</td>
+<td>讨论速度、遮挡与纹理</td>
+<td>控制器能否稳定拿到输入</td>
+</tr>
+<tr>
+<td>文献与讨论</td>
+<td>比较已有路线的适用条件</td>
+<td>哪些选择依赖具体任务</td>
+</tr>
+</tbody></table></div>
+<p>这里没有统一环境交互步数、训练算力和随机种子对照。原文提及的应用系统来自不同研究，硬件、任务和相机也不同；把其运行频率列在一起排序，不能推断控制算法本身的优劣。</p>
+<h2 id="五处原文证据">五处原文证据</h2>
+<p><strong>1．p.655 Fig.2–3。</strong> 前者对照固定相机与末端相机，后者展示位置式分层回路。它支持三条分类轴应该分开的解释，不能据相机位置直接判断控制误差的类型。</p>
+<p><strong>2．p.660 §IV.D。</strong> 讨论位姿估计和标定误差，以及三维任务描述的便利性。它支持 PBVS 的结构性权衡，不是给出一种固定误差阈值下的胜负结果。</p>
+<p><strong>3．p.661 式 (37)–(47)。</strong> 从图像雅可比定义推导点特征变化。它提供控制的几何基础，但依赖投影、深度和速度坐标约定；不能无条件套用到任意鱼眼相机或另一运动符号。</p>
+<p><strong>4．p.662–663 的伪逆与双目点定位例子。</strong> 两台相机产生四个图像坐标，并不意味着一个三维点有四个独立自由度。原文解释极线约束造成冗余，以及矩阵不能按表面维度直接取普通逆。它支持以秩而非特征数量判断信息。</p>
+<p><strong>5．p.665、p.667 的跟踪与讨论。</strong> 教程引用的边缘定位实现，在 Sun SPARC II 上处理所述 20 像素边缘、15 像素 Prewitt 型掩模和限定搜索范围时约需 1.5 ms，并讨论可在 30 Hz 下跟踪多个边缘。这个数字属于特定跟踪配置，不是整套机器人视觉伺服的延迟。p.667 还明确指出遮挡、背景干扰与视觉奇异性是任务执行中的问题。</p>
+<h2 id="贡献代价与理解边界">贡献、代价与理解边界</h2>
+<p>这篇文章的主要新意是教程式综合：它让不同领域使用一致的坐标、速度、误差和系统术语，而不是宣称首次发明所有视觉控制方法。随后阅读现代基于视觉的操作方法时，这些区分仍能帮助识别模型究竟在估计什么、控制什么。</p>
+<p>PBVS 的代价集中在三维重建与标定链，IBVS 的代价集中在交互矩阵估计、特征选择和视觉可观测性；两者都承受图像时延和跟踪失效。降低图像误差也未必产生理想三维路径：目标可能在途中离开视野，机械臂可能接近奇异构型，或者图像局部目标与真实任务不完全一致。</p>
+<p>这些失败并不全来自控制律。有时问题是特征对应跳到了背景，有时是目标点深度估错，有时是速度执行层跟不上视觉外环。本文的分析建议按感知、几何、控制与执行分层诊断，而不是只调整控制增益。</p>
+<h2 id="一个可算的小例子">一个可算的小例子</h2>
+<p><strong>自构教学例子，未运行。</strong> 静止目标点深度为 1 m，归一化横坐标误差为 0.02，只允许相机沿横向平移，控制增益取 1 s⁻¹。此时 <span class="reading-math" data-tex="\dot x=-v_x/Z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>x</mi><mo>˙</mo></mover><mo>=</mo><mo>−</mo><msub><mi>v</mi><mi>x</mi></msub><mi mathvariant="normal">/</mi><mi>Z</mi></mrow><annotation encoding="application/x-tex">\dot x=-v_x/Z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6679em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">x</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1111em;"><span class="mord">˙</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">−</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span></span></span></span></span>，选择 <span class="reading-math" data-tex="v_x=0.02"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>v</mi><mi>x</mi></msub><mo>=</mo><mn>0.02</mn></mrow><annotation encoding="application/x-tex">v_x=0.02</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.02</span></span></span></span></span> m/s 可使 <span class="reading-math" data-tex="\dot e=-0.02"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>e</mi><mo>˙</mo></mover><mo>=</mo><mo>−</mo><mn>0.02</mn></mrow><annotation encoding="application/x-tex">\dot e=-0.02</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6679em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">e</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0833em;"><span class="mord">˙</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">−</span><span class="mord">0.02</span></span></span></span></span> s⁻¹。若把相机运动和目标运动的符号弄反，同样大小的速度反而扩大误差。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>文章梳理的办法</th>
+<th>为什么可能有效</th>
+<th>证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>看见误差却不知道怎样动</td>
+<td>建立图像雅可比</td>
+<td>将反馈变化与速度联系</td>
+<td>点特征推导</td>
+<td>局部、依赖几何约定</td>
+</tr>
+<tr>
+<td>三维任务难直接从像素控制</td>
+<td>PBVS 重建后控制</td>
+<td>使用熟悉的任务空间</td>
+<td>§IV 任务例子</td>
+<td>标定和估计误差</td>
+</tr>
+<tr>
+<td>完整位姿重建负担大</td>
+<td>IBVS 直接控制特征</td>
+<td>省去某些中间重建</td>
+<td>§V 公式与例子</td>
+<td>深度、秩与视野限制</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测能否把观察与动作对上">自测：能否把观察与动作对上</h2>
+<p><strong>问题 1：在机械臂末端安装相机，就一定使用 IBVS 吗？</strong></p>
+<p>**参考答案：**不是。相机布局决定观察几何，PBVS/IBVS 由控制误差定义决定。末端相机可以先估计目标三维位姿，再做 PBVS；固定相机也能直接比较图像特征做 IBVS。</p>
+<p><strong>问题 2：既然 IBVS 不必恢复完整三维位姿，为什么深度估错仍会影响运动？</strong></p>
+<p>**参考答案：**投影对平移的敏感度包含 <span class="reading-math" data-tex="1/Z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mi>Z</mi></mrow><annotation encoding="application/x-tex">1/Z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/</span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span></span></span></span></span>。控制器使用错误深度时，估计的交互矩阵与真实映射不一致，实际误差动力学为 <span class="reading-math" data-tex="-\lambda L\widehat L^+e"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><mi>λ</mi><mi>L</mi><msup><mover accent="true"><mi>L</mi><mo stretchy="true">^</mo></mover><mo>+</mo></msup><mi>e</mi></mrow><annotation encoding="application/x-tex">-\lambda L\widehat L^+e</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0067em;vertical-align:-0.0833em;"></span><span class="mord">−</span><span class="mord mathnormal">λ</span><span class="mord mathnormal">L</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9233em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">L</span></span><span class="svg-align" style="width:calc(100% - 0.0556em);margin-left:0.0556em;top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.24em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.24em" viewBox="0 0 1062 239" preserveAspectRatio="none"><path d="M529 0h5l519 115c5 1 9 5 9 10 0 1-1 2-1 3l-4 22
+c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7713em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span></span></span></span></span><span class="mord mathnormal">e</span></span></span></span></span>，不再是简单的单位比例衰减。避免完整重建并不等于没有几何假设。</p>
+<p><strong>问题 3：双目看到同一个点得到四个像素坐标，能否直接控制末端六维位姿？</strong></p>
+<p>**参考答案：**不能。一个三维点的位置只有三维独立信息，双目四个坐标还受极线约束；单个点也不足以确定物体绕该点的全部旋转。需要更多具有合适几何布局的特征，或者用其他传感与任务约束补足不可观方向。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 037｜视觉伺服：机器人究竟应该追三维位置，还是追图像误差
+    <textarea id="md-source" hidden readonly># 037｜视觉伺服：机器人究竟应该追三维位置，还是追图像误差
 
 [总览](00-发展时间线总览.md) · [目录](README.md) · [上一篇](036-impulse-contact.md) · [下一篇](038-dwa.md)
 
@@ -94,15 +261,15 @@ $$\dot s=L_s\xi,$$
 
 其中 $\xi$ 是按固定约定表达的相机或末端速度。最简单的教学控制律为
 
-$$\xi=-\lambda\widehat L_s^+ e,\qquad\lambda>0.$$
+$$\xi=-\lambda\widehat L_s^+ e,\qquad\lambda&gt;0.$$
 
 帽子表示实际使用的估计矩阵，$+$ 表示伪逆。这个式子试图找到一项运动，让观察到的图像偏差减小。它不是从像素误差直接猜关节力矩：还需要坐标变换、机器人雅可比和内层执行。
 
 以静止世界点、运动相机、归一化像平面坐标 $x=X/Z,y=Y/Z$ 为教学约定，有
 
 $$L_{xy}=\begin{bmatrix}
--1/Z&0&x/Z&xy&-(1+x^2)&y\\
-0&-1/Z&y/Z&1+y^2&-xy&-x
+-1/Z&amp;0&amp;x/Z&amp;xy&amp;-(1+x^2)&amp;y\\
+0&amp;-1/Z&amp;y/Z&amp;1+y^2&amp;-xy&amp;-x
 \end{bmatrix}.$$
 
 前三列对应平移，后三列对应旋转。原文 p.661 式 (47) 的示例采用固定相机观察运动末端点，并保留焦距记号，所以其符号不能不加转换地与上式逐项拼接。确认“谁相对谁运动”比背住一个矩阵更重要。
@@ -192,9 +359,9 @@ PBVS 的代价集中在三维重建与标定链，IBVS 的代价集中在交互�
 
 **参考答案：**不能。一个三维点的位置只有三维独立信息，双目四个坐标还受极线约束；单个点也不足以确定物体绕该点的全部旋转。需要更多具有合适几何布局的特征，或者用其他传感与任务约束补足不可观方向。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

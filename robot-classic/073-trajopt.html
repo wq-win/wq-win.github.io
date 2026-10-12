@@ -7,7 +7,7 @@
     <title>073｜TrajOpt：用局部凸问题修复整条碰撞轨迹 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,141 @@
                 <span class="text-gray-500">TrajOpt：用局部凸问题修复整条碰撞轨迹</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="7ce0367e0b6d3bfd6813f778a953c6771533d4c49aa7626cdd061f7e13edf1f7"><h1>073｜TrajOpt：用局部凸问题修复整条碰撞轨迹</h1>
+<p><a href="index.html">系列首页</a> · <a href="00-timeline.html">时间线总览</a></p>
+<p>论文：John Schulman、Jonathan Ho、Alex Lee、Ibrahim Awwal、Henry Bradlow、Pieter Abbeel，<em>Finding Locally Optimal, Collision-Free Trajectories with Sequential Convex Optimization</em>，RSS 2013。<a href="https://doi.org/10.15607/RSS.2013.IX.031">正式论文</a>；<a href="https://roboticsproceedings.org/rss09/p31.pdf">全文 PDF</a>。依据正文十页的算法、碰撞推导、基准与实机示例；未独立复现。这里讨论原始 RSS 版本。</p>
+<h2 id="一分钟理解">一分钟理解</h2>
+<p>把机械臂起点和终点直线连接，往往会穿过桌子。TrajOpt 不必先得到一条完美路径，而是从可能碰撞的轨迹出发，反复构建一个容易求解的局部凸近似，把整条轨迹推向无碰撞且较短的解。</p>
+<p>它把碰撞违反写成铰链惩罚，通过外层逐渐提高惩罚强度；同时考虑相邻路标之间的扫掠体，避免“每个路标都安全，中间却穿墙”。实验中多初始化版本表现强，但这仍是局部优化，不具备全局最优或概率完备保证。</p>
+<p>一句话总结：在已知环境几何的运动学规划中，通过顺序凸优化与扫掠碰撞代价，提高求解速度和路径质量；代价是依赖初始化、几何近似及实现中的连续安全条件。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>配置空间</strong>把机器人姿态表示为一个点；<strong>顺序凸优化</strong>反复求局部凸近似；<strong>信赖域</strong>限制近似可信的更新范围；<strong>铰链损失</strong>只惩罚违反约束的一侧；<strong>扫掠体</strong>是物体在一段运动中占据空间的并集。</p>
+<h2 id="问题设定与最相关前作">问题设定与最相关前作</h2>
+<p>优化变量是轨迹上的关节配置 <span class="reading-math" data-tex="\theta_1,\ldots,\theta_T"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>θ</mi><mn>1</mn></msub><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><msub><mi>θ</mi><mi>T</mi></msub></mrow><annotation encoding="application/x-tex">\theta_1,\ldots,\theta_T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，起终点可固定，也能加入末端位姿和方向约束。本文主体是运动学规划，并未把完整动力学、力矩和接触切换统一纳入主基准。Atlas 示例保持静态稳定并预设支撑阶段，不能当作动态跑步或自动接触序列发现。</p>
+<p>CHOMP 同样优化轨迹，但主要使用距离场和预条件梯度下降。TrajOpt 使用凸几何碰撞查询、局部凸子问题和可调整的精确惩罚。两者同时改变了多个组件，所以整体结果并不能单独归因为“二阶优化胜过一阶优化”。</p>
+<p>对于采样式规划，失败可能来自搜索预算不足；对于局部优化，失败可能来自初始路径所在的局部结构。多初始化为局部优化提供更多机会，但也增加成本。正确比较应把所有初始化支出计入，而不是只保留最快成功的一次。</p>
+<h2 id="方法三层循环各管什么">方法：三层循环各管什么</h2>
+<p>论文用相邻配置变化的平方和作为平滑目标：</p>
+<p><span class="reading-math" data-tex="f(\theta)=\sum_{t=1}^{T-1}\|\theta_{t+1}-\theta_t\|^2."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>f</mi><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>=</mo><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mrow><mi>T</mi><mo>−</mo><mn>1</mn></mrow></munderover><mi mathvariant="normal">∥</mi><msub><mi>θ</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>−</mo><msub><mi>θ</mi><mi>t</mi></msub><msup><mi mathvariant="normal">∥</mi><mn>2</mn></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">f(\theta)=\sum_{t=1}^{T-1}\|\theta_{t+1}-\theta_t\|^2.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.0954em;vertical-align:-1.2671em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8283em;"><span style="top:-1.8829em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2671em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">∥</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>它鼓励较短且均匀的关节空间运动，但不是严格等于连续曲线长度；轨迹离散化和关节单位也影响其含义。将一般不等式写为 <span class="reading-math" data-tex="g_i(\theta)\le0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>g</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>≤</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">g_i(\theta)\le0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>、等式写为 <span class="reading-math" data-tex="h_j(\theta)=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>h</mi><mi>j</mi></msub><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">h_j(\theta)=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，惩罚目标为</p>
+<p><span class="reading-math" data-tex="F_\mu=f+\mu\sum_i\max(0,g_i)+\mu\sum_j|h_j|."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>F</mi><mi>μ</mi></msub><mo>=</mo><mi>f</mi><mo>+</mo><mi>μ</mi><munder><mo>∑</mo><mi>i</mi></munder><mi>max</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>0</mn><mo separator="true">,</mo><msub><mi>g</mi><mi>i</mi></msub><mo stretchy="false">)</mo><mo>+</mo><mi>μ</mi><munder><mo>∑</mo><mi>j</mi></munder><mi mathvariant="normal">∣</mi><msub><mi>h</mi><mi>j</mi></msub><mi mathvariant="normal">∣</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">F_\mu=f+\mu\sum_i\max(0,g_i)+\mu\sum_j|h_j|.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">F</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">μ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.3277em;vertical-align:-1.2777em;"></span><span class="mord mathnormal">μ</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">max</span><span class="mopen">(</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.4638em;vertical-align:-1.4138em;"></span><span class="mord mathnormal">μ</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">∣</span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">∣.</span></span></span></span></span></span></p>
+<p>铰链在满足约束后归零，避免已经安全的轨迹仍被无限推离障碍。足够大的 <span class="reading-math" data-tex="\mu"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>μ</mi></mrow><annotation encoding="application/x-tex">\mu</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">μ</span></span></span></span></span> 在适当正则条件下具有精确惩罚性质；这不是说任意非凸问题都能靠加大系数自动求到可行全局最优。</p>
+<p>外层调整惩罚，中层重新线性化约束，内层调整信赖域。局部模型预测改善很多但真实目标没有改善，说明步子可能太大，应缩小信赖域重新求解，而不是盲目接受一个看似漂亮的凸解。</p>
+<pre><code class="language-text">输入：起终点、几何模型、初始轨迹、约束
+初始化惩罚系数mu和信赖域半径s
+while 未满足约束且未超预算:
+    在当前轨迹计算距离、接触法向和Jacobian
+    构造凸目标近似与仿射约束近似
+    repeat:
+        求解信赖域内的凸子问题
+        用原始非凸目标检查实际改善
+        若实际/预测改善足够：接受；适当扩大信赖域
+        否则：缩小信赖域并重求
+    until 接受或停滞
+    若局部收敛仍不满足约束：增大mu
+对最终轨迹做独立碰撞检查
+输出可行局部轨迹或明确失败
+</code></pre>
+<h2 id="碰撞位置安全不等于运动安全">碰撞：位置安全不等于运动安全</h2>
+<p>设两个凸体的有符号距离为 <span class="reading-math" data-tex="d(\theta)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">d(\theta)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">d</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span></span></span></span></span>，分离时为正、穿透时为负。安全约束是 <span class="reading-math" data-tex="d\ge d_{safe}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo>≥</mo><msub><mi>d</mi><mrow><mi>s</mi><mi>a</mi><mi>f</mi><mi>e</mi></mrow></msub></mrow><annotation encoding="application/x-tex">d\ge d_{safe}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8304em;vertical-align:-0.136em;"></span><span class="mord mathnormal">d</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≥</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">s</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span><span class="mord mathnormal mtight">e</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，对应 <span class="reading-math" data-tex="\max(0,d_{safe}-d)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>max</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>0</mn><mo separator="true">,</mo><msub><mi>d</mi><mrow><mi>s</mi><mi>a</mi><mi>f</mi><mi>e</mi></mrow></msub><mo>−</mo><mi>d</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\max(0,d_{safe}-d)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mop">max</span><span class="mopen">(</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">s</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span><span class="mord mathnormal mtight">e</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">d</span><span class="mclose">)</span></span></span></span></span>。在当前配置附近，最近点与分离法向给出距离变化方向，再通过机器人 Jacobian 传回关节空间。</p>
+<p>对相邻时刻，论文考虑两端形状的凸包来近似扫掠体。纯平移下，这是容易理解的包络；发生旋转时，仅两端凸包可能漏掉中间伸出的尖角。§V 给出扩张量 <span class="reading-math" data-tex="d_{arc}=r\varphi^2/8"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>d</mi><mrow><mi>a</mi><mi>r</mi><mi>c</mi></mrow></msub><mo>=</mo><mi>r</mi><msup><mi>φ</mi><mn>2</mn></msup><mi mathvariant="normal">/</mi><mn>8</mn></mrow><annotation encoding="application/x-tex">d_{arc}=r\varphi^2/8</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight">rc</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mord"><span class="mord mathnormal">φ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord">/8</span></span></span></span></span>，<span class="reading-math" data-tex="r"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi></mrow><annotation encoding="application/x-tex">r</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span></span></span></span> 是距旋转轴的最大半径，<span class="reading-math" data-tex="\varphi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>φ</mi></mrow><annotation encoding="application/x-tex">\varphi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">φ</span></span></span></span></span> 是旋转角。</p>
+<p>**理论条件与实验实现必须分开。**原文实验认为修正小于一厘米而忽略 <span class="reading-math" data-tex="d_{arc}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>d</mi><mrow><mi>a</mi><mi>r</mi><mi>c</mi></mrow></msub></mrow><annotation encoding="application/x-tex">d_{arc}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight">rc</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>；三维扫掠距离梯度也使用近似，未保证一般三维精确；§VI 说明连续碰撞实现没有处理自碰撞，自碰撞仅在离散点惩罚。因此不能把“论文讨论连续安全”简写成“所有实现轨迹都有严格连续安全证明”。</p>
+<h2 id="实验设计">实验设计</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文设置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>主任务</td>
+<td>§VI：198 个 PR2 七自由度手臂问题、96 个十八自由度全身问题</td>
+</tr>
+<tr>
+<td>场景</td>
+<td>MoveIt 的书架、台面、工业、隧道场景，起终配置对构成问题</td>
+</tr>
+<tr>
+<td>基线</td>
+<td>OMPL RRTConnect、LBKPIECE；手臂另比较 CHOMP</td>
+</tr>
+<tr>
+<td>初始化</td>
+<td>单条配置直线；多初始化使用人工固定中间点或采样的收臂底座配置</td>
+</tr>
+<tr>
+<td>离散与停止</td>
+<td>手臂 11 路标，全身 41；最多 40 次迭代并有改善与信赖域阈值</td>
+</tr>
+<tr>
+<td>预算细节</td>
+<td>CHOMP 每初始化 3 秒；§VI 写全身 OMPL 30 秒，不能只引用引言统一 10 秒</td>
+</tr>
+<tr>
+<td>指标</td>
+<td>成功比例、平均时间、按各问题最短参照归一化的路径长度</td>
+</tr>
+<tr>
+<td>统计边界</td>
+<td>未报告现代多种子置信区间；全身基准没有 CHOMP 对照</td>
+</tr>
+</tbody></table></div>
+<p>优化没有使用示范轨迹训练，但多初始化包含人为选择结构。实机地图来自感知与预处理，几何简化时间和感知误差也影响完整系统，不能只拿优化求解时间代表从传感到执行的总延迟。</p>
+<h2 id="结果与证据强度">结果与证据强度</h2>
+<p>**证据 1｜表 I：多初始化改善成功率，也增加计算。**手臂 TrajOpt 单次为 0.84、0.20 秒，多初始化为 0.99、0.32 秒；RRTConnect 为 0.97、1.2 秒。这里支持该问题集上的性能优势，但单次优化成功率并非优于采样器。归一化路径长度分别约 1.2 与 1.6，不是以米计的绝对长度。</p>
+<p>**证据 2｜表 II：高自由度结果没有“一律亚秒”。**全身多初始化成功率 0.84、平均 7.6 秒；单次 0.63、2.1 秒；RRTConnect 0.53、18.0 秒。它说明局部优化在该套全身问题中有价值，也纠正把简单手臂的快速数字推广到全部问题的误读。</p>
+<p>**证据 3｜图 5、§V–VI：连续碰撞机制有明确近似边界。**旋转扫掠体与端点凸包不同，原文专门给图解释。能够指出这个差异，比只记住“连续碰撞检测”更接近真正理解。未补旋转界或密集复检时，不能赋予额外安全保证。</p>
+<p>**证据 4｜§VIII：实机可执行性的案例证据。**PR2 完成垃圾搬运、开门和通过障碍等全身场景。它支持与真实感知集成的可行性，没有给出足以估计部署事故概率的大规模试验。数值与定位见<a href="https://roboticsproceedings.org/rss09/p31.pdf">原文 PDF</a>。</p>
+<h2 id="贡献限制与教学例子">贡献、限制与教学例子</h2>
+<p>新意在于将合适的几何距离近似和数值优化组织成高效规划器。每个凸子问题易解，不代表原始可行空间变凸；绕柱子左走与右走仍可能是不同局部路线。轨迹可以从深度碰撞开始，是经验上的适应能力，不意味着所有碰撞初始化都能被修复。</p>
+<p>**自构例子，未运行。**细杆从门框一侧移动到另一侧，两端姿态都不碰门框，但中间旋转扫过门沿。离散点代价可能为零，扫掠体代价却能发现问题。若把杆当作两端形状凸包而忽略旋转弧，仍可能漏检；加入保守修正或减小相邻旋转角才更接近论证条件。</p>
+<p>值得追问的实验包括：固定碰撞模型只换优化器、固定初始化数只换代价、在细障碍和大旋转场景检查连续失败率。这些干预可以区分数值方法、几何表示与初始化各自的贡献。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>非凸轨迹修复慢</td>
+<td>顺序凸优化与信赖域</td>
+<td>利用局部结构并控制更新</td>
+<td>表 I、II</td>
+<td>仍受初始化影响</td>
+</tr>
+<tr>
+<td>安全点之间可能穿障碍</td>
+<td>相邻形状扫掠距离惩罚</td>
+<td>直接关注运动区间</td>
+<td>图 5、§V</td>
+<td>旋转和自碰撞实现有近似</td>
+</tr>
+<tr>
+<td>固定惩罚难调</td>
+<td>外层增大精确惩罚权重</td>
+<td>在可行性与目标间协调</td>
+<td>算法 1</td>
+<td>无全局求解保证</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测与答案">自测与答案</h2>
+<p><strong>1. 每次都解凸问题，为什么最后仍可能失败？</strong></p>
+<p>凸性只属于当前局部近似。原始障碍空间非凸，局部迭代可能停在坏的区域，或者信赖域内没有足够好的方向；多个初始化只能增加机会，不能保证找到全局解。</p>
+<p><strong>2. 一条路径的所有路标无碰撞，为什么还不够？</strong></p>
+<p>机器人在路标之间连续运动，中间可能穿过薄障碍或发生旋转扫掠碰撞。必须检查区间运动，而不仅是离散姿态。</p>
+<p><strong>3. 原始实验是否证明全部轨迹严格连续无碰撞？</strong></p>
+<p>不能这样概括。实现忽略了较小的旋转修正，连续代价没有覆盖自碰撞。应依据实现条件与独立复检判断，不能把理论构造的条件省略。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 073｜TrajOpt：用局部凸问题修复整条碰撞轨迹
+    <textarea id="md-source" hidden readonly># 073｜TrajOpt：用局部凸问题修复整条碰撞轨迹
 
 [系列首页](README.md) · [时间线总览](00-发展时间线总览.md)
 
@@ -162,9 +292,9 @@ while 未满足约束且未超预算:
 
 不能这样概括。实现忽略了较小的旋转修正，连续代价没有覆盖自碰撞。应依据实现条件与独立复检判断，不能把理论构造的条件省略。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

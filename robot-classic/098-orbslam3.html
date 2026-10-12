@@ -7,7 +7,7 @@
     <title>098｜ORB-SLAM3：跟踪丢了以后，地图还能继续生长吗 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,138 @@
                 <span class="text-gray-500">ORB-SLAM3：跟踪丢了以后，地图还能继续生长吗</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="b5a79a36c8165417f45d53068a0bc54298278addf1c918a308a485d8a4053fb4"><h1>098｜ORB-SLAM3：跟踪丢了以后，地图还能继续生长吗</h1>
+<p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="097-liosam.html">上一篇</a> · <a href="099-fastlio2.html">下一篇</a></p>
+<p><strong>论文</strong>：Carlos Campos 等，<em>ORB-SLAM3: An Accurate Open-Source Library for Visual, Visual-Inertial, and Multimap SLAM</em>，2020 年预印本，后发表于 IEEE T-RO。<a href="https://arxiv.org/html/2007.11898">原文</a> · <a href="https://github.com/UZ-SLAMLab/ORB_SLAM3">官方代码</a>。</p>
+<p><strong>阅读范围</strong>：核对系统架构、视觉惯性初始化、地图合并及实验正文；公式以下以简化符号解释，不复刻全部优化实现。代码仓库用于确认运行与系统边界，未独立执行基准。</p>
+<h2 id="一分钟理解允许暂时不知道自己在哪里">一分钟理解：允许暂时不知道自己在哪里</h2>
+<p>相机被手挡住，或者机器人突然转向，视觉 SLAM 就可能跟不上原来的特征。一个脆弱的系统会因此丢掉整段运行；另一个危险做法是继续输出貌似平滑但其实已经失真的轨迹。</p>
+<p>ORB-SLAM3 的重要思想是把失踪处理纳入系统：视觉与 IMU 联合估计，暂时无法连回旧地图时可以建立新地图，以后找到可靠联系再合并。它还改进了惯性初始化和场所识别，使历史观测更早、更有效地参与估计。</p>
+<p>一句话：在视觉或视觉惯性定位中，通过更完整的数据关联、惯性初始化和多地图管理，改善精度与跟踪丢失后的恢复能力，代价是更复杂的地图状态、优化调度和标定要求。</p>
+<p>这里的“多地图”是同一个系统维护和关联多个地图片段，不等于论文已经解决多机器人通信、异构传感器协商或无限期开放世界建图。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>重投影误差</strong>检查三维点是否投到观测位置；<strong>BA</strong>联合调整位姿和地图点；<strong>预积分</strong>压缩区间惯性约束；**Sim(3)**在刚体变换外允许尺度变化；<strong>场所识别</strong>提出历史地点候选，仍需要几何验证。</p>
+<h2 id="背景地图不只是最近两帧之间的位移">背景：地图不只是最近两帧之间的位移</h2>
+<p>只比较相邻图像，误差会随时间积累。保留三维地图点，可以让当前帧与更早的帧共同约束同一个位置；识别重访还能把相隔很久的片段连接起来。数据关联因而有不同时间跨度，而不只是“特征检测是否够快”。</p>
+<p>输入可以是相机图像，或相机加 IMU；不同传感器配置对应不同可观测量。单目几何一般没有绝对尺度：把所有点和相机平移一起放大，图像投影仍可不变。双目的已知基线或具有充分运动激励的惯性观测，可提供尺度信息。</p>
+<p>本任务没有策略、奖励或试错训练。变量是相机/机体位姿、地图点，以及惯性配置中的速度、偏置和重力相关量。本文讨论的是稀疏定位建图；它不自动生成可抓取物体语义或高质量稠密网格。</p>
+<h2 id="方法用不同观测反复约束同一组未知量">方法：用不同观测反复约束同一组未知量</h2>
+<h3 id="视觉误差是什么">视觉误差是什么</h3>
+<p>设世界点为 <span class="reading-math" data-tex="P_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>P</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">P_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，相机位姿为 <span class="reading-math" data-tex="T_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">T_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，<span class="reading-math" data-tex="T_{CB}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mrow><mi>C</mi><mi>B</mi></mrow></msub></mrow><annotation encoding="application/x-tex">T_{CB}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">CB</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是机体到相机的已知外参。观察像素为 <span class="reading-math" data-tex="u_{ij}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>u</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub></mrow><annotation encoding="application/x-tex">u_{ij}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，则简化重投影残差为：</p>
+<p><span class="reading-math" data-tex="r_{ij}=u_{ij}-\pi(T_{CB}T_i^{-1}P_j)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>r</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>=</mo><msub><mi>u</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>−</mo><mi>π</mi><mo stretchy="false">(</mo><msub><mi>T</mi><mrow><mi>C</mi><mi>B</mi></mrow></msub><msubsup><mi>T</mi><mi>i</mi><mrow><mo>−</mo><mn>1</mn></mrow></msubsup><msub><mi>P</mi><mi>j</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">r_{ij}=u_{ij}-\pi(T_{CB}T_i^{-1}P_j).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1502em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">CB</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.433em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.267em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>π</mi></mrow><annotation encoding="application/x-tex">\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span></span></span></span></span> 是相机投影模型。它表达的不是“两个描述子相差多少”，而是同一个三维点在当前位姿下应该落在哪个像素。描述子用于提出对应，几何误差用于检查和优化，两者不能混为一个步骤。</p>
+<p>如果相机内参、畸变或外参错误，即使点匹配正确，预测像素也可能系统偏移。增加优化迭代不能保证消除这种模型错误。</p>
+<h3 id="把惯性约束接进来">把惯性约束接进来</h3>
+<p>可以用通用教学目标表示联合估计：</p>
+<p><span class="reading-math" data-tex="\min_{X,P}\sum_{i,j}\rho\!\left(\|r_{ij}\|^2_{\Sigma_{ij}^{-1}}\right)
++\sum_i\|r^{imu}_{i,i+1}\|^2_{\Sigma_{imu}^{-1}}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mrow><mi>X</mi><mo separator="true">,</mo><mi>P</mi></mrow></munder><munder><mo>∑</mo><mrow><mi>i</mi><mo separator="true">,</mo><mi>j</mi></mrow></munder><mi>ρ</mi><mtext> ⁣</mtext><mrow><mo fence="true">(</mo><mi mathvariant="normal">∥</mi><msub><mi>r</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><msubsup><mi mathvariant="normal">∥</mi><msubsup><mi mathvariant="normal">Σ</mi><mrow><mi>i</mi><mi>j</mi></mrow><mrow><mo>−</mo><mn>1</mn></mrow></msubsup><mn>2</mn></msubsup><mo fence="true">)</mo></mrow><mo>+</mo><munder><mo>∑</mo><mi>i</mi></munder><mi mathvariant="normal">∥</mi><msubsup><mi>r</mi><mrow><mi>i</mi><mo separator="true">,</mo><mi>i</mi><mo>+</mo><mn>1</mn></mrow><mrow><mi>i</mi><mi>m</mi><mi>u</mi></mrow></msubsup><msubsup><mi mathvariant="normal">∥</mi><msubsup><mi mathvariant="normal">Σ</mi><mrow><mi>i</mi><mi>m</mi><mi>u</mi></mrow><mrow><mo>−</mo><mn>1</mn></mrow></msubsup><mn>2</mn></msubsup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\min_{X,P}\sum_{i,j}\rho\!\left(\|r_{ij}\|^2_{\Sigma_{ij}^{-1}}\right)
++\sum_i\|r^{imu}_{i,i+1}\|^2_{\Sigma_{imu}^{-1}}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.5638em;vertical-align:-1.4138em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3557em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07847em;">X</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8804em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">ρ</span><span class="mspace" style="margin-right:-0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size2">(</span></span><span class="mord">∥</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.3478em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mtight">Σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8646em;"><span style="top:-2.1777em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span><span style="top:-2.9043em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4612em;"><span></span></span></span></span></span></span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.6751em;"><span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size2">)</span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.3277em;vertical-align:-1.2777em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">∥</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8747em;"><span style="top:-2.453em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">i</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">im</span><span class="mord mathnormal mtight">u</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3831em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.3478em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mtight">Σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8646em;"><span style="top:-2.1777em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">im</span><span class="mord mathnormal mtight">u</span></span></span></span><span style="top:-2.9043em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3223em;"><span></span></span></span></span></span></span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.5778em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="X"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>X</mi></mrow><annotation encoding="application/x-tex">X</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span></span></span></span></span> 包含运动状态，<span class="reading-math" data-tex="P"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi></mrow><annotation encoding="application/x-tex">P</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span></span></span></span></span> 是地图点，<span class="reading-math" data-tex="\rho"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ρ</mi></mrow><annotation encoding="application/x-tex">\rho</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ρ</span></span></span></span></span> 降低错误视觉匹配的影响。惯性残差要求相邻位姿、速度与测得的运动相容。两类约束互相补充：图像能校正漂移，IMU 能提供短时运动预测。</p>
+<p>这不意味着每帧求解全部历史变量。跟踪、局部建图和全局校正有不同优化范围，后台耗时也不同。一次局部 BA 运行超过相机帧间隔，并不自动意味着跟踪线程也以相同频率阻塞；判断实时性要看线程依赖、积压和输出延迟。</p>
+<h3 id="初始化不是随便填几个零">初始化不是随便填几个零</h3>
+<p>视觉惯性初始化需要建立尺度、速度、重力方向和偏置之间的合理关系。论文 §V-B 将初始化组织成视觉估计、惯性变量估计、联合细化。直觉上，先利用几何得到形状和运动，再让惯性观测解释其物理尺度，比从完全不可信的初值同时调整所有变量更有结构。</p>
+<p>但它仍受可观测性约束。想象相机几乎不动：视觉缺乏视差，惯性也缺少区分尺度和偏置的变化。算法知道重力存在，并不意味着从任意短暂静止数据都能恢复完整运动状态。原文也讨论了弱激励下继续进行尺度细化的需要。</p>
+<h3 id="atlas先保留片段再证明它们属于同一世界">Atlas：先保留片段，再证明它们属于同一世界</h3>
+<p>用自构例子理解：机器人在 A 房间建图，经过一段完全黑暗的走廊后进入 B 房间。此时没有足够观测证明 B 相对 A 的位置，可以先建立独立片段。稍后从另一条明亮路径回到 A，若得到可靠的共同几何，就能估计片段变换并融合。</p>
+<p>合并地图至少涉及三个不同动作：提出候选地点、验证几何变换、消除重复点并传播校正。只因两张图像看起来像，就强行合并，会把整张地图拉坏。另一方面，没有重叠或可辨认的历史观测时，保留两个片段是诚实的状态，不是算法忘了按某个按钮。</p>
+<pre><code class="language-text">输入：图像；可选 IMU；相机与外参标定
+在当前活动地图中提取并匹配视觉特征
+根据已有运动与 IMU 预测当前状态
+优化当前跟踪状态，判断有效对应是否足够
+若短时视觉丢失：利用惯性预测尝试恢复匹配
+若长期无法恢复：按条件初始化一个新的活动地图
+后台维护关键帧、地图点并做局部优化
+查询历史地图中的场所候选，并进行几何一致性验证
+若候选在同图：执行回环校正
+若候选在另一图：对齐、融合和联合细化地图
+输出当前估计、地图关联关系及跟踪状态
+</code></pre>
+<p>此伪代码概括机制。实际线程、删除条件与优化窗口应以固定版本代码为准。输出状态必须与位姿一起看，不能把初始化中、暂时丢失和正常跟踪都当成同等可靠的数据。</p>
+<h2 id="实验设计先看对齐方法再看小数点">实验设计：先看对齐方法，再看小数点</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>检查项</th>
+<th>原文说明与解读</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数据与任务</td>
+<td>EuRoC、TUM-VI；单次与多次运行建图</td>
+</tr>
+<tr>
+<td>传感器配置</td>
+<td>单目、双目、单目惯性、双目惯性，分别比较</td>
+</tr>
+<tr>
+<td>主要指标</td>
+<td>RMS ATE；需要说明真值覆盖范围与对齐自由度</td>
+</tr>
+<tr>
+<td>对齐</td>
+<td>纯单目用含尺度的 Sim(3)，其他配置用 SE(3)</td>
+</tr>
+<tr>
+<td>重复</td>
+<td>EuRoC 单次场景报告 10 次中位数；TUM-VI 3 次；多次地图实验 5 次</td>
+</tr>
+<tr>
+<td>硬件</td>
+<td>原实验为 i7-7700、32 GB 内存、CPU 计算</td>
+</tr>
+<tr>
+<td>基线公平性</td>
+<td>表 II 混合引用结果和作者重跑结果，脚注区分真值及轨迹口径</td>
+</tr>
+<tr>
+<td>训练预算</td>
+<td>系统优化不是模型训练；完整调参搜索预算未核实</td>
+</tr>
+</tbody></table></div>
+<p>三组关键证据各回答不同问题：</p>
+<ol>
+<li><strong>表 II 与图 4</strong>：EuRoC 的跨运行误差与失败。双目惯性平均 ATE 为 0.035 米；表中部分其他配置未完成所有序列，带星号的成功子集均值不能当作同一测试集合的排名。</li>
+<li><strong>表 IV</strong>：TUM-VI room 序列中，纯单目平均 0.039 米、双目 0.068 米、双目惯性 0.009 米。单目看似优于双目，部分来自其允许额外尺度对齐，不能据此得出少一个相机通常更准。</li>
+<li><strong>表 V 与图 5–6</strong>：历史地图复用。它支持多次观察带来的收益，但历史地图就是额外信息，不宜与从零开始的单次运行混作公平输入对比。</li>
+</ol>
+<p>TUM-VI 很多长序列只有起终区域真值，room 序列才有完整覆盖。作者展示的室外轨迹改善和地图一致性有参考价值，但缺少中段真值的位置不能被写成已经逐米验证厘米精度。</p>
+<h2 id="贡献与局限恢复能力也有条件">贡献与局限：恢复能力也有条件</h2>
+<p>作者把可靠估计所需的多个环节整合为完整系统：初始化、不同时间跨度的数据关联、丢失处理、合并和局部优化。它并不是换一个损失函数就获得全部收益。阅读消融或配置对比时，应问具体改变了传感器、输入历史、数据关联还是优化范围。</p>
+<p>下面是方法层面的分析。遮挡期间若 IMU 偏置未估好，短时预测也会变差；长时间黑暗没有可用几何，创建新图不能恢复那段缺失轨迹；重复走廊可能提出错误场所候选；地图无限累积还会影响存储和优化成本。</p>
+<p>因此，平均误差低和工程恢复能力强是不同维度。一个方法可能只在容易片段上误差很低，却经常丢失；另一个方法误差略大但覆盖更完整。部署前至少同时看成功覆盖率、重定位时间、误差和尾部延迟。</p>
+<h2 id="自构实验与前置知识">自构实验与前置知识</h2>
+<p><strong>未运行实验</strong>：选同一段有重访的图像序列，在中途人工遮挡连续若干帧，比较禁用多地图、启用多地图和加入 IMU 三种情况。固定特征预算与标定，记录丢失时间、新建地图数、成功合并数、最终可追踪比例和 ATE。然后删除重访部分，检查系统是否仍保留独立地图，而不是凭空恢复联系。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>惯性初值不准、丢失后难恢复、历史信息利用不足</td>
+<td>MAP初始化、改进关联、Atlas与地图合并</td>
+<td>利用互补观测并允许片段暂时独立，再用可靠重访建立联系</td>
+<td>表II/IV/V和图4–6，按传感器及历史输入解释</td>
+<td>可观测性、重复场景、标定与计算资源仍限制效果；不同对齐口径不可直接比较</td>
+</tr>
+</tbody></table></div>
+<h2 id="读懂了吗三问三答">读懂了吗：三问三答</h2>
+<h3 id="1为什么加入-imu-后单目尺度仍可能初始化不好">1．为什么加入 IMU 后，单目尺度仍可能初始化不好？</h3>
+<p><strong>答</strong>：IMU 提供的是受偏置和噪声影响的运动观测。若运动缺乏足够激励，尺度、速度、重力和偏置之间仍难区分。传感器的存在不等于数据已经包含所需信息。</p>
+<h3 id="2新建地图与重定位有什么区别">2．新建地图与重定位有什么区别？</h3>
+<p><strong>答</strong>：重定位是在已有地图中恢复当前位姿；新建地图承认暂时无法建立这种联系，先维护独立片段。只有后来获得可靠共同观测，才能确定地图间变换并合并，不能直接把两个坐标原点当成同一个位置。</p>
+<h3 id="3一个允许尺度对齐的单目结果比双目-ate-更低应该怎样解释">3．一个允许尺度对齐的单目结果比双目 ATE 更低，应该怎样解释？</h3>
+<p><strong>答</strong>：它说明在额外校正全局尺度以后，轨迹形状误差可能更小；不说明系统自己恢复了更准的米制位置。公平解释要保留对齐自由度，并另报尺度误差、失败序列和完整轨迹覆盖。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 098｜ORB-SLAM3：跟踪丢了以后，地图还能继续生长吗
+    <textarea id="md-source" hidden readonly># 098｜ORB-SLAM3：跟踪丢了以后，地图还能继续生长吗
 
 [总览](00-发展时间线总览.md) · [目录](README.md) · [上一篇](097-liosam.md) · [下一篇](099-fastlio2.md)
 
@@ -180,9 +307,9 @@ TUM-VI 很多长序列只有起终区域真值，room 序列才有完整覆盖�
 
 **答**：它说明在额外校正全局尺度以后，轨迹形状误差可能更小；不说明系统自己恢复了更准的米制位置。公平解释要保留对齐自由度，并另报尺度误差、失败序列和完整轨迹覆盖。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
