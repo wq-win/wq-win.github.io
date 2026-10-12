@@ -7,7 +7,7 @@
     <title>第 21 天｜AlphaGo：策略、价值与树搜索如何分工 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,220 @@
                 <span class="text-gray-500">AlphaGo：策略、价值与树搜索如何分工</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="6db8ee4e50e7a15341d292c226922a901c5922be1e7cf1e3b19ef3f5279ca1f2"><h1>第 21 天｜AlphaGo：策略、价值与树搜索如何分工</h1>
+<p><a href="index.html">系列首页</a> · <a href="20-dueling-dqn.html">上一篇</a> · <a href="22-a3c.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：<em>Mastering the game of Go with deep neural networks and tree search</em>，2016。<a href="https://storage.googleapis.com/deepmind-media/alphago/AlphaGoNaturePaper.pdf">原论文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：围棋巨大搜索空间中的决策</p>
+<p><strong>旧方法卡点</strong>：穷举分支不可行，浅层启发式难评价长期胜负</p>
+<p><strong>作者主张</strong>：结合人类棋谱策略学习、自我对弈强化学习、价值网络与树搜索</p>
+<p><strong>论文证据</strong>：2016原论文报告对樊麾五局全胜</p>
+<p><strong>一句话</strong>：在双人零和棋类、自我对弈与已知规则模型规划中，作者通过“结合人类棋谱策略学习、自我对弈强化学习、价值网络与树搜索”应对“围棋巨大搜索空间中的决策”这一问题；证据边界或代价是：不是AlphaGo Zero，训练使用人类棋谱与大量搜索资源。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>MCTS</strong>：用多次模拟分配搜索预算。</li>
+<li><strong>策略先验</strong>：提前估计值得探索的动作。</li>
+<li><strong>价值网络</strong>：估计局面的胜负前景。</li>
+<li><strong>自我对弈</strong>：模型与自身或历史版本比赛生成数据。</li>
+<li><strong>Rollout</strong>：快速走到终局来估计结果。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“围棋巨大搜索空间中的决策”放在双人零和棋类、自我对弈与已知规则模型规划的边界内研究。穷举分支不可行，浅层启发式难评价长期胜负。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>双人零和棋类、自我对弈与已知规则模型规划</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>棋盘及合法落子相关历史</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>合法落子或停着</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>最终胜负</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>终局规则决定胜负</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>策略先验让搜索集中在值得尝试的落子，价值网络估计位置胜率，快速 rollout 提供另一终局评价，MCTS把多次模拟结果累积成更可靠的选择。原版有监督策略、强化策略、快速rollout策略等角色，不能用后来AlphaZero的一套网络循环替换。</p>
+<p>原文一个容易漏掉的细节：搜索先验使用监督策略，价值网络则由较强的RL策略自我对弈数据训练。更强的直接行动策略不一定给搜索提供更好的多样候选。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p>教学搜索规则 <span class="reading-math" data-tex="a=\arg\max_a[Q(s,a)+u(s,a)]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi><mo>=</mo><mi>arg</mi><mo>⁡</mo><msub><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>a</mi></msub><mo stretchy="false">[</mo><mi>Q</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>+</mo><mi>u</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">a=\arg\max_a[Q(s,a)+u(s,a)]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">ar<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop">max</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">u</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)]</span></span></span></span></span>；u 随先验概率增大、随访问次数减少。叶子评价混合价值预测与rollout结果。不同组件损失分别是棋谱似然、胜负策略梯度与胜负价值回归。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">先用人类棋谱训练监督策略
+从监督初始化策略，做自我对弈强化学习
+用自我对弈局面与终局结果训练价值网络
+对每个实战局面：
+  多次沿 Q+探索项选择树路径
+  扩展叶节点，计算策略先验
+  用价值网络及快速rollout评价叶子
+  将评价回传到访问计数和平均价值
+  根据根节点统计选择落子
+输出：搜索后的落子
+</code></pre>
+<p><strong>实现要点</strong>：不是AlphaGo Zero，训练使用人类棋谱与大量搜索资源。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>棋谱动作似然、自我对弈胜率、胜负价值回归分别训练；搜索决定最终行动</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>结合人类棋谱策略学习、自我对弈强化学习、价值网络与树搜索</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>胜率、棋力、搜索性能</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>围棋程序比较与樊麾对局</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>监督策略使用KGS的约3000万局面；价值网络使用自我对弈的约3000万不同对局各抽一个局面</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>原文其他围棋程序与不同组件配置</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>单机搜索48CPU与8GPU；分布式版1202CPU与176GPU。图4程序比赛约5秒每步；其他对局时间规则另计</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>胜率、棋力、搜索性能</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>图4包含95%置信区间；五局人类比赛不是五个独立训练种子</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>学习到的先验与价值能否使搜索达到高棋力</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：不是AlphaGo Zero，训练使用人类棋谱与大量搜索资源。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>图1</td>
+<td>监督、RL与价值训练的多阶段数据流</td>
+<td>明确每个网络的监督</td>
+<td>不等于无人工数据</td>
+</tr>
+<tr>
+<td>图2</td>
+<td>策略准确率、棋力与价值评价误差</td>
+<td>网络评价确实影响控制</td>
+<td>动作预测准确率不是完整棋力</td>
+</tr>
+<tr>
+<td>图3</td>
+<td>选择、扩展、评价与回传</td>
+<td>解释搜索分工</td>
+<td>框图不证明性能</td>
+</tr>
+<tr>
+<td>图4</td>
+<td>程序比赛、组件组合和搜索规模</td>
+<td>提供系统、消融与资源证据</td>
+<td>各比赛时间控制不同</td>
+</tr>
+<tr>
+<td>图5</td>
+<td>实际局面的先验与搜索统计</td>
+<td>展示搜索可以改变最初倾向</td>
+<td>单局案例不是普遍因果证明</td>
+</tr>
+</tbody></table></div>
+<p>正文报告RL策略不搜索时对Pachi胜率85%，而完整系统还加入搜索。图4另有组件和计算扩展比较；必须分别引用“网络本身”“完整搜索系统”和对人比赛，不能把它们合成一个胜率。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者贡献</strong>是深度学习与搜索的高水平系统组合。<strong>本文分析</strong>：围棋规则可精确模拟，奖励清晰，部署可用搜索；真实世界通常不具备这些条件。原文系统成绩不可直接归因于某一种优化器。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>策略认为A有0.7概率、B有0.2，但搜索发现A后续多败、B能稳定赢。先验负责把计算投到有希望处，搜索仍可推翻先验；若所有预算都锁死在A，价值和搜索就无法纠错。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>已知棋规给搜索提供了什么额外优势？</li>
+<li>如何分别计量策略网络和搜索的收益？</li>
+<li>AlphaGo与AlphaGo Zero的数据条件为何不同？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>围棋巨大搜索空间中的决策</td>
+<td>结合人类棋谱策略学习、自我对弈强化学习、价值网络与树搜索</td>
+<td>先验压缩有效分支，价值预测缩短搜索深度</td>
+<td>2016原论文报告对樊麾五局全胜</td>
+<td>不是AlphaGo Zero，训练使用人类棋谱与大量搜索资源</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：策略网络、价值网络和搜索分别做什么？</p>
+<p><strong>参考答案</strong>：策略网络缩小值得探索的落子范围；价值网络预测局面结果；树搜索比较候选后续变化。原始 AlphaGo 还使用快速 rollout 辅助评价。网络提供经验化判断，搜索则在当前局面上投入额外计算。</p>
+<p><strong>问题 2</strong>：能否把原始 AlphaGo 的成功解释为“完全不需要人类知识”？</p>
+<p><strong>参考答案</strong>：不能。原始系统使用人类棋谱进行监督策略训练，还包含特定搜索与工程设计。应区分 AlphaGo 与后来的 AlphaGo Zero、AlphaZero；训练数据和先验不同，不能把后者的设定回填到前者。</p>
+<p><a href="index.html">系列首页</a> · <a href="20-dueling-dqn.html">上一篇</a> · <a href="22-a3c.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 21 天｜AlphaGo：策略、价值与树搜索如何分工
+    <textarea id="md-source" hidden readonly># 第 21 天｜AlphaGo：策略、价值与树搜索如何分工
 
 [系列首页](README.md) · [上一篇](20-dueling-dqn.md) · [下一篇](22-a3c.md)
 
@@ -191,16 +400,16 @@
 
 [系列首页](README.md) · [上一篇](20-dueling-dqn.md) · [下一篇](22-a3c.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "21-alphago";
         const source = document.getElementById('md-source').value;

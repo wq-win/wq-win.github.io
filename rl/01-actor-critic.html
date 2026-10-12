@@ -7,7 +7,7 @@
     <title>第 01 天｜早期 Actor–Critic：让行动者拥有一个评价者 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,211 @@
                 <span class="text-gray-500">早期 Actor–Critic：让行动者拥有一个评价者</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="f0a4d9aa94fcdf657dd7a1efc37a0cb3251971d0b4703fcaa44cc3e5c2a65078"><h1>第 01 天｜早期 Actor–Critic：让行动者拥有一个评价者</h1>
+<p><a href="index.html">系列首页</a> · <a href="02-td-lambda.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：<em>Neuronlike Adaptive Elements That Can Solve Difficult Learning Control Problems</em>，1983。<a href="https://www.derongliu.org/adp/adp-cdrom/refs/barto19830834.pdf">原论文</a>。</p>
+<p><strong>阅读范围</strong>：原始资料限于摘要与书目信息，全文尚未可靠获取。现代 Actor–Critic 公式与伪代码用于解释两类组件的作用，并非 1983 年 ASE/ACE 更新规则的精确复刻；实验曲线与数值尚未核实。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：只有失败信号时怎样学会控制</p>
+<p><strong>旧方法卡点</strong>：最后倒下不说明哪一步开始出了问题</p>
+<p><strong>作者主张</strong>：把行动搜索 ASE 与学习评价 ACE 分开，让预测变化提供更及时的强化</p>
+<p><strong>论文证据</strong>：原文摘要描述两类自适应单元在倒立摆控制中的作用</p>
+<p><strong>一句话</strong>：在在线、单智能体、无模型的倒立摆控制中，作者通过“把行动搜索 ASE 与学习评价 ACE 分开，让预测变化提供更及时的强化”应对“只有失败信号时怎样学会控制”这一问题；证据边界或代价是：原文全文访问受限，不能确认曲线、重复次数和成功门槛。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>Actor</strong>：选择行为的组件。</li>
+<li><strong>Critic</strong>：估计行为前景的组件。</li>
+<li><strong>延迟强化</strong>：后果在多步之后才显现。</li>
+<li><strong>状态编码</strong>：把传感器信息变成学习器输入。</li>
+<li><strong>TD</strong>：以相邻预测之差学习。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“只有失败信号时怎样学会控制”放在在线、单智能体、无模型的倒立摆控制的边界内研究。最后倒下不说明哪一步开始出了问题。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>在线、单智能体、无模型的倒立摆控制</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>小车与杆的运动状态及其编码</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>对小车施加方向性作用力</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>越界或倒杆时的失败信号</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>杆倾斜超过阈值或小车到轨道端点</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>这里的历史问题不是深度网络容量，而是延迟反馈如何指导动作。ASE 负责搜索行为，ACE 学习比最终失败更密集的评价。现代教学对应是 Actor 输出动作概率、Critic 预测未来回报，再以 TD 误差联结两者。不能由概念相似就推断早期论文已经具有 PPO 的损失、现代神经架构或稳定性保证。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><strong>现代教学对应</strong>：<span class="reading-math" data-tex="\delta=r+\gamma V(s')-V(s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>δ</mi><mo>=</mo><mi>r</mi><mo>+</mo><mi>γ</mi><mi>V</mi><mo stretchy="false">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo><mo>−</mo><mi>V</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\delta=r+\gamma V(s&#x27;)-V(s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0019em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">γV</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7519em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span>，<span class="reading-math" data-tex="w\leftarrow w+\alpha_v\delta\nabla_w V(s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>w</mi><mo>←</mo><mi>w</mi><mo>+</mo><msub><mi>α</mi><mi>v</mi></msub><mi>δ</mi><msub><mi mathvariant="normal">∇</mi><mi>w</mi></msub><mi>V</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">w\leftarrow w+\alpha_v\delta\nabla_w V(s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span>，<span class="reading-math" data-tex="\theta\leftarrow\theta+\alpha_\pi\delta\nabla_\theta\log\pi(a|s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>θ</mi><mo>←</mo><mi>θ</mi><mo>+</mo><msub><mi>α</mi><mi>π</mi></msub><mi>δ</mi><msub><mi mathvariant="normal">∇</mi><mi>θ</mi></msub><mi>log</mi><mo>⁡</mo><mi>π</mi><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">∣</mi><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\theta\leftarrow\theta+\alpha_\pi\delta\nabla_\theta\log\pi(a|s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span>。V 是预测，δ 是比预期更好或更坏；这组公式不是所选原文符号的转录。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。<code>stop_gradient</code> 表示停止向目标量传播梯度。</p>
+<pre><code class="language-text">输入：环境；教学版 Actor π 与 Critic V
+循环：
+  s ← 当前观测
+  a ← π(s) 采样
+  r,s_next,done ← 环境反馈
+  v_next ← 0 if done else V(s_next)
+  δ ← stop_gradient(r+γ*v_next-V(s))
+  Critic 沿 δ*∇V(s) 更新
+  Actor 沿 δ*∇logπ(a|s) 更新
+  若 done 则重置环境
+输出：学习后的行为和评价函数
+</code></pre>
+<p><strong>实现要点</strong>：现代代码只解释两种角色；把它称为原文的精确算法会混淆历史实现。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>历史ASE/ACE以失败反馈改善平衡；文中现代教学式用TD评价并更新动作概率</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>把行动搜索 ASE 与学习评价 ACE 分开，让预测变化提供更及时的强化</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>平衡控制表现；精确成功门槛未核实</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>倒立摆，摘要可确认</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>环境交互；总数量本文未核实</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>具体比较方法本文未核实</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>计算资源、更新预算本文未核实</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>平衡控制表现；精确成功门槛未核实</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>独立训练次数及误差条未核实</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>只有稀疏失败反馈是否足以训练控制系统</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：原文全文访问受限，不能确认曲线、重复次数和成功门槛。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>原文摘要：任务</td>
+<td>未知运动方程、失败反馈</td>
+<td>任务是弱监督的控制学习</td>
+<td>不证明无需状态编码</td>
+</tr>
+<tr>
+<td>原文摘要：ASE/ACE</td>
+<td>行动单元与评价单元协作</td>
+<td>支持两种功能的分离</td>
+<td>不能量化各模块独立收益</td>
+</tr>
+<tr>
+<td>原文实验图表</td>
+<td>尚未可靠获取</td>
+<td>定量证据不足</td>
+<td>无法判断具体分数、重复次数与成功门槛</td>
+</tr>
+</tbody></table></div>
+<p><strong>结论边界</strong>：原文摘要描述两类自适应单元在倒立摆控制中的作用。原文全文访问受限，不能确认曲线、重复次数和成功门槛。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者主张</strong>是两个自适应单元能解决困难控制问题。<strong>本文分析</strong>：Critic 仍可能错，错误评价会传给 Actor；状态编码与控制频率也影响难度。原始全文尚未可靠获取，因此无法完整评价消融实验及各组件的独立贡献。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>假设某动作没有立刻失败，r=0，V(s)=−0.8，V(s&#39;)=−0.2，γ=1，则 δ=0.6：虽然未获得显式成功奖励，系统仍能鼓励这个让失败前景下降的动作。若下一状态估计错误，这个鼓励也可能错误。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>如何区分学会平衡与利用终止判定漏洞？</li>
+<li>不用评价者，仅最终失败信号会增加多少样本成本？</li>
+<li>现代策略梯度版与原始 ASE 的更新差异有哪些？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>只有失败信号时怎样学会控制</td>
+<td>把行动搜索 ASE 与学习评价 ACE 分开，让预测变化提供更及时的强化</td>
+<td>评价器把迟到的失败信号变成更及时的预测变化</td>
+<td>原文摘要描述两类自适应单元在倒立摆控制中的作用</td>
+<td>原文全文访问受限，不能确认曲线、重复次数和成功门槛</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>原始资料的可用范围见文首说明。本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：只有倒立摆倒下时才得到负奖励，Critic 怎样帮助 Actor 学习倒下之前的动作？</p>
+<p><strong>参考答案</strong>：Critic 学习预测未来是否容易失败。即使当前没有奖励，只要下一状态的预测比当前更差，就能产生负的 TD 误差，给 Actor 提供较及时的反馈。用现代教学记号表示：</p>
+<p><span class="reading-math" data-tex="\delta_t=r_t+\gamma V(s_{t+1})-V(s_t)"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>δ</mi><mi>t</mi></msub><mo>=</mo><msub><mi>r</mi><mi>t</mi></msub><mo>+</mo><mi>γ</mi><mi>V</mi><mo stretchy="false">(</mo><msub><mi>s</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">)</mo><mo>−</mo><mi>V</mi><mo stretchy="false">(</mo><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\delta_t=r_t+\gamma V(s_{t+1})-V(s_t)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0379em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">γV</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span></span></p>
+<p>Actor 据此调整动作倾向。这里解释的是评价与行动分工的思想，并非精确复刻 1983 年算法。</p>
+<p><strong>问题 2</strong>：Critic 给出的反馈比终局奖励密集，是否意味着它一定更可靠？</p>
+<p><strong>参考答案</strong>：不一定。终局奖励来自实际结果，Critic 的反馈包含估计。如果 Critic 错把危险状态评价为有利，Actor 就可能被引向错误行为。Actor–Critic 用估计换取更及时、通常方差更低的信号，同时引入了评价误差传播的问题。</p>
+<p><a href="index.html">系列首页</a> · <a href="02-td-lambda.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 01 天｜早期 Actor–Critic：让行动者拥有一个评价者
+    <textarea id="md-source" hidden readonly># 第 01 天｜早期 Actor–Critic：让行动者拥有一个评价者
 
 [系列首页](README.md) · [下一篇](02-td-lambda.md)
 
@@ -196,16 +396,16 @@ Actor 据此调整动作倾向。这里解释的是评价与行动分工的思�
 
 [系列首页](README.md) · [下一篇](02-td-lambda.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "01-actor-critic";
         const source = document.getElementById('md-source').value;

@@ -7,7 +7,7 @@
     <title>第 44 天｜Decision Transformer：把控制写成条件序列预测 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,214 @@
                 <span class="text-gray-500">Decision Transformer：把控制写成条件序列预测</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="48775f99ac67ecdb5f67108325eb2ee0fccddb9ca2dacbd2cfa695ed327b560d"><h1>第 44 天｜Decision Transformer：把控制写成条件序列预测</h1>
+<p><a href="index.html">系列首页</a> · <a href="43-awac.html">上一篇</a> · <a href="45-td3-bc.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：<em>Decision Transformer: Reinforcement Learning via Sequence Modeling</em>，2021。<a href="https://arxiv.org/abs/2106.01345">原论文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：离线决策是否必须使用Bellman自举</p>
+<p><strong>旧方法卡点</strong>：TD目标有外推误差，简单BC又不区分好坏轨迹</p>
+<p><strong>作者主张</strong>：用期望回报、状态、动作序列训练因果Transformer预测动作</p>
+<p><strong>论文证据</strong>：Atari、D4RL和序列任务实验展示条件序列建模的竞争力</p>
+<p><strong>一句话</strong>：在离线、回报条件的序列建模控制中，作者通过“用期望回报、状态、动作序列训练因果Transformer预测动作”应对“离线决策是否必须使用Bellman自举”这一问题；证据边界或代价是：请求很高回报不保证可实现，数据覆盖仍限制行为。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>Return-to-go</strong>：从当前时刻到终局的剩余奖励和。</li>
+<li><strong>因果mask</strong>：禁止模型读取未来信息。</li>
+<li><strong>条件模仿</strong>：在特定回报等条件下拟合行为。</li>
+<li><strong>上下文窗口</strong>：模型保留的历史长度。</li>
+<li><strong>行为分布支持</strong>：训练数据中可见的动作与结果。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“离线决策是否必须使用Bellman自举”放在离线、回报条件的序列建模控制的边界内研究。TD目标有外推误差，简单BC又不区分好坏轨迹。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>离线、回报条件的序列建模控制</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>状态历史＋目标return-to-go</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>离散分类或连续动作回归</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>训练RTG由数据未来奖励计算</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>回合边界与上下文窗口独立处理</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>训练输入依序为(RTG,s,a)，因果mask防止看到未来动作和回报。部署时指定想达到的回报，执行动作后减去实际奖励更新剩余目标。没有独立Q、Critic或Bellman TD损失，也不意味着自动学会因果规划。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="\hat R_t=\sum_{k=t}^T r_k,\quad \hat a_t=f_\theta(\hat R_{\le t},s_{\le t},a_{&lt;t})."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mi>t</mi></msub><mo>=</mo><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mi>t</mi></mrow><mi>T</mi></munderover><msub><mi>r</mi><mi>k</mi></msub><mo separator="true">,</mo><mspace width="1em"/><msub><mover accent="true"><mi>a</mi><mo>^</mo></mover><mi>t</mi></msub><mo>=</mo><msub><mi>f</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mrow><mo>≤</mo><mi>t</mi></mrow></msub><mo separator="true">,</mo><msub><mi>s</mi><mrow><mo>≤</mo><mi>t</mi></mrow></msub><mo separator="true">,</mo><msub><mi>a</mi><mrow><mo>&lt;</mo><mi>t</mi></mrow></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\hat R_t=\sum_{k=t}^T r_k,\quad \hat a_t=f_\theta(\hat R_{\le t},s_{\le t},a_{&lt;t}).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0968em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.1304em;vertical-align:-1.3021em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8283em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mrel mtight">=</span><span class="mord mathnormal mtight">t</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3021em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">a</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2952em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">≤</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2452em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2952em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">≤</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2452em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span>
+训练动作MSE或交叉熵；执行无折扣RTG时 <span class="reading-math" data-tex="\hat R_{t+1}=\hat R_t-r_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>=</mo><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mi>t</mi></msub><mo>−</mo><msub><mi>r</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">\hat R_{t+1}=\hat R_t-r_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1551em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0968em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。折扣版本需改递推。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">从离线完整轨迹反向计算RTG
+抽长度K片段，构造RTG/状态/动作tokens
+加时序编码，使用因果attention mask
+从状态位置预测对应动作，最小化监督损失
+部署：
+  指定初始目标RTG
+  基于历史预测并执行动作
+  观察实际r，目标RTG←RTG-r
+  更新上下文窗口直到终止
+输出：回报条件策略
+</code></pre>
+<p><strong>实现要点</strong>：请求很高回报不保证可实现，数据覆盖仍限制行为。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>给定RTG与历史，最小化动作预测MSE或交叉熵</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>用期望回报、状态、动作序列训练因果Transformer预测动作</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>归一化回报、不同目标RTG效果</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>4 Atari、D4RL控制、Minigrid等</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>Atari用DQN-replay的1%，约500k转移</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>CQL、BC及其他离线基线</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>训练更新与数据比例分开；无新增训练交互</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>归一化回报、不同目标RTG效果</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>主要任务3种子；文字与表对离散度称呼需逐项核实</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>序列监督能否替代TD提供有效控制</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：请求很高回报不保证可实现，数据覆盖仍限制行为。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>图1</td>
+<td>因果序列架构</td>
+<td>明确条件与预测对象</td>
+<td>不证明规划能力</td>
+</tr>
+<tr>
+<td>表1</td>
+<td>4 Atari小数据比较</td>
+<td>其中3个与CQL可比</td>
+<td>并非所有任务胜出</td>
+</tr>
+<tr>
+<td>表2</td>
+<td>D4RL任务</td>
+<td>支持连续控制可用性</td>
+<td>不保证OOD目标可达</td>
+</tr>
+<tr>
+<td>条件／稀疏任务实验（具体图表编号本文未核实）</td>
+<td>RTG与序列上下文变化</td>
+<td>检验条件建模</td>
+<td>不证明任意轨迹拼接</td>
+</tr>
+</tbody></table></div>
+<p><strong>结论边界</strong>：Atari、D4RL和序列任务实验展示条件序列建模的竞争力。请求很高回报不保证可实现，数据覆盖仍限制行为。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者贡献</strong>是简洁的序列建模范式。<strong>本文分析</strong>：选择目标RTG是一项决策超参数；若用测试成绩调它，应计入模型选择。数据中的高回报关联未必是可控因果。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>目标回报10，第一步实际得3，下一步输入剩余目标7。模型只是在条件7下预测动作，不能保证环境还允许得到7；目标设100也不会自动产生新能力。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>RTG调参会怎样影响公平比较？</li>
+<li>未来奖励条件是否可能携带不可控随机性？</li>
+<li>何种任务需要TD式拼接而序列BC做不到？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>离线决策是否必须使用Bellman自举</td>
+<td>用期望回报、状态、动作序列训练因果Transformer预测动作</td>
+<td>把好坏轨迹区分为不同条件，避免直接使用自举标签</td>
+<td>Atari、D4RL和序列任务实验展示条件序列建模的竞争力</td>
+<td>请求很高回报不保证可实现，数据覆盖仍限制行为</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：目标剩余回报在训练和执行时分别怎么获得？</p>
+<p><strong>参考答案</strong>：训练时从已有轨迹计算真实 return-to-go；执行时人为指定期望回报，并随实际奖励更新剩余目标。模型学习在历史与回报条件下预测动作，因此可以通过不同条件请求不同水平的行为。</p>
+<p><strong>问题 2</strong>：把目标回报设成 10000，为什么不会自动得到超强策略？</p>
+<p><strong>参考答案</strong>：模型只学到了数据覆盖下的条件关系。极高目标可能落到训练分布之外，环境也未必允许实现。条件输入表达愿望，不提供新的行为证据；数据中轨迹能否被有效组合也不能自动保证。</p>
+<p><a href="index.html">系列首页</a> · <a href="43-awac.html">上一篇</a> · <a href="45-td3-bc.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 44 天｜Decision Transformer：把控制写成条件序列预测
+    <textarea id="md-source" hidden readonly># 第 44 天｜Decision Transformer：把控制写成条件序列预测
 
 [系列首页](README.md) · [上一篇](43-awac.md) · [下一篇](45-td3-bc.md)
 
@@ -82,7 +285,7 @@
 
 ### 关键公式与符号
 
-$$\hat R_t=\sum_{k=t}^T r_k,\quad \hat a_t=f_\theta(\hat R_{\le t},s_{\le t},a_{<t}).$$
+$$\hat R_t=\sum_{k=t}^T r_k,\quad \hat a_t=f_\theta(\hat R_{\le t},s_{\le t},a_{&lt;t}).$$
 训练动作MSE或交叉熵；执行无折扣RTG时 $\hat R_{t+1}=\hat R_t-r_t$。折扣版本需改递推。
 
 ### 输入 → 处理 → 输出：教学伪代码
@@ -189,16 +392,16 @@ $$\hat R_t=\sum_{k=t}^T r_k,\quad \hat a_t=f_\theta(\hat R_{\le t},s_{\le t},a_{
 
 [系列首页](README.md) · [上一篇](43-awac.md) · [下一篇](45-td3-bc.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "44-decision-transformer";
         const source = document.getElementById('md-source').value;

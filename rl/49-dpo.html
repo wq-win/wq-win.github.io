@@ -7,7 +7,7 @@
     <title>第 49 天｜DPO：为什么偏好分类可以直接更新语言模型 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,214 @@
                 <span class="text-gray-500">DPO：为什么偏好分类可以直接更新语言模型</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="a55f9c6fbe4e6e803f2fcded47c286981f23a67ffc35bed44a3f2364291989ba"><h1>第 49 天｜DPO：为什么偏好分类可以直接更新语言模型</h1>
+<p><a href="index.html">系列首页</a> · <a href="48-dreamerv3.html">上一篇</a> · <a href="50-ipo.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：Rafailov 等，<em>Direct Preference Optimization: Your Language Model is Secretly a Reward Model</em>，2023。<a href="https://arxiv.org/html/2305.18290v2">正文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：RLHF的多模型与在线训练复杂性</p>
+<p><strong>旧方法卡点</strong>：先训RM再用PPO需要生成、价值估计和多个网络</p>
+<p><strong>作者主张</strong>：把KL正则奖励最优策略代回偏好模型，直接优化偏好对</p>
+<p><strong>论文证据</strong>：受控情感、摘要和对话实验支持直接偏好训练</p>
+<p><strong>一句话</strong>：在固定偏好数据、参考策略约束的语言模型对齐中，作者通过“把KL正则奖励最优策略代回偏好模型，直接优化偏好对”应对“RLHF的多模型与在线训练复杂性”这一问题；证据边界或代价是：离线偏好覆盖和建模假设仍在，不能当通用在线RL替代。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>偏好对</strong>：同提示下更好与更差的回答。</li>
+<li><strong>Bradley–Terry</strong>：以奖励差预测二选一偏好。</li>
+<li><strong>隐式奖励</strong>：由策略参考概率比对应的奖励。</li>
+<li><strong>参考KL</strong>：约束偏离原行为的程度。</li>
+<li><strong>Margin</strong>：优选与拒绝回答的相对优势。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“RLHF的多模型与在线训练复杂性”放在固定偏好数据、参考策略约束的语言模型对齐的边界内研究。先训RM再用PPO需要生成、价值估计和多个网络。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>固定偏好数据、参考策略约束的语言模型对齐</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>提示x</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>整段回答y；计算上分解为token</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>成对优选／拒绝标签，不单独输出显式RM</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>EOS／长度上限；只对回答token计算概率</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>DPO利用最优策略与奖励间的解析联系，把未知奖励差表示为新旧策略log概率比之差。归一化常数在同提示两个回答的差中消掉。只需训练策略，参考冻结；不需要在每步采新回答或训练Critic。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="L=-E\log\sigma\{\beta[\log\frac{\pi_\theta(y_w|x)}{\pi_{ref}(y_w|x)}-\log\frac{\pi_\theta(y_l|x)}{\pi_{ref}(y_l|x)}]\}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>L</mi><mo>=</mo><mo>−</mo><mi>E</mi><mi>log</mi><mo>⁡</mo><mi>σ</mi><mo stretchy="false">{</mo><mi>β</mi><mo stretchy="false">[</mo><mi>log</mi><mo>⁡</mo><mfrac><mrow><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>y</mi><mi>w</mi></msub><mi mathvariant="normal">∣</mi><mi>x</mi><mo stretchy="false">)</mo></mrow><mrow><msub><mi>π</mi><mrow><mi>r</mi><mi>e</mi><mi>f</mi></mrow></msub><mo stretchy="false">(</mo><msub><mi>y</mi><mi>w</mi></msub><mi mathvariant="normal">∣</mi><mi>x</mi><mo stretchy="false">)</mo></mrow></mfrac><mo>−</mo><mi>log</mi><mo>⁡</mo><mfrac><mrow><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>y</mi><mi>l</mi></msub><mi mathvariant="normal">∣</mi><mi>x</mi><mo stretchy="false">)</mo></mrow><mrow><msub><mi>π</mi><mrow><mi>r</mi><mi>e</mi><mi>f</mi></mrow></msub><mo stretchy="false">(</mo><msub><mi>y</mi><mi>l</mi></msub><mi mathvariant="normal">∣</mi><mi>x</mi><mo stretchy="false">)</mo></mrow></mfrac><mo stretchy="false">]</mo><mo stretchy="false">}</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L=-E\log\sigma\{\beta[\log\frac{\pi_\theta(y_w|x)}{\pi_{ref}(y_w|x)}-\log\frac{\pi_\theta(y_l|x)}{\pi_{ref}(y_l|x)}]\}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3991em;vertical-align:-0.9721em;"></span><span class="mord">−</span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="mopen">{</span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mopen">[</span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.427em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">re</span><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.9721em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.3991em;vertical-align:-0.9721em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.427em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">re</span><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.9721em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mclose">]}</span><span class="mord">.</span></span></span></span></span></span>
+β控制偏好与参考约束的对应尺度。原始序列log概率是回答token之和，不擅自除以长度。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">输入偏好三元组(x,y_win,y_lose)，固定π_ref
+初始化待训练πθ
+循环抽batch：
+  计算胜／负回答的策略log概率和
+  计算对应参考log概率（无梯度）
+  margin←β*((logp_win-logref_win)-(logp_lose-logref_lose))
+  loss←-mean(logsigmoid(margin))
+  更新πθ，不更新参考模型
+用独立偏好及能力指标评价
+输出：对齐策略
+</code></pre>
+<p><strong>实现要点</strong>：离线偏好覆盖和建模假设仍在，不能当通用在线RL替代。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>最小化参考校正log概率差的偏好logistic损失</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>把KL正则奖励最优策略代回偏好模型，直接优化偏好对</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>已知奖励—KL前沿、GPT-4／人类胜率</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>IMDb受控奖励、TL;DR摘要、Anthropic HH对话</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>偏好数据；HH约170k比较</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>PPO、SFT等，模型大小与温度按实验分开</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>无在线RL rollout但需要偏好数据；完整算力未核实</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>已知奖励—KL前沿、GPT-4／人类胜率</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>采样温度和评价人群影响胜率</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>直接偏好目标能否替代特定RLHF流程</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：离线偏好覆盖和建模假设仍在，不能当通用在线RL替代。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>§4推导</td>
+<td>奖励与最优策略关系</td>
+<td>给出损失来源</td>
+<td>不是任意偏好都符合假设</td>
+</tr>
+<tr>
+<td>图2</td>
+<td>受控前沿与摘要比较</td>
+<td>支持性能／KL折中</td>
+<td>非所有任务均优于PPO</td>
+</tr>
+<tr>
+<td>表1</td>
+<td>域外摘要评价</td>
+<td>有限分布变化下的结果</td>
+<td>不保证任意OOD泛化</td>
+</tr>
+<tr>
+<td>§6.4人类评价</td>
+<td>与PPO的回答比较</td>
+<td>独立于自动judge的部分证据</td>
+<td>不同温度须保留</td>
+</tr>
+</tbody></table></div>
+<p><strong>结论边界</strong>：受控情感、摘要和对话实验支持直接偏好训练。离线偏好覆盖和建模假设仍在，不能当通用在线RL替代。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者贡献</strong>是直接偏好损失及解析联系。<strong>本文分析</strong>：离线数据不能主动探索未见行为；可分离偏好数据上持续增加margin可能过拟合。真实人类偏好有冲突，不一定可用单一标量排名解释。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>偏好对的新旧log比差为2，β=0.1，则模型偏好概率sigmoid(0.2)≈0.55。降低损失会扩大这个相对差，但可能通过降低负回答概率实现，未必单独提高正回答绝对概率。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>降低DPO loss是否保证正回答概率上升？</li>
+<li>偏好数据可分离时为什么可能过拟合？</li>
+<li>与在线PPO比较应如何计算数据收集成本？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>RLHF的多模型与在线训练复杂性</td>
+<td>把KL正则奖励最优策略代回偏好模型，直接优化偏好对</td>
+<td>解析最优策略关系消去显式奖励与归一化常数</td>
+<td>受控情感、摘要和对话实验支持直接偏好训练</td>
+<td>离线偏好覆盖和建模假设仍在，不能当通用在线RL替代</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：为什么 DPO 可以不显式训练奖励模型？</p>
+<p><strong>参考答案</strong>：带 KL 正则的最优策略与奖励存在解析关系。把奖励写成策略相对参考策略的对数比，再代入偏好概率模型，同一提示下的归一化项会抵消，得到直接作用于优选与拒绝回答的策略损失。</p>
+<p><strong>问题 2</strong>：省掉奖励模型，是否就摆脱了奖励假设与数据偏差？</p>
+<p><strong>参考答案</strong>：没有。偏好模型、参考策略和数据覆盖仍决定学习内容。DPO 可以更直接地利用偏好，但不能自动发现数据外的好行为，也不能保证偏好等于真实性或任务成功。它不是对所有在线 RL 问题的通用替代。</p>
+<p><a href="index.html">系列首页</a> · <a href="48-dreamerv3.html">上一篇</a> · <a href="50-ipo.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 49 天｜DPO：为什么偏好分类可以直接更新语言模型
+    <textarea id="md-source" hidden readonly># 第 49 天｜DPO：为什么偏好分类可以直接更新语言模型
 
 [系列首页](README.md) · [上一篇](48-dreamerv3.md) · [下一篇](50-ipo.md)
 
@@ -189,16 +392,16 @@ $$L=-E\log\sigma\{\beta[\log\frac{\pi_\theta(y_w|x)}{\pi_{ref}(y_w|x)}-\log\frac
 
 [系列首页](README.md) · [上一篇](48-dreamerv3.md) · [下一篇](50-ipo.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "49-dpo";
         const source = document.getElementById('md-source').value;

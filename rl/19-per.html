@@ -7,7 +7,7 @@
     <title>第 19 天｜优先经验回放：经验并非都值得同样多次重读 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,207 @@
                 <span class="text-gray-500">优先经验回放：经验并非都值得同样多次重读</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="1f67d87ec50dd4d3c228e5469539d668a9f8fa30ba6718bcd30b559dc1ffcd38"><h1>第 19 天｜优先经验回放：经验并非都值得同样多次重读</h1>
+<p><a href="index.html">系列首页</a> · <a href="18-double-dqn.html">上一篇</a> · <a href="20-dueling-dqn.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：<em>Prioritized Experience Replay</em>，2015。<a href="https://arxiv.org/abs/1511.05952">原论文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：replay中有限梯度预算怎样分配</p>
+<p><strong>旧方法卡点</strong>：均匀采样把罕见但重要的误差稀释</p>
+<p><strong>作者主张</strong>：按 TD 误差优先采样并用重要性权重修正分布</p>
+<p><strong>论文证据</strong>：Blind Cliffwalk 与 Atari 实验显示学习速度和分数收益</p>
+<p><strong>一句话</strong>：在off-policy经验回放机制，可与DQN等组合中，作者通过“按 TD 误差优先采样并用重要性权重修正分布”应对“replay中有限梯度预算怎样分配”这一问题；证据边界或代价是：大 TD 误差也可能只是噪声，采样偏差与存储维护有代价。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>优先级</strong>：决定经验抽取倾向的数值。</li>
+<li><strong>重要性权重</strong>：补偿非均匀抽样的梯度偏差。</li>
+<li><strong>TD误差</strong>：价值目标与预测差。</li>
+<li><strong>排序采样</strong>：按误差名次而非数值抽样。</li>
+<li><strong>过期优先级</strong>：网络更新后旧误差不再准确。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“replay中有限梯度预算怎样分配”放在off-policy经验回放机制，可与DQN等组合的边界内研究。均匀采样把罕见但重要的误差稀释。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>off-policy经验回放机制，可与DQN等组合</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>沿用底层算法状态</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>沿用底层动作</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>原任务奖励；优先级不是环境奖励</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>沿用真实转移终止</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>比例版本令优先级为 |δ|+ε，按幂次采样；排序版本按误差排名分配。被频繁抽取的数据会改变梯度分布，因此用重要性权重减轻偏差。优先级过期、新样本初始优先级与零概率保护都是算法一部分。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="P(i)=p_i^\alpha/\sum_jp_j^\alpha,\quad w_i=(N P(i))^{-\beta}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>P</mi><mo stretchy="false">(</mo><mi>i</mi><mo stretchy="false">)</mo><mo>=</mo><msubsup><mi>p</mi><mi>i</mi><mi>α</mi></msubsup><mi mathvariant="normal">/</mi><munder><mo>∑</mo><mi>j</mi></munder><msubsup><mi>p</mi><mi>j</mi><mi>α</mi></msubsup><mo separator="true">,</mo><mspace width="1em"/><msub><mi>w</mi><mi>i</mi></msub><mo>=</mo><mo stretchy="false">(</mo><mi>N</mi><mi>P</mi><mo stretchy="false">(</mo><mi>i</mi><mo stretchy="false">)</mo><msup><mo stretchy="false">)</mo><mrow><mo>−</mo><mi>β</mi></mrow></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">P(i)=p_i^\alpha/\sum_jp_j^\alpha,\quad w_i=(N P(i))^{-\beta}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mopen">(</span><span class="mord mathnormal">i</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4638em;vertical-align:-1.4138em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0037em;">α</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0037em;">α</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3831em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1491em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.13889em;">NP</span><span class="mopen">(</span><span class="mord mathnormal">i</span><span class="mclose">)</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mathnormal mtight" style="margin-right:0.05278em;">β</span></span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span>
+α=0恢复均匀；β控制修正强度，常逐步趋近1。权重归一化影响整体步幅；α与β的角色不同。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">每个新转移以较高初始优先级加入 replay
+每次更新：
+  按 P(i) 抽 minibatch
+  计算当前 TD 目标与 δ_i
+  w_i ← (N*P(i))^(-β)，按实现归一化
+  用 mean(w_i*TD_loss_i) 更新网络
+  将本批优先级改为 abs(δ_i)+ε
+  更新 β 日程
+输出：相同任务策略及非均匀 replay
+</code></pre>
+<p><strong>实现要点</strong>：大 TD 误差也可能只是噪声，采样偏差与存储维护有代价。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>底层TD目标不变；改变抽样分布并用权重调整梯度</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>按 TD 误差优先采样并用重要性权重修正分布</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>学习所需更新、归一化分数</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>Blind Cliffwalk、57款Atari</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>相同来源replay，改变抽样次数</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>均匀replay、Double DQN、两类优先机制</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>曲线按环境帧或更新次数分别报告</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>学习所需更新、归一化分数</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>Cliffwalk图2含10初始化的范围</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>重新分配训练注意力是否更有效</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：大 TD 误差也可能只是噪声，采样偏差与存储维护有代价。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>图2</td>
+<td>Cliffwalk所需更新</td>
+<td>稀有成功经验传播更快</td>
+<td>不等于真实采样也自动更多成功</td>
+</tr>
+<tr>
+<td>图3</td>
+<td>Double DQN加／不加优先回放</td>
+<td>多数游戏受益</td>
+<td>不是全部游戏提高</td>
+</tr>
+<tr>
+<td>图4／表1</td>
+<td>学习速度与汇总成绩</td>
+<td>支持预算内效果</td>
+<td>步数不含树结构维护时间</td>
+</tr>
+</tbody></table></div>
+<p><strong>结论边界</strong>：Blind Cliffwalk 与 Atari 实验显示学习速度和分数收益。大 TD 误差也可能只是噪声，采样偏差与存储维护有代价。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者机制</strong>包含随机化与重要性修正。<strong>本文分析</strong>：过度追逐随机奖励会浪费更新，完全低优先的经验也可能未来重要。优先回放只改变已有数据的利用，不能生成未见过的关键行为。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>三条误差1、2、7，α=1且忽略ε，采样概率0.1、0.2、0.7。β=1时未归一化权重为3.33、1.67、0.476：第三条出现频繁，但每次贡献被缩小。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>高噪声转移会否长期霸占训练？</li>
+<li>β=1是否在所有实现下完全消除偏差？</li>
+<li>额外采样维护时间怎样计入效率？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>replay中有限梯度预算怎样分配</td>
+<td>按 TD 误差优先采样并用重要性权重修正分布</td>
+<td>把更多更新分给当前误差大的经验，加快有用信息传播</td>
+<td>Blind Cliffwalk 与 Atari 实验显示学习速度和分数收益</td>
+<td>大 TD 误差也可能只是噪声，采样偏差与存储维护有代价</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：为什么优先学习 TD 误差大的样本？</p>
+<p><strong>参考答案</strong>：大误差表示当前估值与目标存在较大分歧，这次更新可能产生更多学习进展。但它只是启发式指标：误差也可能来自不可预测噪声，因此需要让其他样本仍有机会被采到，避免训练被少数异常经验占据。</p>
+<p><strong>问题 2</strong>：重要性权重修正了什么，没有修正什么？</p>
+<p><strong>参考答案</strong>：它修正相对于目标回放分布的非均匀抽样。常见权重与 <span class="reading-math" data-tex="(NP(i))^{-\beta}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>N</mi><mi>P</mi><mo stretchy="false">(</mo><mi>i</mi><mo stretchy="false">)</mo><msup><mo stretchy="false">)</mo><mrow><mo>−</mo><mi>β</mi></mrow></msup></mrow><annotation encoding="application/x-tex">(NP(i))^{-\beta}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0991em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.13889em;">NP</span><span class="mopen">(</span><span class="mord mathnormal">i</span><span class="mclose">)</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mathnormal mtight" style="margin-right:0.05278em;">β</span></span></span></span></span></span></span></span></span></span></span></span></span> 成正比；适当条件下 β=1 对应完整抽样修正。它并不自动修复错误 TD 目标，也不是对所有 off-policy 偏差的统一修正。</p>
+<p><a href="index.html">系列首页</a> · <a href="18-double-dqn.html">上一篇</a> · <a href="20-dueling-dqn.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 19 天｜优先经验回放：经验并非都值得同样多次重读
+    <textarea id="md-source" hidden readonly># 第 19 天｜优先经验回放：经验并非都值得同样多次重读
 
 [系列首页](README.md) · [上一篇](18-double-dqn.md) · [下一篇](20-dueling-dqn.md)
 
@@ -187,16 +383,16 @@ $$P(i)=p_i^\alpha/\sum_jp_j^\alpha,\quad w_i=(N P(i))^{-\beta}.$$
 
 [系列首页](README.md) · [上一篇](18-double-dqn.md) · [下一篇](20-dueling-dqn.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "19-per";
         const source = document.getElementById('md-source').value;

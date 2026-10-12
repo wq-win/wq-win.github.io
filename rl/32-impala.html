@@ -7,7 +7,7 @@
     <title>第 32 天｜IMPALA：采样与学习分离后，用V-trace处理策略滞后 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,214 @@
                 <span class="text-gray-500">IMPALA：采样与学习分离后，用V-trace处理策略滞后</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="f8befa7083ad9aad88229fcbdfdde0d198e2dbf37661d68ad1357c3895a78786"><h1>第 32 天｜IMPALA：采样与学习分离后，用V-trace处理策略滞后</h1>
+<p><a href="index.html">系列首页</a> · <a href="31-td3.html">上一篇</a> · <a href="33-diayn.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：<em>IMPALA: Scalable Distributed Deep-RL with Importance Weighted Actor-Learner Architectures</em>，2018。<a href="https://arxiv.org/abs/1802.01561">原论文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：大规模分布式RL的吞吐与数据滞后</p>
+<p><strong>旧方法卡点</strong>：Actor等待Learner浪费资源，完全解耦又导致off-policy数据</p>
+<p><strong>作者主张</strong>：用Actor–Learner队列解耦并通过截断重要性比构造V-trace</p>
+<p><strong>论文证据</strong>：吞吐、DMLab与Atari实验展示可扩展训练</p>
+<p><strong>一句话</strong>：在分布式Actor–Learner、off-policy校正的Actor–Critic中，作者通过“用Actor–Learner队列解耦并通过截断重要性比构造V-trace”应对“大规模分布式RL的吞吐与数据滞后”这一问题；证据边界或代价是：截断引入特定偏差，系统吞吐不等于环境样本效率。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>策略滞后</strong>：数据来自较旧行为策略。</li>
+<li><strong>Actor–Learner</strong>：环境采样和梯度训练的分工。</li>
+<li><strong>V-trace</strong>：截断重要性校正的多步价值目标。</li>
+<li><strong>重要性比</strong>：目标与行为概率的比例。</li>
+<li><strong>吞吐</strong>：单位真实时间处理的样本量。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“大规模分布式RL的吞吐与数据滞后”放在分布式Actor–Learner、off-policy校正的Actor–Critic的边界内研究。Actor等待Learner浪费资源，完全解耦又导致off-policy数据。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>分布式Actor–Learner、off-policy校正的Actor–Critic</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>各Actor环境观测</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>行为策略μ采样动作</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>环境奖励</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>unroll边界bootstrap，真终止清零</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>Actor将整段轨迹和行为概率发给Learner。Learner策略π更新得更快，需要修正π/μ。V-trace分别截断一步TD校正ρ与迹传播c：前者影响目标策略，后者主要调节多步传播和方差，不能混为一个参数。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="v_s=V(s)+\sum_{t\ge s}\gamma^{t-s}(\prod_{i=s}^{t-1}c_i)\rho_t[r_t+\gamma V(s_{t+1})-V(s_t)]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>v</mi><mi>s</mi></msub><mo>=</mo><mi>V</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>+</mo><munder><mo>∑</mo><mrow><mi>t</mi><mo>≥</mo><mi>s</mi></mrow></munder><msup><mi>γ</mi><mrow><mi>t</mi><mo>−</mo><mi>s</mi></mrow></msup><mo stretchy="false">(</mo><munderover><mo>∏</mo><mrow><mi>i</mi><mo>=</mo><mi>s</mi></mrow><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></munderover><msub><mi>c</mi><mi>i</mi></msub><mo stretchy="false">)</mo><msub><mi>ρ</mi><mi>t</mi></msub><mo stretchy="false">[</mo><msub><mi>r</mi><mi>t</mi></msub><mo>+</mo><mi>γ</mi><mi>V</mi><mo stretchy="false">(</mo><msub><mi>s</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">)</mo><mo>−</mo><mi>V</mi><mo stretchy="false">(</mo><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">v_s=V(s)+\sum_{t\ge s}\gamma^{t-s}(\prod_{i=s}^{t-1}c_i)\rho_t[r_t+\gamma V(s_{t+1})-V(s_t)].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">s</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:3.1575em;vertical-align:-1.3564em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8888em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mrel mtight">≥</span><span class="mord mathnormal mtight">s</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3564em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8436em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mathnormal mtight">s</span></span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8011em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">=</span><span class="mord mathnormal mtight">s</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∏</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal">ρ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">γV</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)]</span><span class="mord">.</span></span></span></span></span></span>
+<span class="reading-math" data-tex="\rho=\min(\bar\rho,\pi/\mu)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ρ</mi><mo>=</mo><mi>min</mi><mo>⁡</mo><mo stretchy="false">(</mo><mover accent="true"><mi>ρ</mi><mo>ˉ</mo></mover><mo separator="true">,</mo><mi>π</mi><mi mathvariant="normal">/</mi><mi>μ</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\rho=\min(\bar\rho,\pi/\mu)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ρ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">min</span><span class="mopen">(</span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">ρ</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">ˉ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mord">/</span><span class="mord mathnormal">μ</span><span class="mclose">)</span></span></span></span></span>，<span class="reading-math" data-tex="c=\min(\bar c,\pi/\mu)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi><mo>=</mo><mi>min</mi><mo>⁡</mo><mo stretchy="false">(</mo><mover accent="true"><mi>c</mi><mo>ˉ</mo></mover><mo separator="true">,</mo><mi>π</mi><mi mathvariant="normal">/</mi><mi>μ</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">c=\min(\bar c,\pi/\mu)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">c</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">min</span><span class="mopen">(</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">c</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mord">/</span><span class="mord mathnormal">μ</span><span class="mclose">)</span></span></span></span></span>。截断不是免费修正，理论固定点需按论文解释。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">Actor：同步策略→执行unroll→发送状态动作奖励与logμ
+Learner接收批轨迹：
+  计算当前logπ与V
+  ratio←exp(logπ-logμ)
+  ρ←min(ρbar,ratio)；c←min(cbar,ratio)
+  反向递推V-trace目标v
+  用v回归V
+  Actor用ρ*(r+γ*v_next-V)构造优势更新
+  将新参数供Actor获取
+输出：可扩展的共享策略
+</code></pre>
+<p><strong>实现要点</strong>：截断引入特定偏差，系统吞吐不等于环境样本效率。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>V-trace价值回归和校正Actor优势目标</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>用Actor–Learner队列解耦并通过截断重要性比构造V-trace</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>每秒帧数、任务分数、多任务表现</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>DMLab-30、Atari及吞吐任务</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>多Actor持续生成轨迹</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>A2C等系统与不同校正</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>表1比较特定任务吞吐；硬件数影响结果</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>每秒帧数、任务分数、多任务表现</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>全部种子／区间本文未核实</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>解耦后吞吐收益能否在策略滞后下保留</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：截断引入特定偏差，系统吞吐不等于环境样本效率。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>图1—2</td>
+<td>架构与执行时间线</td>
+<td>解释吞吐差异</td>
+<td>不是回报提升本身</td>
+</tr>
+<tr>
+<td>V-trace理论部分（具体图表编号本文未核实）</td>
+<td>截断比与目标固定点</td>
+<td>解释校正边界</td>
+<td>不等于完全无偏</td>
+</tr>
+<tr>
+<td>表1</td>
+<td>两任务不同系统吞吐</td>
+<td>具体硬件／任务效率</td>
+<td>不能泛化所有环境</td>
+</tr>
+<tr>
+<td>§5任务结果</td>
+<td>单／多任务训练表现</td>
+<td>支持规模化使用</td>
+<td>不意味着零负迁移</td>
+</tr>
+</tbody></table></div>
+<p><strong>结论边界</strong>：吞吐、DMLab与Atari实验展示可扩展训练。截断引入特定偏差，系统吞吐不等于环境样本效率。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者贡献</strong>结合系统架构与统计修正。<strong>本文分析</strong>：队列过长会使μ离π太远，截断后有效学习信号减弱。必须同时画return-vs-frame与return-vs-time才能说明效率改善来自哪里。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>某动作μ概率0.1、π概率0.8，比值8。上限ρbar=1会将校正压到1，减小高方差但不再等同完整比值8的估计。把截断称作“完全修正”会误导。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>队列长度如何影响有效样本质量？</li>
+<li>ρ与c两个截断各自改变什么？</li>
+<li>多任务共享提高均值时是否存在负迁移？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>大规模分布式RL的吞吐与数据滞后</td>
+<td>用Actor–Learner队列解耦并通过截断重要性比构造V-trace</td>
+<td>截断重要性比使滞后的Actor数据在高吞吐训练中仍可用</td>
+<td>吞吐、DMLab与Atari实验展示可扩展训练</td>
+<td>截断引入特定偏差，系统吞吐不等于环境样本效率</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：为什么采样和学习分离后需要 V-trace？</p>
+<p><strong>参考答案</strong>：采样器可能使用较旧策略，而学习器参数已更新。直接按当前策略数据处理会产生分布偏差。V-trace 利用当前与行为策略的动作概率比，并结合多步自举，对这种策略滞后进行修正。</p>
+<p><strong>问题 2</strong>：为什么不直接使用完整的重要性权重？</p>
+<p><strong>参考答案</strong>：长轨迹概率比可能极大，造成高方差和不稳定。截断权重能控制波动，但修正不再完全，某些截断设置还会改变评价的固定点。它是在可扩展性、方差和偏差之间取舍。</p>
+<p><a href="index.html">系列首页</a> · <a href="31-td3.html">上一篇</a> · <a href="33-diayn.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 32 天｜IMPALA：采样与学习分离后，用V-trace处理策略滞后
+    <textarea id="md-source" hidden readonly># 第 32 天｜IMPALA：采样与学习分离后，用V-trace处理策略滞后
 
 [系列首页](README.md) · [上一篇](31-td3.md) · [下一篇](33-diayn.md)
 
@@ -189,16 +392,16 @@ Learner接收批轨迹：
 
 [系列首页](README.md) · [上一篇](31-td3.md) · [下一篇](33-diayn.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "32-impala";
         const source = document.getElementById('md-source').value;

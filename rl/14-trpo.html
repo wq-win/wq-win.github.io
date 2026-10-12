@@ -7,7 +7,7 @@
     <title>第 14 天｜TRPO：策略更新太猛，为什么会毁掉好不容易学会的行为 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,208 @@
                 <span class="text-gray-500">TRPO：策略更新太猛，为什么会毁掉好不容易学会的行为</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="8473adfdc8aaca07dd98f5950fc96874d23987e07110b324d6c3e5aac5ef16f3"><h1>第 14 天｜TRPO：策略更新太猛，为什么会毁掉好不容易学会的行为</h1>
+<p><a href="index.html">系列首页</a> · <a href="13-dpg.html">上一篇</a> · <a href="15-gae.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：Schulman 等，<em>Trust Region Policy Optimization</em>，2015。<a href="https://arxiv.org/html/1502.05477v5">正文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：策略更新的稳定性</p>
+<p><strong>旧方法卡点</strong>：旧策略样本上的改进不一定迁移到大幅变化的新策略</p>
+<p><strong>作者主张</strong>：以 KL 信赖域限制策略变化，近似求解受约束替代目标</p>
+<p><strong>论文证据</strong>：理论界与控制实验支持保守更新的设计</p>
+<p><strong>一句话</strong>：在单智能体、on-policy 随机策略优化中，作者通过“以 KL 信赖域限制策略变化，近似求解受约束替代目标”应对“策略更新的稳定性”这一问题；证据边界或代价是：实际平均 KL 与理论最坏状态约束不同，不构成无条件单调保证。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>信赖域</strong>：限制一步优化偏离可靠区域。</li>
+<li><strong>重要性比</strong>：新旧策略对样本概率的比值。</li>
+<li><strong>替代目标</strong>：用旧样本估计新策略收益的代理。</li>
+<li><strong>共轭梯度</strong>：无需显式逆矩阵的线性求解方法。</li>
+<li><strong>回溯搜索</strong>：逐步缩短候选更新直到满足条件。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“策略更新的稳定性”放在单智能体、on-policy 随机策略优化的边界内研究。旧策略样本上的改进不一定迁移到大幅变化的新策略。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>单智能体、on-policy 随机策略优化</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>控制状态或 Atari 图像</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>连续或离散动作</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>任务回报</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>真终止及 rollout 截断要区分</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>从旧策略得到优势与样本，使用概率比比较新旧策略对已执行动作的倾向。实际求解把目标线性化、KL 二次化，用共轭梯度求方向，再回溯验证近似是否可靠。它沿用策略梯度与自然梯度几何，新增的是受限更新及可执行近似。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="\max_\theta E_{old}[\rho_t(\theta)\hat A_t],\quad E_sD_{KL}(\pi_{old}\|\pi_\theta)\le\delta,\quad\rho_t=\pi_\theta(a_t|s_t)/\pi_{old}(a_t|s_t)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>θ</mi></munder><msub><mi>E</mi><mrow><mi>o</mi><mi>l</mi><mi>d</mi></mrow></msub><mo stretchy="false">[</mo><msub><mi>ρ</mi><mi>t</mi></msub><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><msub><mover accent="true"><mi>A</mi><mo>^</mo></mover><mi>t</mi></msub><mo stretchy="false">]</mo><mo separator="true">,</mo><mspace width="1em"/><msub><mi>E</mi><mi>s</mi></msub><msub><mi>D</mi><mrow><mi>K</mi><mi>L</mi></mrow></msub><mo stretchy="false">(</mo><msub><mi>π</mi><mrow><mi>o</mi><mi>l</mi><mi>d</mi></mrow></msub><mi mathvariant="normal">∥</mi><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">)</mo><mo>≤</mo><mi>δ</mi><mo separator="true">,</mo><mspace width="1em"/><msub><mi>ρ</mi><mi>t</mi></msub><mo>=</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>a</mi><mi>t</mi></msub><mi mathvariant="normal">∣</mi><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><msub><mi>π</mi><mrow><mi>o</mi><mi>l</mi><mi>d</mi></mrow></msub><mo stretchy="false">(</mo><msub><mi>a</mi><mi>t</mi></msub><mi mathvariant="normal">∣</mi><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\max_\theta E_{old}[\rho_t(\theta)\hat A_t],\quad E_sD_{KL}(\pi_{old}\|\pi_\theta)\le\delta,\quad\rho_t=\pi_\theta(a_t|s_t)/\pi_{old}(a_t|s_t).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.6989em;vertical-align:-0.7521em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.4306em;"><span style="top:-2.3479em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">max</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7521em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal">ρ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">A</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1111em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">]</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">s</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">K</span><span class="mord mathnormal mtight">L</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∥</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">ρ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">/</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span>
+理论推导中的最坏状态散度不能直接替换为实验平均散度后仍声称完全相同保证。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">冻结旧策略 π_old
+用 π_old 收集轨迹，估计优势 A
+计算替代目标梯度 g
+定义 KL Hessian-vector product Fv
+用共轭梯度解 Fd≈g
+缩放 d 使局部二次 KL≈δ
+沿 d 回溯候选 θ：
+  若样本替代目标改善且样本平均 KL≤δ：接受
+  否则缩短步长；无可行步则保持 θ
+更新价值估计，开始下一轮
+</code></pre>
+<p><strong>实现要点</strong>：实际平均 KL 与理论最坏状态约束不同，不构成无条件单调保证。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>最大化旧数据上的概率比优势替代目标，受平均KL约束</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>以 KL 信赖域限制策略变化，近似求解受约束替代目标</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>回报与学习曲线</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>§8 连续控制和 Atari</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>on-policy 轨迹；single-path 与 vine 分开</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>自然梯度、其他策略搜索等</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>实验 δ=0.01；完整任务步数本文未逐项核实</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>回报与学习曲线</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>运动任务图4 平均5次运行；其他图按各自协议</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>受限更新是否改善稳定性与样本利用</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：实际平均 KL 与理论最坏状态约束不同，不构成无条件单调保证。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>§3 理论界</td>
+<td>真实性能差与替代目标／散度</td>
+<td>解释小步更新动机</td>
+<td>不等于实际网络严格保证</td>
+</tr>
+<tr>
+<td>§4—5 近似与采样</td>
+<td>可计算 KL 与优化流程</td>
+<td>展示理论如何落地</td>
+<td>不证明近似误差为零</td>
+</tr>
+<tr>
+<td>§8 图4</td>
+<td>连续运动学习曲线</td>
+<td>支持所测任务的表现</td>
+<td>不提供所有场景的最优性</td>
+</tr>
+</tbody></table></div>
+<p><strong>结论边界</strong>：理论界与控制实验支持保守更新的设计。实际平均 KL 与理论最坏状态约束不同，不构成无条件单调保证。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者区分</strong>理论与实际近似。<strong>本文分析</strong>：vine 采样需要恢复环境状态，可能拥有现实机器人没有的权限；样本 KL 也可能漏掉未访问状态的大变化。对照 PPO 时应同时看更新速度、样本效率与实现复杂度。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>旧策略动作概率0.1，新策略0.9，优势为正，替代目标会强烈奖励这个变化。但旧数据几乎没覆盖新策略大量访问的后续状态。KL 约束的意义是限制这种外推，不是证明该动作不值得增加。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>平均 KL 很小却有少数状态变化巨大，可能发生什么？</li>
+<li>恢复状态的 vine 采样额外提供了什么能力？</li>
+<li>回溯通过是否意味着真实回报一定提升？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>策略更新的稳定性</td>
+<td>以 KL 信赖域限制策略变化，近似求解受约束替代目标</td>
+<td>限制更新区域，使旧策略样本对新策略更有参考价值</td>
+<td>理论界与控制实验支持保守更新的设计</td>
+<td>实际平均 KL 与理论最坏状态约束不同，不构成无条件单调保证</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：为什么使用旧策略数据时，新策略不能变化过猛？</p>
+<p><strong>参考答案</strong>：旧轨迹主要覆盖旧策略常去的状态。新策略大幅变化后，可能进入旧数据几乎没覆盖的区域，旧优势估计就不能可靠预测新回报。TRPO 通过 KL 约束控制更新幅度，提高替代目标的局部可信度。</p>
+<p><strong>问题 2</strong>：论文中的单调改进思想，为什么不等于实际神经网络训练每步都进步？</p>
+<p><strong>参考答案</strong>：理论使用特定误差界、精确量或更强约束；实际采用有限样本、近似优势、平均 KL、近似二阶计算和线搜索。这些近似改变了保证成立的条件，因此仍可能出现性能下降。</p>
+<p><a href="index.html">系列首页</a> · <a href="13-dpg.html">上一篇</a> · <a href="15-gae.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 14 天｜TRPO：策略更新太猛，为什么会毁掉好不容易学会的行为
+    <textarea id="md-source" hidden readonly># 第 14 天｜TRPO：策略更新太猛，为什么会毁掉好不容易学会的行为
 
 [系列首页](README.md) · [上一篇](13-dpg.md) · [下一篇](15-gae.md)
 
@@ -188,16 +385,16 @@ $$\max_\theta E_{old}[\rho_t(\theta)\hat A_t],\quad E_sD_{KL}(\pi_{old}\|\pi_\th
 
 [系列首页](README.md) · [上一篇](13-dpg.md) · [下一篇](15-gae.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "14-trpo";
         const source = document.getElementById('md-source').value;

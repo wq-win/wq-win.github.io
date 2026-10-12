@@ -7,7 +7,7 @@
     <title>第 05 天｜REINFORCE：环境不可微，也能沿奖励的梯度学习 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,222 @@
                 <span class="text-gray-500">REINFORCE：环境不可微，也能沿奖励的梯度学习</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="13c77e6e27317dfcdf7d92b032306e2aaf1d3a3b3195dfd1e0f78c10adf7bb27"><h1>第 05 天｜REINFORCE：环境不可微，也能沿奖励的梯度学习</h1>
+<p><a href="index.html">系列首页</a> · <a href="04-q-learning.html">上一篇</a> · <a href="06-sarsa.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：Williams，<em>Simple Statistical Gradient-Following Algorithms for Connectionist Reinforcement Learning</em>，1992。<a href="https://gwern.net/doc/reinforcement-learning/model-free/1992-williams.pdf">原文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：只有标量反馈时如何直接训练随机行为</p>
+<p><strong>旧方法卡点</strong>：环境不提供正确动作标签，奖励也未必能对动作求导</p>
+<p><strong>作者主张</strong>：以奖励减基线乘对数概率梯度更新策略</p>
+<p><strong>论文证据</strong>：§4 的期望更新分析建立梯度方向性质</p>
+<p><strong>一句话</strong>：在随机策略的强化学习；原文含即时与延迟强化中，作者通过“以奖励减基线乘对数概率梯度更新策略”应对“只有标量反馈时如何直接训练随机行为”这一问题；证据边界或代价是：高方差、长时信用分配与有限样本噪声仍在。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>随机策略</strong>：给动作分配概率而非只输出一个动作。</li>
+<li><strong>似然比技巧</strong>：用 log 概率导数改写分布期望的梯度。</li>
+<li><strong>Monte Carlo 回报</strong>：由完整采样轨迹累加得到的结果。</li>
+<li><strong>基线</strong>：用于比较好坏、可减少梯度噪声的参考量。</li>
+<li><strong>信用分配</strong>：判断长序列中哪些行动促成最终结果。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>监督学习给出正确答案，强化学习只说这次结果好不好。策略于是既是模型，也是采样分布。本文不是专门针对深度网络游戏控制的论文，而是讨论一类连接主义随机单元的学习规则。以下用有限回合、γ=1 的现代记法解释其核心，避免把今日常见代码当成原文的全部内容。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>随机策略的强化学习；原文含即时与延迟强化</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>网络输入或序列状态</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>按概率分布采样的离散或连续输出</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>即时奖励或回合后续回报 G</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>回合结束后计算完整回报；原文也讨论其他反馈时序</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>关键转变是对采样概率求导，而不是对环境求导。高回报样本对应的 log 概率被增加，低回报样本被降低。基线不必等于零，但给定状态后不能依赖当前抽中的动作，才能在期望梯度中抵消。Critic 是可选的基线估计器，不是 REINFORCE 成立的必要网络。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="\nabla J=\mathbb E_\tau[R(\tau)\nabla\log p_\theta(\tau)],\quad \hat g=\sum_t(G_t-b(s_t))\nabla\log\pi_\theta(a_t\mid s_t)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">∇</mi><mi>J</mi><mo>=</mo><msub><mi mathvariant="double-struck">E</mi><mi>τ</mi></msub><mo stretchy="false">[</mo><mi>R</mi><mo stretchy="false">(</mo><mi>τ</mi><mo stretchy="false">)</mo><mi mathvariant="normal">∇</mi><mi>log</mi><mo>⁡</mo><msub><mi>p</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>τ</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mo separator="true">,</mo><mspace width="1em"/><mover accent="true"><mi>g</mi><mo>^</mo></mover><mo>=</mo><munder><mo>∑</mo><mi>t</mi></munder><mo stretchy="false">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><mi>b</mi><mo stretchy="false">(</mo><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mi mathvariant="normal">∇</mi><mi>log</mi><mo>⁡</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>a</mi><mi>t</mi></msub><mo>∣</mo><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\nabla J=\mathbb E_\tau[R(\tau)\nabla\log p_\theta(\tau)],\quad \hat g=\sum_t(G_t-b(s_t))\nabla\log\pi_\theta(a_t\mid s_t).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">∇</span><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mclose">)</span><span class="mord">∇</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mclose">)]</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3em;vertical-align:-1.25em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">b</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">))</span><span class="mord">∇</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>第一式来自 <span class="reading-math" data-tex="\nabla p=p\nabla\log p"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∇</mi><mi>p</mi><mo>=</mo><mi>p</mi><mi mathvariant="normal">∇</mi><mi>log</mi><mo>⁡</mo><mi>p</mi></mrow><annotation encoding="application/x-tex">\nabla p=p\nabla\log p</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord">∇</span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mord">∇</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span></span></span></span></span>；不依赖 θ 的环境转移项在 log 概率的导数中消失。第二式使用后续回报，省去与当前动作无因果关联的过去奖励。这里 γ=1；若换折扣目标，需要同步核对时间权重。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。<code>stop_gradient</code> 表示停止向目标量传播梯度。</p>
+<pre><code class="language-text">输入：随机策略 πθ，完整回合采样器
+重复：
+  用当前 πθ 采样若干完整回合并保存 logπθ(a|s)
+  对每个回合从后向前计算 G_t = r_t + G_(t+1)
+  对每步取 b_t（零或只依赖状态的旧基线）
+  A_t ← stop_gradient(G_t-b_t)
+  L_actor ← -平均回合的 Σ_t logπθ(a_t|s_t)*A_t
+  对 L_actor 梯度下降
+  若使用学习基线：以 G_t 为停止梯度的回归目标更新它
+输出：更新后的动作分布
+</code></pre>
+<p>不要对 A 的数值误差反向穿过 Actor，否则优化的是另一目标。同一批样本反复更新很多轮时，采样策略已经过期；原始 on-policy 梯度不能无条件重用。训练基线时先分清共享网络与独立网络。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>最大化期望奖励；实现常写为负 log 概率加权损失</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>以奖励减基线乘对数概率梯度更新策略</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>理论期望方向与样本梯度性质，不是每步回报单调增加</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>随机单元及强化学习理论设定</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>从自身分布产生的输出及奖励</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>直接梯度表达式、不同强化规则</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>此处不对应统一现代基准预算</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>期望更新与期望奖励梯度的关系</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>理论期望不等于小样本置信区间</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>仅有奖励的随机输出规则能否找到有用更新方向</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：一个 rollout 的全部动作共享终局奖励，会带来方差，不代表每步都应同等受奖。比较基线时应看梯度估计方差和同等采样预算下的真实回报；仅看损失不能判断好坏。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>§3 奖励设定</td>
+<td>明确随机输出与强化信号</td>
+<td>建立可求期望的对象</td>
+<td>不自动适合依赖参数的环境</td>
+</tr>
+<tr>
+<td>§4 Theorem 1</td>
+<td>期望更新与梯度方向比较</td>
+<td>相应条件下得到方向性质</td>
+<td>不保证单样本更新有益</td>
+</tr>
+<tr>
+<td>延迟强化相关讨论（具体图表编号本文未核实）</td>
+<td>即时反馈与延迟反馈的推广</td>
+<td>可用于序列信用分配</td>
+<td>不证明长回合方差已经解决</td>
+</tr>
+</tbody></table></div>
+<p>本文证据以数学分析为主。等标量学习率的情形与参数具有不同学习率的方向表述需要区分；“REINFORCE 是无偏的”也必须说明采用什么回报、基线和采样分布。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者贡献</strong>是统一的随机梯度学习规则。<strong>本文分析</strong>：方差会随奖励噪声、轨迹长度和概率尖锐程度变化；加入状态基线通常有帮助，但任意基线不保证降低方差。参数化策略也可能有局部最优或边界问题。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>二动作策略令 p(a1)=sigmoid(θ)=0.2。抽到 a1，回报减基线为 3，那么 log 概率梯度是 1−0.2=0.8，贡献是 2.4；若优势为 −3，贡献是 −2.4。增加概率的是“比基线好”的行为，未必是原始奖励大于零的行为。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>为什么只依赖状态的基线在期望中抵消？</li>
+<li>同一批轨迹更新十轮后，梯度还对应当前策略吗？</li>
+<li>回报标准化会改变什么，何时不能直接称为无偏？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>只有标量反馈时如何直接训练随机行为</td>
+<td>以奖励减基线乘对数概率梯度更新策略</td>
+<td>提高有利样本的采样概率在期望上对应期望奖励的导数</td>
+<td>§4 的期望更新分析建立梯度方向性质</td>
+<td>高方差、长时信用分配与有限样本噪声仍在</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：环境不可微，REINFORCE 怎么得到梯度？</p>
+<p><strong>参考答案</strong>：它不对环境求导，而对“策略生成这些动作的概率”求导：</p>
+<p><span class="reading-math" data-tex="\nabla_\theta J
+=
+\mathbb E\!\left[
+\sum_t\nabla_\theta\log\pi_\theta(a_t|s_t)G_t
+\right]"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="normal">∇</mi><mi>θ</mi></msub><mi>J</mi><mo>=</mo><mi mathvariant="double-struck">E</mi><mtext> ⁣</mtext><mrow><mo fence="true">[</mo><munder><mo>∑</mo><mi>t</mi></munder><msub><mi mathvariant="normal">∇</mi><mi>θ</mi></msub><mi>log</mi><mo>⁡</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>a</mi><mi>t</mi></msub><mi mathvariant="normal">∣</mi><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo><msub><mi>G</mi><mi>t</mi></msub><mo fence="true">]</mo></mrow></mrow><annotation encoding="application/x-tex">\nabla_\theta J
+=
+\mathbb E\!\left[
+\sum_t\nabla_\theta\log\pi_\theta(a_t|s_t)G_t
+\right]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3em;vertical-align:-1.25em;"></span><span class="mord mathbb">E</span><span class="mspace" style="margin-right:-0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size4">[</span></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size4">]</span></span></span></span></span></span></span></span></p>
+<p>高回报样本推动相关动作概率上升。环境虽然决定样本回报，但不需要提供从奖励到动作的可微路径。</p>
+<p><strong>问题 2</strong>：减去状态基线为什么不改变期望梯度？</p>
+<p><strong>参考答案</strong>：给定状态，基线不依赖当前采样动作时：</p>
+<p><span class="reading-math" data-tex="\mathbb E_{a\sim\pi}
+[\nabla_\theta\log\pi(a|s)b(s)]=0"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="double-struck">E</mi><mrow><mi>a</mi><mo>∼</mo><mi>π</mi></mrow></msub><mo stretchy="false">[</mo><msub><mi mathvariant="normal">∇</mi><mi>θ</mi></msub><mi>log</mi><mo>⁡</mo><mi>π</mi><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">∣</mi><mi>s</mi><mo stretchy="false">)</mo><mi>b</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\mathbb E_{a\sim\pi}
+[\nabla_\theta\log\pi(a|s)b(s)]=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mrel mtight">∼</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mord mathnormal">b</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)]</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span></span></p>
+<p>因此它不改变期望方向，却能去掉“这个状态本来就容易得高分”的部分，降低波动。基线在策略梯度项中还应作为固定量处理，不能任意通过它反向传播。</p>
+<p><a href="index.html">系列首页</a> · <a href="04-q-learning.html">上一篇</a> · <a href="06-sarsa.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 05 天｜REINFORCE：环境不可微，也能沿奖励的梯度学习
+    <textarea id="md-source" hidden readonly># 第 05 天｜REINFORCE：环境不可微，也能沿奖励的梯度学习
 
 [系列首页](README.md) · [上一篇](04-q-learning.md) · [下一篇](06-sarsa.md)
 
@@ -206,16 +417,16 @@ $$
 
 [系列首页](README.md) · [上一篇](04-q-learning.md) · [下一篇](06-sarsa.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "05-reinforce";
         const source = document.getElementById('md-source').value;
