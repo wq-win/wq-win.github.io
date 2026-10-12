@@ -7,6 +7,36 @@
         return RANK[rank] || String(rank);
     }
 
+    var PIPS = {
+        2: [[50, 16], [50, 84]],
+        3: [[50, 14], [50, 50], [50, 86]],
+        4: [[28, 16], [72, 16], [28, 84], [72, 84]],
+        5: [[28, 16], [72, 16], [50, 50], [28, 84], [72, 84]],
+        6: [[28, 14], [72, 14], [28, 50], [72, 50], [28, 86], [72, 86]],
+        7: [[28, 14], [72, 14], [50, 32], [28, 50], [72, 50], [28, 86], [72, 86]],
+        8: [[28, 14], [72, 14], [50, 32], [28, 50], [72, 50], [50, 68], [28, 86], [72, 86]],
+        9: [[28, 10], [72, 10], [28, 36], [72, 36], [50, 50], [28, 64], [72, 64], [28, 90], [72, 90]],
+        10: [[28, 10], [72, 10], [50, 24], [28, 38], [72, 38], [28, 62], [72, 62], [50, 76], [28, 90], [72, 90]]
+    };
+    var COURT = { 11: 'jack', 12: 'queen', 13: 'king' };
+
+    function cardArtwork(card) {
+        var label = rankText(card.r);
+        var suit = SUITS[card.s];
+        var corner = '<b>' + label + '</b><i>' + suit + '</i>';
+        var center;
+        if (card.r >= 11) {
+            center = '<img class="spider-court" src="assets/paodekuai/court-' + COURT[card.r] + '.svg" alt="" draggable="false">';
+        } else if (card.r === 1) {
+            center = '<span class="spider-ace" aria-hidden="true">' + suit + '</span>';
+        } else {
+            center = '<span class="spider-pips" aria-hidden="true">' + PIPS[card.r].map(function (point) {
+                return '<span class="spider-pip' + (point[1] > 50 ? ' is-flipped' : '') + '" style="left:' + point[0] + '%;top:' + point[1] + '%">' + suit + '</span>';
+            }).join('') + '</span>';
+        }
+        return '<span class="spider-corner" aria-hidden="true">' + corner + '</span>' + center + '<span class="spider-corner spider-corner-bottom" aria-hidden="true">' + corner + '</span>';
+    }
+
     function buildDeck(suitCount) {
         var suits = ['S', 'H', 'D', 'C'].slice(0, suitCount);
         var copies = 8 / suitCount;
@@ -137,37 +167,48 @@
         state.columns.forEach(function (col, index) {
             var pile = document.createElement('div');
             pile.className = 'spider-col' + (col.length ? '' : ' is-empty');
-            pile.style.height = (col.length ? (72 + (col.length - 1) * 20) : 96) + 'px';
+            pile.style.height = (col.length ? (86 + (col.length - 1) * 22) : 96) + 'px';
             pile.addEventListener('click', function () {
                 if (selected && selected.col !== index) moveTo(index);
             });
             col.forEach(function (card, cardIndex) {
                 var el = document.createElement('button');
+                var picked = selected && selected.col === index && cardIndex >= selected.index;
                 el.type = 'button';
-                el.className = 'pcard' + (card.up ? (RED[card.s] ? ' red' : '') : ' back');
-                if (selected && selected.col === index && cardIndex >= selected.index) el.classList.add('is-selected');
-                el.style.top = (cardIndex * 20) + 'px';
-                el.style.zIndex = String(cardIndex + 1);
+                el.className = 'pcard' + (card.up ? (RED[card.s] ? ' red' : '') : ' back') + (picked ? ' is-selected' : '');
+                el.style.top = (cardIndex * 22) + 'px';
+                el.style.zIndex = String(picked ? 40 + cardIndex : cardIndex + 1);
                 if (card.up) {
-                    el.innerHTML = '<b>' + rankText(card.r) + '</b><i>' + SUITS[card.s] + '</i>';
+                    el.innerHTML = cardArtwork(card);
+                    el.setAttribute('aria-label', rankText(card.r) + SUITS[card.s]);
                     el.addEventListener('click', function (event) {
                         event.stopPropagation();
                         onCard(index, cardIndex);
                     });
+                } else {
+                    el.setAttribute('aria-label', '牌背');
+                    el.tabIndex = -1;
                 }
                 pile.appendChild(el);
             });
             cols.appendChild(pile);
         });
         var deals = Math.floor(state.stock.length / 10);
-        stock.innerHTML = '<button type="button" id="spider-deal" class="pcard back" aria-label="发牌"></button><span>' + deals + ' 次</span>';
+        stock.innerHTML = '<button type="button" id="spider-deal" class="pcard back' + (deals > 1 ? ' is-thick' : '') + '" aria-label="发牌"' + (deals ? '' : ' disabled') + '></button><span>' + deals + ' 次</span>';
         document.getElementById('spider-deal').addEventListener('click', dealRow);
         done.innerHTML = '';
         var d;
+        if (!state.done) {
+            var empty = document.createElement('div');
+            empty.className = 'spider-foundation';
+            empty.textContent = '收齐';
+            done.appendChild(empty);
+        }
         for (d = 0; d < state.done; d += 1) {
             var chip = document.createElement('div');
             chip.className = 'pcard';
-            chip.textContent = 'K–A';
+            chip.innerHTML = cardArtwork({ r: 13, s: 'S' });
+            chip.setAttribute('aria-label', '已收一组');
             done.appendChild(chip);
         }
         var wins = readWins();

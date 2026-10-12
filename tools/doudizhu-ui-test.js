@@ -350,11 +350,30 @@ test('original engine remains byte-for-byte unchanged', () => {
     assert.equal(crypto.createHash('sha256').update(engineSource).digest('hex'), '50f034fdea65f512e751b8264f5ab3e0e70c1d81514bea0e75b56b41187fa09b');
 });
 
-test('all 11 original levels remain byte-for-byte unchanged', () => {
-    assert.equal(crypto.createHash('sha256').update(levelsSource).digest('hex'), '7f260fbdd1b6824047647f9ee9e9eef3b9756368606c51c731064e338f047ed2');
+test('the first 11 levels stay, and five later levels add other patterns', () => {
     const game = createGame();
-    assert.equal(game.levels.length, 11);
-    assert.deepEqual(clone(game.levels.map(level => level.id)), Array.from({ length: 11 }, (_, i) => i + 1));
+    assert.equal(game.levels.length, 16);
+    assert.deepEqual(clone(game.levels.map(level => level.id)), Array.from({ length: 16 }, (_, i) => i + 1));
+    assert.deepEqual(game.levels.slice(0, 11).map(level => [level.youText, level.oppText]), [
+        ['Q J J 8 8 6 5 5', '小王 9 9 4 4'],
+        ['Q J J 10 6 6 5 5', '大王 J J 6 5 5'],
+        ['Q Q J 9 6 6 3 3', '小王 K 10 10 8 4 4'],
+        ['Q J J 10 8 8 7 7 3', '大王 2 10 9 9 5'],
+        ['Q Q J 6 6 5 5 3', '小王 7 7 4 4'],
+        ['Q Q J 9 9 4 4 3', '小王 2 9 9 5 4 4'],
+        ['Q Q J 10 7 7 6 6 5', '小王 K 10 8 8 5'],
+        ['Q J J 9 8 8 7 6 6 3', '大王 2 10 8 8 7 3 3'],
+        ['Q J 10 10 8 8 6 5 5 5', '大王 小王 J J J 9 7 6 3'],
+        ['Q Q J 10 10 9 8 7 6 6', 'A K K 10 8 5 5'],
+        ['Q 10 10 9 8 6 6 4 4', '小王 10 10 9 6 5 5']
+    ]);
+    assert.deepEqual(game.levels.slice(11).map(level => level.youText), [
+        'A K J 9 7 6 5 4 3',
+        'A 10 10 9 9 8 8 7',
+        '2 10 10 9 9 8 8 6',
+        'A 10 10 9 3 3 3 3',
+        'A K K Q J 10 9'
+    ]);
 });
 
 test('required controls are unique and local page assets exist', () => {
@@ -575,13 +594,13 @@ test('seat indicators follow turns, hinting, paused restart and winner state', (
     assert.equal(game.el('dd-you-seat').classList.contains('is-winner'), false);
 });
 
-test('progress display counts only the 11 real levels and updates after a win', () => {
+test('progress display counts all 16 levels and updates after a win', () => {
     const game = createGame({ storage: { [STORAGE_KEY]: '{"2":1,"7":1,"999":1}' } });
-    assert.equal(game.el('dd-progress').textContent, '第 1 / 11 关 · 已过 2 关');
+    assert.equal(game.el('dd-progress').textContent, '第 1 / 16 关 · 已过 2 关');
     win(game);
-    assert.equal(game.el('dd-progress').textContent, '第 1 / 11 关 · 已过 3 关');
+    assert.equal(game.el('dd-progress').textContent, '第 1 / 16 关 · 已过 3 关');
     game.click('dd-next');
-    assert.equal(game.el('dd-progress').textContent, '第 2 / 11 关 · 已过 3 关');
+    assert.equal(game.el('dd-progress').textContent, '第 2 / 16 关 · 已过 3 关');
 });
 
 test('nested card artwork clicks select and deselect without submitting a move', () => {
@@ -909,7 +928,7 @@ test('all original levels remain winnable through UI hint/play/pass controls', (
         assert.equal(game.api.state.level.id, level.id, 'Completion must not auto-advance.');
         assert.equal(game.timers.size, 0);
     });
-    assert.equal(Object.keys(JSON.parse(game.storage[STORAGE_KEY])).length, 11);
+    assert.equal(Object.keys(JSON.parse(game.storage[STORAGE_KEY])).length, 16);
     assert.match(game.el('dd-result-title').textContent, /全部通关/);
 });
 
@@ -953,7 +972,7 @@ test('win replay resets the same level; final win has no next level', () => {
     assert.equal(visible(game.el('dd-replay')), true);
     assert.equal(game.timers.size, 0);
     game.el('dd-next').dispatchEvent({ type: 'click' });
-    assert.equal(game.api.state.level.id, 11);
+    assert.equal(game.api.state.level.id, 16);
 });
 
 test('opponent completion shows loss retry and resets same level', () => {
