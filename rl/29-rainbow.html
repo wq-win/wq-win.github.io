@@ -7,7 +7,7 @@
     <title>第 29 天｜Rainbow：六种DQN改进叠加后，哪些真的重要 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,214 @@
                 <span class="text-gray-500">Rainbow：六种DQN改进叠加后，哪些真的重要</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="dc2f27b19753860ccb8dac350aa7c37bf5625fe0b76f56cabc535f67a7e1724f"><h1>第 29 天｜Rainbow：六种DQN改进叠加后，哪些真的重要</h1>
+<p><a href="index.html">系列首页</a> · <a href="28-c51.html">上一篇</a> · <a href="30-sac.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：<em>Rainbow: Combining Improvements in Deep Reinforcement Learning</em>，2017。<a href="https://arxiv.org/abs/1710.02298">原论文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：独立DQN改进能否互补</p>
+<p><strong>旧方法卡点</strong>：单篇改进的收益不说明组合后的贡献</p>
+<p><strong>作者主张</strong>：组合Double、优先回放、Dueling、多步、分布式、Noisy Nets</p>
+<p><strong>论文证据</strong>：57 Atari整体与移除组件实验支持组合方案</p>
+<p><strong>一句话</strong>：在off-policy、离散视觉价值学习的组合算法中，作者通过“组合Double、优先回放、Dueling、多步、分布式、Noisy Nets”应对“独立DQN改进能否互补”这一问题；证据边界或代价是：贡献有交互，不能把单独提升相加。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>多步目标</strong>：使用多次真实奖励再自举。</li>
+<li><strong>Noisy Nets</strong>：通过可学习参数噪声探索。</li>
+<li><strong>组合消融</strong>：在完整方案中移除组件。</li>
+<li><strong>交互作用</strong>：一个模块的效果依赖另一个模块。</li>
+<li><strong>曲线面积</strong>：汇总整个训练过程而非终点。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“独立DQN改进能否互补”放在off-policy、离散视觉价值学习的组合算法的边界内研究。单篇改进的收益不说明组合后的贡献。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>off-policy、离散视觉价值学习的组合算法</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>Atari叠帧</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>带参数噪声的动作价值策略</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>裁剪训练奖励</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>多步回报遇终止应截断</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>Double改选评分工；PER改采样；Dueling改结构；多步改回报跨度；分布式改预测对象；Noisy Nets改探索。六项作用在不同接口，所以可组合，但它们也会互相改变误差与数据分布。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="G_t^{(n)}=\sum_{k=0}^{n-1}\gamma^kr_{t+k},\quad Z_{target}=\Phi(G_t^{(n)}+\gamma^n Z_{targetnet}(s_{t+n},a^*))."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msubsup><mi>G</mi><mi>t</mi><mrow><mo stretchy="false">(</mo><mi>n</mi><mo stretchy="false">)</mo></mrow></msubsup><mo>=</mo><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>0</mn></mrow><mrow><mi>n</mi><mo>−</mo><mn>1</mn></mrow></munderover><msup><mi>γ</mi><mi>k</mi></msup><msub><mi>r</mi><mrow><mi>t</mi><mo>+</mo><mi>k</mi></mrow></msub><mo separator="true">,</mo><mspace width="1em"/><msub><mi>Z</mi><mrow><mi>t</mi><mi>a</mi><mi>r</mi><mi>g</mi><mi>e</mi><mi>t</mi></mrow></msub><mo>=</mo><mi mathvariant="normal">Φ</mi><mo stretchy="false">(</mo><msubsup><mi>G</mi><mi>t</mi><mrow><mo stretchy="false">(</mo><mi>n</mi><mo stretchy="false">)</mo></mrow></msubsup><mo>+</mo><msup><mi>γ</mi><mi>n</mi></msup><msub><mi>Z</mi><mrow><mi>t</mi><mi>a</mi><mi>r</mi><mi>g</mi><mi>e</mi><mi>t</mi><mi>n</mi><mi>e</mi><mi>t</mi></mrow></msub><mo stretchy="false">(</mo><msub><mi>s</mi><mrow><mi>t</mi><mo>+</mo><mi>n</mi></mrow></msub><mo separator="true">,</mo><msup><mi>a</mi><mo>∗</mo></msup><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">G_t^{(n)}=\sum_{k=0}^{n-1}\gamma^kr_{t+k},\quad Z_{target}=\Phi(G_t^{(n)}+\gamma^n Z_{targetnet}(s_{t+n},a^*)).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.2906em;vertical-align:-0.2458em;"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.0448em;"><span style="top:-2.4542em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span><span style="top:-3.2198em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight">n</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2458em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.1032em;vertical-align:-1.3021em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8011em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mrel mtight">=</span><span class="mord mtight">0</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3021em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2948em;vertical-align:-0.25em;"></span><span class="mord">Φ</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.0448em;"><span style="top:-2.4542em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span><span style="top:-3.2198em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight">n</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2458em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight">t</span><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mclose">))</span><span class="mord">.</span></span></span></span></span></span>
+用在线分布期望选a*、目标分布评价，训练分布交叉熵并乘PER权重；具体终止掩码按多步有效长度。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">建立带Noisy层与Dueling结构的分布Q网络
+用带噪网络与环境交互
+将n步转移加入优先replay
+按优先级采样并计算重要性权重
+在线网络按期望选择下一动作
+目标网络提供该动作的回报分布
+形成n步分布目标并投影
+加权交叉熵更新；按实现更新优先级
+定期复制目标参数
+输出：组合价值策略
+</code></pre>
+<p><strong>实现要点</strong>：贡献有交互，不能把单独提升相加。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>带优先权重的多步分布式TD交叉熵，结合其他结构与探索机制</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>组合Double、优先回放、Dueling、多步、分布式、Noisy Nets</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>中位人类归一化分数、曲线面积</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>57款Atari</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>在线replay</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>DQN、六相关基线、逐项移除版本</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>图1报告7M帧达到DQN最好表现，44M帧超所比较基线；不是墙钟</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>中位人类归一化分数、曲线面积</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>完整训练种子本文未核实；部分基线引自各自论文</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>组件在完整系统中是否互补</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：贡献有交互，不能把单独提升相加。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>图1</td>
+<td>组合与已发表基线</td>
+<td>整体样本效率</td>
+<td>不同实现预算未必全匹配</td>
+</tr>
+<tr>
+<td>图3</td>
+<td>一次移除一个组件</td>
+<td>条件于其他组件的边际作用</td>
+<td>不是六项独立因果收益</td>
+</tr>
+<tr>
+<td>图4</td>
+<td>各游戏消融曲线面积</td>
+<td>展示任务差异</td>
+<td>汇总不能替代失败案例</td>
+</tr>
+<tr>
+<td>表2</td>
+<td>最佳快照汇总</td>
+<td>原文评价协议下的成绩</td>
+<td>最佳快照不等于最终固定模型</td>
+</tr>
+</tbody></table></div>
+<p><strong>结论边界</strong>：57 Atari整体与移除组件实验支持组合方案。贡献有交互，不能把单独提升相加。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者贡献</strong>是系统组合与经验消融。<strong>本文分析</strong>：删除一模块后最优超参数可能改变，因此未重新调参的消融并不等于该模块的普遍必要性。更多模块也增加故障定位和复现成本。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>多步回报让成功奖励更快传播，PER又更常采到传播中的大误差；两者收益重叠，分别提升10分不代表一起提升20分。组合也可能放大噪声。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>移除组件后是否应重新调参？</li>
+<li>六项中哪些改变数学对象，哪些只改训练机制？</li>
+<li>用最终检查点而非最佳快照，结论是否保持？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>独立DQN改进能否互补</td>
+<td>组合Double、优先回放、Dueling、多步、分布式、Noisy Nets</td>
+<td>分别改进采样、表示、目标跨度和探索的模块可能互补</td>
+<td>57 Atari整体与移除组件实验支持组合方案</td>
+<td>贡献有交互，不能把单独提升相加</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：为什么六项改进的收益不能直接相加？</p>
+<p><strong>参考答案</strong>：它们会改变彼此面对的数据与误差。例如优先回放依据 TD 误差选样本，而多步目标和分布式学习又会改变误差结构。组件可能互补，也可能替代某些作用，组合收益取决于相互作用。</p>
+<p><strong>问题 2</strong>：移除一个组件后性能下降，能否说明它单独也有效？</p>
+<p><strong>参考答案</strong>：只能说明在这个完整系统和实验配置中，移除它会损失性能。它单独加入基础算法是否有效、是否依赖其他组件、效果是否来自超参数匹配，都需要额外实验。消融结论应绑定具体上下文。</p>
+<p><a href="index.html">系列首页</a> · <a href="28-c51.html">上一篇</a> · <a href="30-sac.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 29 天｜Rainbow：六种DQN改进叠加后，哪些真的重要
+    <textarea id="md-source" hidden readonly># 第 29 天｜Rainbow：六种DQN改进叠加后，哪些真的重要
 
 [系列首页](README.md) · [上一篇](28-c51.md) · [下一篇](30-sac.md)
 
@@ -189,16 +392,16 @@ $$G_t^{(n)}=\sum_{k=0}^{n-1}\gamma^kr_{t+k},\quad Z_{target}=\Phi(G_t^{(n)}+\gam
 
 [系列首页](README.md) · [上一篇](28-c51.md) · [下一篇](30-sac.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "29-rainbow";
         const source = document.getElementById('md-source').value;

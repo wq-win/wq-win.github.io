@@ -7,7 +7,7 @@
     <title>066｜BridgeData V2：跨场景操作数据 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,180 @@
                 <span class="text-gray-500">BridgeData V2：跨场景操作数据</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="b92b25562cf2e1d09ef81c0e31ead1dd5b44dfe7ea75c3c2b2e7140aa437b07a"><h1>066｜BridgeData V2：跨场景操作数据</h1>
+<p><a href="index.html">系列首页</a> · <a href="065-rt2.html">上一篇</a> · <a href="067-extreme-parkour.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>BridgeData V2: A Dataset for Robot Learning at Scale</em>，Homer Walke 等，首次公开于 2023，本文对应 2024 年 arXiv v3。<a href="https://arxiv.org/abs/2308.12952">论文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p>如果一个机器人只在某张桌子上学会搬杯子，换实验室就失效，那么它学到的可能既包含技能，也包含大量偶然的视觉规律。BridgeData V2 的问题是：怎样采集一份数据，使别人能在自己的机器人场景里真正使用？</p>
+<p>这是一篇数据与实证研究论文。它提供多环境、多任务、可用图像或语言指定目标的机器人轨迹，并比较不同离线学习方法。重点不在发明某个新损失，而在设计数据支持的泛化问题。</p>
+<p>一个重要设计是：同一场景里同时存在多种任务。这样模型不能只看背景就猜到动作，必须注意目标条件。另一个设计是让技能、对象和相机配置具有变化，而不只是重复同一条成功轨迹。</p>
+<p>一句话：在可复用的真实机器人离线学习中，通过增加任务和环境覆盖、保留多种目标接口，改善跨对象与场景泛化，限制是单一机器人、单机构采集及偏低精度的操作范围。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：</p>
+<ol>
+<li><strong>目标条件策略</strong>：动作不仅依赖当前状态，还依赖想达到的结果。</li>
+<li><strong>事后目标重标记</strong>：把实际达到的后续状态作为训练目标。</li>
+<li><strong>多峰动作分布</strong>：同一目标可能存在多条不同但有效的动作路线。</li>
+<li><strong>数据捷径</strong>：模型利用与标签相关但非任务本质的线索。</li>
+<li><strong>跨域评估</strong>：在采集分布之外测试，并明确究竟改变了哪些因素。</li>
+</ol>
+<h2 id="二任务技能和环境不是同一个计数单位">二、任务、技能和环境不是同一个计数单位</h2>
+<p>论文中的“技能”按运动类型分组，例如搬运和擦拭；“任务”还取决于对象和目标，例如把胡萝卜放盘子与把茄子放锅里。不同论文对这两个词的计数并不统一，不能直接拿标题里的任务数量排列通用程度。</p>
+<p>数据平台是 WidowX 机械臂，动作包含六维末端相对运动和夹爪开合。论文学习实验主要使用肩后方单个 RGB 视角。数据保存了更多传感信息，但不是每条轨迹都有完整多相机观测，也不是实验策略使用了全部传感器。</p>
+<p>目标有两类：</p>
+<ul>
+<li>图像目标 <span class="reading-math" data-tex="g"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi></mrow><annotation encoding="application/x-tex">g</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span></span></span></span></span>：用期望最终画面告诉机器人要达到哪里。</li>
+<li>语言目标 <span class="reading-math" data-tex="\ell"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">ℓ</mi></mrow><annotation encoding="application/x-tex">\ell</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">ℓ</span></span></span></span></span>：用自然语言指定行为与对象。</li>
+</ul>
+<p>前者通常更直接表达空间布局，但需要准备目标图像，且可能包含无关背景差异；后者方便交互，却需要把语言对象名称与视觉接地。两者的信息量不同，因此表格中的成功率不是完全同输入条件的架构竞赛。</p>
+<p>这是离线学习设定。部分数据来自脚本策略，包含不成功或次优尝试；它们是否有用取决于学习目标，不能把所有轨迹都叫专家成功示范。</p>
+<h2 id="三方法思想数据协议改变了模型能学到什么">三、方法思想：数据协议改变了模型能学到什么</h2>
+<h3 id="31-为什么同场景多任务重要">3.1 为什么同场景多任务重要</h3>
+<p>设场景为 <span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span>，语言为 <span class="reading-math" data-tex="\ell"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">ℓ</mi></mrow><annotation encoding="application/x-tex">\ell</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">ℓ</span></span></span></span></span>，动作为 <span class="reading-math" data-tex="a"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi></mrow><annotation encoding="application/x-tex">a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span></span></span></span></span>。理想策略需要学习 <span class="reading-math" data-tex="p(a\mid s,\ell)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo stretchy="false">(</mo><mi>a</mi><mo>∣</mo><mi>s</mi><mo separator="true">,</mo><mi mathvariant="normal">ℓ</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">p(a\mid s,\ell)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">ℓ</span><span class="mclose">)</span></span></span></span></span>。如果每个场景只有一种任务，那么训练中 <span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span> 几乎唯一决定 <span class="reading-math" data-tex="\ell"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">ℓ</mi></mrow><annotation encoding="application/x-tex">\ell</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">ℓ</span></span></span></span></span>，模型可以用 <span class="reading-math" data-tex="p(a\mid s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo stretchy="false">(</mo><mi>a</mi><mo>∣</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">p(a\mid s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span> 取得很低损失，却完全忽略语言。</p>
+<p>这是自构的统计解释，不是论文给出的定理。它说明数据集设计怎样决定“跟随指令”是否可辨识：同样的场景应出现不同指令与相应不同动作，才能让语言成为必要信息。</p>
+<h3 id="32-目标图像重标记">3.2 目标图像重标记</h3>
+<p>目标条件行为克隆可写成：</p>
+<p><span class="reading-math" data-tex="L_{\rm GCBC}
+=-\mathbb E_{\tau,t,k&gt;t}
+\log\pi_\theta(a_t\mid o_t,g=o_k)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mrow><mi mathvariant="normal">G</mi><mi mathvariant="normal">C</mi><mi mathvariant="normal">B</mi><mi mathvariant="normal">C</mi></mrow></msub><mo>=</mo><mo>−</mo><msub><mi mathvariant="double-struck">E</mi><mrow><mi>τ</mi><mo separator="true">,</mo><mi>t</mi><mo separator="true">,</mo><mi>k</mi><mo>&gt;</mo><mi>t</mi></mrow></msub><mi>log</mi><mo>⁡</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>a</mi><mi>t</mi></msub><mo>∣</mo><msub><mi>o</mi><mi>t</mi></msub><mo separator="true">,</mo><mi>g</mi><mo>=</mo><msub><mi>o</mi><mi>k</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_{\rm GCBC}
+=-\mathbb E_{\tau,t,k&gt;t}
+\log\pi_\theta(a_t\mid o_t,g=o_k).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">GCBC</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord">−</span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">t</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mrel mtight">&gt;</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="\tau"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>τ</mi></mrow><annotation encoding="application/x-tex">\tau</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span></span></span></span></span> 是轨迹，<span class="reading-math" data-tex="o_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>o</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">o_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是当前图像，<span class="reading-math" data-tex="o_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>o</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">o_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是轨迹后续图像。原文训练从未来时间步抽取目标。这样一个行为片段不仅服务于最终目标，也能用于学习途中不同可达结果。</p>
+<p>这与“失败轨迹自动变成高质量示范”不同：重标记只说明数据实际到达过某个结果，不保证动作高效，也不保证该结果满足原语言指令。</p>
+<p>语言条件版本则拟合：</p>
+<p><span class="reading-math" data-tex="L_{\rm LCBC}
+=-\mathbb E_D\log\pi_\theta(a\mid o,\ell)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mrow><mi mathvariant="normal">L</mi><mi mathvariant="normal">C</mi><mi mathvariant="normal">B</mi><mi mathvariant="normal">C</mi></mrow></msub><mo>=</mo><mo>−</mo><msub><mi mathvariant="double-struck">E</mi><mi>D</mi></msub><mi>log</mi><mo>⁡</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>a</mi><mo>∣</mo><mi>o</mi><mo separator="true">,</mo><mi mathvariant="normal">ℓ</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_{\rm LCBC}
+=-\mathbb E_D\log\pi_\theta(a\mid o,\ell).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">LCBC</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">−</span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">D</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">o</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">ℓ</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>扩散版本用去噪过程建模动作多峰性；ACT 预测动作段；对比 RL 使用目标条件价值学习并保留行为正则。这些是不同已有方法的适配，不是 BridgeData V2 自创的一种统一算法。</p>
+<h3 id="33-采集与训练流程">3.3 采集与训练流程</h3>
+<pre><code class="language-text">采集：
+    准备同时允许多种操作的场景
+    遥操作完成不同可行任务，保留图像、动作与轨迹边界
+    周期性改变对象、相机与工作空间相对位置
+    用随机化脚本补充对象搬运数据，保留其来源标识
+    事后标注任务语言，检查描述与实际结果一致
+训练：
+    固定数据版本和允许使用的传感器
+    图像目标：从同一轨迹未来时刻采样目标
+    语言目标：读取与轨迹对应的语言标注
+    用选定离线学习目标更新策略
+评估：
+    分开测试已见任务、新对象、新环境、另一机构
+    每回合记录目标条件、动作执行结果与失败类型
+</code></pre>
+<p>论文的采集过程不要求每条轨迹之后把场景恢复到原样。这节省复位成本，也让状态分布更丰富；与此同时，连续采集的相邻轨迹可能高度相关。建立训练测试划分时，以帧随机划分容易低估这种关联。</p>
+<h3 id="34-动作段长度必须与时间对齐">3.4 动作段长度必须与时间对齐</h3>
+<p>原始 ACT 的动作段长度不能原封不动搬到较慢控制平台。动作段覆盖的真实时间为：</p>
+<p><span class="reading-math" data-tex="T_{\rm chunk}=\frac{H}{f},"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>T</mi><mrow><mi mathvariant="normal">c</mi><mi mathvariant="normal">h</mi><mi mathvariant="normal">u</mi><mi mathvariant="normal">n</mi><mi mathvariant="normal">k</mi></mrow></msub><mo>=</mo><mfrac><mi>H</mi><mi>f</mi></mfrac><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">T_{\rm chunk}=\frac{H}{f},</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">chunk</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.2408em;vertical-align:-0.8804em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3603em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8804em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mpunct">,</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>H</mi></mrow><annotation encoding="application/x-tex">H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span></span></span> 是动作步数，<span class="reading-math" data-tex="f"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>f</mi></mrow><annotation encoding="application/x-tex">f</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span></span></span></span></span> 是控制频率。相同的 <span class="reading-math" data-tex="H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>H</mi></mrow><annotation encoding="application/x-tex">H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span></span></span> 在不同机器人上代表不同时间跨度。本文对 ACT 做了长度适配，因此比较时应报告秒数、观测历史和重新预测频率，而不只报告 token 个数。</p>
+<h2 id="四实验与数据表">四、实验与数据表</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>原文设置及读法</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数据规模</td>
+<td>60,096 条轨迹，其中 50,365 条专家示范、9,731 条脚本轨迹</td>
+</tr>
+<tr>
+<td>覆盖</td>
+<td>24 个环境、13 类技能；这是论文自己的技能定义</td>
+</tr>
+<tr>
+<td>控制</td>
+<td>5 Hz；主要学习输入为肩后单视角</td>
+</tr>
+<tr>
+<td>方法</td>
+<td>GCBC、扩散 GCBC、ACT、对比 RL、语言 BC、RT-1</td>
+</tr>
+<tr>
+<td>输入差异</td>
+<td>RT-1 使用更高分辨率和观测历史，不能仅把差距归因于 Transformer</td>
+</tr>
+<tr>
+<td>已见与未见</td>
+<td>对象、场景或二者变化；“已见”也包含位置、光照扰动</td>
+</tr>
+<tr>
+<td>跨机构</td>
+<td>无新实验室数据微调的测试，使用相同种类机器人</td>
+</tr>
+<tr>
+<td>重复</td>
+<td>主任务每方法十次；技能多样性对照每策略二十次</td>
+</tr>
+<tr>
+<td>资源</td>
+<td>附录给出方法适配和部分训练资源；全方法训练种子与算力未逐项确认</td>
+</tr>
+</tbody></table></div>
+<p>所有数据都在一个机构采集，跨机构评估是后续迁移测试，不是多机构数据采集。这个区分对判断数据多样性来源尤其重要。</p>
+<p>脚本数据的存在也不意味着论文已严格隔离了它对每个算法的贡献。要回答“失败数据是否改善恢复”，需要在相同总条数下比较保留、删除和替换脚本数据，并区分成功与失败子集。</p>
+<h2 id="五五处关键证据">五、五处关键证据</h2>
+<p>以下结果定位依据<a href="https://arxiv.org/html/2308.12952">原文 v3 正文与附录</a>。</p>
+<p><strong>第一处：表 2，已见任务仍不容易。</strong> GCBC、扩散 GCBC 与 RT-1 的平均成功率均为 0.49，但分任务表现不同。相同平均数不代表相同行为分布，也不代表复杂模型无价值；它说明需要看具体任务瓶颈。</p>
+<p><strong>第二处：表 3，泛化并非越复杂越强。</strong> 未见任务平均中 GCBC 为 0.60，ACT 为 0.28；这不能用来否定 ACT 原论文，因为控制频率、目标条件、任务类型与训练配置都改变了。它证明算法效果必须放在具体数据和部署条件下解释。</p>
+<p><strong>第三处：表 4，跨机构可用但有落差。</strong> RT-1 的三任务平均由 0.47 到 0.40。它支持零样本跨实验室存在实际能力，不支持所有单任务都保持性能；数据还显示不同算法的变化方向并不完全一致。</p>
+<p><strong>第四处：图 5，技能多样性对照。</strong> 接近等规模的数据中，更多技能使一个未见搬运任务的成功率由 0.30 到 0.65。差值为 35 个百分点，结果约为原来的 2.17 倍。这比同时增加数量与技能更能说明多样性的作用，但只有指定任务上的证据，尚不是普适缩放定律。</p>
+<p><strong>第五处：附录 D，旧数据与新数据。</strong> 新数据组合提高未见任务表现，但样本数、环境数和技能数同时变化。它说明新版本作为整体资源更有用，不能独立估计每个因素贡献。</p>
+<p>模型更会拟合数据还可能更忠实地复制暂停。§5.1 提到不同方法的停顿与动作模式切换，这是很有价值的观察：示范似然更高，不总是执行更流畅。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p>BridgeData V2 把数据可复用性当作主要目标。公开轨迹之外，它同时考虑目标接口、机器人可获得性、环境覆盖和外部实验室验证。这使它成为训练方法共同研究的基础，而不只是某个模型的专用数据。</p>
+<p>作者承认任务偏低精度、缺少复杂力控制，且机器人形态单一。它不能代表高速抛掷、重物搬运或低公差工业插入。环境数量也不是覆盖质量的充分统计量：多个相似玩具厨房和同数量真实家庭的分布并不相同。</p>
+<p>本文的进一步分析是，语言标注应该描述实际完成的行为，而非只记录操作者原本想做什么。意图标签与结果标签混在一起，会使失败轨迹上的监督自相矛盾。对于离线 RL，这种区分还有助于构造目标达成信号。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>单场景过拟合</td>
+<td>多任务、多环境采集</td>
+<td>打破背景与动作的偶然关联</td>
+<td>新环境测试</td>
+<td>单机构与相似场景仍占较多</td>
+</tr>
+<tr>
+<td>数据只能服务一种方法</td>
+<td>图像目标、语言、行为轨迹并存</td>
+<td>支持不同条件策略和离线学习</td>
+<td>六种方法评估</td>
+<td>输入和训练机制不完全匹配</td>
+</tr>
+<tr>
+<td>别的实验室难使用</td>
+<td>可获得机器人与迁移测试</td>
+<td>降低硬件与分布障碍</td>
+<td>跨机构表格</td>
+<td>仍是同机器人形态</td>
+</tr>
+</tbody></table></div>
+<h2 id="七一个小例子与前置知识">七、一个小例子与前置知识</h2>
+<p>以下是自构例子，未运行。训练集中蓝桌子总是要求抓杯子，红桌子总是要求开抽屉。一个完全不读取语言的网络也能得到很高训练分数。测试时在蓝桌子要求开抽屉，它就暴露出缺陷。</p>
+<p>修正不只是多采一千条蓝桌抓杯子，而是让蓝桌也包含开抽屉、移动勺子等行为，并让红桌包含对应变化。这样背景无法唯一决定任务，语言或目标图像必须参与动作选择。</p>
+<p>阅读范围：核对原文 v3 的采集、方法、主结果和实现附录；没有下载并统计整个数据集，也未独立训练策略，数据完整性与全部训练资源未逐项验证。</p>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：为什么“同一场景能做多个任务”比“场景数量多”更直接检验语言条件学习？</strong></p>
+<p>答案：如果每个场景只有一个标签，背景可以替代语言。让同样的视觉布局对应多种指令和动作，才能迫使策略区分目标；场景多样性主要处理视觉分布覆盖，二者解决不同问题。</p>
+<p><strong>问题2：图像目标模型比语言模型更好，能否说明语言不适合机器人？</strong></p>
+<p>答案：不能。目标图像直接提供空间结果，而语言可能省略位置细节；两者预训练、分辨率、历史长度也可能不同。应先匹配目标信息与模型资源，再检验语言接地或控制能力究竟是瓶颈。</p>
+<p><strong>问题3：数据量相同、技能更多时表现提高，下一步最值得做什么对照？</strong></p>
+<p>答案：检查新增技能是否只是提供了更多目标物体、相机或抓取姿态。可以匹配对象和场景覆盖，只改变动作技能类别，并在多个未见任务与训练种子上重复。这样才能进一步判断正迁移来自运动知识还是共享视觉信息。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 066｜BridgeData V2：跨场景操作数据
+    <textarea id="md-source" hidden readonly># 066｜BridgeData V2：跨场景操作数据
 
 [系列首页](README.md) · [上一篇](065-rt2.md) · [下一篇](067-extreme-parkour.md)
 
@@ -91,7 +260,7 @@
 
 $$
 L_{\rm GCBC}
-=-\mathbb E_{\tau,t,k>t}
+=-\mathbb E_{\tau,t,k&gt;t}
 \log\pi_\theta(a_t\mid o_t,g=o_k).
 $$
 
@@ -218,9 +387,9 @@ BridgeData V2 把数据可复用性当作主要目标。公开轨迹之外，它
 答案：检查新增技能是否只是提供了更多目标物体、相机或抓取姿态。可以匹配对象和场景覆盖，只改变动作技能类别，并在多个未见任务与训练种子上重复。这样才能进一步判断正迁移来自运动知识还是共享视觉信息。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

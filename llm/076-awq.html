@@ -7,7 +7,7 @@
     <title>076｜AWQ：量化权重时，为什么要先看激活？ | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,142 @@
                 <span class="text-gray-500">AWQ：量化权重时，为什么要先看激活？</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="3ce08116752fbfa145c4a3866139b708bb9f4badcc1e518a790daccdbc65856a"><h1>076｜AWQ：量化权重时，为什么要先看激活？</h1>
+<p><a href="index.html">返回目录</a> · <a href="00-timeline.html">发展时间线</a></p>
+<p>论文：Ji Lin 等，<em>AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration</em>，2023。<a href="https://arxiv.org/abs/2306.00978">论文</a>、<a href="https://arxiv.org/html/2306.00978v2">正文 v2</a>、<a href="https://github.com/mit-han-lab/llm-awq">官方代码</a>。本文核对 v2 的方法、定量实验、系统测量和限制附录；没有独立运行量化与速度测试。后续实现变化不包含在本文实证结论中。</p>
+<h2 id="一分钟理解同样的权重误差后果不一样">一分钟理解：同样的权重误差，后果不一样</h2>
+<p>线性层计算 <span class="reading-math" data-tex="y=Wx"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi><mo>=</mo><mi>W</mi><mi>x</mi></mrow><annotation encoding="application/x-tex">y=Wx</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mord mathnormal">x</span></span></span></span></span>。某个权重少了一点点，如果对应输入激活很大，这一点点误差就会被放大。因此，量化时不能只看权重自身的大小，还应看它通常处理怎样的输入。</p>
+<p>AWQ 的观察是：按激活大小找到少数重要通道，优先保护它们，可以显著减轻低位量化损失。但直接把这些权重保留为16位会增加混合精度实现难度。最终方法选择先缩放权重通道、反向缩放输入，再统一量化，使重要通道得到更细的有效精度。</p>
+<p>表2中 OPT-6.7B 的 INT3-g128 设置，简单量化困惑度23.54，对重要通道取缩放2后降到11.92；继续放大到4却变差为12.36。这个反例说明保护重要通道需要考虑其他通道的损失。</p>
+<p>一句话总结：在低位权重量化的部署场景下，通过激活引导的通道缩放和裁剪，改善量化后质量，并结合高效内核实现加速，限制是依赖校准分布、分组方式与具体硬件工作负载。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个概念：<strong>训练后量化</strong>在已有权重上做压缩；<strong>校准集</strong>提供典型激活统计；<strong>通道缩放</strong>重新分配数值动态范围；<strong>分组量化</strong>让小块权重共享尺度；<strong>内核融合</strong>减少中间存储和启动开销。</p>
+<h2 id="背景权重量化与激活量化不是一回事">背景：权重量化与激活量化不是一回事</h2>
+<p>本文主要研究 W4A16 或 W3A16，即权重低位、激活维持较高精度。Activation-aware 指算法利用激活信息，不表示激活也被量化到4位。它属于训练后量化，不通过任务损失反向传播微调语言模型，也不涉及奖励或环境交互。</p>
+<p>RTN 将每个权重映射到邻近量化值，简单但没有充分考虑输出误差。GPTQ 利用校准输入和近似二阶信息补偿权重舍入误差。AWQ 选择更受限制的搜索空间：根据输入通道的平均激活幅度设置缩放，再搜索一个指数参数，而不是回归调整全部权重。</p>
+<p>作者认为这种限制降低了过拟合校准数据的风险。实验提供了跨两个文本领域的支持，但“完全不会过拟合”比实验能证明的范围更强；网格搜索仍然利用了校准样本上的输出误差。</p>
+<h2 id="方法先作等价变换再接受量化近似">方法：先作等价变换，再接受量化近似</h2>
+<p>令 <span class="reading-math" data-tex="S=\operatorname{diag}(s_1,\ldots,s_d)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mo>=</mo><mi mathvariant="normal">diag</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>s</mi><mn>1</mn></msub><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><msub><mi>s</mi><mi>d</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">S=\operatorname{diag}(s_1,\ldots,s_d)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm" style="margin-right:0.01389em;">diag</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">d</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，在全精度数学下：</p>
+<p><span class="reading-math" data-tex="WX=(WS)(S^{-1}X)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>W</mi><mi>X</mi><mo>=</mo><mo stretchy="false">(</mo><mi>W</mi><mi>S</mi><mo stretchy="false">)</mo><mo stretchy="false">(</mo><msup><mi>S</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mi>X</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">WX=(WS)(S^{-1}X).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="mclose">)</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>量化后的输出为：</p>
+<p><span class="reading-math" data-tex="\widehat Y=Q(WS)S^{-1}X,\qquad
+E(S)=\|Q(WS)S^{-1}X-WX\|_F^2."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mover accent="true"><mi>Y</mi><mo stretchy="true">^</mo></mover><mo>=</mo><mi>Q</mi><mo stretchy="false">(</mo><mi>W</mi><mi>S</mi><mo stretchy="false">)</mo><msup><mi>S</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mi>X</mi><mo separator="true">,</mo><mspace width="2em"/><mi>E</mi><mo stretchy="false">(</mo><mi>S</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="normal">∥</mi><mi>Q</mi><mo stretchy="false">(</mo><mi>W</mi><mi>S</mi><mo stretchy="false">)</mo><msup><mi>S</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mi>X</mi><mo>−</mo><mi>W</mi><mi>X</mi><msubsup><mi mathvariant="normal">∥</mi><mi>F</mi><mn>2</mn></msubsup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\widehat Y=Q(WS)S^{-1}X,\qquad
+E(S)=\|Q(WS)S^{-1}X-WX\|_F^2.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9233em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9233em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">Y</span></span><span class="svg-align" style="top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.24em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.24em" viewBox="0 0 1062 239" preserveAspectRatio="none"><path d="M529 0h5l519 115c5 1 9 5 9 10 0 1-1 2-1 3l-4 22
+c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord">∥</span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">F</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>第一条等式是精确代数关系；第二条引入 <span class="reading-math" data-tex="Q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Q</mi></mrow><annotation encoding="application/x-tex">Q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span></span></span></span></span> 后一般不再等价。目标是选择缩放使输出误差较小，而不是声称缩放消除了所有舍入误差。输入逆缩放通常可以融合进前一层，减少运行时开销。</p>
+<p>设通道激活统计为 <span class="reading-math" data-tex="a_j=\mathbb E|X_j|"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>a</mi><mi>j</mi></msub><mo>=</mo><mi mathvariant="double-struck">E</mi><mi mathvariant="normal">∣</mi><msub><mi>X</mi><mi>j</mi></msub><mi mathvariant="normal">∣</mi></mrow><annotation encoding="application/x-tex">a_j=\mathbb E|X_j|</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathbb">E</span><span class="mord">∣</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">∣</span></span></span></span></span>，论文把缩放限制为 <span class="reading-math" data-tex="s_j=a_j^\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mi>j</mi></msub><mo>=</mo><msubsup><mi>a</mi><mi>j</mi><mi>α</mi></msubsup></mrow><annotation encoding="application/x-tex">s_j=a_j^\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0592em;vertical-align:-0.3948em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-2.4413em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0037em;">α</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3948em;"><span></span></span></span></span></span></span></span></span></span></span>，在 <span class="reading-math" data-tex="\alpha\in[0,1]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi><mo>∈</mo><mo stretchy="false">[</mo><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">\alpha\in[0,1]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">]</span></span></span></span></span> 上用20个网格候选搜索。接近0时缩放弱，接近1时更偏重高激活通道；随后也搜索权重裁剪以减少量化步长。</p>
+<p>为什么放大会保护通道？若分组的量化步长 <span class="reading-math" data-tex="\Delta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">Δ</mi></mrow><annotation encoding="application/x-tex">\Delta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">Δ</span></span></span></span></span> 近似不变，把权重放大 <span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span> 倍再把输入除以 <span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span>，有效输出舍入误差也约除以 <span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span>。但若放大后的权重抬高了组最大值，新的 <span class="reading-math" data-tex="\Delta'"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi mathvariant="normal">Δ</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup></mrow><annotation encoding="application/x-tex">\Delta&#x27;</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7519em;"></span><span class="mord"><span class="mord">Δ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7519em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span></span></span></span></span> 也会增长，其他通道反而更粗糙。原文的近似依赖这个平衡，不是任意缩放的误差单调下降证明。</p>
+<pre><code class="language-text">输入：浮点模型、少量校准文本、目标位宽、group_size=128
+run calibration forward passes and cache layer inputs
+for each supported linear layer:
+    activation_scale = mean_absolute_input_per_channel
+    for α in grid_of_20_candidates:
+        S = diagonal(activation_scale ** α)
+        candidate = group_quantize(W @ S)
+        error = output_error(candidate @ inverse(S) @ X, W @ X)
+    choose the best scaling candidate
+    search clipping parameters on calibration outputs
+    fuse inverse scaling into compatible preceding operation
+    pack all target weights into low-bit storage
+输出：低位模型、量化元数据与可执行推理布局
+</code></pre>
+<p>这是算法主线的教学表达。数值实现需要处理零激活、张量布局和尺度融合等细节；不能把伪代码当作与所有网络结构直接兼容的部署库。</p>
+<h2 id="三个容易混淆的优化">三个容易混淆的“优化”</h2>
+<p>数学上最小化的是校准输入上的局部输出误差；机制上改变的是通道缩放、裁剪与整数表示；实验中改善的是困惑度、任务分数和推理速度。局部误差更小并不自动证明长文本推理更可靠。</p>
+<p>“保留1%高精度权重”是验证重要通道存在的分析实验，不是最终 AWQ 必须采用的混合精度格式。正式缩放方案的意义正是尽量保留统一低位格式，让硬件更容易执行。</p>
+<h2 id="实验设置质量校准与系统分别测量">实验设置：质量、校准与系统分别测量</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>原文设置及范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>模型</td>
+<td>OPT、LLaMA、Llama2；指令模型Vicuna；多模态OpenFlamingo9B与LLaVA13B</td>
+</tr>
+<tr>
+<td>位宽</td>
+<td>主要INT3/INT4、每组128；极低位补充INT2、每组64</td>
+</tr>
+<tr>
+<td>校准</td>
+<td>Pile小样本，尺度网格20；正文未把所有主表统一默认校准条数与序列长度清楚列成一张配置表，不能用敏感性实验的16条替代全部配置</td>
+</tr>
+<tr>
+<td>质量评价</td>
+<td>WikiText2困惑度；Vicuna80题两种回答顺序，共160次比较；COCO5000样本的图像描述CIDEr</td>
+</tr>
+<tr>
+<td>多模态量化范围</td>
+<td>OpenFlamingo仅量化语言部分，视觉组件保持原精度；不能把语言权重4倍压缩推广为整个系统严格4倍</td>
+</tr>
+<tr>
+<td>校准迁移</td>
+<td>PubMed与Enron交叉校准、各1000评估样本；校准与评估无重叠</td>
+</tr>
+<tr>
+<td>量化计算</td>
+<td>附录B：小于40B使用1张A100，大模型2—4张；约0.1—3 GPU小时，随规模变化</td>
+</tr>
+<tr>
+<td>速度</td>
+<td>RTX4090、笔记本RTX4070、Jetson Orin；batch1、4token提示、生成200token，报告中位延迟</td>
+</tr>
+<tr>
+<td>系统基线</td>
+<td>Hugging Face FP16；AWQ系统同时优化量化线性层和其他层，并含融合，速度差不能只归因于数学缩放</td>
+</tr>
+<tr>
+<td>不确定性</td>
+<td>主质量表没有统一给出多次校准随机种子的置信区间；160次评判不是160个独立问题</td>
+</tr>
+</tbody></table></div>
+<h2 id="结果五组证据构成完整链条">结果：五组证据构成完整链条</h2>
+<p><strong>证据一：表1，重要性来自哪里？</strong> OPT-6.7B 的INT3困惑度23.54；按激活选1%通道保留FP16为11.39，按权重选为22.37，随机选为24.23。它支持这一模型中输入激活比权重幅度更能识别值得保护的通道。并不证明1%是所有层和任务通用的比例。</p>
+<p><strong>证据二：表2与表3，缩放不是越大越好。</strong> 缩放2时困惑度11.92，缩放4为12.36；新旧量化步长不同的组比例由8.2%增至21.2%。完整AWQ在表3该模型达到11.39，接近保留1%FP16的结果。这里应在相同表配置内比较；附录另表的浮点困惑度与主表不同，不能把数字跨表拼接成额外增益。</p>
+<p><strong>证据三：表4，Llama2质量。</strong> 7B浮点5.47，INT4的RTN5.73、GPTQ-R5.63、AWQ5.60；70B浮点3.32、AWQ3.41。AWQ较低位基线更好，同时仍存在相对浮点的损失。尤其4位大模型的差距很小，不能夸大成所有下游任务都会明显提升。</p>
+<p><strong>证据四：表5，多模态迁移。</strong> OpenFlamingo32-shot的FP16 CIDEr81.70，INT4 RTN77.13，AWQ80.53，损失从4.57缩小到1.17分。INT3 AWQ74.47，仍差7.23分。它说明文本校准得到的量化策略可用于所测图像描述，但没有覆盖所有视觉推理、幻觉和OCR任务。</p>
+<p><strong>证据五：图6与图5，分布和真实速度。</strong> PubMed/Enron交叉校准时，AWQ困惑度增加约0.5—0.6，对照GPTQ增加2.3—4.9；这支持有限跨域稳健性。速度实验中4090报告2.7—3.9倍加速，4070上的13B达到33 token/s，但测量是极短提示、单请求解码，不能推广到长提示预填充或高并发服务。</p>
+<p>表6还显示AWQ可以与GPTQ组合：OPT13B的INT2困惑度由GPTQ16.74降到13.25，而浮点10.13。二者不是只能竞争的互斥方案；更低位场景中的互补并没有消除质量差距。</p>
+<h2 id="贡献与局限高质量压缩需要与运行时一起设计">贡献与局限：高质量压缩需要与运行时一起设计</h2>
+<p>AWQ 的贡献是将“某些通道更重要”的分析转化为统一低位格式下的缩放方案，并展示校准需求与跨模态表现。系统实现则把存储节省变成速度收益，这与算法精度贡献互相配合，但不是同一个实验问题。</p>
+<p>作者承认评测主要集中于困惑度和任务准确性，还需要可靠性、偏差、校准等更广指标。附录C讨论无分组量化时的不足，说明当前机制依赖分组提供局部动态范围，不能随意去掉分组却期待保留同样收益。</p>
+<p>进一步分析还包括：激活分布可能因提示格式、语言、长上下文和领域改变；量化不负责修正原模型事实错误；固定分组带来尺度与零点元数据；CPU或不支持所需低位内核的设备未必加速。“模型文件更小”与“每次请求更快”需要两份测量。</p>
+<h2 id="自构例子与五个概念">自构例子与五个概念</h2>
+<p><strong>自构例子，未运行：</strong> 两个输入通道典型幅度分别100和1，权重舍入误差都为0.01时，对输出的单项影响约为1和0.01。若第一通道经过缩放2后有效误差减半，收益可能很大；但若它抬高整组量化范围，第二通道以及其他通道的误差也会变大。因此选择尺度应看整体输出误差，不能只看被保护通道。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>统一低位舍入忽略不同通道对输出的影响</td>
+<td>激活引导的缩放、网格搜索与裁剪，配合低位运行时</td>
+<td>保护高激活通道的有效精度，同时维持统一权重格式</td>
+<td>表1重要性；表2尺度；表4/5质量；图6跨域；图5速度</td>
+<td>校准依赖；分组元数据；不是无损；加速含系统优化且负载有限</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测与答案">自测与答案</h2>
+<p><strong>1. AWQ 名称里有 activation，是否说明它把激活也变成4位？</strong></p>
+<p>答案：不是。它主要做低位权重量化，利用激活统计决定如何保护权重通道。了解输入对权重误差的放大作用，不需要把输入本身也低位化。</p>
+<p><strong>2. 为什么缩放和逆缩放在量化前等价，量化后却能改变结果？</strong></p>
+<p>答案：实数乘法中两个缩放严格抵消；量化会把不同范围的权重舍入到不同网格点，不能和缩放交换顺序。正是这种非等价性给了重新分配误差的机会，也引入了损害其他通道的风险。</p>
+<p><strong>3. 怎样验证一套AWQ实现的3倍加速真的是你需要的收益？</strong></p>
+<p>答案：固定硬件、模型、生成长度、batch和提示长度，分别测预填充、逐token解码和端到端时间，同时报告质量和峰值内存。还应比较相同优化程度的FP16运行时，区分量化节省与融合优化；只复制论文短提示结果不足以预测自己的服务。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 076｜AWQ：量化权重时，为什么要先看激活？
+    <textarea id="md-source" hidden readonly># 076｜AWQ：量化权重时，为什么要先看激活？
 
 [返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
 
@@ -176,9 +307,9 @@ AWQ 的贡献是将“某些通道更重要”的分析转化为统一低位格�
 
 答案：固定硬件、模型、生成长度、batch和提示长度，分别测预填充、逐token解码和端到端时间，同时报告质量和峰值内存。还应比较相同优化程度的FP16运行时，区分量化节省与融合优化；只复制论文短提示结果不足以预测自己的服务。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

@@ -7,7 +7,7 @@
     <title>第 17 天｜DDPG：把确定性策略梯度放进深度网络 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,208 @@
                 <span class="text-gray-500">DDPG：把确定性策略梯度放进深度网络</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="8726514bf32ad6da1952f3fe8723f8916a6570f3093c21bfc2b17f1e9ae5cc96"><h1>第 17 天｜DDPG：把确定性策略梯度放进深度网络</h1>
+<p><a href="index.html">系列首页</a> · <a href="16-dqn.html">上一篇</a> · <a href="18-double-dqn.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：Lillicrap 等，<em>Continuous control with deep reinforcement learning</em>，2015／2016。<a href="https://arxiv.org/html/1509.02971v6">正文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：从复杂观测学习连续控制</p>
+<p><strong>旧方法卡点</strong>：DQN 无法枚举无限动作，朴素深度 Actor–Critic 相互放大错误</p>
+<p><strong>作者主张</strong>：把 DPG 与回放、双目标网络、软更新和探索噪声结合</p>
+<p><strong>论文证据</strong>：算法1与§4对照实验支持稳定化组件的作用</p>
+<p><strong>一句话</strong>：在在线收集、off-policy、连续动作、无模型 Actor–Critic中，作者通过“把 DPG 与回放、双目标网络、软更新和探索噪声结合”应对“从复杂观测学习连续控制”这一问题；证据边界或代价是：仍易受价值高估、尺度和超参数影响。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>确定性 Actor</strong>：直接输出连续动作。</li>
+<li><strong>目标 Actor</strong>：为下一状态提供较稳定动作。</li>
+<li><strong>软更新</strong>：目标参数逐渐跟随在线参数。</li>
+<li><strong>OU 噪声</strong>：具有时间相关性的探索噪声。</li>
+<li><strong>动作导数</strong>：指导 Actor 修改动作的信号。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“从复杂观测学习连续控制”放在在线收集、off-policy、连续动作、无模型 Actor–Critic的边界内研究。DQN 无法枚举无限动作，朴素深度 Actor–Critic 相互放大错误。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>在线收集、off-policy、连续动作、无模型 Actor–Critic</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>低维状态或堆叠图像</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>连续关节／控制指令</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>任务回报</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>环境终止与固定时间长度分开</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>Actor 输出动作，Critic 评价状态动作。Critic 的目标由目标 Actor 选动作、目标 Critic 评价；Actor 则通过在线 Critic 的动作导数学习。原文还使用 batch normalization、OU 噪声；这些不是确定性策略梯度定理的组成部分。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="y=r+\gamma(1-d)Q_{\bar\phi}(s',\mu_{\bar\theta}(s')),\quad L_Q=E(Q_\phi-y)^2,\quad L_\mu=-E Q_\phi(s,\mu_\theta(s))."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>y</mi><mo>=</mo><mi>r</mi><mo>+</mo><mi>γ</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>d</mi><mo stretchy="false">)</mo><msub><mi>Q</mi><mover accent="true"><mi>ϕ</mi><mo>ˉ</mo></mover></msub><mo stretchy="false">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo separator="true">,</mo><msub><mi>μ</mi><mover accent="true"><mi>θ</mi><mo>ˉ</mo></mover></msub><mo stretchy="false">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="1em"/><msub><mi>L</mi><mi>Q</mi></msub><mo>=</mo><mi>E</mi><mo stretchy="false">(</mo><msub><mi>Q</mi><mi>ϕ</mi></msub><mo>−</mo><mi>y</mi><msup><mo stretchy="false">)</mo><mn>2</mn></msup><mo separator="true">,</mo><mspace width="1em"/><msub><mi>L</mi><mi>μ</mi></msub><mo>=</mo><mo>−</mo><mi>E</mi><msub><mi>Q</mi><mi>ϕ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><msub><mi>μ</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">y=r+\gamma(1-d)Q_{\bar\phi}(s&#x27;,\mu_{\bar\theta}(s&#x27;)),\quad L_Q=E(Q_\phi-y)^2,\quad L_\mu=-E Q_\phi(s,\mu_\theta(s)).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1751em;vertical-align:-0.3732em;"></span><span class="mord mathnormal">d</span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.4629em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight">ϕ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord mtight">ˉ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3732em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.4629em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord mtight">ˉ</span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2371em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">))</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">Q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">ϕ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1502em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">μ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord">−</span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">ϕ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">))</span><span class="mord">.</span></span></span></span></span></span>
+软更新 <span class="reading-math" data-tex="\bar\theta\leftarrow\tau\theta+(1-\tau)\bar\theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>θ</mi><mo>ˉ</mo></mover><mo>←</mo><mi>τ</mi><mi>θ</mi><mo>+</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>τ</mi><mo stretchy="false">)</mo><mover accent="true"><mi>θ</mi><mo>ˉ</mo></mover></mrow><annotation encoding="application/x-tex">\bar\theta\leftarrow\tau\theta+(1-\tau)\bar\theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8312em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span></span><span style="top:-3.2634em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0812em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mclose">)</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span></span><span style="top:-3.2634em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">ˉ</span></span></span></span></span></span></span></span></span></span></span>，Critic 同理。τ 是跟随速度，不是奖励折扣。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">初始化 Actor、Critic、两者目标副本与 replay
+收集 a=μ(s)+探索噪声 的真实转移
+循环抽 replay minibatch：
+  用两个目标网络构建 y，终止时 y=r
+  最小化 Critic TD 损失
+  固定 Critic 参数但保留其对动作的导数
+  最小化 -Q(s,μ(s)) 更新 Actor
+  软更新目标 Actor 和目标 Critic
+评价时去掉探索噪声
+输出：连续控制策略
+</code></pre>
+<p><strong>实现要点</strong>：仍易受价值高估、尺度和超参数影响。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>Critic最小化TD损失；Actor最大化在线Critic评价</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>把 DPG 与回放、双目标网络、软更新和探索噪声结合</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>任务累计回报与学习曲线</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>MuJoCo 多种连续控制</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>在线状态／视觉经验</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>原文相关控制方法与组件移除</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>像素设定含64×64×9输入；完整预算本文未逐项核实</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>任务累计回报与学习曲线</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>种子与全部不确定性报告本文未核实</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>稳定化能否让深度 DPG 实际可训练</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：仍易受价值高估、尺度和超参数影响。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>算法1</td>
+<td>完整训练顺序</td>
+<td>明确两个目标网络作用</td>
+<td>算法定义不等于有效性</td>
+</tr>
+<tr>
+<td>§4 图2</td>
+<td>去掉目标网络／归一化等</td>
+<td>支持组件影响稳定性</td>
+<td>不证明每种任务都必需</td>
+</tr>
+<tr>
+<td>§4 不同输入任务</td>
+<td>状态与像素控制</td>
+<td>展示适用范围</td>
+<td>不证明超参数不敏感</td>
+</tr>
+</tbody></table></div>
+<p><strong>结论边界</strong>：算法1与§4对照实验支持稳定化组件的作用。仍易受价值高估、尺度和超参数影响。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者贡献</strong>是可用的深度连续控制方案。<strong>本文分析</strong>：Actor 优化得越充分，越可能钻 Critic 错误的空子；OU 噪声不是连续控制唯一或总最好的探索方式。后来 TD3 正对其误差反馈进行修补。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>目标 Actor 给出动作0.3，目标 Critic 估值5，r=1，γ=0.9，目标为5.5。Actor 更新时不能对这个离线目标求导，而要对在线 Q(s,μ(s)) 的动作路径求导；两条梯度路线作用不同。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>为什么目标 Critic 不能单独解决高估？</li>
+<li>batch normalization 的训练／评价统计如何影响结果？</li>
+<li>更强的 Actor 优化为何有时反而变差？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>从复杂观测学习连续控制</td>
+<td>把 DPG 与回放、双目标网络、软更新和探索噪声结合</td>
+<td>目标网络和回放减缓深度Actor与Critic互相追逐的波动</td>
+<td>算法1与§4对照实验支持稳定化组件的作用</td>
+<td>仍易受价值高估、尺度和超参数影响</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：DDPG 为什么需要 Actor，而 DQN 通常不需要单独的 Actor？</p>
+<p><strong>参考答案</strong>：DQN 可以枚举有限动作比较 Q；连续动作空间无法直接逐个枚举。DDPG 训练 Actor 近似执行动作优化，直接输出连续动作，再让 Critic 评价并指导改进。Actor 相当于学会了怎样寻找高 Q 动作。</p>
+<p><strong>问题 2</strong>：更新 Actor 时，为什么冻结 Critic 参数，但不能把整个 Q 输出 detach？</p>
+<p><strong>参考答案</strong>：冻结 Critic 参数，是避免 Actor 靠修改评分器来提高分数；保留 Q 对动作的梯度，才能知道动作应如何改变。若把 Q 输出整体停止梯度，Q→动作→Actor 参数的学习链就被切断。</p>
+<p><a href="index.html">系列首页</a> · <a href="16-dqn.html">上一篇</a> · <a href="18-double-dqn.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 17 天｜DDPG：把确定性策略梯度放进深度网络
+    <textarea id="md-source" hidden readonly># 第 17 天｜DDPG：把确定性策略梯度放进深度网络
 
 [系列首页](README.md) · [上一篇](16-dqn.md) · [下一篇](18-double-dqn.md)
 
@@ -188,16 +385,16 @@ $$y=r+\gamma(1-d)Q_{\bar\phi}(s',\mu_{\bar\theta}(s')),\quad L_Q=E(Q_\phi-y)^2,\
 
 [系列首页](README.md) · [上一篇](16-dqn.md) · [下一篇](18-double-dqn.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "17-ddpg";
         const source = document.getElementById('md-source').value;

@@ -7,7 +7,7 @@
     <title>第 13 天｜DPG：沿价值对动作的梯度，训练连续策略 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,221 @@
                 <span class="text-gray-500">DPG：沿价值对动作的梯度，训练连续策略</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="ff8dc9bd9dd6544981a8851c57edea92fc45025c2c80314943c7ce42481e53c8"><h1>第 13 天｜DPG：沿价值对动作的梯度，训练连续策略</h1>
+<p><a href="index.html">系列首页</a> · <a href="12-gps.html">上一篇</a> · <a href="14-trpo.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：Silver 等，<em>Deterministic Policy Gradient Algorithms</em>，2014。<a href="https://proceedings.mlr.press/v32/silver14.pdf">原文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：高维连续动作的策略更新</p>
+<p><strong>旧方法卡点</strong>：离散枚举不可行，随机策略梯度可能需要大量动作样本</p>
+<p><strong>作者主张</strong>：以 Critic 对动作的导数连接确定性 Actor 的参数导数</p>
+<p><strong>论文证据</strong>：§5 在连续 bandit 与控制任务上验证其作用</p>
+<p><strong>一句话</strong>：在确定性策略、连续动作、单智能体 Actor–Critic中，作者通过“以 Critic 对动作的导数连接确定性 Actor 的参数导数”应对“高维连续动作的策略更新”这一问题；证据边界或代价是：Critic 梯度错误可直接误导 Actor，off-policy 实现与理想定理有差别。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>确定性策略</strong>：给定状态直接输出动作。</li>
+<li><strong>链式法则</strong>：组合函数的导数可分段相乘。</li>
+<li><strong>动作梯度</strong>：Q 随动作微小改变的变化。</li>
+<li><strong>行为策略</strong>：负责实际探索的数据生成器。</li>
+<li><strong>访问分布</strong>：训练状态的概率权重。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“高维连续动作的策略更新”放在确定性策略、连续动作、单智能体 Actor–Critic的边界内研究。离散枚举不可行，随机策略梯度可能需要大量动作样本。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>确定性策略、连续动作、单智能体 Actor–Critic</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>环境状态 s</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>连续向量 μθ(s)</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>环境累计收益</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>任务终止或折扣继续过程</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>DPG 首先是一条策略梯度定理，然后才是相应算法。Actor 负责输出动作，Critic 给出动作改变的方向；探索由行为策略完成，不需要目标策略本身随机。它只对学到的 Q 求导，不要求真实物理环境可微。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="\nabla J=\mathbb E_{s\sim\rho^\mu}[\nabla_\theta\mu_\theta(s)\nabla_aQ^\mu(s,a)|_{a=\mu_\theta(s)}]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">∇</mi><mi>J</mi><mo>=</mo><msub><mi mathvariant="double-struck">E</mi><mrow><mi>s</mi><mo>∼</mo><msup><mi>ρ</mi><mi>μ</mi></msup></mrow></msub><mo stretchy="false">[</mo><msub><mi mathvariant="normal">∇</mi><mi>θ</mi></msub><msub><mi>μ</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><msub><mi mathvariant="normal">∇</mi><mi>a</mi></msub><msup><mi>Q</mi><mi>μ</mi></msup><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><msub><mi mathvariant="normal">∣</mi><mrow><mi>a</mi><mo>=</mo><msub><mi>μ</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow></msub><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\nabla J=\mathbb E_{s\sim\rho^\mu}[\nabla_\theta\mu_\theta(s)\nabla_aQ^\mu(s,a)|_{a=\mu_\theta(s)}].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">∇</span><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1052em;vertical-align:-0.3552em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2655em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">s</span><span class="mrel mtight">∼</span><span class="mord mtight"><span class="mord mathnormal mtight">ρ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5935em;"><span style="top:-2.786em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">μ</span></span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">μ</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mord"><span class="mord">∣</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.5198em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mrel mtight">=</span><span class="mord mtight"><span class="mord mathnormal mtight">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.3488em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1512em;"><span></span></span></span></span></span></span><span class="mopen mtight">(</span><span class="mord mathnormal mtight">s</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3552em;"><span></span></span></span></span></span></span><span class="mclose">]</span><span class="mord">.</span></span></span></span></span></span>
+ρ 是策略访问分布。用行为分布替代它涉及 off-policy 目标或近似，不能默认为同一个真梯度。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">初始化确定性 Actor μ 和 Critic Q
+循环：
+  用带探索的行为策略收集转移
+  以 r+γQ(s_next,μ(s_next)) 为目标学习 Critic
+  x ← 当前样本状态
+  a ← μθ(x)
+  g_action ← ∂Q(x,a)/∂a
+  g_actor ← (∂μθ(x)/∂θ)ᵀ*g_action
+  θ ← θ+α*g_actor
+输出：确定性策略
+注：这是核心 Actor–Critic 示意，未添加 DDPG 的目标网络配方
+</code></pre>
+<p><strong>实现要点</strong>：Critic 梯度错误可直接误导 Actor，off-policy 实现与理想定理有差别。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>最大化确定性策略回报，以Q的动作导数计算Actor梯度</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>以 Critic 对动作的导数连接确定性 Actor 的参数导数</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>回报与随采样增长的学习速度</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>§5 连续二次 bandit、经典控制、章鱼臂</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>行为策略采样</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>随机 Actor–Critic 等；文中 SAC 缩写不是 2018 Soft AC</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>bandit 动作维度 10、25、50；其余完整预算本文未核实</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>回报与随采样增长的学习速度</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>全部种子／误差定义本文未核实</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>避免动作积分是否改善连续动作优化</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：Critic 梯度错误可直接误导 Actor，off-policy 实现与理想定理有差别。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>§3—4 定理</td>
+<td>确定性策略梯度表达</td>
+<td>提供链式更新依据</td>
+<td>不保证近似 Critic</td>
+</tr>
+<tr>
+<td>图1</td>
+<td>10/25/50 维 bandit 比较</td>
+<td>直接检验动作维度影响</td>
+<td>不涵盖所有复杂动力学</td>
+</tr>
+<tr>
+<td>§5 控制任务</td>
+<td>确定与随机策略方法比较</td>
+<td>支持原文任务中的可行性</td>
+<td>不证明确定策略普遍占优</td>
+</tr>
+</tbody></table></div>
+<p><strong>结论边界</strong>：§5 在连续 bandit 与控制任务上验证其作用。Critic 梯度错误可直接误导 Actor，off-policy 实现与理想定理有差别。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者贡献</strong>包括确定性梯度理论和算法。<strong>本文分析</strong>：Actor 会寻找 Q 的局部高点，也会利用 Q 的错误高点；没有足够探索时，导数只是模型外推。后来的 DDPG、TD3 主要处理这一结构在深度网络中的稳定性问题。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>令 Q(a)=−(a−2)²，Actor 当前 a=0，则 ∂Q/∂a=4，会推动 a 增大。如果学错成 −(a+2)²，同样合法的反向传播会把动作推向错误方向。梯度可算与梯度可信是两件事。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>确定性策略怎样保证探索？</li>
+<li>动作有硬边界时梯度如何处理？</li>
+<li>为什么不需要对真实环境求导？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>高维连续动作的策略更新</td>
+<td>以 Critic 对动作的导数连接确定性 Actor 的参数导数</td>
+<td>避开连续动作枚举，把改进方向交给可微Critic</td>
+<td>§5 在连续 bandit 与控制任务上验证其作用</td>
+<td>Critic 梯度错误可直接误导 Actor，off-policy 实现与理想定理有差别</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：确定性策略没有动作概率，梯度从哪里来？</p>
+<p><strong>参考答案</strong>：沿 Q 对动作的变化方向更新策略：</p>
+<p><span class="reading-math" data-tex="\nabla_\theta J
+=
+\mathbb E[
+\nabla_\theta\mu_\theta(s)
+\nabla_aQ^\mu(s,a)|_{a=\mu_\theta(s)}
+]"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="normal">∇</mi><mi>θ</mi></msub><mi>J</mi><mo>=</mo><mi mathvariant="double-struck">E</mi><mo stretchy="false">[</mo><msub><mi mathvariant="normal">∇</mi><mi>θ</mi></msub><msub><mi>μ</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><msub><mi mathvariant="normal">∇</mi><mi>a</mi></msub><msup><mi>Q</mi><mi>μ</mi></msup><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><msub><mi mathvariant="normal">∣</mi><mrow><mi>a</mi><mo>=</mo><msub><mi>μ</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow></msub><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">\nabla_\theta J
+=
+\mathbb E[
+\nabla_\theta\mu_\theta(s)
+\nabla_aQ^\mu(s,a)|_{a=\mu_\theta(s)}
+]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1052em;vertical-align:-0.3552em;"></span><span class="mord mathbb">E</span><span class="mopen">[</span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">μ</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mord"><span class="mord">∣</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.5198em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mrel mtight">=</span><span class="mord mtight"><span class="mord mathnormal mtight">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.3488em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1512em;"><span></span></span></span></span></span></span><span class="mopen mtight">(</span><span class="mord mathnormal mtight">s</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3552em;"><span></span></span></span></span></span></span><span class="mclose">]</span></span></span></span></span></span></p>
+<p>Critic 提供“动作往哪里变化更好”，Actor 的导数再把动作方向转换为参数方向。</p>
+<p><strong>问题 2</strong>：为什么 Q 数值预测准确，仍可能不足以训练好 Actor？</p>
+<p><strong>参考答案</strong>：Actor 使用的是 Q 对动作的导数。一个函数可以在数据点上的数值很准，却在点之间产生错误斜率。Actor 可能顺着这些错误斜率选择缺少数据支持的动作，所以还要关注局部梯度与覆盖范围。</p>
+<p><a href="index.html">系列首页</a> · <a href="12-gps.html">上一篇</a> · <a href="14-trpo.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 13 天｜DPG：沿价值对动作的梯度，训练连续策略
+    <textarea id="md-source" hidden readonly># 第 13 天｜DPG：沿价值对动作的梯度，训练连续策略
 
 [系列首页](README.md) · [上一篇](12-gps.md) · [下一篇](14-trpo.md)
 
@@ -200,16 +410,16 @@ Critic 提供“动作往哪里变化更好”，Actor 的导数再把动作方�
 
 [系列首页](README.md) · [上一篇](12-gps.md) · [下一篇](14-trpo.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "13-dpg";
         const source = document.getElementById('md-source').value;

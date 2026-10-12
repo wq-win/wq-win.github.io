@@ -7,7 +7,7 @@
     <title>第 25 天｜MADDPG：训练时看全局，执行时各自行动 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,208 @@
                 <span class="text-gray-500">MADDPG：训练时看全局，执行时各自行动</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="135077ffc0f0658e8eb96632b0411684245d7427fd451ba1b8e18ec1507950c8"><h1>第 25 天｜MADDPG：训练时看全局，执行时各自行动</h1>
+<p><a href="index.html">系列首页</a> · <a href="24-icm.html">上一篇</a> · <a href="26-her.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：<em>Multi-Agent Actor-Critic for Mixed Cooperative-Competitive Environments</em>，2017。<a href="https://arxiv.org/abs/1706.02275">原论文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：多个学习者使彼此的环境不断变化</p>
+<p><strong>旧方法卡点</strong>：独立Critic把其他策略变化误认为环境噪声</p>
+<p><strong>作者主张</strong>：为每个智能体用集中Critic，Actor执行时只用局部观测</p>
+<p><strong>论文证据</strong>：合作、竞争和混合粒子任务实验显示作用</p>
+<p><strong>一句话</strong>：在多智能体、集中训练分散执行、连续策略梯度中，作者通过“为每个智能体用集中Critic，Actor执行时只用局部观测”应对“多个学习者使彼此的环境不断变化”这一问题；证据边界或代价是：集中信息和联合动作输入限制可扩展性。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>非平稳性</strong>：其他策略更新改变数据规律。</li>
+<li><strong>集中训练</strong>：学习时可使用联合信息。</li>
+<li><strong>分散执行</strong>：部署时各自凭可用信息决策。</li>
+<li><strong>联合动作</strong>：所有智能体动作的组合。</li>
+<li><strong>信用分配</strong>：把共同结果归因到参与者行为。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“多个学习者使彼此的环境不断变化”放在多智能体、集中训练分散执行、连续策略梯度的边界内研究。独立Critic把其他策略变化误认为环境噪声。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>多智能体、集中训练分散执行、连续策略梯度</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>Actor用局部o_i；Critic用联合信息x</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>每个智能体a_i，联合为a_1…a_N</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>可合作共享或各自不同奖励r_i</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>联合任务终止</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>每个Actor只负责自己的动作，但Critic可看其他智能体实际做了什么，从而让条件分布更稳定。与单智能体DDPG相比，关键修改是价值函数的条件信息；训练时额外信息必须在评估声明中说清楚。原文还讨论策略集合与对手建模，核心代码先聚焦集中Critic。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="\nabla_{\theta_i}J_i=E[\nabla_{\theta_i}\mu_i(o_i)\nabla_{a_i}Q_i(x,a_1,\ldots,a_N)]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="normal">∇</mi><msub><mi>θ</mi><mi>i</mi></msub></msub><msub><mi>J</mi><mi>i</mi></msub><mo>=</mo><mi>E</mi><mo stretchy="false">[</mo><msub><mi mathvariant="normal">∇</mi><msub><mi>θ</mi><mi>i</mi></msub></msub><msub><mi>μ</mi><mi>i</mi></msub><mo stretchy="false">(</mo><msub><mi>o</mi><mi>i</mi></msub><mo stretchy="false">)</mo><msub><mi mathvariant="normal">∇</mi><msub><mi>a</mi><mi>i</mi></msub></msub><msub><mi>Q</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo separator="true">,</mo><msub><mi>a</mi><mn>1</mn></msub><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><msub><mi>a</mi><mi>N</mi></msub><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\nabla_{\theta_i}J_i=E[\nabla_{\theta_i}\mu_i(o_i)\nabla_{a_i}Q_i(x,a_1,\ldots,a_N)].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9334em;vertical-align:-0.2501em;"></span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:-0.0278em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2501em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0001em;vertical-align:-0.2501em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mopen">[</span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:-0.0278em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2501em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2501em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.10903em;">N</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)]</span><span class="mord">.</span></span></span></span></span></span>
+只有a_i路径对Actor i反传；别的动作应按该更新的采样与停止梯度约定处理。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">用各Actor+探索噪声联合交互
+存储联合观测、动作、各奖励与后继观测
+每个智能体i：
+  用所有目标Actor生成后继联合动作
+  y_i←r_i+γ*(1-done)*目标Q_i(x_next,联合动作)
+  更新集中Q_i
+  用μ_i(o_i)替换联合动作中的a_i
+  最大化Q_i更新Actor i，冻结其他Actor
+  软更新目标网络
+部署：每个Actor只接收自己的o_i
+</code></pre>
+<p><strong>实现要点</strong>：集中信息和联合动作输入限制可扩展性。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>每个智能体最大化自身回报；集中Critic提供局部Actor梯度</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>为每个智能体用集中Critic，Actor执行时只用局部观测</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>各智能体回报、合作／竞争任务结果</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>合作通信、捕食追逐、协作导航、欺骗等粒子任务</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>联合在线replay</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>独立DDPG及原文相关基线</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>完整步数、网络和调参预算本文未逐项核实</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>各智能体回报、合作／竞争任务结果</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>全部种子与不确定性本文未核实</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>集中评价能否缓解其他策略变化</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：集中信息和联合动作输入限制可扩展性。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>图1</td>
+<td>集中Critic／局部Actor</td>
+<td>部署信息分工</td>
+<td>不等于训练也只用局部信息</td>
+</tr>
+<tr>
+<td>图2</td>
+<td>多种交互任务</td>
+<td>明确协作／竞争覆盖</td>
+<td>不是复杂现实社会仿真</td>
+</tr>
+<tr>
+<td>§5结果与相关消融</td>
+<td>集中方法与独立学习</td>
+<td>支持所测多智能体场景</td>
+<td>不证明任意人数下扩展</td>
+</tr>
+</tbody></table></div>
+<p><strong>结论边界</strong>：合作、竞争和混合粒子任务实验显示作用。集中信息和联合动作输入限制可扩展性。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者贡献</strong>是可处理混合互动的集中评价。<strong>本文分析</strong>：联合输入随人数增长，训练中熟悉的对手分布也可能与部署不同。一个智能体回报增加可能意味着别人损失，不能把所有结果都叫整体协作提高。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>两机器人同时推箱子，单个机器人观察到箱子不动，不知道自己推错还是伙伴没推。Critic看到双方动作后能区分这两种情况；部署Actor仍只能依据自己的观测行动。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>集中Critic使用的全局信息部署时真的不需要吗？</li>
+<li>新对手策略会造成怎样的分布偏移？</li>
+<li>如何评价竞争任务中谁受益？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>多个学习者使彼此的环境不断变化</td>
+<td>为每个智能体用集中Critic，Actor执行时只用局部观测</td>
+<td>条件化其他智能体的动作，减少其变化造成的评价混淆</td>
+<td>合作、竞争和混合粒子任务实验显示作用</td>
+<td>集中信息和联合动作输入限制可扩展性</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：为什么多智能体训练中的环境看起来不稳定？</p>
+<p><strong>参考答案</strong>：一个智能体观察到的结果，取决于其他智能体的行为，而其他策略也在更新。MADDPG 的集中式 Critic 在训练时条件于更完整的观测和联合动作，减少把别人行为变化误当成不可解释环境噪声的问题。</p>
+<p><strong>问题 2</strong>：训练时使用全局信息，为什么不一定妨碍分散执行？</p>
+<p><strong>参考答案</strong>：关键是这些信息由哪个组件使用。Critic 训练时可以看全局，Actor 执行时必须只依赖实际可获得的信息。若把全局信息直接输入部署 Actor，却无法在真实执行时取得，就不满足分散执行设定。</p>
+<p><a href="index.html">系列首页</a> · <a href="24-icm.html">上一篇</a> · <a href="26-her.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 25 天｜MADDPG：训练时看全局，执行时各自行动
+    <textarea id="md-source" hidden readonly># 第 25 天｜MADDPG：训练时看全局，执行时各自行动
 
 [系列首页](README.md) · [上一篇](24-icm.md) · [下一篇](26-her.md)
 
@@ -188,16 +385,16 @@ $$\nabla_{\theta_i}J_i=E[\nabla_{\theta_i}\mu_i(o_i)\nabla_{a_i}Q_i(x,a_1,\ldots
 
 [系列首页](README.md) · [上一篇](24-icm.md) · [下一篇](26-her.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "25-maddpg";
         const source = document.getElementById('md-source').value;

@@ -7,7 +7,7 @@
     <title>070｜Reflexion：把失败经验写成语言，下一次真的会更好吗？ | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,134 @@
                 <span class="text-gray-500">Reflexion：把失败经验写成语言，下一次真的会更好吗？</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="c345f8b62bd7fc246cef551e3804293bab0e77f26b9bf43eeccc197504441207"><h1>070｜Reflexion：把失败经验写成语言，下一次真的会更好吗？</h1>
+<p><a href="index.html">返回目录</a> · <a href="00-timeline.html">发展时间线</a></p>
+<p>论文：Noah Shinn 等，<em>Reflexion: Language Agents with Verbal Reinforcement Learning</em>，2023。原始来源：<a href="https://arxiv.org/abs/2303.11366">论文</a>、<a href="https://arxiv.org/html/2303.11366v4">正文 v4</a>、<a href="https://github.com/noahshinn024/reflexion">官方代码</a>。以下依据 v4 的方法、实验与附录相关部分解读；没有独立运行仓库，也没有把所有提示词逐条复现。</p>
+<h2 id="一分钟理解改的是下次尝试的上下文">一分钟理解：改的是下次尝试的上下文</h2>
+<p>假设一个助手写错程序。给它一句“错了”，它可能换种说法再错一次；给它一段可靠的错误分析，例如“循环遗漏了右端点，下一次先检查边界”，再次作答时就有了可以执行的修正方向。Reflexion 把这个过程组织成通用框架：执行任务、评价结果、生成反思、保存反思、再次尝试。</p>
+<p>过去的提示式 Agent 常常只保留当前行动轨迹，或者从头重试。前者可能让冗长错误淹没有用信息，后者会重复相同错误。作者希望用短小的语言记忆概括失败原因，使下一次行动受以前结果影响。</p>
+<p>作者把这称为“语言强化学习”。需要先划清边界：论文的推理循环没有通过梯度更新语言模型参数，反思也不是数学意义上的策略梯度。变化发生在模型的条件输入和外部记忆中。</p>
+<p>实验最醒目的结果之一是 HumanEval Python 上，表1中的 GPT-4 基线由80.1%提高到91.0%。但程序在提交最终答案前可以内部测试和重试；这不能理解成一次模型调用就有91%的成功率。同一张表中 MBPP Python 反而从80.1%降到77.1%。</p>
+<p>一句话总结：在能够获得有效反馈且允许重试的任务中，通过把失败经验压缩为语言记忆，改善后续尝试的成功率，代价是额外调用、反馈系统和错误反思可能带来的退化。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>理解本文最需要五个概念：<strong>轨迹</strong>是行动与观察的序列；<strong>上下文学习</strong>是在不更新参数时利用输入改变行为；<strong>外部记忆</strong>是跨尝试保留的信息；<strong>oracle反馈</strong>是评测时可获得但部署时未必存在的真实判定；<strong>隐藏测试</strong>是不能被候选生成过程直接利用的最终评估集合。</p>
+<h2 id="研究背景这里的环境和奖励是什么">研究背景：这里的环境和奖励是什么？</h2>
+<p>论文研究固定语言模型驱动的单个 Agent，覆盖 ALFWorld 文本交互、HotpotQA 问答和程序生成。它不是一个统一训练好的新基础模型，也没有统一的状态空间。</p>
+<p>在 ALFWorld 中，观测是环境返回的文本，动作是导航、寻找和操作物体的命令，任务完成状态提供反馈。在问答中，输入问题与检索内容构成上下文，输出答案接受评价。在编程中，候选代码接受生成的单元测试，最后用独立测试集统计成绩。</p>
+<p>这三种反馈的可信程度不同。模拟器的任务完成信号比较直接；HotpotQA 实验可以使用真实答案导出的正确与否反馈；程序的自生成测试则可能把错误实现判为正确，也可能用错误期望值否定正确程序。因此，“有反思”不是唯一条件，“反思依据什么”更加关键。</p>
+<p>核心假设是：一次失败能够被压缩为有助于下一次决策的经验，而且模型读到经验后能够采取不同、更好的行动。论文用经验性实验检查这些假设，没有给出每次反思都使成功概率单调上升的定理。</p>
+<h2 id="方法三个角色与一份有限记忆">方法：三个角色与一份有限记忆</h2>
+<p>Actor 负责行动或产生答案；Evaluator 评价轨迹；Self-Reflection 模块把轨迹和评价转换为自然语言反馈。这三个角色可以由语言模型或外部执行器承担，不能因为名称类似 Actor–Critic 就把 Evaluator 等同于学习状态价值的 TD critic。</p>
+<p>用教学记号描述第 <span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 次尝试：</p>
+<p><span class="reading-math" data-tex="\tau_k\sim\pi_M(\cdot\mid x,m_k),\qquad
+r_k=E(\tau_k),\qquad
+s_k=R(\tau_k,r_k,m_k),\qquad
+m_{k+1}=\operatorname{truncate}(m_k\oplus s_k)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>τ</mi><mi>k</mi></msub><mo>∼</mo><msub><mi>π</mi><mi>M</mi></msub><mo stretchy="false">(</mo><mo>⋅</mo><mo>∣</mo><mi>x</mi><mo separator="true">,</mo><msub><mi>m</mi><mi>k</mi></msub><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><msub><mi>r</mi><mi>k</mi></msub><mo>=</mo><mi>E</mi><mo stretchy="false">(</mo><msub><mi>τ</mi><mi>k</mi></msub><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><msub><mi>s</mi><mi>k</mi></msub><mo>=</mo><mi>R</mi><mo stretchy="false">(</mo><msub><mi>τ</mi><mi>k</mi></msub><mo separator="true">,</mo><msub><mi>r</mi><mi>k</mi></msub><mo separator="true">,</mo><msub><mi>m</mi><mi>k</mi></msub><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><msub><mi>m</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>=</mo><mi mathvariant="normal">truncate</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>m</mi><mi>k</mi></msub><mo>⊕</mo><msub><mi>s</mi><mi>k</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\tau_k\sim\pi_M(\cdot\mid x,m_k),\qquad
+r_k=E(\tau_k),\qquad
+s_k=R(\tau_k,r_k,m_k),\qquad
+m_{k+1}=\operatorname{truncate}(m_k\oplus s_k).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1132em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∼</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.10903em;">M</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord">⋅</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1132em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1132em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">truncate</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊕</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 是任务，<span class="reading-math" data-tex="m_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>m</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">m_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是记忆，<span class="reading-math" data-tex="\tau_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>τ</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">\tau_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1132em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是轨迹或候选程序，<span class="reading-math" data-tex="E"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi></mrow><annotation encoding="application/x-tex">E</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span></span></span></span></span> 是评价器，<span class="reading-math" data-tex="R"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>R</mi></mrow><annotation encoding="application/x-tex">R</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span></span></span></span> 是反思生成过程，<span class="reading-math" data-tex="\oplus"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>⊕</mo></mrow><annotation encoding="application/x-tex">\oplus</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord">⊕</span></span></span></span></span> 表示追加。截断操作限制上下文长度。模型参数 <span class="reading-math" data-tex="M"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi></mrow><annotation encoding="application/x-tex">M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">M</span></span></span></span></span> 在这一循环中保持不变。</p>
+<p>这里没有一个被梯度下降直接优化的统一 Reflexion 损失。任务成功率是评价指标；“执行—反馈—记忆”是算法机制；改变条件分布是机制产生的效果。三者不能合并成“优化奖励函数”一句话。</p>
+<pre><code class="language-text">输入：任务 x、固定模型、评价器 E、重试预算 K、记忆容量 Ω
+memory = []
+for trial in 1..K:
+    candidate, trajectory = Actor(x, memory)
+    feedback = E(candidate, trajectory)
+    if feedback indicates success:
+        return candidate
+    reflection = Reflect(x, trajectory, feedback, memory)
+    memory = last_Ω(memory + [reflection])
+return best_or_last_candidate_according_to_protocol
+</code></pre>
+<p>这是便于实现的教学版本。原文算法1的循环条件写法不宜脱离上下文机械照抄；实际程序必须同时保证成功后停止、预算耗尽后停止。最后返回哪个候选也应由评价协议明确规定。</p>
+<p>为什么语言记忆可能比原始轨迹有效？原始轨迹告诉模型“发生了什么”，反思还尝试提炼“下次应改变什么”。但这是信息压缩，不是无损记录：概括失真、过早归因以及错误测试都可能把下一次尝试引向错误方向。</p>
+<h2 id="实验设计反馈与预算是比较的一部分">实验设计：反馈与预算是比较的一部分</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文设置与需要保留的口径</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>ALFWorld</td>
+<td>§4.1：134个环境、6类任务；基于 GPT-3 的 ReAct；连续12轮尝试，保留最近3份反思</td>
+</tr>
+<tr>
+<td>ALFWorld 重试</td>
+<td>重复相同行动与响应超过阈值，或行动过长时重置；基线也获得重试机会，不是只比较一次基线与多次新方法</td>
+</tr>
+<tr>
+<td>HotpotQA</td>
+<td>图4的100道题；CoT、ReAct及记忆消融；使用正确性反馈，部分 CoT 设置提供真实支持上下文</td>
+</tr>
+<tr>
+<td>程序生成</td>
+<td>GPT-4；HumanEval、MBPP 的 Python/Rust 版本；HumanEval Rust 使用较难的50题子集；另有40道 LeetCode hard</td>
+</tr>
+<tr>
+<td>内部反馈</td>
+<td>模型生成单元测试，进行语法过滤与代码执行；语法正确不能保证测试的期望答案正确</td>
+</tr>
+<tr>
+<td>记忆与停止</td>
+<td>编程保留最近一次反思；成功停止取决于内部测试。统一的编程总调用预算没有在这里所核对的正文中确认</td>
+</tr>
+<tr>
+<td>评价口径</td>
+<td>最终候选提交隐藏测试；pass@1 描述最终提交，不排除内部多轮生成、执行与修正</td>
+</tr>
+<tr>
+<td>不确定性</td>
+<td>不把有限任务集上的单个比例当作稳定总体参数；正文结果不足以推导所有模型与任务的置信区间</td>
+</tr>
+</tbody></table></div>
+<p>HotpotQA 的正确与否反馈具有实验 oracle 的性质：真实部署的问题通常没有已知正确答案可随时判分。把这个系统搬到开放研究问题上，必须另行构建评价器，不能直接沿用其问答增益。</p>
+<p>还要注意不同论文的 GPT-4 成绩不可直接互换。这里 HumanEval 基线80.1%，并不是 GPT-4 技术报告中67%的同一实验配置；模型版本、提示、采样和评测流程都影响可比性。</p>
+<h2 id="结果五处证据应该怎样读">结果：五处证据应该怎样读？</h2>
+<p><strong>证据1：图3，ALFWorld 的累计成功。</strong> 最终完成130/134个任务，即约97.01%，这个比例由任务数自行计算。曲线支持记忆与重试可以帮助解决先前失败的任务，但它是多轮累计结果，不能证明首次行动就有相同可靠性，更不能只凭最终成功率判断调用效率。</p>
+<p><strong>证据2：图4，问答中的记忆消融。</strong> 作者比较仅保留近期经历与加入语言反思的设置，报告反思记忆带来8个百分点的增益。这支持“如何编码过去经验”有作用；然而正确性反馈与部分实验的真实上下文也参与了结果，不能据此证明不依赖验证信息的自由反思同样有效。</p>
+<p><strong>证据3：表1，程序任务有明显异质性。</strong> HumanEval Python 为80.1%→91.0%，绝对增加10.9个百分点；Rust 为60%→68%。MBPP Python 则80.1%→77.1%，下降3个百分点；MBPP Rust 为70.9%→75.4%。LeetCode hard 为7.5%→15%，在40题上对应3题→6题，样本很小。“翻倍”不能掩盖只多解3题的事实。</p>
+<p><strong>证据4：表2，自生成测试的可靠程度。</strong> 作者讨论 MBPP 与 HumanEval 上内部测试放过错误程序的差异，正文给出16.3%与1.4%的相关比例。阅读时必须遵循表中条件归一化方式，不能擅自把它们当成以所有错误程序为分母的标准假阳性率。它支持测试质量影响最终效果，不能证明反思模块本身在 MBPP 上没有价值。</p>
+<p><strong>证据5：表3，Rust 子集的组件消融。</strong> 基线0.60；省去测试生成而保留反思为0.52；有测试但省去语言反思为0.60；完整方法为0.68。在这一设置下，可靠反馈与语言修正共同出现才取得增益，缺少测试的反思甚至变差。结论范围是该子集与配置，不是任何任务都必须使用相同组件。</p>
+<h2 id="贡献成本与尚未解决的问题">贡献、成本与尚未解决的问题</h2>
+<p>这篇论文的重要贡献是把语言反馈、有限记忆与任务重试组织成清晰的 Agent 框架，并跨交互、问答和代码任务实验。它展示了一种无参数更新的适应方式，为后来“经验记忆”“自修正”系统提供了可讨论的基线。</p>
+<p>成本至少包括更多生成 token、评价器调用、代码执行与任务重置。最终准确率提高并不自动意味着单位时间成功率提高；若两个方法可用预算不同，应该同时报告成功率随总 token、调用次数和墙钟时间的变化。</p>
+<p>作者讨论了复杂代码与不可靠测试带来的困难。进一步分析还包括：短记忆可能遗忘早期有效信息；同一模型生成答案和反思时可能共享盲点；错误归因可以积累成顽固记忆；任务无法重置时，试错本身可能改变环境，不能照搬离线修正流程。</p>
+<p>论文对 LeetCode 时间切分的解释涉及 GPT-4 训练截止日期，其依据不宜当作已证实的去污染保证。<a href="https://arxiv.org/abs/2303.08774">GPT-4 技术报告</a>描述的是大部分数据截止于2021年9月、另有少量更新数据，不能由一个题目发布日期推出模型绝不可能见过相关信息。这属于外部原始来源支持的证据边界。</p>
+<h2 id="一个具体例子与五个前置概念">一个具体例子与五个前置概念</h2>
+<p><strong>自构例子，未运行：</strong> 任务是实现闭区间整数求和。首次代码用 <code>range(a, b)</code>，测试 <code>sum_interval(2, 4) == 9</code> 失败，结果为5。好的反思是“Python 的 range 不含右端点，下次使用 b+1，并检查 a=b”；坏的反思是“需要给所有结果加4”。后者可能修好这一个测试，却破坏其他输入。若测试本身错误地要求结果为8，反思越坚定也可能越偏离真实规格。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>重试容易重复错误，完整轨迹又过长</td>
+<td>评价后生成行动导向的语言反思，写入有限记忆</td>
+<td>压缩错误原因，让下一次条件输入包含可执行修正</td>
+<td>图3累计130/134；图4记忆消融；表1 HumanEval增益与 MBPP 退化；表3组件消融</td>
+<td>多次调用和执行；依赖可靠反馈；无参数更新或单调改进保证</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测与答案">自测与答案</h2>
+<p><strong>1. Reflexion 没有更新权重，为什么仍然能“学到”经验？它和 PPO 的学习一样吗？</strong></p>
+<p>答案：记忆改变了后续生成的条件分布，相同模型读到不同失败经验，可以产生不同动作。这是一种任务内的上下文适应。PPO 则通常通过奖励和梯度更新策略参数；两者变化的存储位置、跨任务持久性和优化机制不同。“语言梯度”只能当作比喻。</p>
+<p><strong>2. HumanEval 的91% pass@1 能否说明一次模型调用有91%概率写对？怎样做公平比较？</strong></p>
+<p>答案：不能。最终只有一个提交，不代表内部只有一次生成；测试、反思和修正都消耗预算。应固定同一模型与最终隐藏测试，比较相同总 token、执行次数或墙钟预算下的 Reflexion、直接多次采样和无反思修正，并把首次成功与最终成功分开报告。</p>
+<p><strong>3. 为什么更详细的反思可能使程序变差？怎样验证问题出在反馈还是反思？</strong></p>
+<p>答案：错误测试会提供错误优化方向，反思还可能把局部错误概括成错误规则。可构造真实测试与自生成测试两种反馈，在相同预算下分别运行有反思、无反思系统；另外检查反思是否忠实解释失败。只有这样才能区分评价器失真、语言归因失真和模型无法执行正确建议三种原因。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 070｜Reflexion：把失败经验写成语言，下一次真的会更好吗？
+    <textarea id="md-source" hidden readonly># 070｜Reflexion：把失败经验写成语言，下一次真的会更好吗？
 
 [返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
 
@@ -171,9 +294,9 @@ HotpotQA 的正确与否反馈具有实验 oracle 的性质：真实部署的问
 
 答案：错误测试会提供错误优化方向，反思还可能把局部错误概括成错误规则。可构造真实测试与自生成测试两种反馈，在相同预算下分别运行有反思、无反思系统；另外检查反思是否忠实解释失败。只有这样才能区分评价器失真、语言归因失真和模型无法执行正确建议三种原因。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

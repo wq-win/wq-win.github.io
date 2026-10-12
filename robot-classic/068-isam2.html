@@ -7,7 +7,7 @@
     <title>068｜iSAM2：把不断增长的SLAM问题变成局部树更新 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,175 @@
                 <span class="text-gray-500">iSAM2：把不断增长的SLAM问题变成局部树更新</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="cec212756dbe3f415f5b285e42fc3df3c3c6ba39b5ada62cf925ce5b0e89d32d"><h1>068｜iSAM2：把不断增长的SLAM问题变成局部树更新</h1>
+<p><a href="00-timeline.html">总览</a> · <a href="067-ompl.html">上一篇</a> · <a href="069-tum-rgbd.html">下一篇</a></p>
+<p><strong>原论文：</strong> <em>iSAM2: Incremental Smoothing and Mapping Using the Bayes Tree</em>，Michael Kaess、Hordur Johannsson、Richard Roberts、Viorela Ila、John Leonard、Frank Dellaert。本文解读2012年IJRR期刊版；期刊在线发表于2011年12月，另有2011年ICRA先行论文。<a href="https://doi.org/10.1177/0278364911430419">期刊链接</a> · <a href="https://www.cs.cmu.edu/~kaess/pub/Kaess12ijrr.pdf">作者全文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p>机器人每走一步，就多一个位姿和若干测量。最准确的做法之一是保留历史位姿与地图，把所有约束联合优化；但每一步从头求解全部历史，计算会越来越重。原版iSAM可以增量更新矩阵，却仍需要周期性的重排序和重新线性化。</p>
+<p>iSAM2的关键是把稀疏矩阵分解解释成一棵 <strong>Bayes tree</strong>。新测量到来时，找出受影响的树部分，重建它，并把未变的子树接回。再根据估计变化决定哪些变量需要重新线性化，按需回代更新状态。</p>
+<p>实验支持它能在多个图结构上，以接近充分迭代最小二乘的目标值实现增量求解。但它不是所有数据集最快，也没有保证每次大回环都在固定时间内完成。</p>
+<p>一句话：在持续增加约束的非线性SLAM中，通过Bayes树局部更新、增量排序和按需线性化，改善了求解效率与在线精度，代价是复杂的数据结构、近似阈值和大回环时仍可能出现的计算峰值。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>理解本文需要的五个概念：</p>
+<ul>
+<li><strong>因子图</strong>：用局部函数连接变量，表达测量如何约束状态。</li>
+<li><strong>高斯—牛顿</strong>：线性化残差并迭代求解局部最小二乘。</li>
+<li><strong>消元与填充</strong>：消去变量会在剩余变量之间产生新联系。</li>
+<li><strong>Bayes树</strong>：用条件概率团组织消元结果，暴露可复用结构。</li>
+<li><strong>回代</strong>：已有三角分解后，按依赖关系恢复变量增量。</li>
+</ul>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>这是一篇状态估计与稀疏优化论文，不是强化学习论文。没有策略、奖励或训练回报；输入是传感器处理后得到的测量因子，输出是机器人轨迹和可选地标的估计。数据关联通常已经由前端处理，iSAM2并不自动判断“这次看见的是不是过去那个地标”。</p>
+<p>变量集合 <span class="reading-math" data-tex="\Theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">Θ</mi></mrow><annotation encoding="application/x-tex">\Theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">Θ</span></span></span></span></span> 可包含位姿和地标。测量 <span class="reading-math" data-tex="z_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>z</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">z_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 约束其中一个小子集 <span class="reading-math" data-tex="\Theta_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="normal">Θ</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">\Theta_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord">Θ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。高斯噪声假设下，最大后验估计可以写成加权非线性最小二乘：</p>
+<p><span class="reading-math" data-tex="\Theta^\star=\arg\min_\Theta\sum_i
+\|h_i(\Theta_i)-z_i\|_{\Sigma_i^{-1}}^2."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi mathvariant="normal">Θ</mi><mo>⋆</mo></msup><mo>=</mo><mi>arg</mi><mo>⁡</mo><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mi mathvariant="normal">Θ</mi></munder><munder><mo>∑</mo><mi>i</mi></munder><mi mathvariant="normal">∥</mi><msub><mi>h</mi><mi>i</mi></msub><mo stretchy="false">(</mo><msub><mi mathvariant="normal">Θ</mi><mi>i</mi></msub><mo stretchy="false">)</mo><mo>−</mo><msub><mi>z</mi><mi>i</mi></msub><msubsup><mi mathvariant="normal">∥</mi><msubsup><mi mathvariant="normal">Σ</mi><mi>i</mi><mrow><mo>−</mo><mn>1</mn></mrow></msubsup><mn>2</mn></msubsup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\Theta^\star=\arg\min_\Theta\sum_i
+\|h_i(\Theta_i)-z_i\|_{\Sigma_i^{-1}}^2.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7387em;"></span><span class="mord"><span class="mord">Θ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">⋆</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3277em;vertical-align:-1.2777em;"></span><span class="mop">ar<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3557em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">Θ</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7443em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">∥</span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord">Θ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.442em;vertical-align:-0.5778em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.3478em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mtight">Σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8646em;"><span style="top:-2.1777em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-2.9043em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3223em;"><span></span></span></span></span></span></span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.5778em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="h_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>h</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">h_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是测量预测，<span class="reading-math" data-tex="\Sigma_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="normal">Σ</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">\Sigma_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord">Σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是噪声协方差，平方范数给不同方向与测量不同权重。通常还需一个先验固定全局坐标自由度，否则整体平移或旋转不会改变相对测量，系统可能奇异。</p>
+<p>全量平滑保留过去状态，能够用后来的回环修正早期轨迹。困难在于：新增约束影响哪些变量？何时旧线性近似已不可靠？变量按什么顺序消去才不会产生大量填充？这些就是本文的研究对象。</p>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<h3 id="1-从因子图到bayes树">1. 从因子图到Bayes树</h3>
+<p>在线性化点 <span class="reading-math" data-tex="\bar\Theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi mathvariant="normal">Θ</mi><mo>ˉ</mo></mover></mrow><annotation encoding="application/x-tex">\bar\Theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8201em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8201em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord">Θ</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">ˉ</span></span></span></span></span></span></span></span></span></span></span> 附近，用局部增量 <span class="reading-math" data-tex="\delta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>δ</mi></mrow><annotation encoding="application/x-tex">\delta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span></span></span></span></span> 近似残差：</p>
+<p><span class="reading-math" data-tex="\delta^\star=\arg\min_\delta\|A\delta-b\|^2,\qquad
+\Theta\leftarrow\bar\Theta\oplus\delta."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>δ</mi><mo>⋆</mo></msup><mo>=</mo><mi>arg</mi><mo>⁡</mo><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mi>δ</mi></munder><mi mathvariant="normal">∥</mi><mi>A</mi><mi>δ</mi><mo>−</mo><mi>b</mi><msup><mi mathvariant="normal">∥</mi><mn>2</mn></msup><mo separator="true">,</mo><mspace width="2em"/><mi mathvariant="normal">Θ</mi><mo>←</mo><mover accent="true"><mi mathvariant="normal">Θ</mi><mo>ˉ</mo></mover><mo>⊕</mo><mi>δ</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\delta^\star=\arg\min_\delta\|A\delta-b\|^2,\qquad
+\Theta\leftarrow\bar\Theta\oplus\delta.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7387em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">⋆</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.5021em;vertical-align:-0.7521em;"></span><span class="mop">ar<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3479em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03785em;">δ</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7521em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">∥</span><span class="mord mathnormal">A</span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord mathnormal">b</span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">Θ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.9034em;vertical-align:-0.0833em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8201em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord">Θ</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊕</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="A"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span> 是白化后的稀疏雅可比，<span class="reading-math" data-tex="b"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>b</mi></mrow><annotation encoding="application/x-tex">b</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">b</span></span></span></span></span> 是负残差；<span class="reading-math" data-tex="\oplus"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>⊕</mo></mrow><annotation encoding="application/x-tex">\oplus</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord">⊕</span></span></span></span></span> 表示把切空间增量映射回位姿等变量，旋转不能简单当普通向量无限相加。</p>
+<p>变量消元得到条件概率的乘积。Bayes树把它们组织为团：每个团包含自己的 frontal variables，以及作为条件的 separator variables，可写为 <span class="reading-math" data-tex="p(F_k\mid S_k)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo stretchy="false">(</mo><msub><mi>F</mi><mi>k</mi></msub><mo>∣</mo><msub><mi>S</mi><mi>k</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">p(F_k\mid S_k)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">F</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>。全局密度由这些条件相乘构成。它与平方根信息矩阵的块三角结构相对应，不是用来存储地图几何的八叉树。</p>
+<h3 id="2-更新树的上部保留未变子树">2. 更新树的上部，保留未变子树</h3>
+<p>新因子涉及某些变量，它们所在团及到根的祖先需要重新消元。把这部分恢复成因子图，加入新测量，重新排序、消元、构造新树，再接回未受影响的“孤立”子树。边界上的缓存因子也必须保留，否则过去子树的信息会丢失。</p>
+<p>局部更新的依据是条件独立性，不是“离机器人远就忽略”。一个跨越地图的大回环，可能把很大的树部分联系起来；反之，有些几何上很近的变量在消元结构中并不便宜。</p>
+<h3 id="3-增量排序与流动重线性化">3. 增量排序与流动重线性化</h3>
+<p>消元顺序决定 fill-in：原先无直接连接的变量，可能因消元产生额外连接。iSAM2在受影响部分使用受约束的近似最小度排序，让近期访问变量倾向靠近消元末端、树根附近，为接下来的更新降低成本。最小填充排序本身一般很难，启发式不提供普遍最优保证。</p>
+<p>非线性问题还要决定何时重新计算雅可比。若变量当前增量超过阈值 <span class="reading-math" data-tex="\beta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>β</mi></mrow><annotation encoding="application/x-tex">\beta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span></span></span></span></span>，更新其线性化点并标记相关团。论文称为 fluid relinearization。它不是完全放弃重线性化，而是避免每次对所有变量统一执行。</p>
+<p>另一个阈值 <span class="reading-math" data-tex="\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span> 用于部分回代：树中传播的解变化足够小，就不继续深入该分支。<span class="reading-math" data-tex="\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span>控制解更新传播，<span class="reading-math" data-tex="\beta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>β</mi></mrow><annotation encoding="application/x-tex">\beta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span></span></span></span></span>控制线性模型刷新，二者不能混为一个“误差阈值”。不同量纲也需要合理尺度，米和弧度不能无解释地共用某个物理精度承诺。</p>
+<pre><code class="language-text">输入：当前Bayes树、原始非线性因子、线性化点、上次增量
+收到新因子与新变量：
+    保存因子，并初始化新增变量
+    根据增量阈值标记需要重线性化的变量
+    合并新因子涉及的变量，找出相关团及其到根的路径
+    移除这些团，保存未受影响子树与边界缓存因子
+    在更新的线性化点重建所需线性因子
+    对局部变量做受约束排序、消元，形成新的树上部
+    接回原有子树
+    从根向下回代，按变化阈值停止不必要传播
+    返回线性化点加局部增量得到的轨迹和地图
+</code></pre>
+<p>以上重构原文算法4—8的逻辑。数学优化目标没有换，改变的是计算组织、线性化更新与求解近似。改进指标是时间、重新计算条目数和目标值接近程度，不是“使用更少环境交互学会任务”。</p>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文设置</th>
+<th>验证问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>二维位姿图</td>
+<td>City20000、W10000、Manhattan、Intel、Killian Court</td>
+<td>图规模和约束密度怎样影响增量成本</td>
+</tr>
+<tr>
+<td>带地标问题</td>
+<td>Trees10000、Victoria Park</td>
+<td>不只适用于纯位姿图</td>
+</tr>
+<tr>
+<td>三维问题</td>
+<td>Sphere2500、Torus10000</td>
+<td>大范围三维旋转下的非线性求解</td>
+</tr>
+<tr>
+<td>对比</td>
+<td>iSAM1、HOG-Man、SPA；部分不支持某类问题</td>
+<td>同输入约束上的效率与目标值</td>
+</tr>
+<tr>
+<td>硬件</td>
+<td>Intel 1.6 GHz i7-720笔记本；iSAM2单线程C++研究实现</td>
+<td>这是特定实现的墙钟测量</td>
+</tr>
+<tr>
+<td>iSAM2参数</td>
+<td><span class="reading-math" data-tex="\alpha=0.001,\beta=0.1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi><mo>=</mo><mn>0.001</mn><mo separator="true">,</mo><mi>β</mi><mo>=</mo><mn>0.1</mn></mrow><annotation encoding="application/x-tex">\alpha=0.001,\beta=0.1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord">0.001</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.1</span></span></span></span></span>；每10步检查重线性化</td>
+<td>速度与近似精度折中</td>
+</tr>
+<tr>
+<td>排序与求解</td>
+<td>CCOLAMD；论文实现使用团内Cholesky方案</td>
+<td>不把抽象QR推导当唯一实现</td>
+</tr>
+<tr>
+<td>指标</td>
+<td>每步时间均值、标准差、最大值；总时间；归一化<span class="reading-math" data-tex="\chi^2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>χ</mi><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">\chi^2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0085em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">χ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span></span></td>
+<td>同时检查平均速度、延迟峰值与约束拟合</td>
+</tr>
+</tbody></table></div>
+<p>论文§5明确提醒实现差异会影响速度，所以还测量受影响变量及稀疏矩阵重新计算条目。表1的时间标准差描述各增量步骤的运行波动，不应自动解释为多随机种子重复实验的方差。本文未逐项确认额外重复运行次数。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<p><strong>证据1：图5—6解释局部性的来源。</strong> 新回环只要求重建树的一部分，未影响子树能够复用。这是算法结构示例，说明为什么可以节约计算，不是任何SLAM图都只改固定大小区域的证据。</p>
+<p><strong>证据2：图8—10分开检查排序与阈值。</strong> 图8比较增量排序导致的填充及受影响变量；图9研究重线性化，图10研究回代阈值。Manhattan上小阈值能够维持接近充分求解的目标值并减少工作量。不能据此把同一阈值无条件迁移到不同单位、噪声和图结构。</p>
+<p><strong>证据3：表1并没有“全面更快”。</strong> Intel上iSAM2总时间1.59秒，iSAM1为5.28秒，约节省69.9%；Torus10000为352对864秒。但City20000是323对141秒，iSAM2反而更慢；W10000上HOG-Man164秒比iSAM2的224秒快。重线性化提高精度，也可能多付计算，必须与精度一起比较。</p>
+<p><strong>证据4：表1与图14展示延迟峰值。</strong> City20000中iSAM2平均每步16.1毫秒，最大1125毫秒。平均看起来可在线运行，不意味着严格实时控制期限都满足。大回环、较大重建区域与实现常数都会影响峰值，移植到机器人时需要缓冲或异步架构。</p>
+<p><strong>证据5：图16的“真值”是优化参考解。</strong> 图中参考线来自每步充分迭代到收敛的最小二乘估计，比较的是归一化<span class="reading-math" data-tex="\chi^2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>χ</mi><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">\chi^2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0085em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">χ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span></span>差异，不是外部动作捕捉真值。iSAM2更接近它，支持求解质量；错误的数据关联或噪声模型即使被精确优化，也可能得到错误地图。小尖峰与每10步重线性化的安排有关。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p>贡献在于用图结构解释并组织稀疏非线性增量优化，使重排序和重线性化自然成为局部操作。Bayes树不只是一种方便的比喻，它保存可重复利用的条件分解和信息边界。</p>
+<p>局限也来自同一结构。图越来越大，历史状态与因子仍需存储；作者明确说无限运行的“永久SLAM”仍是开放问题。大回环可能影响广泛变量，一般复杂度上界并非常数。初始化足够好、局部线性近似有效及高斯测量模型，都是解释结果的重要条件。</p>
+<p>本文的进一步分析：后端拟合优良不能替代前端可靠性；离群回环可能让求解器迅速而精确地优化错误问题。接入系统时，还需单独处理鲁棒损失、数据关联、异常测量和生命周期管理。这些不是本文已经解决的全部功能。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<p><strong>自构例子，未运行。</strong> 一辆车先走左侧房间，再走右侧房间。新里程计只连接最后两个位姿，可能只改树根附近。随后发现右侧房间其实与最早位置相连，就要沿相关祖先路径重新组织信息。左侧某些已消元的子树若条件关系没变，可接回使用；这不意味着左侧最终位姿绝不会改变，回代仍可能把新的边界条件传下去。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>每步全量分解</td>
+<td>树局部重建</td>
+<td>复用未变条件关系</td>
+<td>图5—6、14</td>
+<td>大回环可能影响广</td>
+</tr>
+<tr>
+<td>定期排序之间填充增长</td>
+<td>增量受约束排序</td>
+<td>为近期变量保留便宜更新路径</td>
+<td>图8</td>
+<td>启发式非全局最优</td>
+</tr>
+<tr>
+<td>旧雅可比失效</td>
+<td>按需重线性化</td>
+<td>刷新明显移动的变量</td>
+<td>图9、16</td>
+<td>阈值影响精度与时间</td>
+</tr>
+<tr>
+<td>回代遍历全部状态</td>
+<td>部分状态更新</td>
+<td>小变化分支可停止传播</td>
+<td>图10</td>
+<td>引入近似，需尺度控制</td>
+</tr>
+</tbody></table></div>
+<p>阅读范围：核对作者提供的期刊稿中§3—5、算法4—8、图5—16与表1；未独立复现，未重新计时，教学例子未运行。</p>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：为什么保留未修改子树，不等于忽略它们的历史信息？</strong></p>
+<p>答案：子树已经编码为条件关系，并通过缓存的边界因子影响重新消元的区域。新树接回它们后，新的边界估计仍可通过回代影响内部变量。复用的是计算结果和条件结构，不是删除过去观测。</p>
+<p><strong>问题2：iSAM2目标值接近参考最小二乘，为什么不能证明地图接近真实世界？</strong></p>
+<p>答案：参考解只保证更充分地满足输入因子。若回环关联错误或协方差不合理，目标本身就偏离真实问题。应另用独立真值轨迹或几何测量评价地图，而不能把优化残差当物理真值误差。</p>
+<p><strong>问题3：平均每步16.1毫秒，能否据此接进要求每20毫秒必出结果的控制循环？</strong></p>
+<p>答案：不能。论文同数据集最大步骤超过一秒，平均速度不约束尾部延迟。必须实测最坏或高分位延迟，并考虑异步后端、预测状态或计算预算；这些系统设计不由平均值自动保证。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 068｜iSAM2：把不断增长的SLAM问题变成局部树更新
+    <textarea id="md-source" hidden readonly># 068｜iSAM2：把不断增长的SLAM问题变成局部树更新
 
 [总览](00-发展时间线总览.md) · [上一篇](067-ompl.md) · [下一篇](069-tum-rgbd.md)
 
@@ -192,9 +356,9 @@ $A$ 是白化后的稀疏雅可比，$b$ 是负残差；$\oplus$ 表示把切空
 
 答案：不能。论文同数据集最大步骤超过一秒，平均速度不约束尾部延迟。必须实测最坏或高分位延迟，并考虑异步后端、预测状态或计算预算；这些系统设计不由平均值自动保证。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

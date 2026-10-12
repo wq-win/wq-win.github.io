@@ -8,6 +8,7 @@
         function postKind(post) {
             if (post.kind) return post.kind;
             const slug = String(post.slug || '');
+            if (slug.indexOf('reading-guide') !== -1) return 'guide';
             if (slug.indexOf('timeline') !== -1) return 'overview';
             if (slug.indexOf('epilogue') !== -1) return 'epilogue';
             return 'paper';

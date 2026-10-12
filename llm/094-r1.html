@@ -7,7 +7,7 @@
     <title>094｜DeepSeek-R1：奖励正确答案，为什么能改变解题过程 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,141 @@
                 <span class="text-gray-500">DeepSeek-R1：奖励正确答案，为什么能改变解题过程</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="e983d0c119596d633d96bffeb9b40a0319297496154b7ea3561b0430cbfb772f"><h1>094｜DeepSeek-R1：奖励正确答案，为什么能改变解题过程</h1>
+<p><a href="index.html">返回目录</a> · <a href="00-timeline.html">发展时间线</a></p>
+<p><strong>论文</strong>：DeepSeek-AI，<em>DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning</em>，2025。<a href="https://arxiv.org/abs/2501.12948">原文</a> · <a href="https://arxiv.org/html/2501.12948v1">正文 v1</a> · <a href="https://github.com/deepseek-ai/DeepSeek-R1">官方仓库</a>。以下使用首次报告的章节与表号，核对了方法、评估、失败尝试和局限；不把后续版本或其他复现的参数补写成 v1 已报告的设置。</p>
+<h2 id="一一分钟理解">一、一分钟理解</h2>
+<p>如果教师只给最终答案打分，而不逐行示范推导，学生能否逐渐学会检查、换方法和延长思考？R1-Zero 探索的是这个问题在强预训练语言模型上的版本。它从 DeepSeek-V3-Base 出发，用数学答案和代码测试等可验证反馈进行强化学习，不先执行一轮解题示范微调。</p>
+<p>训练后的正确率显著提高，生成过程也变长，出现重新检查的文本行为。但输出可读性和语言一致性有问题，因此完整 R1 加入冷启动示范、拒绝采样和通用能力训练。另一条路线把大模型生成的答案用于小模型 SFT，使后者获得较强数学成绩。</p>
+<p>一句话总结：在答案可以验证的推理任务中，通过在线采样与奖励更新，改善强基础模型的解题成功率，再通过监督整理与蒸馏提高可用性，代价是长回答、大量采样以及验证器与训练数据的限制。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>策略梯度</strong> 根据回报调整生成概率；<strong>优势</strong> 表示相对基线的好坏；<strong>KL 约束</strong> 限制策略偏离参考分布；<strong>拒绝采样</strong> 保留满足检查条件的候选；<strong>蒸馏</strong> 让学生学习教师输出所携带的信息。</p>
+<h2 id="二问题定义与三个必须区分的模型">二、问题定义与三个必须区分的模型</h2>
+<p><strong>R1-Zero</strong> 没有冷启动 SFT，不等于没有预训练知识、人工题目、答案标签或人为设计。<strong>完整 R1</strong> 有监督训练与强化学习交替。<strong>R1-Distill</strong> 是在 Qwen、Llama 等基础上学习教师输出的模型，论文表 5 所报版本只使用 SFT，没有学生侧 RL。</p>
+<p>强化学习状态可以看成问题与已生成前缀，动作是下一个 token，终止发生在输出结束或长度达到上限，奖励来自整段回答的正确性、格式等检查。环境转移主要是把生成 token 接到前缀后；数学验证器并不是一个会替模型推导的世界模型。</p>
+<p>困难在于信用分配：最后答案正确，不代表每个中间句子都可靠；答案错误也不代表每一步都错。论文依赖足够强的基础模型，能够采样出有区别的候选解。如果所有回答都失败，结果奖励就很难告诉模型哪条路径更值得继续探索。</p>
+<h2 id="三方法在同一道题的候选之间比较">三、方法：在同一道题的候选之间比较</h2>
+<h3 id="grpo-的作用">GRPO 的作用</h3>
+<p>对于问题 <span class="reading-math" data-tex="q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi></mrow><annotation encoding="application/x-tex">q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span></span></span></span>，旧策略生成 <span class="reading-math" data-tex="G"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span></span></span></span></span> 个回答，奖励为 <span class="reading-math" data-tex="r_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>r</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">r_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。组相对优势是：</p>
+<p><span class="reading-math" data-tex="A_i=\frac{r_i-\bar r}{\operatorname{std}(r_1,\ldots,r_G)}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>A</mi><mi>i</mi></msub><mo>=</mo><mfrac><mrow><msub><mi>r</mi><mi>i</mi></msub><mo>−</mo><mover accent="true"><mi>r</mi><mo>ˉ</mo></mover></mrow><mrow><mi mathvariant="normal">std</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>r</mi><mn>1</mn></msub><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><msub><mi>r</mi><mi>G</mi></msub><mo stretchy="false">)</mo></mrow></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">A_i=\frac{r_i-\bar r}{\operatorname{std}(r_1,\ldots,r_G)}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.1963em;vertical-align:-0.936em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.2603em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop"><span class="mord mathrm">std</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">G</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">ˉ</span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.936em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这里的基线来自同组回答，而非单独训练的 critic。优势回答一个相对问题：“这次回答比本题其他尝试更好吗？”它不能直接比较不同题目的绝对难度。当全组奖励相同，标准差为零，需要实现层面的处理；v1 没有详细交代该边界，不应自行给出某个稳定项并声称是原配置。</p>
+<p>以 <span class="reading-math" data-tex="\rho_i=\pi_\theta(o_i|q)/\pi_{old}(o_i|q)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ρ</mi><mi>i</mi></msub><mo>=</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>o</mi><mi>i</mi></msub><mi mathvariant="normal">∣</mi><mi>q</mi><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><msub><mi>π</mi><mrow><mi>o</mi><mi>l</mi><mi>d</mi></mrow></msub><mo stretchy="false">(</mo><msub><mi>o</mi><mi>i</mi></msub><mi mathvariant="normal">∣</mi><mi>q</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\rho_i=\pi_\theta(o_i|q)/\pi_{old}(o_i|q)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">ρ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mclose">)</span><span class="mord">/</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mclose">)</span></span></span></span></span> 表示策略概率比，报告式（1）的裁剪项为：</p>
+<p><span class="reading-math" data-tex="\min\{\rho_i A_i,\operatorname{clip}(\rho_i,1-\epsilon,1+\epsilon)A_i\}
+-\beta D_{KL}(\pi_\theta\Vert\pi_{ref})."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>min</mi><mo>⁡</mo><mo stretchy="false">{</mo><msub><mi>ρ</mi><mi>i</mi></msub><msub><mi>A</mi><mi>i</mi></msub><mo separator="true">,</mo><mi mathvariant="normal">clip</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>ρ</mi><mi>i</mi></msub><mo separator="true">,</mo><mn>1</mn><mo>−</mo><mi>ϵ</mi><mo separator="true">,</mo><mn>1</mn><mo>+</mo><mi>ϵ</mi><mo stretchy="false">)</mo><msub><mi>A</mi><mi>i</mi></msub><mo stretchy="false">}</mo><mo>−</mo><mi>β</mi><msub><mi>D</mi><mrow><mi>K</mi><mi>L</mi></mrow></msub><mo stretchy="false">(</mo><msub><mi>π</mi><mi>θ</mi></msub><mi mathvariant="normal">∥</mi><msub><mi>π</mi><mrow><mi>r</mi><mi>e</mi><mi>f</mi></mrow></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\min\{\rho_i A_i,\operatorname{clip}(\rho_i,1-\epsilon,1+\epsilon)A_i\}
+-\beta D_{KL}(\pi_\theta\Vert\pi_{ref}).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">min</span><span class="mopen">{</span><span class="mord"><span class="mord mathnormal">ρ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mord mathrm">clip</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">ρ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8389em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ϵ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">ϵ</span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">}</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">K</span><span class="mord mathnormal mtight">L</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∥</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">re</span><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="\epsilon"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϵ</mi></mrow><annotation encoding="application/x-tex">\epsilon</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">ϵ</span></span></span></span></span> 限制对旧策略的激进更新，<span class="reading-math" data-tex="\beta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>β</mi></mrow><annotation encoding="application/x-tex">\beta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span></span></span></span></span> 调节偏离参考模型的程度。原文用整段输出写出概括公式；不能据此臆造实际训练内核的 token 归一化和全部超参数。它继承 DeepSeekMath 的 GRPO，不是 R1 首次提出该算法。</p>
+<h3 id="奖励与四阶段流程">奖励与四阶段流程</h3>
+<p>R1-Zero 主要采用正确性与格式奖励，不使用神经网络结果奖励或过程奖励模型。代码检查通常检查测试是否通过，数学检查提取指定格式的答案；正确性来自验证规则，不来自回答里“我已经验证”的自述。</p>
+<p>完整 R1 先用数千条长推理示范冷启动，随后执行推理 RL。为减少混合语言，又加入目标语言词比例奖励；作者承认这会略微降低部分推理表现。之后收集约 600K 推理样本与 200K 通用样本，重新微调 V3-Base 两轮，再执行面向推理与通用偏好的 RL。</p>
+<pre><code class="language-text">输入：V3-Base、可验证训练问题、通用任务数据
+Zero 路线：
+    直接从基础模型重复采样同题回答
+    用正确性与格式规则评分，计算组相对优势
+    用 GRPO 更新策略，跟踪正确率和回答长度
+完整 R1 路线：
+    基础模型 ← 数千条可读长推理示范的 SFT
+    执行推理 RL，并加入语言一致性约束
+    从成熟 RL 模型采样并过滤，获得推理示范
+    混合通用样本，重新对 V3-Base 做 SFT
+    执行混合规则奖励与偏好奖励的最终 RL
+蒸馏路线：
+    用约 800K 筛选样本对小模型做 SFT
+输出：三类不同训练来源的模型，分别评价
+</code></pre>
+<p>这段流程里最容易读错的是“重新微调 V3-Base”：后续 SFT 不是简单在前一 RL 检查点上接着训练。筛选后的回答把前阶段探索结果转化为监督数据，新的基础模型借此吸收比较干净的行为模式。</p>
+<h2 id="四实验设计与缺失信息">四、实验设计与缺失信息</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>报告设置及解释</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>大模型基础</td>
+<td>V3-Base，671B 总参数、每 token 37B 激活；不能把稀疏激活量当完整存储量</td>
+</tr>
+<tr>
+<td>监督数据</td>
+<td>冷启动仅报告数千条；后续约 800K、两轮；完整内容和所有过滤参数未报告</td>
+</tr>
+<tr>
+<td>大规模 RL 预算</td>
+<td>v1 未给出足以重建完整训练的采样批次、总 token、全部学习率和 GPU 小时</td>
+</tr>
+<tr>
+<td>小模型 RL 对照</td>
+<td>§4.1：Qwen-32B 基础上进行超过 10K 步数学、代码、STEM RL</td>
+</tr>
+<tr>
+<td>采样评估</td>
+<td>温度 0.6、top-p 0.95，输出上限 32768；按任务每题通常采样 4—64 个回答</td>
+</tr>
+<tr>
+<td>Pass@1</td>
+<td>对多次独立回答的正确指示取平均，估计一次随机回答的成功率；不是从中挑一个最优答案</td>
+</tr>
+<tr>
+<td>cons@64</td>
+<td>64 个回答的多数投票；需要额外推理预算，与 Pass@1 不同</td>
+</tr>
+<tr>
+<td>工程与模型裁判</td>
+<td>SWE-bench Verified 用 Agentless；开放回答评估只向裁判提供最终摘要</td>
+</tr>
+<tr>
+<td>对照口径</td>
+<td>o1-1217 成绩引用官方报告，并非所有模型都在同一实验平台重新测量</td>
+</tr>
+<tr>
+<td>不确定性</td>
+<td>采样重复有助估计输出随机性，但不能替代多个独立训练种子；v1 未完整报告训练间方差</td>
+</tr>
+</tbody></table></div>
+<p>正确性奖励与真实需求之间仍有距离：通过有限代码测试可能遗漏边界错误，数学答案正确可能掩盖无效推导。只展示最终成绩无法证明不存在奖励投机，也不能把可验证任务的收益自动推广到无法快速检验的开放式任务。</p>
+<h2 id="五结果五处值得认真读的证据">五、结果：五处值得认真读的证据</h2>
+<p><strong>证据 1：图 2、表 2，Zero 的改善。</strong> AIME 2024 的平均 Pass@1 从 15.6 到 71.0，提高 55.4 个百分点；cons@64 为 86.7。图 2 每题采样 16 次跟踪训练。它支持无冷启动 SFT 的 RL 能在该基础模型上改善成功率，不能支持“从空白模型学出推理”。</p>
+<p><strong>证据 2：图 3、表 3，长度与重新检查。</strong> 图 3 显示训练集回答长度增加，表 3 展示重新审视推导的个案。这些是行为观察，没有严格隔离长度、采样分布与策略变化的因果实验；个案也不能证明产生了人类式意识或稳定的内部自我验证机制。</p>
+<p><strong>证据 3：表 4，R1 的强项与退步。</strong> AIME 为 79.8，V3 为 39.2；GPQA 为 71.5、V3 为 59.1。相反，IFEval 为 83.3、V3 为 86.1；C-SimpleQA 为 63.7、V3 为 68.0。论文对事实问答下降提出安全拒答解释，但不能由此把所有错误都归结为拒答。</p>
+<p><strong>证据 4：表 5，蒸馏后的模型。</strong> Qwen-7B 蒸馏版 AIME 为 55.5、MATH-500 为 92.8；Qwen-32B 为 72.6、94.3。这是模型、教师示范和较长输出预算共同作用的结果。较小参数量不代表教学数据免费，也不代表所有任务都超过更大的通用模型。</p>
+<p><strong>证据 5：表 6，蒸馏与直接 RL。</strong> 32B 直接 RL 的 AIME 为 47.0，蒸馏版为 72.6；LiveCodeBench 为 40.2 与 57.2。该对照说明作者所用方案中蒸馏更强，但两者信息来源不同，完整计算也未严格配平，因此不能推出所有小模型 RL 都不如蒸馏。</p>
+<h2 id="六贡献与适用边界">六、贡献与适用边界</h2>
+<p>R1 的贡献是展示一套可见的推理后训练路线，以及 RL 探索结果如何转成监督数据供更小模型学习。它既没有发明预训练，也没有证明 SFT 无用；完整系统恰恰组合了多种监督来源。</p>
+<p>§4.2 报告了过程奖励与 MCTS 尝试不成功的经验：步骤划分困难、价值判断不准、训练搜索代价高。这些失败有助于理解工程选择，但作者也明确没有否定这些方法未来的可能性。</p>
+<p>§5 承认函数调用、多轮、复杂角色扮演和 JSON 输出仍弱于 V3；其他语言还会出现混合输出。软件工程任务的验证慢，限制了大规模 RL 的使用。这里的分析是，奖励反馈的速度与可靠性会塑造能力分布：容易批量验收的数学、竞赛代码，更容易成为强化学习率先取得进展的领域。</p>
+<h2 id="七建立理解">七、建立理解</h2>
+<p><strong>自构例子。</strong> 同一道算术题采样四次，奖励为 <span class="reading-math" data-tex="[1,0,0,1]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">[</mo><mn>1</mn><mo separator="true">,</mo><mn>0</mn><mo separator="true">,</mo><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[1,0,0,1]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">]</span></span></span></span></span>。组平均为 0.5，使用总体标准差时优势为 <span class="reading-math" data-tex="[1,-1,-1,1]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">[</mo><mn>1</mn><mo separator="true">,</mo><mo>−</mo><mn>1</mn><mo separator="true">,</mo><mo>−</mo><mn>1</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[1,-1,-1,1]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">−</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">−</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">]</span></span></span></span></span>。成功轨迹被相对加强，但这不会逐句证明其中每一步正确。若四个答案全错，组内便没有相对信号；增加一个更强示范或改变采样策略可能比重复同样失败更有效。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>解题依赖示范、正确率不足、长推理难以迁移</td>
+<td>基础模型上 GRPO，监督与 RL 交替，再以筛选轨迹蒸馏</td>
+<td>在线探索加强成功轨迹，监督整理行为并转移给学生</td>
+<td>图 2、表 4—6 的推理成绩与对照</td>
+<td>强基础与教师成本不可忽略；长输出增加推理费用；格式、语言和开放任务有退步</td>
+</tr>
+</tbody></table></div>
+<h2 id="八自测与答案">八、自测与答案</h2>
+<p><strong>1. R1-Zero 的 Zero 到底排除了什么，又没有排除什么？</strong></p>
+<p>答：它排除了 RL 前的冷启动 SFT；没有排除基础模型预训练、人工设计的任务与答案、格式约束及奖励规则。因而证据针对强基础模型上的后训练方式，不能解释成无知识起点的自发学习。</p>
+<p><strong>2. 采样 64 次估计 Pass@1，与 cons@64 的部署成本含义有什么不同？</strong></p>
+<p>答：前者用多次实验估计一次随机作答的平均成功率，实际一次回答仍可只生成一条；后者的预测方法本身依赖 64 条回答及投票，部署时也须承担这笔采样成本。</p>
+<p><strong>3. 只奖励最终正确，为什么不能把生成的推理文字当成经过证明的解释？</strong></p>
+<p>答：结果奖励只检验终点，可能保留错误但被后续修正的步骤、偶然得到答案的路径，甚至与答案没有因果关系的文字。需要额外的步骤检查、干预或形式验证，才能提高对解释本身的信任。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 094｜DeepSeek-R1：奖励正确答案，为什么能改变解题过程
+    <textarea id="md-source" hidden readonly># 094｜DeepSeek-R1：奖励正确答案，为什么能改变解题过程
 
 [返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
 
@@ -175,9 +305,9 @@ R1 的贡献是展示一套可见的推理后训练路线，以及 RL 探索结�
 
 答：结果奖励只检验终点，可能保留错误但被后续修正的步骤、偶然得到答案的路径，甚至与答案没有因果关系的文字。需要额外的步骤检查、干预或形式验证，才能提高对解释本身的信任。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

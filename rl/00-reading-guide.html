@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script>try{if(localStorage.getItem('mylog-theme')==='dark')document.documentElement.classList.add('dark')}catch(e){}</script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 0｜强化学习阅读入门：先分清谁决策、谁评价、数据从哪里来 | MyLog</title>
+    <script src="/js/vendor/tailwind.js"></script>
+    <link href="/css/font-awesome.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">Day 0｜强化学习阅读入门：先分清谁决策、谁评价、数据从哪里来</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="6923c57fa94072b8c9ff7de39ef34aa4f6bf5a986187c7ca266ec913cd648119"><h1>Day 0｜强化学习阅读入门：先分清谁决策、谁评价、数据从哪里来</h1>
+<p><a href="index.html">系列首页</a> · <a href="00-timeline.html">下一站：发展时间线</a> · <a href="../glossary.html?series=rl">中英概念与符号速查</a></p>
+<p><strong>建议用时：15–20 分钟，包含文末自测。</strong> 这一篇为后面的论文准备一套够用的语言。读完后，你应该能拆开“随机、无模型、off-policy Actor–Critic”这句话，也能看出两篇论文究竟改了决策规则、评价方法，还是数据使用方式。不需要先背算法年表，也不需要现在推完所有公式。</p>
+<h2 id="一先跟着一辆小车完成一次任务">一、先跟着一辆小车完成一次任务</h2>
+<p>我们用一个贯穿全文的教学例子：在模拟器中，让小车停到一米外的标线旁。小车可以连续调节加速度，越过边界算失败。下面的奖励与数字都是为讲解构造的，不是某篇论文的实验结果。</p>
+<p>每隔一小段时间，小车读取位置和速度，选择加速度，模拟器推进，再告诉它新的位置、速度和奖励。靠近目标、平稳停车可以得较高分；距离远、动作过猛或碰撞可以被扣分。</p>
+<ul>
+<li>**智能体（agent）**是选择动作并学习的部分；**环境（environment）**负责动作之后会发生什么。</li>
+<li><strong>状态（state）<strong>是描述当前决策所需情形的变量。本例先假设位置和速度足够；若只给一张照片，速度可能不可直接得到，那是</strong>观测（observation）</strong>，不一定包含完整状态。</li>
+<li>**动作（action）**是这一步选的加速度。**奖励（reward）**是环境对这次转移给的即时标量反馈。</li>
+<li>**策略（policy）**把可用信息变成动作或动作分布。它回答“现在怎样开”，并不直接告诉你“最后能得几分”。<a href="../glossary.html?series=rl#policy">查看策略定义</a></li>
+</ul>
+<p>同一个位置，如果速度不同，合适的动作也不同。这解释了为什么论文首先要交代状态与观测：漏掉关键变量，会把两个应该区别对待的情形压成一个输入。若任务严格要求五秒内完成，剩余时间也可能需要进入状态；若只是每收集五秒就暂停记录，则是另一种边界。</p>
+<p>把这段过程当作第一张概念地图：<strong>策略选择动作，环境产生下一状态和奖励，数据记录这段交互，学习算法利用数据更新策略或辅助模型。</strong> 接下来所有术语都在这几个位置上分工。</p>
+<h2 id="二奖励回报和价值分别回答什么">二、奖励、回报和价值分别回答什么</h2>
+<p>奖励只说这一步。**回报（return）**把以后多步奖励合起来，表示一段行为的总体结果。本文约定 <span class="reading-math" data-tex="r_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>r</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">r_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是执行 <span class="reading-math" data-tex="a_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>a</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">a_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 后收到的奖励；对在 <span class="reading-math" data-tex="T"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>T</mi></mrow><annotation encoding="application/x-tex">T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">T</span></span></span></span></span> 时刻结束的轨迹，写成：</p>
+<p><span class="reading-math" data-tex="G_t=\sum_{k=0}^{T-t-1}\gamma^k r_{t+k}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>G</mi><mi>t</mi></msub><mo>=</mo><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>0</mn></mrow><mrow><mi>T</mi><mo>−</mo><mi>t</mi><mo>−</mo><mn>1</mn></mrow></munderover><msup><mi>γ</mi><mi>k</mi></msup><msub><mi>r</mi><mrow><mi>t</mi><mo>+</mo><mi>k</mi></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">G_t=\sum_{k=0}^{T-t-1}\gamma^k r_{t+k}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.1304em;vertical-align:-1.3021em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8283em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mrel mtight">=</span><span class="mord mtight">0</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span><span class="mbin mtight">−</span><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3021em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="\gamma"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi></mrow><annotation encoding="application/x-tex">\gamma</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span></span></span></span></span> 是折扣因子（discount factor），控制远期奖励相对于近期奖励的权重。有限任务可以使用 <span class="reading-math" data-tex="\gamma=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\gamma=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>；持续任务是否收敛还要看相应条件。别把折扣理解为“智能体只看眼前”：小车可能需要先承受减速成本，才能避免稍后的大惩罚。</p>
+<p>一次实际行驶得到一个 <span class="reading-math" data-tex="G_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>G</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">G_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。**价值函数（value function）**估计的是在某种后续行为下，回报的期望。环境有随机性、策略会采样，或者初始状态不同，都会让实际结果变化。</p>
+<h3 id="v-看处境q-看处境中的一个动作">V 看处境，Q 看处境中的一个动作</h3>
+<p><strong>状态价值（state value）</strong> <span class="reading-math" data-tex="V^\pi(s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>V</mi><mi>π</mi></msup><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">V^\pi(s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span> 问：“来到状态 <span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span>，随后一直按策略 <span class="reading-math" data-tex="\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>π</mi></mrow><annotation encoding="application/x-tex">\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span></span></span></span></span> 开，平均能得到多少回报？”</p>
+<p><strong>动作价值（action value）</strong> <span class="reading-math" data-tex="Q^\pi(s,a)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>Q</mi><mi>π</mi></msup><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">Q^\pi(s,a)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span></span></span></span></span> 问：“来到 <span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span>，先指定做 <span class="reading-math" data-tex="a"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi></mrow><annotation encoding="application/x-tex">a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span></span></span></span></span>，之后再按 <span class="reading-math" data-tex="\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>π</mi></mrow><annotation encoding="application/x-tex">\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span></span></span></span></span> 开，平均能得到多少回报？”二者的差别是有没有先固定当前动作。对同一套普通回报定义，有：</p>
+<p><span class="reading-math" data-tex="V^\pi(s)=\mathbb{E}_{a\sim\pi(\cdot\mid s)}[Q^\pi(s,a)],\qquad
+A^\pi(s,a)=Q^\pi(s,a)-V^\pi(s)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>V</mi><mi>π</mi></msup><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>=</mo><msub><mi mathvariant="double-struck">E</mi><mrow><mi>a</mi><mo>∼</mo><mi>π</mi><mo stretchy="false">(</mo><mo>⋅</mo><mo>∣</mo><mi>s</mi><mo stretchy="false">)</mo></mrow></msub><mo stretchy="false">[</mo><msup><mi>Q</mi><mi>π</mi></msup><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mo separator="true">,</mo><mspace width="2em"/><msup><mi>A</mi><mi>π</mi></msup><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>=</mo><msup><mi>Q</mi><mi>π</mi></msup><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>−</mo><msup><mi>V</mi><mi>π</mi></msup><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">V^\pi(s)=\mathbb{E}_{a\sim\pi(\cdot\mid s)}[Q^\pi(s,a)],\qquad
+A^\pi(s,a)=Q^\pi(s,a)-V^\pi(s).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1052em;vertical-align:-0.3552em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.5198em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mrel mtight">∼</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span><span class="mopen mtight">(</span><span class="mord mtight">⋅</span><span class="mrel mtight">∣</span><span class="mord mathnormal mtight">s</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3552em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)]</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><strong>优势（advantage）</strong> <span class="reading-math" data-tex="A^\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>A</mi><mi>π</mi></msup></mrow><annotation encoding="application/x-tex">A^\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span></span></span></span></span> 表示某个动作比该状态下策略的平均表现好多少。小车靠近标线时，轻刹的 <span class="reading-math" data-tex="Q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Q</mi></mrow><annotation encoding="application/x-tex">Q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span></span></span></span></span> 可能高于继续加速；优势关心的是这种相对改善。价值数值可以为负，负数本身不意味着估计器出了错。</p>
+<p>上标 <span class="reading-math" data-tex="\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>π</mi></mrow><annotation encoding="application/x-tex">\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span></span></span></span></span> 很重要：换了后续策略，同一个状态的价值也可能改变。<span class="reading-math" data-tex="Q^*"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>Q</mi><mo>∗</mo></msup></mrow><annotation encoding="application/x-tex">Q^*</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8831em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6887em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span></span></span></span></span> 则通常指最优动作价值，与某个当前策略的 <span class="reading-math" data-tex="Q^\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>Q</mi><mi>π</mi></msup></mrow><annotation encoding="application/x-tex">Q^\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span></span></span></span></span> 有区别。后面的 SAC 采用含熵的 soft 价值约定，不能把这里的普通价值关系原封不动套进去。<a href="../glossary.html?series=rl#state-value">对照 V</a> · <a href="../glossary.html?series=rl#action-value">对照 Q</a></p>
+<h2 id="三算法标签是几条不同的分类轴">三、算法标签是几条不同的分类轴</h2>
+<p>看到一个新算法，最好分别问下面五个问题。它们可以组合，并不是一棵互斥的算法家谱。</p>
+<h3 id="1-策略输出一个动作还是动作分布">1. 策略输出一个动作，还是动作分布</h3>
+<p>**确定性策略（deterministic policy）**常写成 <span class="reading-math" data-tex="a=\mu_\theta(s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi><mo>=</mo><msub><mi>μ</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">a=\mu_\theta(s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span>，相同输入对应一个动作。**随机策略（stochastic policy）**常写成 <span class="reading-math" data-tex="a\sim\pi_\theta(\cdot\mid s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi><mo>∼</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mo>⋅</mo><mo>∣</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">a\sim\pi_\theta(\cdot\mid s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∼</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord">⋅</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span>，输出分布，再从中采样。</p>
+<p>小车的随机策略可以给出加速度分布，并不只会在几个离散动作中选择。连续／离散描述动作空间；随机／确定描述决策方式。确定性策略在采样时也可以另外加探索噪声，环境本身也可能随机，三种随机来源要分开。<a href="../glossary.html?series=rl#stochastic-policy">随机策略</a> · <a href="../glossary.html?series=rl#deterministic-policy">确定性策略</a></p>
+<h3 id="2-谁直接决定动作谁估计好坏">2. 谁直接决定动作，谁估计好坏</h3>
+<p>**Actor（策略部分）**直接表示并更新策略；**Critic（价值评估部分）**学习 V、Q 或相关价值估计，为策略改进提供信号。<strong>Actor–Critic</strong>描述这两个角色配合，不要求它们必须是两台机器或完全独立的神经网络。<a href="../glossary.html?series=rl#actor-critic">查看角色分工</a></p>
+<p>价值方法也能选动作。例如 Q-learning 可以依据 Q 值选动作，而不单独训练一个参数化 Actor。反过来，策略梯度也可以直接用采样回报更新策略；并非所有策略方法都必须有一个学出来的 Critic。Critic 估计的长期回报，也不同于只给当前结果打分的奖励函数。</p>
+<h3 id="3-有没有利用环境如何变化的模型">3. 有没有利用环境如何变化的模型</h3>
+<p>**有模型（model-based）**方法利用已知或学得的环境模型做预测、规划或生成学习数据。例如先预测“小车若轻刹三步会停在哪里”，再选择动作。**无模型（model-free）**方法不依赖这样的环境转移模型来改进决策，可直接学习策略或价值。<a href="../glossary.html?series=rl#model-based">有模型</a> · <a href="../glossary.html?series=rl#model-free">无模型</a></p>
+<p>这里的“模型”特指环境转移、奖励或与决策有关的预测结构。一个方法有很大的神经网络，仍可能是无模型；一个方法用已知物理方程规划，也可以是有模型，而不必先训练世界模型。</p>
+<h3 id="4-学习期间还能不能取得新的交互数据">4. 学习期间还能不能取得新的交互数据</h3>
+<p>**在线强化学习（online RL）**在学习过程中继续与环境交互、补充数据。**离线强化学习（offline RL）**在既定数据集上学习，训练阶段不继续靠当前策略收集环境数据。这里的在线与互联网连接无关。<a href="../glossary.html?series=rl#online-rl">在线学习</a> · <a href="../glossary.html?series=rl#offline-rl">离线学习</a></p>
+<p>如果只有别人开车留下的一批记录，模型可能对记录里很少出现的急转或急刹过于乐观。离线方法要认真处理这种分布外动作问题。因此，把一个在线算法的采样循环关掉，并不自动得到可靠的离线算法。</p>
+<h3 id="5-产生数据的策略与学习目标的策略是什么关系">5. 产生数据的策略与学习目标的策略是什么关系</h3>
+<p>**On-policy（同策略）**方法主要使用与正在评价、改进的策略相匹配的数据；**off-policy（异策略）**方法允许数据来自不同的行为策略（behavior policy），而目标策略（target policy）另有所指。<a href="../glossary.html?series=rl#on-policy">同策略</a> · <a href="../glossary.html?series=rl#off-policy">异策略</a></p>
+<p>在线／离线问“还能不能收集”；on／off-policy 问“谁收集、学谁”。小车不断收集新数据，同时复用早期策略的经验，可以既在线又 off-policy。离线训练常涉及异策略数据，但两组词仍不能互换。</p>
+<h2 id="四把-ppo-和-sac-放在同一张地图上">四、把 PPO 和 SAC 放在同一张地图上</h2>
+<p>现在让两套算法分别训练这辆小车。先不比较哪套“更强”，而是读它们如何工作。</p>
+<p><strong>PPO</strong>通常使用随机策略和 Actor–Critic。它先冻结一份旧策略，收集一批新 rollout，再在这批数据上更新若干轮，随后重新采样。它的常用裁剪目标通过新旧概率比和优势来减弱某些过大更新的收益。虽然一批数据会使用多次，PPO 仍通常归入 on-policy 路线；这与任意复用长期历史数据不同。<a href="27-ppo.html">读 PPO</a></p>
+<p><strong>SAC</strong>也是随机 Actor–Critic，但通常从经验回放池（replay buffer）抽取多个时期的数据，进行 off-policy 更新。它把策略熵纳入目标，使动作多样性也参与优化。**熵（entropy）**刻画分布的不确定程度；它在目标中的权重控制奖励与随机性的折中，并非越高越好。标准 SAC 是无模型方法，训练一般在线进行；“可以复用旧数据”不等于“任意离线数据上都可靠”。<a href="30-sac.html">读 SAC</a></p>
+<p>这两个例子都可以是随机、无模型、在线的 Actor–Critic，却在数据复用和优化目标上不同。因而“随机策略就是 on-policy”“有 Critic 就是 off-policy”都不成立。</p>
+<p>本系列 SAC 文章固定讨论原始 2018 版本，包括独立 V 网络；后来的常见实现可能移除 V 网络并使用自动温度调节。读论文时要保留版本差别，不能拿后来代码中的每个模块反推早期原文。</p>
+<h3 id="为什么概率比会出现">为什么概率比会出现</h3>
+<p>**重要性采样（importance sampling）**试图用来自一个分布的样本估计另一个分布下的量。对于旧策略生成的动作，常见的一步比值是：</p>
+<p><span class="reading-math" data-tex="\rho_t=\frac{\pi_\theta(a_t\mid s_t)}{\pi_{\mathrm{old}}(a_t\mid s_t)}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>ρ</mi><mi>t</mi></msub><mo>=</mo><mfrac><mrow><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>a</mi><mi>t</mi></msub><mo>∣</mo><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo></mrow><mrow><msub><mi>π</mi><mrow><mi mathvariant="normal">o</mi><mi mathvariant="normal">l</mi><mi mathvariant="normal">d</mi></mrow></msub><mo stretchy="false">(</mo><msub><mi>a</mi><mi>t</mi></msub><mo>∣</mo><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo></mrow></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\rho_t=\frac{\pi_\theta(a_t\mid s_t)}{\pi_{\mathrm{old}}(a_t\mid s_t)}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">ρ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.363em;vertical-align:-0.936em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.427em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">old</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.936em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>把小车动作临时简化成几个档位：旧策略选择轻刹的概率为 0.2，新策略为 0.3，则这个动作的比值为 1.5。它表示相对权重，不是把奖励凭空增加 50%。连续动作使用相应概率密度的比值。<a href="../glossary.html?series=rl#importance-sampling">重要性采样速查</a></p>
+<p>分母必须覆盖目标分布会用到的样本；极小分母会带来大权重和高方差。轨迹级修正还可能涉及多个比值相乘，状态访问分布也会改变。因此，一个动作比值并不能无条件解决所有异策略偏差。PPO 的裁剪进一步改变了替代目标，它也不提供“所有概率或 KL 都被硬性限制”的保证。</p>
+<h2 id="五episoderollout-与-mcts-在哪里">五、episode、rollout 与 MCTS 在哪里</h2>
+<p>**回合（episode）**是任务定义的一次完整尝试，例如从小车复位到成功或撞出边界。**Rollout（轨迹展开／采样片段）**是沿策略实际或模拟运行得到的一段序列，可以是完整回合，也可以只截取其中固定长度的一段。<a href="../glossary.html?series=rl#episode">回合</a> · <a href="../glossary.html?series=rl#rollout">Rollout</a></p>
+<p>为了凑齐一批数据而暂停采样，通常不代表任务真正终止。真正终止与时间截断会影响是否用下一状态价值补上未观察的未来，读 TD、GAE 和 PPO 时要特别留意。</p>
+<p>**蒙特卡洛树搜索（Monte Carlo Tree Search，MCTS）**位于“做决定前先搜索”的位置。它反复选择分支、扩展节点、评估叶子并回传统计量，把有限模拟预算分配到候选动作上。用在小车教学例子时，可以先把加速度离散成几个候选档位再构建树；这只是帮助理解的改写。</p>
+<p>搜索需要某种可展开的转移结构。叶子评估可以来自模拟 rollout，也可以来自价值网络；不是所有现代 MCTS 都要随机走到终局。策略网络可以提出有希望的动作，价值网络估计后果，树搜索再综合它们决定实际动作。MCTS 本身是一类规划方法，可以与强化学习组合；它不等同于一种 Actor–Critic 更新规则。<a href="../glossary.html?series=rl#mcts">MCTS 速查</a> · <a href="21-alphago.html">AlphaGo</a> · <a href="41-muzero.html">MuZero</a></p>
+<h2 id="六看到公式时先认清这些符号">六、看到公式时先认清这些符号</h2>
+<p>本篇约定只是阅读起点，每篇原论文的定义优先。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>符号</th>
+<th>本篇含义</th>
+<th>最需要防止的混淆</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><span class="reading-math" data-tex="s_t,o_t,a_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mi>t</mi></msub><mo separator="true">,</mo><msub><mi>o</mi><mi>t</mi></msub><mo separator="true">,</mo><msub><mi>a</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">s_t,o_t,a_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></td>
+<td>状态、观测、动作</td>
+<td>观测不一定包含完整状态</td>
+</tr>
+<tr>
+<td><span class="reading-math" data-tex="r_t,G_t,\gamma"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>r</mi><mi>t</mi></msub><mo separator="true">,</mo><msub><mi>G</mi><mi>t</mi></msub><mo separator="true">,</mo><mi>γ</mi></mrow><annotation encoding="application/x-tex">r_t,G_t,\gamma</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span></span></span></span></span></td>
+<td>即时奖励、回报、折扣</td>
+<td>奖励下标在不同教材可能写成 <span class="reading-math" data-tex="r_{t+1}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>r</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">r_{t+1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span></td>
+</tr>
+<tr>
+<td><span class="reading-math" data-tex="\pi_\theta,\mu_\theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>π</mi><mi>θ</mi></msub><mo separator="true">,</mo><msub><mi>μ</mi><mi>θ</mi></msub></mrow><annotation encoding="application/x-tex">\pi_\theta,\mu_\theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></td>
+<td>参数化随机策略、确定性策略</td>
+<td><span class="reading-math" data-tex="\theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>θ</mi></mrow><annotation encoding="application/x-tex">\theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span></span></span></span></span> 是参数，不是状态</td>
+</tr>
+<tr>
+<td><span class="reading-math" data-tex="V^\pi,Q^\pi,A^\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>V</mi><mi>π</mi></msup><mo separator="true">,</mo><msup><mi>Q</mi><mi>π</mi></msup><mo separator="true">,</mo><msup><mi>A</mi><mi>π</mi></msup></mrow><annotation encoding="application/x-tex">V^\pi,Q^\pi,A^\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span></span></span></span></span></td>
+<td>状态价值、动作价值、优势</td>
+<td>soft 目标可能改变价值定义</td>
+</tr>
+<tr>
+<td><span class="reading-math" data-tex="\pi_{\mathrm{old}}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>π</mi><mrow><mi mathvariant="normal">o</mi><mi mathvariant="normal">l</mi><mi mathvariant="normal">d</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\pi_{\mathrm{old}}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">old</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></td>
+<td>生成本轮数据的旧策略</td>
+<td>不等于偏好优化中的参考策略 <span class="reading-math" data-tex="\pi_{\mathrm{ref}}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>π</mi><mrow><mi mathvariant="normal">r</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">f</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\pi_{\mathrm{ref}}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight" style="margin-right:0.07778em;">ref</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></td>
+</tr>
+<tr>
+<td><span class="reading-math" data-tex="\rho_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ρ</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">\rho_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">ρ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></td>
+<td>本节新旧动作概率比</td>
+<td>其他论文可能用 <span class="reading-math" data-tex="\rho"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ρ</mi></mrow><annotation encoding="application/x-tex">\rho</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ρ</span></span></span></span></span> 表示状态分布或更新系数</td>
+</tr>
+<tr>
+<td><span class="reading-math" data-tex="\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span></td>
+<td>SAC 中常表示熵权重</td>
+<td>在其他算法中可能表示学习率</td>
+</tr>
+<tr>
+<td><span class="reading-math" data-tex="\tau"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>τ</mi></mrow><annotation encoding="application/x-tex">\tau</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span></span></span></span></span></td>
+<td>有时表示轨迹，有时表示软更新系数</td>
+<td>必须读局部定义，不能跨文照搬</td>
+</tr>
+</tbody></table></div>
+<h2 id="七接下来怎样读">七、接下来怎样读</h2>
+<p>先读<a href="00-timeline.html">发展时间线</a>，把论文放回当时的问题中。之后可以按这条基础路线进入：</p>
+<ol>
+<li><a href="01-actor-critic.html">Actor–Critic</a>理解分工，再读 <a href="04-q-learning.html">Q-learning</a>与 <a href="05-reinforce.html">REINFORCE</a>，比较价值更新和直接策略更新。</li>
+<li>读 <a href="03-dyna.html">Dyna</a>，理解经验、预测模型和规划怎样连接；再把 <a href="27-ppo.html">PPO</a>与 <a href="30-sac.html">SAC</a>放在上面的分类轴上比较。</li>
+<li>对数据复用感兴趣，进入 <a href="42-cql.html">CQL</a>；对搜索感兴趣，进入 <a href="21-alphago.html">AlphaGo</a>；对世界模型感兴趣，进入 <a href="40-dreamer.html">Dreamer</a>。这几条支线不用同时读完。</li>
+</ol>
+<p>每篇先写下四句话：它允许看见什么；它能收集什么数据；它改了哪个机制；它用什么证据判断改善。实验回报更高、真实交互更少、运行更快，是不同结论，不能只看一条上升曲线。</p>
+<h2 id="八用三分钟检查自己">八、用三分钟检查自己</h2>
+<p><strong>1. SAC 取随机动作，又复用历史经验，是否矛盾？</strong></p>
+<p>不矛盾。随机描述策略输出分布；off-policy 描述允许利用不同策略产生的数据。两者属于不同的分类轴。</p>
+<p><strong>2. 小车有一个预测长期回报的 Q 网络，是否已经是 model-based？</strong></p>
+<p>不能据此判断。Q 评价动作的长期好坏；环境模型描述或支持预测动作之后如何演化。仅有 Q 网络不构成有模型方法的充分条件。</p>
+<p><strong>3. 五秒采样结束，是否应该把下一状态价值设为零？</strong></p>
+<p>先问五秒是否是任务真正终点。如果只是截断一段持续任务的数据，通常还需要估计未观察的未来；若任务本来就到此结束，则遵循该有限时域任务的终止定义。</p>
+<h2 id="资料与阅读边界">资料与阅读边界</h2>
+<p>本篇是教学导读，案例没有独立实验结果。分类与算法接口可对照 <a href="https://spinningup.openai.com/en/latest/spinningup/rl_intro2.html">OpenAI Spinning Up 的 RL 分类</a>，SAC 版本差异可对照其 <a href="https://spinningup.openai.com/en/latest/algorithms/sac.html">SAC 文档</a>；具体论文证据仍以各篇的原文链接与范围说明为准。加入导读不表示既有文章的全部证明、附录和代码已重新核实，也不改变原有“未核实”或“未复现”的限制。</p>
+<p><a href="00-timeline.html">继续阅读发展时间线</a> · <a href="../glossary.html?series=rl">打开中英概念与符号速查</a></p>
+</div><!-- READING:END -->
+            <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" hidden readonly># Day 0｜强化学习阅读入门：先分清谁决策、谁评价、数据从哪里来
+
+[系列首页](index.html) · [下一站：发展时间线](00-timeline.html) · [中英概念与符号速查](../glossary.html?series=rl)
+
+**建议用时：15–20 分钟，包含文末自测。** 这一篇为后面的论文准备一套够用的语言。读完后，你应该能拆开“随机、无模型、off-policy Actor–Critic”这句话，也能看出两篇论文究竟改了决策规则、评价方法，还是数据使用方式。不需要先背算法年表，也不需要现在推完所有公式。
+
+## 一、先跟着一辆小车完成一次任务
+
+我们用一个贯穿全文的教学例子：在模拟器中，让小车停到一米外的标线旁。小车可以连续调节加速度，越过边界算失败。下面的奖励与数字都是为讲解构造的，不是某篇论文的实验结果。
+
+每隔一小段时间，小车读取位置和速度，选择加速度，模拟器推进，再告诉它新的位置、速度和奖励。靠近目标、平稳停车可以得较高分；距离远、动作过猛或碰撞可以被扣分。
+
+- **智能体（agent）**是选择动作并学习的部分；**环境（environment）**负责动作之后会发生什么。
+- **状态（state）**是描述当前决策所需情形的变量。本例先假设位置和速度足够；若只给一张照片，速度可能不可直接得到，那是**观测（observation）**，不一定包含完整状态。
+- **动作（action）**是这一步选的加速度。**奖励（reward）**是环境对这次转移给的即时标量反馈。
+- **策略（policy）**把可用信息变成动作或动作分布。它回答“现在怎样开”，并不直接告诉你“最后能得几分”。[查看策略定义](../glossary.html?series=rl#policy)
+
+同一个位置，如果速度不同，合适的动作也不同。这解释了为什么论文首先要交代状态与观测：漏掉关键变量，会把两个应该区别对待的情形压成一个输入。若任务严格要求五秒内完成，剩余时间也可能需要进入状态；若只是每收集五秒就暂停记录，则是另一种边界。
+
+把这段过程当作第一张概念地图：**策略选择动作，环境产生下一状态和奖励，数据记录这段交互，学习算法利用数据更新策略或辅助模型。** 接下来所有术语都在这几个位置上分工。
+
+## 二、奖励、回报和价值分别回答什么
+
+奖励只说这一步。**回报（return）**把以后多步奖励合起来，表示一段行为的总体结果。本文约定 $r_t$ 是执行 $a_t$ 后收到的奖励；对在 $T$ 时刻结束的轨迹，写成：
+
+$$
+G_t=\sum_{k=0}^{T-t-1}\gamma^k r_{t+k}.
+$$
+
+$\gamma$ 是折扣因子（discount factor），控制远期奖励相对于近期奖励的权重。有限任务可以使用 $\gamma=1$；持续任务是否收敛还要看相应条件。别把折扣理解为“智能体只看眼前”：小车可能需要先承受减速成本，才能避免稍后的大惩罚。
+
+一次实际行驶得到一个 $G_t$。**价值函数（value function）**估计的是在某种后续行为下，回报的期望。环境有随机性、策略会采样，或者初始状态不同，都会让实际结果变化。
+
+### V 看处境，Q 看处境中的一个动作
+
+**状态价值（state value）** $V^\pi(s)$ 问：“来到状态 $s$，随后一直按策略 $\pi$ 开，平均能得到多少回报？”
+
+**动作价值（action value）** $Q^\pi(s,a)$ 问：“来到 $s$，先指定做 $a$，之后再按 $\pi$ 开，平均能得到多少回报？”二者的差别是有没有先固定当前动作。对同一套普通回报定义，有：
+
+$$
+V^\pi(s)=\mathbb{E}_{a\sim\pi(\cdot\mid s)}[Q^\pi(s,a)],\qquad
+A^\pi(s,a)=Q^\pi(s,a)-V^\pi(s).
+$$
+
+**优势（advantage）** $A^\pi$ 表示某个动作比该状态下策略的平均表现好多少。小车靠近标线时，轻刹的 $Q$ 可能高于继续加速；优势关心的是这种相对改善。价值数值可以为负，负数本身不意味着估计器出了错。
+
+上标 $\pi$ 很重要：换了后续策略，同一个状态的价值也可能改变。$Q^*$ 则通常指最优动作价值，与某个当前策略的 $Q^\pi$ 有区别。后面的 SAC 采用含熵的 soft 价值约定，不能把这里的普通价值关系原封不动套进去。[对照 V](../glossary.html?series=rl#state-value) · [对照 Q](../glossary.html?series=rl#action-value)
+
+## 三、算法标签是几条不同的分类轴
+
+看到一个新算法，最好分别问下面五个问题。它们可以组合，并不是一棵互斥的算法家谱。
+
+### 1. 策略输出一个动作，还是动作分布
+
+**确定性策略（deterministic policy）**常写成 $a=\mu_\theta(s)$，相同输入对应一个动作。**随机策略（stochastic policy）**常写成 $a\sim\pi_\theta(\cdot\mid s)$，输出分布，再从中采样。
+
+小车的随机策略可以给出加速度分布，并不只会在几个离散动作中选择。连续／离散描述动作空间；随机／确定描述决策方式。确定性策略在采样时也可以另外加探索噪声，环境本身也可能随机，三种随机来源要分开。[随机策略](../glossary.html?series=rl#stochastic-policy) · [确定性策略](../glossary.html?series=rl#deterministic-policy)
+
+### 2. 谁直接决定动作，谁估计好坏
+
+**Actor（策略部分）**直接表示并更新策略；**Critic（价值评估部分）**学习 V、Q 或相关价值估计，为策略改进提供信号。**Actor–Critic**描述这两个角色配合，不要求它们必须是两台机器或完全独立的神经网络。[查看角色分工](../glossary.html?series=rl#actor-critic)
+
+价值方法也能选动作。例如 Q-learning 可以依据 Q 值选动作，而不单独训练一个参数化 Actor。反过来，策略梯度也可以直接用采样回报更新策略；并非所有策略方法都必须有一个学出来的 Critic。Critic 估计的长期回报，也不同于只给当前结果打分的奖励函数。
+
+### 3. 有没有利用环境如何变化的模型
+
+**有模型（model-based）**方法利用已知或学得的环境模型做预测、规划或生成学习数据。例如先预测“小车若轻刹三步会停在哪里”，再选择动作。**无模型（model-free）**方法不依赖这样的环境转移模型来改进决策，可直接学习策略或价值。[有模型](../glossary.html?series=rl#model-based) · [无模型](../glossary.html?series=rl#model-free)
+
+这里的“模型”特指环境转移、奖励或与决策有关的预测结构。一个方法有很大的神经网络，仍可能是无模型；一个方法用已知物理方程规划，也可以是有模型，而不必先训练世界模型。
+
+### 4. 学习期间还能不能取得新的交互数据
+
+**在线强化学习（online RL）**在学习过程中继续与环境交互、补充数据。**离线强化学习（offline RL）**在既定数据集上学习，训练阶段不继续靠当前策略收集环境数据。这里的在线与互联网连接无关。[在线学习](../glossary.html?series=rl#online-rl) · [离线学习](../glossary.html?series=rl#offline-rl)
+
+如果只有别人开车留下的一批记录，模型可能对记录里很少出现的急转或急刹过于乐观。离线方法要认真处理这种分布外动作问题。因此，把一个在线算法的采样循环关掉，并不自动得到可靠的离线算法。
+
+### 5. 产生数据的策略与学习目标的策略是什么关系
+
+**On-policy（同策略）**方法主要使用与正在评价、改进的策略相匹配的数据；**off-policy（异策略）**方法允许数据来自不同的行为策略（behavior policy），而目标策略（target policy）另有所指。[同策略](../glossary.html?series=rl#on-policy) · [异策略](../glossary.html?series=rl#off-policy)
+
+在线／离线问“还能不能收集”；on／off-policy 问“谁收集、学谁”。小车不断收集新数据，同时复用早期策略的经验，可以既在线又 off-policy。离线训练常涉及异策略数据，但两组词仍不能互换。
+
+## 四、把 PPO 和 SAC 放在同一张地图上
+
+现在让两套算法分别训练这辆小车。先不比较哪套“更强”，而是读它们如何工作。
+
+**PPO**通常使用随机策略和 Actor–Critic。它先冻结一份旧策略，收集一批新 rollout，再在这批数据上更新若干轮，随后重新采样。它的常用裁剪目标通过新旧概率比和优势来减弱某些过大更新的收益。虽然一批数据会使用多次，PPO 仍通常归入 on-policy 路线；这与任意复用长期历史数据不同。[读 PPO](27-ppo.html)
+
+**SAC**也是随机 Actor–Critic，但通常从经验回放池（replay buffer）抽取多个时期的数据，进行 off-policy 更新。它把策略熵纳入目标，使动作多样性也参与优化。**熵（entropy）**刻画分布的不确定程度；它在目标中的权重控制奖励与随机性的折中，并非越高越好。标准 SAC 是无模型方法，训练一般在线进行；“可以复用旧数据”不等于“任意离线数据上都可靠”。[读 SAC](30-sac.html)
+
+这两个例子都可以是随机、无模型、在线的 Actor–Critic，却在数据复用和优化目标上不同。因而“随机策略就是 on-policy”“有 Critic 就是 off-policy”都不成立。
+
+本系列 SAC 文章固定讨论原始 2018 版本，包括独立 V 网络；后来的常见实现可能移除 V 网络并使用自动温度调节。读论文时要保留版本差别，不能拿后来代码中的每个模块反推早期原文。
+
+### 为什么概率比会出现
+
+**重要性采样（importance sampling）**试图用来自一个分布的样本估计另一个分布下的量。对于旧策略生成的动作，常见的一步比值是：
+
+$$
+\rho_t=\frac{\pi_\theta(a_t\mid s_t)}{\pi_{\mathrm{old}}(a_t\mid s_t)}.
+$$
+
+把小车动作临时简化成几个档位：旧策略选择轻刹的概率为 0.2，新策略为 0.3，则这个动作的比值为 1.5。它表示相对权重，不是把奖励凭空增加 50%。连续动作使用相应概率密度的比值。[重要性采样速查](../glossary.html?series=rl#importance-sampling)
+
+分母必须覆盖目标分布会用到的样本；极小分母会带来大权重和高方差。轨迹级修正还可能涉及多个比值相乘，状态访问分布也会改变。因此，一个动作比值并不能无条件解决所有异策略偏差。PPO 的裁剪进一步改变了替代目标，它也不提供“所有概率或 KL 都被硬性限制”的保证。
+
+## 五、episode、rollout 与 MCTS 在哪里
+
+**回合（episode）**是任务定义的一次完整尝试，例如从小车复位到成功或撞出边界。**Rollout（轨迹展开／采样片段）**是沿策略实际或模拟运行得到的一段序列，可以是完整回合，也可以只截取其中固定长度的一段。[回合](../glossary.html?series=rl#episode) · [Rollout](../glossary.html?series=rl#rollout)
+
+为了凑齐一批数据而暂停采样，通常不代表任务真正终止。真正终止与时间截断会影响是否用下一状态价值补上未观察的未来，读 TD、GAE 和 PPO 时要特别留意。
+
+**蒙特卡洛树搜索（Monte Carlo Tree Search，MCTS）**位于“做决定前先搜索”的位置。它反复选择分支、扩展节点、评估叶子并回传统计量，把有限模拟预算分配到候选动作上。用在小车教学例子时，可以先把加速度离散成几个候选档位再构建树；这只是帮助理解的改写。
+
+搜索需要某种可展开的转移结构。叶子评估可以来自模拟 rollout，也可以来自价值网络；不是所有现代 MCTS 都要随机走到终局。策略网络可以提出有希望的动作，价值网络估计后果，树搜索再综合它们决定实际动作。MCTS 本身是一类规划方法，可以与强化学习组合；它不等同于一种 Actor–Critic 更新规则。[MCTS 速查](../glossary.html?series=rl#mcts) · [AlphaGo](21-alphago.html) · [MuZero](41-muzero.html)
+
+## 六、看到公式时先认清这些符号
+
+本篇约定只是阅读起点，每篇原论文的定义优先。
+
+| 符号 | 本篇含义 | 最需要防止的混淆 |
+|---|---|---|
+| $s_t,o_t,a_t$ | 状态、观测、动作 | 观测不一定包含完整状态 |
+| $r_t,G_t,\gamma$ | 即时奖励、回报、折扣 | 奖励下标在不同教材可能写成 $r_{t+1}$ |
+| $\pi_\theta,\mu_\theta$ | 参数化随机策略、确定性策略 | $\theta$ 是参数，不是状态 |
+| $V^\pi,Q^\pi,A^\pi$ | 状态价值、动作价值、优势 | soft 目标可能改变价值定义 |
+| $\pi_{\mathrm{old}}$ | 生成本轮数据的旧策略 | 不等于偏好优化中的参考策略 $\pi_{\mathrm{ref}}$ |
+| $\rho_t$ | 本节新旧动作概率比 | 其他论文可能用 $\rho$ 表示状态分布或更新系数 |
+| $\alpha$ | SAC 中常表示熵权重 | 在其他算法中可能表示学习率 |
+| $\tau$ | 有时表示轨迹，有时表示软更新系数 | 必须读局部定义，不能跨文照搬 |
+
+## 七、接下来怎样读
+
+先读[发展时间线](00-timeline.html)，把论文放回当时的问题中。之后可以按这条基础路线进入：
+
+1. [Actor–Critic](01-actor-critic.html)理解分工，再读 [Q-learning](04-q-learning.html)与 [REINFORCE](05-reinforce.html)，比较价值更新和直接策略更新。
+2. 读 [Dyna](03-dyna.html)，理解经验、预测模型和规划怎样连接；再把 [PPO](27-ppo.html)与 [SAC](30-sac.html)放在上面的分类轴上比较。
+3. 对数据复用感兴趣，进入 [CQL](42-cql.html)；对搜索感兴趣，进入 [AlphaGo](21-alphago.html)；对世界模型感兴趣，进入 [Dreamer](40-dreamer.html)。这几条支线不用同时读完。
+
+每篇先写下四句话：它允许看见什么；它能收集什么数据；它改了哪个机制；它用什么证据判断改善。实验回报更高、真实交互更少、运行更快，是不同结论，不能只看一条上升曲线。
+
+## 八、用三分钟检查自己
+
+**1. SAC 取随机动作，又复用历史经验，是否矛盾？**
+
+不矛盾。随机描述策略输出分布；off-policy 描述允许利用不同策略产生的数据。两者属于不同的分类轴。
+
+**2. 小车有一个预测长期回报的 Q 网络，是否已经是 model-based？**
+
+不能据此判断。Q 评价动作的长期好坏；环境模型描述或支持预测动作之后如何演化。仅有 Q 网络不构成有模型方法的充分条件。
+
+**3. 五秒采样结束，是否应该把下一状态价值设为零？**
+
+先问五秒是否是任务真正终点。如果只是截断一段持续任务的数据，通常还需要估计未观察的未来；若任务本来就到此结束，则遵循该有限时域任务的终止定义。
+
+## 资料与阅读边界
+
+本篇是教学导读，案例没有独立实验结果。分类与算法接口可对照 [OpenAI Spinning Up 的 RL 分类](https://spinningup.openai.com/en/latest/spinningup/rl_intro2.html)，SAC 版本差异可对照其 [SAC 文档](https://spinningup.openai.com/en/latest/algorithms/sac.html)；具体论文证据仍以各篇的原文链接与范围说明为准。加入导读不表示既有文章的全部证明、附录和代码已重新核实，也不改变原有“未核实”或“未复现”的限制。
+
+[继续阅读发展时间线](00-timeline.html) · [打开中英概念与符号速查](../glossary.html?series=rl)
+</textarea>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="js/common.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script>
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "00-reading-guide";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

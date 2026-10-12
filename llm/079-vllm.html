@@ -7,7 +7,7 @@
     <title>079｜vLLM 与 PagedAttention：不改变模型，也能让更多请求同时运行 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,156 @@
                 <span class="text-gray-500">vLLM 与 PagedAttention：不改变模型，也能让更多请求同时运行</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="13370e9889039a6f0eb67452881e21544872c53285f395fc3f65adb07dada9e6"><h1>079｜vLLM 与 PagedAttention：不改变模型，也能让更多请求同时运行</h1>
+<p><a href="index.html">返回目录</a> · <a href="00-timeline.html">发展时间线</a></p>
+<p>论文：Woosuk Kwon 等，<em>Efficient Memory Management for Large Language Model Serving with PagedAttention</em>，2023，SOSP。依据<a href="https://arxiv.org/html/2309.06180v1">论文 v1</a>的方法、系统实现、全部实验与讨论章节；代码见<a href="https://github.com/vllm-project/vllm">官方仓库</a>。这里分析论文时代的系统配置，仓库后续版本的功能和性能不自动属于原论文证据。</p>
+<h2 id="一分钟理解显存里的空座位也会让请求排队">一分钟理解：显存里的空座位也会让请求排队</h2>
+<p>语言模型逐个生成 token 时，需要保存此前 token 的键和值。每个请求最终会生成多长，开始时并不知道。若为每个请求预留最大长度的连续缓存，大量空间会暂时甚至永远空着，而其他请求只能排队。</p>
+<p>PagedAttention 借鉴操作系统的分页：逻辑上连续的上下文，可以放在物理上不连续、大小相同的缓存块中；需要新位置时再分配。vLLM 把这个机制和调度、共享、写时复制结合起来，让同一块 GPU 显存容纳更多正在生成的序列。</p>
+<p>作者的主张是提高服务吞吐，实验支持多个模型和合成请求轨迹中的吞吐改善。它既不重新训练模型，也不证明每个用户的孤立请求都会同比变快。</p>
+<p>一句话：在并发自回归服务场景下，通过按需分页和共享 KV cache，改善有效批量与服务吞吐，代价是间接寻址、块管理及特定负载下的额外开销。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>KV cache</strong>保存已有上下文的注意力键值；<strong>prefill</strong>并行处理已知输入；<strong>decode</strong>逐步生成新 token；<strong>连续批处理</strong>在迭代间接纳和移除请求；<strong>写时复制</strong>让共享数据直到修改时才分离。</p>
+<h2 id="背景为什么普通连续张量在这里不够合适">背景：为什么普通连续张量在这里不够合适</h2>
+<p>训练中，一个批次的张量形状通常提前可知。在线服务则会不断收到新请求，旧请求可能下一步结束，也可能持续生成很久。每条序列的生命周期不同，所需内存还在增长。</p>
+<p>模型权重在多个请求间共享，但 KV cache 属于各个上下文。它不是把单词查表得到的静态向量：同一个 token 出现在不同前文之后，内部键值通常不同。因此不能因为两段文本都含有“北京”，就让它们共享该词位置的缓存。</p>
+<p>连续分配容易产生三类浪费。最大长度超过实际结束长度，形成内部碎片；按不同大小分配释放后留下无法方便利用的间隙，形成外部碎片；还有之后确实会用到、但当前尚未使用的预留空间。第三类并非最终永远浪费，却仍会压低当前并发量。</p>
+<p>本文的场景是已训练模型的服务系统优化，不适用状态、奖励或策略梯度的强化学习分类。请求到达过程、输入输出长度和显存预算是核心环境条件，优化对象是资源利用及延迟约束下的吞吐。</p>
+<h2 id="方法先分清计算语义与内存布局">方法：先分清计算语义与内存布局</h2>
+<h3 id="kv-cache-有多大">KV cache 有多大</h3>
+<p>忽略对齐和管理元数据，缓存大小可估算为</p>
+<p><span class="reading-math" data-tex="M_{\mathrm{KV}}=2LTH_{\mathrm{kv}}d_hs."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>M</mi><mrow><mi mathvariant="normal">K</mi><mi mathvariant="normal">V</mi></mrow></msub><mo>=</mo><mn>2</mn><mi>L</mi><mi>T</mi><msub><mi>H</mi><mrow><mi mathvariant="normal">k</mi><mi mathvariant="normal">v</mi></mrow></msub><msub><mi>d</mi><mi>h</mi></msub><mi>s</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">M_{\mathrm{KV}}=2LTH_{\mathrm{kv}}d_hs.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">M</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight" style="margin-right:0.01389em;">KV</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord">2</span><span class="mord mathnormal">L</span><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight" style="margin-right:0.01389em;">kv</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">h</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal">s</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="L"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi></mrow><annotation encoding="application/x-tex">L</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span></span></span></span></span> 是层数，<span class="reading-math" data-tex="T"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>T</mi></mrow><annotation encoding="application/x-tex">T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">T</span></span></span></span></span> 是已缓存 token 数，<span class="reading-math" data-tex="H_{\mathrm{kv}}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>H</mi><mrow><mi mathvariant="normal">k</mi><mi mathvariant="normal">v</mi></mrow></msub></mrow><annotation encoding="application/x-tex">H_{\mathrm{kv}}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight" style="margin-right:0.01389em;">kv</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是键值头数，<span class="reading-math" data-tex="d_h"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>d</mi><mi>h</mi></msub></mrow><annotation encoding="application/x-tex">d_h</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">h</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是每头维度，<span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span> 是单个数值的字节数，前面的 2 对应 key 和 value。批内多条不共享的序列需要再对各自长度求和。</p>
+<p>这个公式也连接了此前的 GQA：GQA 减少 <span class="reading-math" data-tex="H_{\mathrm{kv}}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>H</mi><mrow><mi mathvariant="normal">k</mi><mi mathvariant="normal">v</mi></mrow></msub></mrow><annotation encoding="application/x-tex">H_{\mathrm{kv}}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight" style="margin-right:0.01389em;">kv</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，PagedAttention 则减少为尚未存在的 token 预留空间和重复存储。两者改变的是不同因素，不应互相替代。权重量化减少参数内存，也不自动消除 KV 碎片。</p>
+<h3 id="分块以后注意力仍需对整个历史归一化">分块以后，注意力仍需对整个历史归一化</h3>
+<p>设一条序列的有效键被分成多个块，<span class="reading-math" data-tex="S_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>S</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">S_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是第 <span class="reading-math" data-tex="j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span></span></span></span></span> 块中有效位置的集合。数学上仍然计算</p>
+<p><span class="reading-math" data-tex="Z=\sum_j\sum_{u\in S_j}\exp(q^\top k_u/\sqrt{d_h}),\qquad
+o=\frac{\sum_j\sum_{u\in S_j}\exp(q^\top k_u/\sqrt{d_h})v_u}{Z}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>Z</mi><mo>=</mo><munder><mo>∑</mo><mi>j</mi></munder><munder><mo>∑</mo><mrow><mi>u</mi><mo>∈</mo><msub><mi>S</mi><mi>j</mi></msub></mrow></munder><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><msup><mi>q</mi><mi mathvariant="normal">⊤</mi></msup><msub><mi>k</mi><mi>u</mi></msub><mi mathvariant="normal">/</mi><msqrt><msub><mi>d</mi><mi>h</mi></msub></msqrt><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><mi>o</mi><mo>=</mo><mfrac><mrow><munder><mo>∑</mo><mi>j</mi></munder><munder><mo>∑</mo><mrow><mi>u</mi><mo>∈</mo><msub><mi>S</mi><mi>j</mi></msub></mrow></munder><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><msup><mi>q</mi><mi mathvariant="normal">⊤</mi></msup><msub><mi>k</mi><mi>u</mi></msub><mi mathvariant="normal">/</mi><msqrt><msub><mi>d</mi><mi>h</mi></msub></msqrt><mo stretchy="false">)</mo><msub><mi>v</mi><mi>u</mi></msub></mrow><mi>Z</mi></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">Z=\sum_j\sum_{u\in S_j}\exp(q^\top k_u/\sqrt{d_h}),\qquad
+o=\frac{\sum_j\sum_{u\in S_j}\exp(q^\top k_u/\sqrt{d_h})v_u}{Z}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.5417em;vertical-align:-1.4917em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8557em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">u</span><span class="mrel mtight">∈</span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:-0.0576em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2819em;"><span></span></span></span></span></span></span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4917em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">exp</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0315em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">u</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.0061em;"><span class="svg-align" style="top:-3.2em;"><span class="pstrut" style="height:3.2em;"></span><span class="mord" style="padding-left:1em;"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">h</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.9661em;"><span class="pstrut" style="height:3.2em;"></span><span class="hide-tail" style="min-width:1.02em;height:1.28em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.28em" viewBox="0 0 400000 1296" preserveAspectRatio="xMinYMin slice"><path d="M263,681c0.7,0,18,39.7,52,119
+c34,79.3,68.167,158.7,102.5,238c34.3,79.3,51.8,119.3,52.5,120
+c340,-704.7,510.7,-1060.3,512,-1067
+l0 -0
+c4.7,-7.3,11,-11,19,-11
+H40000v40H1012.3
+s-271.3,567,-271.3,567c-38.7,80.7,-84,175,-136,283c-52,108,-89.167,185.3,-111.5,232
+c-22.3,46.7,-33.8,70.3,-34.5,71c-4.7,4.7,-12.3,7,-23,7s-12,-1,-12,-1
+s-109,-253,-109,-253c-72.7,-168,-109.3,-252,-110,-252c-10.7,8,-22,16.7,-34,26
+c-22,17.3,-33.3,26,-34,26s-26,-26,-26,-26s76,-59,76,-59s76,-60,76,-60z
+M1001 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2339em;"><span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">o</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4303em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.7442em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.887em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1786em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">u</span><span class="mrel mtight">∈</span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:-0.0576em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2819em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.497em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">exp</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0315em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">u</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8572em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">h</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8172em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1828em;"><span></span></span></span></span></span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">u</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这是把普通注意力按块重写，目的是说明所有块共享全局分母。若每块独立 softmax 再直接相加，就改变了模型。实现还要采用数值稳定的归约，并屏蔽最后一块未填满的位置；上式不是建议直接计算巨大指数。</p>
+<p>块表将逻辑块编号映射到物理块编号。注意力内核根据块表读数据，模型看到的上下文顺序保持不变。无需把所有块先复制回一段连续缓存，否则会重新引入大量搬运。</p>
+<h3 id="共享与写时复制">共享与写时复制</h3>
+<p>同一提示生成多个候选时，共同前缀的 KV 可共用。每个物理块维护引用计数。分支只读共享块没有问题；若要向一个仍被别人引用的尾块写入，就先复制该块，再改写本分支的映射。这样避免候选之间相互污染。</p>
+<p>Beam search 的共享更加动态：某些分支被删除，另一些分支产生多个后代。释放的是引用，只有引用计数归零才回收物理块。它不需要为每次分叉复制整段上下文。</p>
+<pre><code class="language-text">输入：请求队列、固定大小 KV 块池、块表、冻结语言模型
+在每个生成迭代：
+    移除已结束序列，减少其物理块引用计数
+    回收引用计数为零的块
+    调度可运行请求，并接纳显存允许的新请求
+    为每条序列检查下一 token 是否需要新块
+    若将写入共享尾块，则复制该块并更新映射
+    若空间不足，则按策略抢占序列组并换出或放弃其缓存
+    对新提示执行 prefill；对已有序列执行分页注意力
+    采样新 token，更新长度、块表和停止状态
+恢复被抢占序列时：换入缓存，或从已知 token 重新计算
+输出：与相应解码策略一致的生成结果及服务响应
+</code></pre>
+<p>这是系统流程而非训练伪代码。重计算恢复时，不必重新逐个采样旧 token：已经生成的 token 已知，可把它们连同原提示一起做 prefill，重建缓存。原论文按序列组整体抢占，避免一个需要协同的 beam 组只剩一部分在运行。</p>
+<h2 id="实验测的是服务曲线不是模型准确率曲线">实验：测的是服务曲线，不是模型准确率曲线</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原论文设置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>模型</td>
+<td>§6.1：OPT 13B、66B、175B，以及 LLaMA 13B</td>
+</tr>
+<tr>
+<td>硬件</td>
+<td>表 1：13B 用 A100 40GB；66B 用 4 张 A100、合计 160GB；175B 用 8 张 A100 80GB</td>
+</tr>
+<tr>
+<td>数据与请求</td>
+<td>ShareGPT、Alpaca 的输入输出长度用于合成请求；原数据没有时间戳，到达时间按不同速率的泊松过程生成</td>
+</tr>
+<tr>
+<td>持续时间</td>
+<td>大部分实验为 1 小时轨迹；175B 因成本使用 15 分钟</td>
+</tr>
+<tr>
+<td>基线</td>
+<td>FasterTransformer 加作者实现的调度器；Orca 为作者复现版本，并设 Oracle、Pow2、Max 三种预留口径</td>
+</tr>
+<tr>
+<td>主要指标</td>
+<td>请求端到端延迟除以输出长度，再在请求上取均值；观察请求速率提高时的归一化延迟</td>
+</tr>
+<tr>
+<td>附加实验</td>
+<td>并行采样、beam search、共享前缀、聊天；内核延迟、块大小、换出与重计算消融</td>
+</tr>
+<tr>
+<td>不确定性</td>
+<td>正文未将所有曲线配成多随机轨迹均值及置信区间；也没有训练随机种子的概念</td>
+</tr>
+</tbody></table></div>
+<p>Oracle 基线预先知道真实输出长度，这是普通线上系统没有的信息；它可以帮助判断“即使长度预测完美，连续分配是否仍有损失”。但作者复现的 Orca 不应不加说明地当作原作者系统的完整实测。</p>
+<p>归一化延迟也不等于首 token 延迟或逐 token 间隔的分位数。长输出会改变分母。系统比较应固定模型、硬件、生成长度分布与到达轨迹，再讨论收益；只给 tokens/s 而不说并发和延迟要求会掩盖体验差异。</p>
+<h2 id="四组证据及其边界">四组证据及其边界</h2>
+<p><strong>证据一｜图 2 与 §3：浪费确实限制有效容量。</strong> 作者剖析的旧系统只有 20.4%—38.2% 的 KV 分配空间实际保存 token 状态。这是在对应实验下的缓存利用率，不是 GPU 总显存利用率，更不是所有现存推理系统的共同常数。它支持先解决分配浪费的动机。</p>
+<p><strong>证据二｜图 12—13：省出的空间转化为并发。</strong> ShareGPT 负载下，vLLM 相比 Orca Oracle 在相近延迟下承受 1.7—2.7 倍请求速率；OPT-13B 的对应并发请求量为其 2.2 倍。它支持“更有效的缓存允许更大批量”的机制链。175B 搭配较短 Alpaca 序列时优势缩小，论文解释为容量已足够、系统逐渐转向计算瓶颈；这也给出了不应期待巨大收益的条件。</p>
+<p><strong>证据三｜图 14—16：共享模式影响收益。</strong> OPT-13B、Alpaca 的 beam search 中，块共享节省 37.6%—55.2% 缓存；并行采样为 6.1%—9.8%，因为后者主要共享提示。共享前缀翻译实验中，相比 Oracle，单样例前缀为 1.67 倍吞吐，五样例前缀为 3.58 倍。这些结果支持共享长前缀的价值，不能推导成所有不同用户内容都可以互相共享。</p>
+<p><strong>证据四｜图 18：更快的系统可以包含更慢的内核。</strong> 分页注意力内核比所比较的 FasterTransformer 内核慢 20%—26%，原因包括间接寻址和分支；端到端服务仍更好。块大小 16—128 对较长 ShareGPT 负载有效，短 Alpaca 对大块更敏感，论文实现采用 16。这里的 16 是该实现的经验折中，不是硬件无关的数学最优值。</p>
+<p>这些证据分别覆盖动机、系统结果、共享收益和局部代价，不能把最大端到端倍数写成每个注意力操作的加速倍数。</p>
+<h2 id="理解边界分页不等于自动拥有无限上下文">理解边界：分页不等于自动拥有无限上下文</h2>
+<p>贡献是利用 LLM 服务的动态内存语义，设计可以直接读取分散 KV 的内核与管理系统。它借鉴已有分页思想，但实现需要结合注意力、序列组调度和生成恢复，不能只用普通 Python 列表切片代替。</p>
+<p>分页仍需存储真实历史；序列足够长、并发足够多时照样耗尽显存。它没有提升训练时的上下文能力，也没有让全注意力变成只看少量块。最后一块仍可能有内部碎片；块表、复制、调度和抢占恢复都需要时间。</p>
+<p><strong>自构例子。</strong> 假设每块容纳 4 个 token，两个请求长度分别为 5 和 9，且没有共同前缀。它们需要 2 和 3 块，共 20 个位置，其中 14 个使用、6 个暂空。如果每请求直接预留 16 个位置，则共占 32 个，当前空 18 个。这只是容量算例，不能直接推出吞吐提升 <span class="reading-math" data-tex="32/20"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>32</mn><mi mathvariant="normal">/</mi><mn>20</mn></mrow><annotation encoding="application/x-tex">32/20</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">32/20</span></span></span></span></span> 倍。若再让第二条序列分叉，共同完整块可共享，写入尾块时才考虑复制。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>未知生成长度引起预留浪费，分支重复复制 KV</td>
+<td>等大小按需分页、块表、共享与写时复制，并结合迭代调度</td>
+<td>降低有效缓存占用，让更多请求共同摊销模型计算</td>
+<td>图 2 利用率，图 12—13 服务曲线，图 14—16 共享，图 18 内核及块大小消融</td>
+<td>额外寻址开销；计算受限负载收益缩小；基线部分为复现；不改善模型知识或上下文语义能力</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测从内存图推导服务行为">自测：从内存图推导服务行为</h2>
+<p><strong>1. 为什么不能每块独立 softmax 后把结果相加？</strong></p>
+<p>答案：普通注意力要求历史所有有效 token 共享一个归一化分母。各块分别归一化会让每块都分到总权重 1，相当于改变不同块之间的相对权重。分页只改变取数位置和执行组织，必须通过正确的全局归约保持注意力语义。</p>
+<p><strong>2. 两个请求都出现同一个词，为什么不一定能共享缓存？</strong></p>
+<p>答案：该位置的隐藏状态依赖前文、位置和模型配置。只有相同有效前缀在相同计算条件下的对应缓存才可复用；相同词面不足以保证相同 KV。分支共享共同前缀之后，一旦上下文分歧，后续缓存通常也随之不同。</p>
+<p><strong>3. 内核慢 20%—26%，为什么总体服务吞吐仍可能提高？</strong></p>
+<p>答案：内核延迟只衡量局部运算；端到端吞吐还受可容纳批量、权重带宽摊销、排队和复制开销影响。分页增加局部寻址成本，却可能显著扩大有效批量。若显存本来充足、计算已饱和，这条收益链会减弱，因此必须比较完整负载曲线。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 079｜vLLM 与 PagedAttention：不改变模型，也能让更多请求同时运行
+    <textarea id="md-source" hidden readonly># 079｜vLLM 与 PagedAttention：不改变模型，也能让更多请求同时运行
 
 [返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
 
@@ -179,9 +324,9 @@ Oracle 基线预先知道真实输出长度，这是普通线上系统没有的�
 
 答案：内核延迟只衡量局部运算；端到端吞吐还受可容纳批量、权重带宽摊销、排队和复制开销影响。分页增加局部寻址成本，却可能显著扩大有效批量。若显存本来充足、计算已饱和，这条收益链会减弱，因此必须比较完整负载曲线。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

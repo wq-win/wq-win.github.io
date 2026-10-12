@@ -7,7 +7,7 @@
     <title>第 54 天｜DAPO：GRPO训练中的采样、长度与裁剪，如何一起修正 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,214 @@
                 <span class="text-gray-500">DAPO：GRPO训练中的采样、长度与裁剪，如何一起修正</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="e9053cae7a046fdc096f24f0c84a22b324167f0307e2b4ddf0b737db982a6f9f"><h1>第 54 天｜DAPO：GRPO训练中的采样、长度与裁剪，如何一起修正</h1>
+<p><a href="index.html">系列首页</a> · <a href="53-r1.html">上一篇</a> · <a href="55-dr-grpo.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：Yu 等，<em>DAPO: An Open-Source LLM Reinforcement Learning System at Scale</em>，2025。<a href="https://arxiv.org/html/2503.14476v1">正文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：大规模推理RL的熵塌缩、无效样本与长度问题</p>
+<p><strong>旧方法卡点</strong>：对称裁剪、零方差组和逐回答平均可能限制训练</p>
+<p><strong>作者主张</strong>：组合Clip-Higher、动态采样、token级损失与超长奖励处理</p>
+<p><strong>论文证据</strong>：原文Qwen2.5-32B的AIME实验及累积消融支持组合配方</p>
+<p><strong>一句话</strong>：在在线推理RL，规则奖励，GRPO衍生配方中，作者通过“组合Clip-Higher、动态采样、token级损失与超长奖励处理”应对“大规模推理RL的熵塌缩、无效样本与长度问题”这一问题；证据边界或代价是：多项同时改变，训练步数不能代表全部生成和筛选成本。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>Clip-Higher</strong>：提高裁剪区间上侧阈值。</li>
+<li><strong>动态采样</strong>：过滤无区分组并继续补采。</li>
+<li><strong>Token级归约</strong>：按整体有效token聚合损失。</li>
+<li><strong>超长惩罚</strong>：针对接近或越过生成上限的反馈。</li>
+<li><strong>熵塌缩</strong>：策略分布过早变得过度确定。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“大规模推理RL的熵塌缩、无效样本与长度问题”放在在线推理RL，规则奖励，GRPO衍生配方的边界内研究。对称裁剪、零方差组和逐回答平均可能限制训练。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>在线推理RL，规则奖励，GRPO衍生配方</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>数学提示与回答token</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>token</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>数学正确性及超长相关处理</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>长度上限／缓冲惩罚区／EOS</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>Clip-Higher提高概率增加一侧的裁剪阈值，缓解某些探索限制；动态采样丢掉全对／全错组并补采，保持有区分性的训练batch；token级聚合按全batch有效token计权；超长处理避免截断答案造成错误负奖励。各项解决不同接口，不能简单说是“新优势公式”。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="L=\frac{\sum_{i,t}m_{it}\min(\rho_{it}A_i,clip(\rho_{it},1-\epsilon_l,1+\epsilon_h)A_i)}{\sum_{i,t}m_{it}}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>L</mi><mo>=</mo><mfrac><mrow><munder><mo>∑</mo><mrow><mi>i</mi><mo separator="true">,</mo><mi>t</mi></mrow></munder><msub><mi>m</mi><mrow><mi>i</mi><mi>t</mi></mrow></msub><mi>min</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>ρ</mi><mrow><mi>i</mi><mi>t</mi></mrow></msub><msub><mi>A</mi><mi>i</mi></msub><mo separator="true">,</mo><mi>c</mi><mi>l</mi><mi>i</mi><mi>p</mi><mo stretchy="false">(</mo><msub><mi>ρ</mi><mrow><mi>i</mi><mi>t</mi></mrow></msub><mo separator="true">,</mo><mn>1</mn><mo>−</mo><msub><mi>ϵ</mi><mi>l</mi></msub><mo separator="true">,</mo><mn>1</mn><mo>+</mo><msub><mi>ϵ</mi><mi>h</mi></msub><mo stretchy="false">)</mo><msub><mi>A</mi><mi>i</mi></msub><mo stretchy="false">)</mo></mrow><mrow><munder><mo>∑</mo><mrow><mi>i</mi><mo separator="true">,</mo><mi>t</mi></mrow></munder><msub><mi>m</mi><mrow><mi>i</mi><mi>t</mi></mrow></msub></mrow></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L=\frac{\sum_{i,t}m_{it}\min(\rho_{it}A_i,clip(\rho_{it},1-\epsilon_l,1+\epsilon_h)A_i)}{\sum_{i,t}m_{it}}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.6976em;vertical-align:-1.1218em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.5758em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.8258em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">min</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">ρ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">c</span><span class="mord mathnormal" style="margin-right:0.01968em;">l</span><span class="mord mathnormal">i</span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">ρ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal">ϵ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal">ϵ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">h</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.1218em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span>
+原文采用非对称阈值，示例ε_l=0.2、ε_h=0.28。m屏蔽padding及规定的无效位置；这是全局token平均，非固定最大长度分母。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">冻结π_old
+反复采提示与每题G条回答，直到收集足量有效组
+  评分并识别全对／全错零优势组
+  按动态采样规则过滤并补采
+  处理超长截断和软长度惩罚
+计算组相对优势
+使用非对称clip和全batch有效token聚合
+更新策略；记录被丢弃的全部生成成本
+输出：推理模型
+注：原文数学配置移除KL，不能默认所有RLHF也应移除
+</code></pre>
+<p><strong>实现要点</strong>：多项同时改变，训练步数不能代表全部生成和筛选成本。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>非对称clip、整体token归约和超长处理组成的策略目标</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>组合Clip-Higher、动态采样、token级损失与超长奖励处理</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>AIME平均正确率；不是pass@32</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>AIME评价、Qwen2.5-32B</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>约17k数学题构造训练集</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>naive GRPO及逐项加入组件、相关R1-Zero结果</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>每提示16回答、512提示batch；评估32重复平均</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>AIME平均正确率；不是pass@32</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>重复作答32次不等于32训练种子</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>各训练配方是否缓解无效梯度与熵／长度问题</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：多项同时改变，训练步数不能代表全部生成和筛选成本。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>表1</td>
+<td>累积组件与AIME</td>
+<td>naive约30到完整约50</td>
+<td>累积表不完全分离交互</td>
+</tr>
+<tr>
+<td>图2—3</td>
+<td>熵、裁剪与有效组统计</td>
+<td>支持训练机制解释</td>
+<td>不单独证明最终泛化</td>
+</tr>
+<tr>
+<td>图4—5</td>
+<td>token损失与超长处理</td>
+<td>检验长度相关设计</td>
+<td>更长不自动更好</td>
+</tr>
+<tr>
+<td>动态采样分析（具体图表编号本文未核实）</td>
+<td>有效组比例与训练</td>
+<td>说明更新效率</td>
+<td>不等于生成成本降低</td>
+</tr>
+</tbody></table></div>
+<p><strong>结论边界</strong>：原文Qwen2.5-32B的AIME实验及累积消融支持组合配方。多项同时改变，训练步数不能代表全部生成和筛选成本。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者贡献</strong>是可扩展训练配方与实践分析。<strong>本文分析</strong>：过滤简单与极难问题改变训练分布；更高有效更新密度可能付出更多rollout。比较“半数训练步”时必须计入补采及生成token总量。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>两个题组一个全对、一个半对半错。前者GRPO相对优势为零，后者有正负信号；动态采样补掉前者提高batch学习信号，却已经花掉了前者的生成成本。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>补采后总token成本是否仍更低？</li>
+<li>丢弃全错组是否妨碍学习最难问题？</li>
+<li>非对称clip为何不是动作概率硬上限？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>大规模推理RL的熵塌缩、无效样本与长度问题</td>
+<td>组合Clip-Higher、动态采样、token级损失与超长奖励处理</td>
+<td>减少零优势样本和特定长度／探索限制，使有效更新更集中</td>
+<td>原文Qwen2.5-32B的AIME实验及累积消融支持组合配方</td>
+<td>多项同时改变，训练步数不能代表全部生成和筛选成本</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：动态采样为什么能提高每次更新的有效性？</p>
+<p><strong>参考答案</strong>：同题回答奖励全部相同的组，缺少相对优势信号。筛掉这些组、补采有差异的组，可以提高训练 batch 中的有效信号密度。但被筛掉的回答已经消耗生成资源，所以更新次数减少不一定等于总成本减少。</p>
+<p><strong>问题 2</strong>：为什么按 token 归约损失会改变长短回答的影响？</p>
+<p><strong>参考答案</strong>：每条回答先平均，再跨回答平均，会让每条回答拥有相近总权重；对所有有效 token 统一平均，则较长回答包含更多项。改变归约方式会改变隐式权重，不能只把它理解为无关紧要的实现细节。</p>
+<p><a href="index.html">系列首页</a> · <a href="53-r1.html">上一篇</a> · <a href="55-dr-grpo.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 54 天｜DAPO：GRPO训练中的采样、长度与裁剪，如何一起修正
+    <textarea id="md-source" hidden readonly># 第 54 天｜DAPO：GRPO训练中的采样、长度与裁剪，如何一起修正
 
 [系列首页](README.md) · [上一篇](53-r1.md) · [下一篇](55-dr-grpo.md)
 
@@ -189,16 +392,16 @@ $$L=\frac{\sum_{i,t}m_{it}\min(\rho_{it}A_i,clip(\rho_{it},1-\epsilon_l,1+\epsil
 
 [系列首页](README.md) · [上一篇](53-r1.md) · [下一篇](55-dr-grpo.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "54-dapo";
         const source = document.getElementById('md-source').value;

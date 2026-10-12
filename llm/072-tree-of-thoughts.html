@@ -7,7 +7,7 @@
     <title>072｜Tree of Thoughts：让语言模型保留岔路，而不是一路写到底 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,132 @@
                 <span class="text-gray-500">Tree of Thoughts：让语言模型保留岔路，而不是一路写到底</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="f3cde6b39828ce15cbd1b958b39ec528f307f766e1aa48944902041b064acfd7"><h1>072｜Tree of Thoughts：让语言模型保留岔路，而不是一路写到底</h1>
+<p><a href="index.html">返回目录</a> · <a href="00-timeline.html">发展时间线</a></p>
+<p>论文：Shunyu Yao 等，<em>Tree of Thoughts: Deliberate Problem Solving with Large Language Models</em>，2023。<a href="https://arxiv.org/abs/2305.10601">论文</a>、<a href="https://arxiv.org/html/2305.10601v2">正文 v2</a>、<a href="https://github.com/princeton-nlp/tree-of-thought-llm">官方代码与提示</a>。本文核对方法、三项主实验及附录B；没有独立运行历史 GPT-4 实验。以下 ToT 指外部控制的搜索过程，不是仅在提示词里写一句“请使用思维树”。</p>
+<h2 id="一分钟理解错误的第一步可能让后面全白写">一分钟理解：错误的第一步，可能让后面全白写</h2>
+<p>做24点时，先算哪两个数非常重要。某条路线走不通，继续写更详细的解释也无法得到正确答案。普通思维链通常顺着已经生成的文字继续；多条独立思维链虽然能覆盖不同路线，却很少在中间状态主动比较、剪枝和回退。</p>
+<p>ToT 把一个中间解当作树节点，让语言模型提出几种后续想法，再评价哪些值得继续。搜索控制器负责保留分支或回到父节点。模型负责生成与启发式判断，经典搜索算法负责组织尝试。</p>
+<p>表2中，较难24点题的 CoT 平均成功率4%，宽度5的 ToT 为74%。这个差异伴随多次生成与评价，不能理解为增加几个提示词就在相同调用预算下提高70个百分点。更有力的比较还包括100次 CoT 采样配合正确答案 oracle 的49%。</p>
+<p>一句话总结：在可拆解且中间状态能够被有效评价的任务中，通过对多个想法进行启发式搜索，改善最终解题表现，代价是额外推理预算、任务设计和错误剪枝风险。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个概念：<strong>搜索状态</strong>保存当前部分解；<strong>分支宽度</strong>限制同时保留的候选数；<strong>启发式</strong>估计状态是否值得继续而非保证正确；<strong>回溯</strong>撤销部分决策后探索替代路线；<strong>oracle选择</strong>借助真实答案挑选候选，通常只是能力上界而非部署策略。</p>
+<h2 id="背景与问题定义搜索什么不搜索什么">背景与问题定义：搜索什么，不搜索什么？</h2>
+<p>ToT 使用固定的预训练语言模型，没有新增训练数据和参数优化。它适用于推理时搜索，不应归类为一项新的策略梯度训练算法。</p>
+<p>论文有三种状态表示。24点的状态包含剩余数字与已执行算式，动作是再组合两个数字，成功要求每个输入恰好使用一次且结果为24。创意写作的状态包含计划或候选文章，目标是在四个段落末尾分别放入指定句子并保持连贯。填字游戏的状态是部分填好的网格，动作是填入一个符合线索的词，目标同时满足横向与纵向约束。</p>
+<p>这种表示不是免费的。想法过小，就退回 token 搜索，评价难以判断意义；想法过大，一次错误会覆盖太多决策，失去局部修正机会。作者将“想法粒度、候选生成、状态评价、搜索策略”作为四个独立设计问题。</p>
+<p>与 Self-Consistency 的主要区别在于选择位置：后者通常在完整答案间投票，ToT 可以在中间状态间选择。与 Reflexion 的区别是，ToT 显式保留和探索不同部分解，而 Reflexion 主要把一次尝试的反馈压缩成下一次尝试的记忆；实际系统可以组合这两种机制。</p>
+<h2 id="方法生成器评价器与搜索控制器">方法：生成器、评价器与搜索控制器</h2>
+<p>设输入为 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span>，前 <span class="reading-math" data-tex="t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>t</mi></mrow><annotation encoding="application/x-tex">t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6151em;"></span><span class="mord mathnormal">t</span></span></span></span></span> 个想法为 <span class="reading-math" data-tex="z_{1:t}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>z</mi><mrow><mn>1</mn><mo>:</mo><mi>t</mi></mrow></msub></mrow><annotation encoding="application/x-tex">z_{1:t}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1</span><span class="mrel mtight">:</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，状态为 <span class="reading-math" data-tex="s_t=[x,z_{1:t}]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mi>t</mi></msub><mo>=</mo><mo stretchy="false">[</mo><mi>x</mi><mo separator="true">,</mo><msub><mi>z</mi><mrow><mn>1</mn><mo>:</mo><mi>t</mi></mrow></msub><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">s_t=[x,z_{1:t}]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1</span><span class="mrel mtight">:</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">]</span></span></span></span></span>。生成器 <span class="reading-math" data-tex="G"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span></span></span></span></span> 产生下一步候选；评价器 <span class="reading-math" data-tex="V"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>V</mi></mrow><annotation encoding="application/x-tex">V</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span></span></span></span></span> 对状态的前景给分。宽度限制为 <span class="reading-math" data-tex="b"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>b</mi></mrow><annotation encoding="application/x-tex">b</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">b</span></span></span></span></span> 的层次搜索可写成：</p>
+<p><span class="reading-math" data-tex="S'_t=\{s\oplus z:s\in S_{t-1},z\in G(s)\},\qquad
+S_t=\operatorname{TopB}_{s\in S'_t}V(s)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msubsup><mi>S</mi><mi>t</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msubsup><mo>=</mo><mo stretchy="false">{</mo><mi>s</mi><mo>⊕</mo><mi>z</mi><mo>:</mo><mi>s</mi><mo>∈</mo><msub><mi>S</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo separator="true">,</mo><mi>z</mi><mo>∈</mo><mi>G</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo stretchy="false">}</mo><mo separator="true">,</mo><mspace width="2em"/><msub><mi>S</mi><mi>t</mi></msub><mo>=</mo><msub><mrow><mi mathvariant="normal">TopB</mi><mo>⁡</mo></mrow><mrow><mi>s</mi><mo>∈</mo><msubsup><mi>S</mi><mi>t</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msubsup></mrow></msub><mi>V</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">S&#x27;_t=\{s\oplus z:s\in S_{t-1},z\in G(s)\},\qquad
+S_t=\operatorname{TopB}_{s\in S&#x27;_t}V(s).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0489em;vertical-align:-0.247em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-2.453em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">{</span><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊕</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">:</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em;"></span><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8917em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">G</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)}</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1975em;vertical-align:-0.4475em;"></span><span class="mop"><span class="mop"><span class="mord mathrm">TopB</span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.275em;"><span style="top:-2.4559em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">s</span><span class="mrel mtight">∈</span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7416em;"><span style="top:-2.2095em;margin-left:-0.0576em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">t</span></span></span><span style="top:-2.8448em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2905em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4475em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="S_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>S</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">S_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是保留的前沿，<span class="reading-math" data-tex="\oplus"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>⊕</mo></mrow><annotation encoding="application/x-tex">\oplus</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord">⊕</span></span></span></span></span> 是追加想法。这里的 <span class="reading-math" data-tex="V"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>V</mi></mrow><annotation encoding="application/x-tex">V</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span></span></span></span></span> 是模型提示产生的启发式评分，不是经过 Bellman 训练的价值函数，也没有可采纳启发式所需的误差保证。论文称其 BFS，但加入宽度裁剪后，不是遍历所有同层节点的完整广度优先搜索。</p>
+<p>候选有两种生成方式：开放写作可以独立采样多个计划；24点这类受约束任务可以在一次上下文中顺序列出多个后续算式，减少重复。评价也有两类：逐项判断有希望与否，或者比较候选并投票。</p>
+<pre><code class="language-text">输入：任务 x、生成器 G、评价器 V、最大深度 T、宽度 b
+frontier = [initial_state(x)]
+for depth in 1..T:
+    candidates = []
+    for state in frontier:
+        candidates += expand(state, G(state))
+    if candidates is empty:
+        return failure_under_budget
+    scores = evaluate_with_optional_repeated_votes(V, candidates)
+    frontier = retain_top_b(candidates, scores)
+return render_and_select_final_answer(frontier)
+</code></pre>
+<p>这是教学版层次搜索。填字实验改用深度优先：先探索最有希望的词，遇到后续线索不可满足时剪枝并回溯。真正执行时，还必须保留总调用与 token 预算；深度不大也可能产生很多候选评价。</p>
+<p>论文没有新的可微损失函数。它优化的是推理过程中的候选选择，实测目标是解题正确率或文本连贯性。为什么可能有效？中间检查可以阻止把所有预算消耗在明显错误的前缀上；但若评价器误判，剪枝同样会阻止找到正确答案。这是经验支持的机制，不是最优性证明。</p>
+<h2 id="实验设计三类任务三种成功口径">实验设计：三类任务，三种成功口径</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>设置与验证目的</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>模型</td>
+<td>主实验为2023年5月5—16日期间的 GPT-4 Chat Completion，通常温度0.7；不应默认等同于后来的同名服务</td>
+</tr>
+<tr>
+<td>24点数据</td>
+<td>1362题中按人类解题时间排序的第901—1000题，共100道较难题</td>
+</tr>
+<tr>
+<td>24点预算</td>
+<td>3步想法；ToT保留1或5个状态；每候选评价采样3次；CoT、直接回答各采样100次形成比较</td>
+</tr>
+<tr>
+<td>写作</td>
+<td>100组输入，各含4句指定段末句；每阶段5个候选和5次投票；自动连贯性评分与人类盲评</td>
+</tr>
+<tr>
+<td>填字</td>
+<td>156个5×5游戏中间隔选择20个测试、另5个作提示；最多100个 DFS 搜索步骤</td>
+</tr>
+<tr>
+<td>填字指标</td>
+<td>字母、词和整盘正确率分别计算；整盘率不能由字母率替代</td>
+</tr>
+<tr>
+<td>人类评价</td>
+<td>部分作者进行100对文章的随机顺序盲评；不是独立的大规模普通读者调查</td>
+</tr>
+<tr>
+<td>成本</td>
+<td>附录B.3记录历史 API token 与费用；并非当前价格，且节点数、token数和墙钟时间不等价</td>
+</tr>
+<tr>
+<td>泛化</td>
+<td>附录B包含100道 GSM8K 测试题和100道 StrategyQA 开发题的补充实验，以及 GPT-3.5 替换</td>
+</tr>
+</tbody></table></div>
+<p>24点可以用程序检查最终等式，因此最佳样本 oracle 是可构造的。写作没有唯一答案，评价更依赖偏好与评分器。用同一个“成功”概念描述这两者，会遮蔽证据强度的差别。</p>
+<h2 id="五处结果搜索有效但不是万能扩展器">五处结果：搜索有效，但不是万能扩展器</h2>
+<p><strong>证据一：表2，24点。</strong> ToT 宽度1为45%，宽度5为74%；CoT-SC 的100样本多数选择为9%，正确性 oracle 从100条 CoT 中挑选为49%。它支持中间搜索优于这组完整轨迹采样方案，同时说明答案多数票与“至少出现过正确解”相差很大。74%是100道题上的系统结果，不是统计上精确的总体成功概率。</p>
+<p><strong>证据二：图3，失败位置。</strong> 作者观察到约60%的 CoT 轨迹第一步之后已经不能完成任务。这个分析解释了为什么前缀选择值得改进；它没有证明所有推理任务都在第一步损失最多，也没有把错误都归因于解码算法，模型的候选质量同样参与。</p>
+<p><strong>证据三：图5，写作与自修正。</strong> 自动评分 ToT 为7.56，CoT 为6.93，直接回答6.19；人工比较41对偏好 ToT，21对偏好 CoT，38对相近。直接回答加迭代修正达到7.67，高于不加修正的 ToT；ToT 加修正为7.91。因此更准确的结论是多种推理程序可以互补，不能说树搜索在所有比较中最好。</p>
+<p><strong>证据四：表3，填字搜索与答案选择。</strong> ToT 词正确率60%、整盘20%，即4/20；oracle 选择已访问过的最佳状态可达到35%，即7/20。省去剪枝或回溯时整盘率均为5%，但这些消融并非完全相同的轨迹和控制流程。正文还记录正确生僻词被误判后剪去：搜索曾经找到正确状态，不等于最终系统能够认出并输出它。</p>
+<p><strong>证据五：附录B，能力与预算边界。</strong> GSM8K 的 CoT/ToT 为86/90，StrategyQA 为82/83，增益远小于24点。24点中 GPT-4 生成、GPT-3.5 评价为64%；反过来为31%，提示这组实验的候选生成是重要瓶颈。表7记录 ToT 历史费用每题0.74美元，对比 CoT best-of-100 的0.47美元，准确率比较并非同费用实验。</p>
+<p>费用表中的汇总 token 与费用不宜重新套用今日单价反算；其统计口径并未足够细化为统一部署成本模型。可以采用它们作为“搜索额外消耗显著”的原文记录，但若要估算自己的任务，需要重新测量每次输入、输出、缓存和串行等待。</p>
+<h2 id="贡献局限与迁移到实际任务的条件">贡献、局限与迁移到实际任务的条件</h2>
+<p>ToT 的价值在于把语言模型作为候选生成器与语义启发式，接入清晰的搜索框架。经典 BFS、DFS 本身不是新发明；创新集中在想法粒度、语言自评和模块组合，并用可控任务展示效果。</p>
+<p>作者承认任务范围较窄、额外推理成本较高，已有模型擅长的简单题可能不值得搜索。进一步分析还包括：相同模型的生成和评价可能共享偏差；知识缺失不能单靠增加分支补足；高分不一定是高正确率；候选越多，越有可能出现迎合评价器的错误答案。</p>
+<p>在真实交互任务中，回溯也不一定可行。删除一个文本分支很容易，撤销一个已经作用到外部环境的动作却可能需要额外机制。因此要先区分“在纸上搜索方案”和“执行动作后回退环境”，不能把论文的纯推理实验直接等同于机器人行动可靠性。</p>
+<h2 id="自构例子与五个概念">自构例子与五个概念</h2>
+<p><strong>自构例子，未运行：</strong> 用3、3、8、8凑24，解之一是 <span class="reading-math" data-tex="8/(3-8/3)=24"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>8</mn><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mn>3</mn><mo>−</mo><mn>8</mn><mi mathvariant="normal">/</mi><mn>3</mn><mo stretchy="false">)</mo><mo>=</mo><mn>24</mn></mrow><annotation encoding="application/x-tex">8/(3-8/3)=24</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">8/</span><span class="mopen">(</span><span class="mord">3</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">8/3</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">24</span></span></span></span></span>。如果评价器用“先算出分数不太合理”这样的经验剪枝，就可能删除正确路线。保留更多分支只有在这条路线仍有机会存活时才有效；将分数运算规则交给确定性的检查器，可能比单纯增加自然语言评价次数更有价值。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>单条推理链无法主动比较岔路，错误前缀持续消耗预算</td>
+<td>显式拆分想法，由模型生成和评价，再用BFS/DFS组织分支</td>
+<td>及早筛选部分解，保留替代路线并允许回退</td>
+<td>表2的74%与49%；图3早期错误；图5写作盲评；表3剪枝与回溯消融</td>
+<td>更多调用；需任务适配；错误剪枝；答案选择与知识缺失仍是瓶颈</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测与答案">自测与答案</h2>
+<p><strong>1. 在提示词中写“请提出三个想法并选最好的”，是否就实现了论文的 ToT？</strong></p>
+<p>答案：它可以是很浅的特例，但不自动具有显式状态、逐层扩展、预算控制和回溯。论文的核心是可执行的搜索过程；必须看控制器实际保存了哪些候选、何时评价、怎样继续，不能只看输出是否画成树形。</p>
+<p><strong>2. 为什么 best-of-100 与100次多数投票的24点成绩差这么多？</strong></p>
+<p>答案：best-of-100 利用正确性检查，只需100个答案中有一个正确；多数投票要求正确答案出现得足够集中。不同正确等式还可能分散票数。前者衡量生成覆盖加理想选择，后者衡量实际聚合规则，不能当作同一指标。</p>
+<p><strong>3. 如果增加搜索宽度没有改善，该优先检查什么？</strong></p>
+<p>答案：检查生成器是否产生正确方向、评价器是否误剪正确前缀，以及最终选择器是否丢掉已经找到的解。可以记录 oracle 候选覆盖率、剪枝后的覆盖率与最终准确率逐级定位，再比较同 token 预算的独立采样。只有这样才能知道问题出在探索不足还是选择失真。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 072｜Tree of Thoughts：让语言模型保留岔路，而不是一路写到底
+    <textarea id="md-source" hidden readonly># 072｜Tree of Thoughts：让语言模型保留岔路，而不是一路写到底
 
 [返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
 
@@ -165,9 +286,9 @@ ToT 的价值在于把语言模型作为候选生成器与语义启发式，接�
 
 答案：检查生成器是否产生正确方向、评价器是否误剪正确前缀，以及最终选择器是否丢掉已经找到的解。可以记录 oracle 候选覆盖率、剪枝后的覆盖率与最终准确率逐级定位，再比较同 token 预算的独立采样。只有这样才能知道问题出在探索不足还是选择失真。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

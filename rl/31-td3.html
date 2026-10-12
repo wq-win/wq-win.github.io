@@ -7,7 +7,7 @@
     <title>第 31 天｜TD3：给 DDPG 的价值误差加三道约束 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,215 @@
                 <span class="text-gray-500">TD3：给 DDPG 的价值误差加三道约束</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="2b989d261fc46059f7c5814fd2a63d1759ddf4fa6a4466b5c5654ea04609c429"><h1>第 31 天｜TD3：给 DDPG 的价值误差加三道约束</h1>
+<p><a href="index.html">系列首页</a> · <a href="30-sac.html">上一篇</a> · <a href="32-impala.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：Fujimoto 等，<em>Addressing Function Approximation Error in Actor-Critic Methods</em>，2018。<a href="https://arxiv.org/html/1802.09477v3">正文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：Critic 错误被 Actor 放大的不稳定性</p>
+<p><strong>旧方法卡点</strong>：确定策略也会选中高估动作，快速交替更新使错误传播</p>
+<p><strong>作者主张</strong>：双 Critic 取较小目标、延迟 Actor 更新、平滑目标动作</p>
+<p><strong>论文证据</strong>：§6 七个控制任务与消融支持整体方案</p>
+<p><strong>一句话</strong>：在off-policy、无模型、确定性连续 Actor–Critic中，作者通过“双 Critic 取较小目标、延迟 Actor 更新、平滑目标动作”应对“Critic 错误被 Actor 放大的不稳定性”这一问题；证据边界或代价是：可能引入低估，不能把双 Critic 最小值当真值下界。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>Clipped Double Q</strong>：目标用两估值较小者。</li>
+<li><strong>延迟策略更新</strong>：让 Critic 多学几步再改 Actor。</li>
+<li><strong>目标平滑</strong>：对邻近目标动作平均化评价。</li>
+<li><strong>高估传播</strong>：自举把局部误差传到其他状态。</li>
+<li><strong>消融</strong>：移除组件检验其作用。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“Critic 错误被 Actor 放大的不稳定性”放在off-policy、无模型、确定性连续 Actor–Critic的边界内研究。确定策略也会选中高估动作，快速交替更新使错误传播。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>off-policy、无模型、确定性连续 Actor–Critic</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>MuJoCo低维状态</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>连续动作向量</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>环境回报</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>任务终止／时间限制</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>三项修改分别针对乐观估计、未稳定的评价者和尖锐虚假峰值。目标噪声用于平滑 Bellman 目标，行为探索噪声用于采集数据，二者不是同一用途。Actor 使用一个在线 Critic 更新；目标取两者较小值。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="a'=\operatorname{clip}(\mu_{\bar\theta}(s')+\operatorname{clip}(\epsilon,-c,c)),\quad y=r+\gamma(1-d)\min_{i=1,2}Q_{\bar\phi_i}(s',a')."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>a</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>=</mo><mi mathvariant="normal">clip</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>μ</mi><mover accent="true"><mi>θ</mi><mo>ˉ</mo></mover></msub><mo stretchy="false">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo><mo>+</mo><mi mathvariant="normal">clip</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>ϵ</mi><mo separator="true">,</mo><mo>−</mo><mi>c</mi><mo separator="true">,</mo><mi>c</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="1em"/><mi>y</mi><mo>=</mo><mi>r</mi><mo>+</mo><mi>γ</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>d</mi><mo stretchy="false">)</mo><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mrow><mi>i</mi><mo>=</mo><mn>1</mn><mo separator="true">,</mo><mn>2</mn></mrow></munder><msub><mi>Q</mi><msub><mover accent="true"><mi>ϕ</mi><mo>ˉ</mo></mover><mi>i</mi></msub></msub><mo stretchy="false">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo separator="true">,</mo><msup><mi>a</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">a&#x27;=\operatorname{clip}(\mu_{\bar\theta}(s&#x27;)+\operatorname{clip}(\epsilon,-c,c)),\quad y=r+\gamma(1-d)\min_{i=1,2}Q_{\bar\phi_i}(s&#x27;,a&#x27;).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8019em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0519em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">clip</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.4629em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord mtight">ˉ</span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2371em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">clip</span></span><span class="mopen">(</span><span class="mord mathnormal">ϵ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">−</span><span class="mord mathnormal">c</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">c</span><span class="mclose">))</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.6657em;vertical-align:-0.8638em;"></span><span class="mord mathnormal">d</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3723em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">=</span><span class="mord mtight">1</span><span class="mpunct mtight">,</span><span class="mord mtight">2</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8638em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.4629em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight">ϕ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord mtight">ˉ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3732em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span>
+两个 Critic 回归同一冻结 y；每隔 d_policy 次 Critic 更新再更新 Actor。符号 d_policy 与终止标志不要混用。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">采集带行为探索噪声的经验到 replay
+每次梯度步骤：
+  抽 minibatch
+  目标动作 ← 目标Actor(s_next)+截断高斯噪声
+  再截断到合法动作区间
+  y ← r+γ*(1-done)*min(目标Q1,目标Q2)
+  更新两个 Critic 的 TD 损失
+  若 update_index % policy_delay == 0：
+    Actor 最大化在线 Q1(s,Actor(s))
+    软更新目标 Actor 与两个目标 Critic
+输出：评价时无探索噪声的 Actor
+</code></pre>
+<p><strong>实现要点</strong>：可能引入低估，不能把双 Critic 最小值当真值下界。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>双Critic回归保守平滑目标；延迟Actor最大化Q1</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>双 Critic 取较小目标、延迟 Actor 更新、平滑目标动作</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>表1为原文汇总回报，不是2026排行榜</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>七个连续控制任务</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>在线交互1百万步</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>DDPG、重调DDPG、PPO/TRPO/SAC等原文版本</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>10训练种子；每5000步做10回合无探索评价</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>表1为原文汇总回报，不是2026排行榜</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>10种子均值及标准差</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>误差控制能否独立于普通调参改善性能</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：可能引入低估，不能把双 Critic 最小值当真值下界。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>§4 误差分析</td>
+<td>Actor选动作与估值噪声</td>
+<td>指出连续控制也有高估</td>
+<td>不保证所有误差同分布</td>
+</tr>
+<tr>
+<td>表1</td>
+<td>七任务与重调基线</td>
+<td>整体性能证据</td>
+<td>不能忽略重调DDPG提升</td>
+</tr>
+<tr>
+<td>§6.2 表2</td>
+<td>移除三项机制</td>
+<td>检验组件贡献</td>
+<td>模块并非完全独立</td>
+</tr>
+<tr>
+<td>学习曲线（具体图表编号本文未核实）</td>
+<td>回报随交互量增长</td>
+<td>样本预算内稳定性</td>
+<td>不等同GPU时间</td>
+</tr>
+</tbody></table></div>
+<p>表1 HalfCheetah：TD3 约9636.95，原DDPG约3305.60，作者重调DDPG约8577.29。比较对象一换，改善幅度就大幅不同。数字来自原文条件；不据此宣称所有今日 SAC 实现弱于 TD3。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者贡献</strong>是针对误差传播的组合修正。<strong>本文分析</strong>：双 Q 共享数据仍可能相关；min 的悲观程度影响探索与最终回报。目标平滑适合局部动作价值平滑的假设，尖锐但真实的最优动作也可能被抹掉。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>目标Q1=8、Q2=5，r=1、γ=0.9，y=5.5，而使用Q1会得到8.2。若真实值为9，两种都低估，min 更低；机制控制的是乐观风险，不是逐样本准确性。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>两 Critic 完全相关时还有多少作用？</li>
+<li>为什么目标噪声不等于探索噪声？</li>
+<li>同样交互预算下更频繁 Critic 更新是否公平？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Critic 错误被 Actor 放大的不稳定性</td>
+<td>双 Critic 取较小目标、延迟 Actor 更新、平滑目标动作</td>
+<td>同时限制乐观估计、尖峰目标和不成熟评价反馈</td>
+<td>§6 七个控制任务与消融支持整体方案</td>
+<td>可能引入低估，不能把双 Critic 最小值当真值下界</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：TD3 的三项改动分别针对什么？</p>
+<p><strong>参考答案</strong>：双 Critic 取较小值，抑制乐观估计；延迟 Actor 更新，让价值估计有更多机会稳定；目标策略平滑，在邻近动作上平滑目标，降低尖锐虚假高值的吸引力。它们共同减弱 Actor 利用 Critic 误差的反馈。</p>
+<p><strong>问题 2</strong>：取两个 Q 的较小值，为什么不是可信下界？</p>
+<p><strong>参考答案</strong>：两个 Critic 可能共享数据偏差，在同一区域同时高估；它们也可能同时低估。取最小值是一种抑制高估的机制，没有自动附带统计置信水平或对真实价值的逐点下界保证。</p>
+<p><a href="index.html">系列首页</a> · <a href="30-sac.html">上一篇</a> · <a href="32-impala.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 31 天｜TD3：给 DDPG 的价值误差加三道约束
+    <textarea id="md-source" hidden readonly># 第 31 天｜TD3：给 DDPG 的价值误差加三道约束
 
 [系列首页](README.md) · [上一篇](30-sac.md) · [下一篇](32-impala.md)
 
@@ -190,16 +394,16 @@ $$a'=\operatorname{clip}(\mu_{\bar\theta}(s')+\operatorname{clip}(\epsilon,-c,c)
 
 [系列首页](README.md) · [上一篇](30-sac.md) · [下一篇](32-impala.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "31-td3";
         const source = document.getElementById('md-source').value;

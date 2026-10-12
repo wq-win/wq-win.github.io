@@ -7,7 +7,7 @@
     <title>第 56 天｜MBDPO：让世界模型、价值学习与扩散策略更一致 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,229 @@
                 <span class="text-gray-500">MBDPO：让世界模型、价值学习与扩散策略更一致</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="7d06aab1530a96ccab6518c390b61008dd0c9650f4ccf31f69744382842ee679"><h1>第 56 天｜MBDPO：让世界模型、价值学习与扩散策略更一致</h1>
+<p><a href="index.html">系列首页</a> · <a href="55-dr-grpo.html">上一篇</a> · <a href="57-worldsample.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：Cheng 等，<em>Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization</em>，2026-05-25。<a href="https://arxiv.org/html/2605.26282v1">正文</a>。这里的 Diffusion Policy Optimization 与直接偏好优化 DPO 不是同一算法。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：模型搜索与价值训练的策略分布不一致</p>
+<p><strong>旧方法卡点</strong>：搜索可能挑中价值网络未训练过的动作序列，误差被下一轮继续放大</p>
+<p><strong>作者主张</strong>：加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器</p>
+<p><strong>论文证据</strong>：121任务、视觉控制和多任务扩展实验支持所报告方案</p>
+<p><strong>一句话</strong>：在模型驱动在线、离线预训练及在线微调中，作者通过“加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器”应对“模型搜索与价值训练的策略分布不一致”这一问题；证据边界或代价是：能量密度解释有采样假设；最大模型并非所有设置都继续改善。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>Score</strong>：扩散分布对输入的log密度梯度。</li>
+<li><strong>能量模型</strong>：用标量分数描述样本相容性。</li>
+<li><strong>Gibbs权重</strong>：按指数回报分配候选权重。</li>
+<li><strong>摊销推断</strong>：把昂贵求解结果学习进网络。</li>
+<li><strong>策略漂移</strong>：行动分布偏离训练支持。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“模型搜索与价值训练的策略分布不一致”放在模型驱动在线、离线预训练及在线微调的边界内研究。搜索可能挑中价值网络未训练过的动作序列，误差被下一轮继续放大。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>模型驱动在线、离线预训练及在线微调</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>潜在状态z和环境观测</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>多步连续动作序列</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>预测任务回报加能量相关正则</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>环境终止与模型展开长度分别处理</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>世界模型预测动作后果，价值网络补足后续收益，能量模型约束偏离行为分布。训练时对候选序列计算正则化想象回报，形成加权Monte Carlo score目标，再让score网络拟合。部署时使用学到的score做扩散采样，把训练中的昂贵估计摊销到网络；不是每次执行都完整重跑同样Monte Carlo规划。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="w_i=\frac{\exp(\widetilde G_i/\kappa)}{\sum_j\exp(\widetilde G_j/\kappa)},\quad L_{score}=E\|\hat\phi(z,a^\tau,\tau)-\phi_{MC}(z,a^\tau,\tau)\|^2."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>w</mi><mi>i</mi></msub><mo>=</mo><mfrac><mrow><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mover accent="true"><mi>G</mi><mo stretchy="true">~</mo></mover><mi>i</mi></msub><mi mathvariant="normal">/</mi><mi>κ</mi><mo stretchy="false">)</mo></mrow><mrow><munder><mo>∑</mo><mi>j</mi></munder><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mover accent="true"><mi>G</mi><mo stretchy="true">~</mo></mover><mi>j</mi></msub><mi mathvariant="normal">/</mi><mi>κ</mi><mo stretchy="false">)</mo></mrow></mfrac><mo separator="true">,</mo><mspace width="1em"/><msub><mi>L</mi><mrow><mi>s</mi><mi>c</mi><mi>o</mi><mi>r</mi><mi>e</mi></mrow></msub><mo>=</mo><mi>E</mi><mi mathvariant="normal">∥</mi><mover accent="true"><mi>ϕ</mi><mo>^</mo></mover><mo stretchy="false">(</mo><mi>z</mi><mo separator="true">,</mo><msup><mi>a</mi><mi>τ</mi></msup><mo separator="true">,</mo><mi>τ</mi><mo stretchy="false">)</mo><mo>−</mo><msub><mi>ϕ</mi><mrow><mi>M</mi><mi>C</mi></mrow></msub><mo stretchy="false">(</mo><mi>z</mi><mo separator="true">,</mo><msup><mi>a</mi><mi>τ</mi></msup><mo separator="true">,</mo><mi>τ</mi><mo stretchy="false">)</mo><msup><mi mathvariant="normal">∥</mi><mn>2</mn></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">w_i=\frac{\exp(\widetilde G_i/\kappa)}{\sum_j\exp(\widetilde G_j/\kappa)},\quad L_{score}=E\|\hat\phi(z,a^\tau,\tau)-\phi_{MC}(z,a^\tau,\tau)\|^2.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.8895em;vertical-align:-1.2691em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.6203em;"><span style="top:-2.1667em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">exp</span><span class="mopen">(</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9433em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">G</span></span><span class="svg-align" style="width:calc(100% - 0.1667em);margin-left:0.1667em;top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.26em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.26em" viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M200 55.538c-77 0-168 73.953-177 73.953-3 0-7
+-2.175-9-5.437L2 97c-1-2-2-4-2-6 0-4 2-7 5-9l20-12C116 12 171 0 207 0c86 0
+ 114 68 191 68 78 0 168-68 177-68 4 0 7 2 9 5l12 19c1 2.175 2 4.35 2 6.525 0
+ 4.35-2 7.613-5 9.788l-19 13.05c-92 63.077-116.937 75.308-183 76.128
+-68.267.847-113-73.952-191-73.952z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord mathnormal">κ</span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop">exp</span><span class="mopen">(</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9433em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">G</span></span><span class="svg-align" style="width:calc(100% - 0.1667em);margin-left:0.1667em;top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.26em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.26em" viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M200 55.538c-77 0-168 73.953-177 73.953-3 0-7
+-2.175-9-5.437L2 97c-1-2-2-4-2-6 0-4 2-7 5-9l20-12C116 12 171 0 207 0c86 0
+ 114 68 191 68 78 0 168-68 177-68 4 0 7 2 9 5l12 19c1 2.175 2 4.35 2 6.525 0
+ 4.35-2 7.613-5 9.788l-19 13.05c-92 63.077-116.937 75.308-183 76.128
+-68.267.847-113-73.952-191-73.952z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord mathnormal">κ</span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2691em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">score</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2079em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mord">∥</span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9579em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">ϕ</span></span><span style="top:-3.2634em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">ϕ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">MC</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mclose">)</span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span>
+κ是回报权重温度；φ_MC使用噪声级别和加权干净候选序列计算，详见式15。能量用于正则化G，其与−log行为密度的联系取决于负样本分布。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">从真实replay训练编码、潜在动态、奖励和价值模型
+训练能量模型：数据动作正例，规定的错配动作负例
+训练扩散score：
+  抽状态z、噪声级别τ和带噪动作序列
+  从对应提议分布采T个干净候选序列
+  在世界模型中展开，求正则化回报G_tilde
+  softmax(G_tilde/κ)得到权重
+  按原文式15构造Monte Carlo score目标
+  停止目标梯度，拟合score网络
+部署：从噪声用score迭代生成动作序列并执行规定动作
+继续真实交互更新数据
+</code></pre>
+<p><strong>实现要点</strong>：能量密度解释有采样假设；最大模型并非所有设置都继续改善。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>世界模型／能量训练，以及回报加权Monte Carlo score目标的回归</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>回报／成功、cross TD误差、策略漂移和时间</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>DMControl、MetaWorld、ManiSkill2、MyoSuite共121任务</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>在线replay、30／80任务离线数据及微调</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>TD-MPC、TD-MPC2、SAC、DreamerV3</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>模型1.7M—340M；表1在线A800、离线H200上10M更新成本</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>回报／成功、cross TD误差、策略漂移和时间</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>视觉图5各任务5种子；其他实验范围单独核对</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>分布约束和摊销扩散策略是否改善世界模型学习</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：能量密度解释有采样假设；最大模型并非所有设置都继续改善。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>图3</td>
+<td>cross TD误差与策略漂移</td>
+<td>支持所测训练不一致减少</td>
+<td>不是完全无模型误差证明</td>
+</tr>
+<tr>
+<td>图4—5</td>
+<td>多基准和视觉控制</td>
+<td>支持实验覆盖内收益</td>
+<td>不代表每个子任务均更好</td>
+</tr>
+<tr>
+<td>图6</td>
+<td>30／80任务模型扩展</td>
+<td>考察容量收益</td>
+<td>30任务340M下降，非严格单调</td>
+</tr>
+<tr>
+<td>图7</td>
+<td>离线到在线微调</td>
+<td>展示可迁移性及失败例</td>
+<td>Hopper Hop仍有明显问题</td>
+</tr>
+<tr>
+<td>表1</td>
+<td>训练硬件与时间</td>
+<td>提供部分计算成本证据</td>
+<td>不能混用不同GPU时间</td>
+</tr>
+</tbody></table></div>
+<p><strong>证据疑点</strong>：正文概括“单调扩展”，同时写明30任务数据上340M模型两方法表现下降。应以分设置曲线解读，不把概括句当全范围定律。能量解释也需核对：对比估计一般学习相对负样本分布的密度比，不能不看负例分布就称为精确行为密度。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者解释</strong>较大模型下降可能与数据容量饱和有关；这是解释而非被独立证明的原因。<strong>本文分析</strong>：候选数、去噪步数、score拟合误差及能量正则共同决定成本和质量；只看世界模型参数量不足以解释扩展行为。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>模型给两序列想象回报10与9，但高分序列偏离数据很远。正则后可能变为6与8，权重转向后者。若能量模型把罕见但有效动作也当危险，它会限制真实改进。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>负样本采样如何改变能量的密度解释？</li>
+<li>固定总训练成本而非参数量时扩展趋势是否保持？</li>
+<li>score拟合与世界模型误差各贡献多少失败？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>模型搜索与价值训练的策略分布不一致</td>
+<td>加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器</td>
+<td>行为相关正则减少搜索偏离，score网络摊销昂贵策略求解</td>
+<td>121任务、视觉控制和多任务扩展实验支持所报告方案</td>
+<td>能量密度解释有采样假设；最大模型并非所有设置都继续改善</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：搜索策略与价值学习的策略不一致，为什么会出问题？</p>
+<p><strong>参考答案</strong>：搜索可能挑中价值网络缺少训练支持的动作序列，并利用其中的高估。MBDPO 用行为相关能量约束候选行为，再通过世界模型回报构造加权 score 目标，训练扩散策略，将搜索与策略改进更紧密地结合。<a href="https://arxiv.org/html/2605.26282v1">原文方法</a></p>
+<p><strong>问题 2</strong>：为什么不能直接把对比学习得到的能量当成精确的负对数行为概率？</p>
+<p><strong>参考答案</strong>：一般对比学习识别的是数据分布相对于负样本分布的密度比。只有对负样本分布作出适当假设，才能进一步解释成行为密度。因此，使用这种能量约束可能有效，并不自动证明它是准确的概率模型。</p>
+<p><a href="index.html">系列首页</a> · <a href="55-dr-grpo.html">上一篇</a> · <a href="57-worldsample.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 56 天｜MBDPO：让世界模型、价值学习与扩散策略更一致
+    <textarea id="md-source" hidden readonly># 第 56 天｜MBDPO：让世界模型、价值学习与扩散策略更一致
 
 [系列首页](README.md) · [上一篇](55-dr-grpo.md) · [下一篇](57-worldsample.md)
 
@@ -191,16 +409,16 @@ $$w_i=\frac{\exp(\widetilde G_i/\kappa)}{\sum_j\exp(\widetilde G_j/\kappa)},\qua
 
 [系列首页](README.md) · [上一篇](55-dr-grpo.md) · [下一篇](57-worldsample.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "56-mbdpo";
         const source = document.getElementById('md-source').value;

@@ -7,7 +7,7 @@
     <title>089｜ORB-SLAM2：把单目、双目和深度观测接入同一套 SLAM 后端 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,162 @@
                 <span class="text-gray-500">ORB-SLAM2：把单目、双目和深度观测接入同一套 SLAM 后端</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="fbd8ab5cc6d6ba6b04b38f84a598a299b0fdf3411504a61e09981fd5e029ccc5"><h1>089｜ORB-SLAM2：把单目、双目和深度观测接入同一套 SLAM 后端</h1>
+<p><a href="00-timeline.html">返回总览</a> · <a href="088-colmap.html">上一篇：COLMAP</a> · <a href="090-se-sync.html">下一篇：SE-Sync</a></p>
+<p><strong>论文</strong>：Raúl Mur-Artal、Juan D. Tardós，<em>ORB-SLAM2: an Open-Source SLAM System for Monocular, Stereo and RGB-D Cameras</em>，2016 年首次公开，2017 年发表于 T-RO。<a href="https://arxiv.org/html/1610.06475v2">论文 v2</a> · <a href="https://github.com/raulmur/ORB_SLAM2">官方代码</a>。</p>
+<p><strong>阅读范围</strong>：2017 年 6 月 v2 全部方法与实验、表 I–IV；未运行软件。本文不把 ORB-SLAM3 的视觉惯性、鱼眼和多地图能力归入第二代系统。</p>
+<h2 id="一一分钟理解">一、一分钟理解</h2>
+<p>单目 ORB-SLAM 已能跟踪、建图、回环和重定位，但一张单目图像不能直接给出深度和公制尺度。双目或 RGB-D 可以更早得到三维点，却也带来不同的观测形式和噪声。</p>
+<p>ORB-SLAM2 将这些输入统一为单目二维观测或双目三维观测。RGB-D 深度被转换成“虚拟右图坐标”，后端继续使用特征匹配、局部 BA、回环修正和全局 BA。近点和远点分开处理，让系统同时利用近点的平移信息与远点的旋转信息。</p>
+<p>实验支持跨手持相机、无人机和汽车序列的定位能力，但并非所有序列最好。系统输出核心是稀疏地图；论文中的稠密点云是深度反投影显示，明确没有实施深度融合。</p>
+<p>一句话：<strong>在多种视觉传感器的 SLAM 中，通过统一观测与分层优化提升地图复用和公制定位能力，代价是特征可见性、标定依赖及全局优化成本；纯单目模式仍有尺度自由度。</strong></p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>视差</strong>：校正双目中左右对应位置的水平差，与深度成反比。</li>
+<li><strong>公制尺度</strong>：重建长度对应实际单位，需要已知基线或深度等信息。</li>
+<li><strong>共视图</strong>：连接观察到共同地图点的关键帧。</li>
+<li><strong>重定位</strong>：跟踪中断后，相对已有地图重新估计位姿。</li>
+<li><strong>局部与全局 BA</strong>：调整的状态范围不同，计算频率和代价也不同。</li>
+</ol>
+<h2 id="二问题定义与背景">二、问题定义与背景</h2>
+<p>这是在线定位与建图系统，不是强化学习。输入分别可以是单目、校正后的双目或对齐深度图的 RGB-D；输出是相机位姿与地图点。这里“三种输入”是系统支持不同模式，不表示随时把任意三种设备自动混合标定。</p>
+<p>单目模式继承前作的多视图初始化与尺度问题；双目和 RGB-D 以已标定的基线或深度尺度提供公制约束。一旦深度尺度标定偏了，地图也会受影响。因此“尺度可观测”不等于“尺度数值永远准确”。</p>
+<p>长期漂移需要与旧地图重新建立联系。纯 VO 只向前累计局部变化；SLAM 通过回环与地图复用纠正累计误差。反过来，错误地点识别也可能污染地图，所以外观匹配之后必须几何验证。</p>
+<h2 id="三方法统一输入并保留不同信息强度">三、方法：统一输入并保留不同信息强度</h2>
+<h3 id="1-虚拟双目观测">1. 虚拟双目观测</h3>
+<p>双目关键点可写为 <span class="reading-math" data-tex="(u_L,v_L,u_R)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><msub><mi>u</mi><mi>L</mi></msub><mo separator="true">,</mo><msub><mi>v</mi><mi>L</mi></msub><mo separator="true">,</mo><msub><mi>u</mi><mi>R</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(u_L,v_L,u_R)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">L</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">L</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，校正后的左右对应点位于同一扫描线。RGB-D 特征的深度 <span class="reading-math" data-tex="d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi></mrow><annotation encoding="application/x-tex">d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span> 可以转成：</p>
+<p><span class="reading-math" data-tex="u_R=u_L-\frac{f_xb}{d}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>u</mi><mi>R</mi></msub><mo>=</mo><msub><mi>u</mi><mi>L</mi></msub><mo>−</mo><mfrac><mrow><msub><mi>f</mi><mi>x</mi></msub><mi>b</mi></mrow><mi>d</mi></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">u_R=u_L-\frac{f_xb}{d}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">L</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.0574em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3714em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">d</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal">b</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="f_x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>f</mi><mi>x</mi></msub></mrow><annotation encoding="application/x-tex">f_x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 为焦距，<span class="reading-math" data-tex="b"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>b</mi></mrow><annotation encoding="application/x-tex">b</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">b</span></span></span></span></span> 是等效基线。它让同一后端以相同形式处理深度，但虚拟右坐标并非真的拍到一张右图。噪声模型和深度尺度仍需要正确设定；深度无效的特征可保留为单目观测，不能当零深度点使用。</p>
+<h3 id="2-近点与远点">2. 近点与远点</h3>
+<p>论文第 III-A 节采用约四十倍基线的深度阈值。近点的视差较可靠，对尺度和平移有帮助；远点视差小，旋转信息仍有价值，但单帧深度不稳定，需要更多视图支持。</p>
+<p>对双目公式 <span class="reading-math" data-tex="Z=f_xb/\delta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Z</mi><mo>=</mo><msub><mi>f</mi><mi>x</mi></msub><mi>b</mi><mi mathvariant="normal">/</mi><mi>δ</mi></mrow><annotation encoding="application/x-tex">Z=f_xb/\delta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal">b</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span></span></span></span></span> 求导，可以得到教学近似 <span class="reading-math" data-tex="|\Delta Z|\approx Z^2|\Delta\delta|/(f_xb)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∣</mi><mi mathvariant="normal">Δ</mi><mi>Z</mi><mi mathvariant="normal">∣</mi><mo>≈</mo><msup><mi>Z</mi><mn>2</mn></msup><mi mathvariant="normal">∣</mi><mi mathvariant="normal">Δ</mi><mi>δ</mi><mi mathvariant="normal">∣</mi><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><msub><mi>f</mi><mi>x</mi></msub><mi>b</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">|\Delta Z|\approx Z^2|\Delta\delta|/(f_xb)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">∣Δ</span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="mord">∣</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord">∣Δ</span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord">∣/</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal">b</span><span class="mclose">)</span></span></span></span></span>。同样一个像素的视差误差，对远点造成更大的深度误差。这解释为何不能把所有点视为等精度，也说明“四十倍”是工程阈值而非普遍物理常数。</p>
+<h3 id="3-三种-ba-的区别">3. 三种 BA 的区别</h3>
+<p>跟踪中的 motion-only BA 固定地图点，只优化当前位姿；局部 BA 同时优化邻近关键帧和地图点，并让相关外部关键帧作为固定约束；全局 BA 在回环后优化整张地图，固定原点以消除规范自由度。</p>
+<p>共同目标是鲁棒重投影误差：</p>
+<p><span class="reading-math" data-tex="\min_{R,t}\sum_k\rho\left(\|x_k-\pi_{m/s}(RX_k+t)\|_{\Sigma^{-1}}^2\right)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mrow><mi>R</mi><mo separator="true">,</mo><mi>t</mi></mrow></munder><munder><mo>∑</mo><mi>k</mi></munder><mi>ρ</mi><mrow><mo fence="true">(</mo><mi mathvariant="normal">∥</mi><msub><mi>x</mi><mi>k</mi></msub><mo>−</mo><msub><mi>π</mi><mrow><mi>m</mi><mi mathvariant="normal">/</mi><mi>s</mi></mrow></msub><mo stretchy="false">(</mo><mi>R</mi><msub><mi>X</mi><mi>k</mi></msub><mo>+</mo><mi>t</mi><mo stretchy="false">)</mo><msubsup><mi mathvariant="normal">∥</mi><msup><mi mathvariant="normal">Σ</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mn>2</mn></msubsup><mo fence="true">)</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\min_{R,t}\sum_k\rho\left(\|x_k-\pi_{m/s}(RX_k+t)\|_{\Sigma^{-1}}^2\right).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.3521em;vertical-align:-1.3021em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3557em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">t</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8804em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3021em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">ρ</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size1">(</span></span><span class="mord">∥</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.5198em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">m</span><span class="mord mtight">/</span><span class="mord mathnormal mtight">s</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3552em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord mathnormal">t</span><span class="mclose">)</span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.4306em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mtight">Σ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7463em;"><span style="top:-2.786em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2694em;"><span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size1">)</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="\pi_m"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>π</mi><mi>m</mi></msub></mrow><annotation encoding="application/x-tex">\pi_m</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">m</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 输出二维单目坐标，<span class="reading-math" data-tex="\pi_s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>π</mi><mi>s</mi></msub></mrow><annotation encoding="application/x-tex">\pi_s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">s</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 输出三维双目坐标；<span class="reading-math" data-tex="\rho"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ρ</mi></mrow><annotation encoding="application/x-tex">\rho</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ρ</span></span></span></span></span> 为 Huber 代价。这个公式是当前位姿优化形式，局部或全局 BA 还把相应地图变量放入优化。BA 的非线性局部求解不自动获得全局最优。</p>
+<h3 id="4-回环之后全局-ba-不能阻塞一切">4. 回环之后，全局 BA 不能阻塞一切</h3>
+<p>系统先验证回环、融合重复点并优化位姿图，再用独立线程运行全局 BA。运行期间新关键帧仍可能加入，所以 BA 完成后需通过生成树传播修正；若又发现新回环，则中止旧优化并启动新的修正过程。</p>
+<p>双目/深度下尺度可观测，相关回环处理采用刚体变换；单目仍要考虑尺度。不能因为软件名相同，就把两种模式的数学自由度混为一谈。</p>
+<h3 id="5-定位模式与伪代码">5. 定位模式与伪代码</h3>
+<p>定位模式关闭建图和回环线程，主要使用既有地图匹配，必要时重定位；进入未建图区域时还利用相邻帧生成的 VO 点。前者约束相对旧地图的累计漂移，后者仍可能漂移。“零漂移”应理解为持续相对既有地图定位，而非任何时刻绝对误差为零。</p>
+<pre><code class="language-text">输入：单目、双目或 RGB-D 流以及相应标定
+提取 ORB；生成单目观测和真实/虚拟双目观测
+按输入模式初始化地图
+每帧：
+    预测位姿，匹配局部地图，进行 motion-only BA
+    若跟踪失败，检索历史关键帧并几何验证重定位
+    若允许建图且需要新关键帧：
+        插入关键帧，生成或三角化点，局部 BA，剔除冗余
+    回环线程验证地点重访：
+        融合地图并进行位姿图修正
+        后台启动全局 BA；必要时中止旧任务
+        完成后向新加入的关键帧和点传播修正
+输出：相机轨迹与稀疏地图
+</code></pre>
+<p>这是教学流程。优化目标、系统机制和实测误差是三层概念；线程多也不是算法自动获得低延迟的证明。</p>
+<h2 id="四实验设计与公平性">四、实验设计与公平性</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文报告</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数据集</td>
+<td>KITTI 11 条公开真值序列、EuRoC 11 条、TUM RGB-D 7 条选定序列，共 29 条评测输入</td>
+</tr>
+<tr>
+<td>传感器</td>
+<td>KITTI、EuRoC 使用双目视觉；EuRoC 虽提供 IMU，但本系统此处没有使用</td>
+</tr>
+<tr>
+<td>计算</td>
+<td>i7-4790、16 GB RAM；每序列运行五次，报告轨迹精度中位数</td>
+</tr>
+<tr>
+<td>对照</td>
+<td>Stereo LSD-SLAM、ElasticFusion、Kintinuous、DVO-SLAM 等，取原作者发表结果，并非全部同机重跑</td>
+</tr>
+<tr>
+<td>精度指标</td>
+<td>KITTI 同时报相对平移/旋转误差与绝对平移 RMSE；其他表主要报平移 RMSE</td>
+</tr>
+<tr>
+<td>特殊处理</td>
+<td>作者对 Freiburg2 深度约 4% 尺度偏差做补偿，承认这可能部分解释较好结果</td>
+</tr>
+<tr>
+<td>时间统计</td>
+<td>表 IV 一般任务为均值±两倍标准差；每条计时序列只有一次的大回环/全局 BA 任务报单次时间</td>
+</tr>
+</tbody></table></div>
+<p>五次同序列运行反映多线程非确定性，不等于五个独立环境。深度补偿与基线配置差异也限制了将全部改善归因于 BA 的强因果结论。</p>
+<h2 id="五五组关键结果">五、五组关键结果</h2>
+<p><strong>表 I，KITTI 01。</strong> 双目系统能处理前作单目失败的高速公路序列；相对平移误差为 1.39%，Stereo LSD-SLAM 为 2.36%。但绝对平移 RMSE 为 10.4 m，对照为 9.0 m。两个指标给出不同排序，不能只挑一项说全面更准。KITTI 00 相对平移 0.70% 也高于对照 0.63%。</p>
+<p><strong>图 3、5：深度与尺度。</strong> 近点短暂可见时，双目较早初始化点有帮助；远点辅助旋转。作者用 KITTI 08 对比单目尺度漂移与双目轨迹，但它不是把传感器完全相同后只移除某一个代码模块的消融。</p>
+<p><strong>表 II：EuRoC 并非全部成功。</strong> V1_02 为 0.020 m，对照 0.074 m；MH_04 为 0.119 m；V2_03 明确失败，原因是严重模糊。因此“厘米级”有具体序列条件，不能把失败行从总体稳健性叙述中删去。对照仅部分序列有数值，“—”不是零误差。</p>
+<p><strong>表 III：RGB-D 的优势与例外。</strong> fr3/office 为 0.010 m、ElasticFusion 0.017 m；fr3/nst 则为 0.019 m、ElasticFusion 0.016 m。本方法不总领先。fr2/xyz 的 0.004 m 还应连同深度尺度补偿一起理解，不能单凭它证明稀疏 BA 普遍胜过稠密方法。</p>
+<p><strong>表 IV：实时跟踪不等于全图每帧更新。</strong> EuRoC、KITTI、TUM 示例平均跟踪耗时分别 41.66、49.47、25.58 ms；TUM 示例全局 BA 本身约 1640.96 ms，在后台单次执行。平均跟踪低于相机周期支持实时运行，但误差条与单次记录不构成最坏延迟保证。</p>
+<p>另一个限制是 KITTI 09 的末尾回环没有检测到；不能写成所有存在回环的序列都成功闭环。证据见<a href="https://arxiv.org/html/1610.06475v2">原文第 IV 节</a>。</p>
+<h2 id="六贡献代价与边界">六、贡献、代价与边界</h2>
+<p>真正贡献是把多传感器视觉模式、地图复用及异步优化组织为可用系统，延续前作统一 ORB 特征的设计。它并不声称发明了双目、BA 或近远点区别，背景明确承认前人。</p>
+<p>作者把更强模糊鲁棒性、全向或多相机、大规模稠密融合列为未来工作。我的分析是，地图复用需要环境和外观足够稳定，动态物体或长期场景变化可能破坏关联；公制深度也不能解决所有低纹理与遮挡。可靠的定位模式仍需检测何时已退化为会漂移的局部 VO。</p>
+<h2 id="七具体例子与前置概念">七、具体例子与前置概念</h2>
+<p><strong>自构例子，未运行。</strong> 取焦距 500 px、基线 0.1 m。2 m 处视差 25 px，20 m 处仅 2.5 px；0.5 px 误差对应的一阶深度误差约为 0.04 m 与 4 m。远点深度不准仍可对朝向变化提供约束，解释了“不丢掉所有远点，也不把远点当可靠近点”。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>输入观测形式不同</td>
+<td>统一单目/双目特征约束</td>
+<td>共享后端与地图管理</td>
+<td>三数据集</td>
+<td>标定和深度尺度仍关键</td>
+</tr>
+<tr>
+<td>远点深度不可靠</td>
+<td>区分近远点并调整关键帧策略</td>
+<td>保留旋转信息并补充近点</td>
+<td>KITTI 01</td>
+<td>高速少纹理仍困难</td>
+</tr>
+<tr>
+<td>全局修正计算长</td>
+<td>后台 BA 与更新传播</td>
+<td>跟踪可继续运行</td>
+<td>表 IV</td>
+<td>并发状态需要一致管理</td>
+</tr>
+<tr>
+<td>已建图区域重复漂移</td>
+<td>地图复用和定位模式</td>
+<td>重新约束到旧地图</td>
+<td>系统演示与回环结果</td>
+<td>未建图区域仍会漂移</td>
+</tr>
+</tbody></table></div>
+<h2 id="八理解检查问题与答案">八、理解检查：问题与答案</h2>
+<p><strong>问题 1：RGB-D 的虚拟右坐标是否意味着凭空增加了一个独立测量？</strong></p>
+<p><strong>答案：</strong> 不是。它只是把原深度测量换一种参数表达，信息量来自原始深度。必须同步转换噪声含义，不能当作又获得一台独立相机。</p>
+<p><strong>问题 2：为什么论文平均跟踪约 26 ms，却允许全局 BA 超过一秒？</strong></p>
+<p><strong>答案：</strong> 两者在不同线程、不同频率执行。跟踪使用当前地图继续定位，全局 BA 后台求解并在完成后传播修正；一秒级全局任务不等于每帧都阻塞一秒，但仍需关注更新与并发开销。</p>
+<p><strong>问题 3：如何解释“零漂移定位”？</strong></p>
+<p><strong>答案：</strong> 在持续匹配稳定旧地图时，不会像无地图 VO 那样无界累积相对误差；但地图可能已有误差，测量有噪声，未建图区域也仍会漂移。它不是绝对位置始终完全正确的保证。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 089｜ORB-SLAM2：把单目、双目和深度观测接入同一套 SLAM 后端
+    <textarea id="md-source" hidden readonly># 089｜ORB-SLAM2：把单目、双目和深度观测接入同一套 SLAM 后端
 
 [返回总览](00-发展时间线总览.md) · [上一篇：COLMAP](088-colmap.md) · [下一篇：SE-Sync](090-se-sync.md)
 
@@ -191,9 +342,9 @@ $\pi_m$ 输出二维单目坐标，$\pi_s$ 输出三维双目坐标；$\rho$ 为
 
 **答案：** 在持续匹配稳定旧地图时，不会像无地图 VO 那样无界累积相对误差；但地图可能已有误差，测量有噪声，未建图区域也仍会漂移。它不是绝对位置始终完全正确的保证。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

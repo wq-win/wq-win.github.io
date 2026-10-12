@@ -7,7 +7,7 @@
     <title>第 07 天｜Options：把“到达门口”也当作一个动作 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,210 @@
                 <span class="text-gray-500">Options：把“到达门口”也当作一个动作</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="7a982dd72512245a13271efd9b65eac8cac9f2c3d6712f70d1a3768f2ae2a5b4"><h1>第 07 天｜Options：把“到达门口”也当作一个动作</h1>
+<p><a href="index.html">系列首页</a> · <a href="06-sarsa.html">上一篇</a> · <a href="08-policy-gradient-theorem.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：<em>Between MDPs and Semi-MDPs: A Framework for Temporal Abstraction in Reinforcement Learning</em>，1999。<a href="https://people.eecs.berkeley.edu/~russell/classes/cs294/f05/papers/sutton%2Bal-1999.pdf">原论文</a>。</p>
+<p><strong>阅读范围</strong>：原始资料限于摘要与书目信息，全文尚未可靠获取。下文采用 Options 的标准数学教学形式；原论文的实验曲线、消融与页码尚未核实。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：长期任务如何在多个时间尺度决策</p>
+<p><strong>旧方法卡点</strong>：原始动作粒度太细，搜索和信用分配跨度太长</p>
+<p><strong>作者主张</strong>：用启动集合、内部策略、终止规则定义时间延展动作</p>
+<p><strong>论文证据</strong>：原文建立 MDP 与 SMDP 之间的理论框架</p>
+<p><strong>一句话</strong>：在单智能体、时间抽象与层级强化学习框架中，作者通过“用启动集合、内部策略、终止规则定义时间延展动作”应对“长期任务如何在多个时间尺度决策”这一问题；证据边界或代价是：技能选择范围限制可达策略；本文未完整读取原文图表。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>时间抽象</strong>：用多步行为作为决策单位。</li>
+<li><strong>启动集合</strong>：允许开始某技能的状态。</li>
+<li><strong>内部策略</strong>：技能执行期间的反馈控制。</li>
+<li><strong>终止函数</strong>：决定何时归还上层控制。</li>
+<li><strong>SMDP</strong>：决策间隔允许变化的决策过程。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“长期任务如何在多个时间尺度决策”放在单智能体、时间抽象与层级强化学习框架的边界内研究。原始动作粒度太细，搜索和信用分配跨度太长。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>单智能体、时间抽象与层级强化学习框架</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>底层环境状态；上层在 option 边界选择</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>上层 option，内部仍执行原始动作</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>持续 k 步内的折扣奖励累计</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>β(s) 决定 option 终止；环境终止优先</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>一个 option 是三元组 (I,π,β)：在哪里可开始、开始后怎么走、何时停止。它是闭环行为，不是固定动作脚本：途中观测可以改变下一步。call-and-return 的上层等技能结束后再选择。原论文还讨论模型、规划、intra-option 学习与中断，以下只实现基本 SMDP 更新。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="Q(s,o)\leftarrow Q(s,o)+\alpha[\sum_{j=0}^{k-1}\gamma^j r_{t+j}+\gamma^k\max_{o'}Q(s_{t+k},o')-Q(s,o)]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>Q</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>o</mi><mo stretchy="false">)</mo><mo>←</mo><mi>Q</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>o</mi><mo stretchy="false">)</mo><mo>+</mo><mi>α</mi><mo stretchy="false">[</mo><munderover><mo>∑</mo><mrow><mi>j</mi><mo>=</mo><mn>0</mn></mrow><mrow><mi>k</mi><mo>−</mo><mn>1</mn></mrow></munderover><msup><mi>γ</mi><mi>j</mi></msup><msub><mi>r</mi><mrow><mi>t</mi><mo>+</mo><mi>j</mi></mrow></msub><mo>+</mo><msup><mi>γ</mi><mi>k</mi></msup><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><msup><mi>o</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup></munder><mi>Q</mi><mo stretchy="false">(</mo><msub><mi>s</mi><mrow><mi>t</mi><mo>+</mo><mi>k</mi></mrow></msub><mo separator="true">,</mo><msup><mi>o</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo><mo>−</mo><mi>Q</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>o</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">Q(s,o)\leftarrow Q(s,o)+\alpha[\sum_{j=0}^{k-1}\gamma^j r_{t+j}+\gamma^k\max_{o&#x27;}Q(s_{t+k},o&#x27;)-Q(s,o)].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">o</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">o</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:3.2499em;vertical-align:-1.4138em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mopen">[</span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8361em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="mrel mtight">=</span><span class="mord mtight">0</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8747em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.6431em;vertical-align:-0.744em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.4306em;"><span style="top:-2.356em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6828em;"><span style="top:-2.786em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">max</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.744em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">o</span><span class="mclose">)]</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>k 是技能实际持续时间，所以未来价值要乘 γ 的 k 次方。若漏掉 k，长技能会被错误估值；最终可选技能还须满足启动集合。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">输入：固定 options (I_o,π_o,β_o)
+上层处于状态 s：
+  从可启动 options 中探索选择 o
+  R ← 0；k ← 0；s_start ← s
+  repeat：
+    a ← π_o(s)；r,s_next,done ← step(a)
+    R ← R+γ^k*r；k ← k+1；s ← s_next
+  until done 或 β_o(s) 采样为终止
+  y ← R if done else R+γ^k*max_可启动o&#39; Q(s,o&#39;)
+  Q(s_start,o) ← Q(s_start,o)+α*(y-Q(s_start,o))
+输出：上层 option 策略
+</code></pre>
+<p><strong>实现要点</strong>：该伪代码假设技能给定，技能发现属于另一个学习问题；终止概率与环境 done 不是同一个量。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>优化技能序列回报；SMDP目标累加技能内奖励并按持续k步折扣</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>用启动集合、内部策略、终止规则定义时间延展动作</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>策略价值、规划和学习效率；具体分数尚未核实</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>原论文框架与示例；完整实验未核实</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>option 定义及转移经验；规模未核实</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>原始动作层学习／规划是概念参照</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>内部步数和上层决策数需分别计量</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>策略价值、规划和学习效率；具体分数尚未核实</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>本文未核实</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>时间抽象能否与原始 MDP 一致地组合</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：技能选择范围限制可达策略；本文未完整读取原文图表。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>原文摘要：Options 定义</td>
+<td>动作推广为闭环的长时行为</td>
+<td>时间抽象的概念贡献</td>
+<td>不证明技能自动发现</td>
+</tr>
+<tr>
+<td>原文摘要：SMDP 联系</td>
+<td>options 嵌入半马尔可夫过程</td>
+<td>持续时长可以被正式建模</td>
+<td>不保证任意技能集足够表达最优解</td>
+</tr>
+<tr>
+<td>原文实验图表</td>
+<td>尚未完整获取</td>
+<td>定量证据不足</td>
+<td>四房间实验的图号与提升幅度尚未核实</td>
+</tr>
+</tbody></table></div>
+<p><strong>结论边界</strong>：原文建立 MDP 与 SMDP 之间的理论框架。技能选择范围限制可达策略；本文未完整读取原文图表。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者主张</strong>是统一多个时间尺度的表示、规划与学习。<strong>本文分析</strong>：不好的技能可能把最优动作挡在技能内部，持续太久还会降低纠错速度。option 数多不等于真正丰富，技能覆盖与可终止性都重要。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>到门口 option 花三步，每步 −1，γ=0.9，门口下一技能价值 10。目标是 −1−0.9−0.81+0.9³×10=4.58。若错误只乘一次 γ，会得到 6.29，把较长技能算得过好。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>哪类 option 会损失原始最优策略的表达能力？</li>
+<li>如何公平比较一次上层决策与十次原始动作？</li>
+<li>为什么固定技能发现与技能选择应分开评测？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>长期任务如何在多个时间尺度决策</td>
+<td>用启动集合、内部策略、终止规则定义时间延展动作</td>
+<td>较粗粒度决策可复用长行为，缩短上层搜索跨度</td>
+<td>原文建立 MDP 与 SMDP 之间的理论框架</td>
+<td>技能选择范围限制可达策略；本文未完整读取原文图表</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>原始资料的可用范围见文首说明。本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：把“走到门口”作为一个动作，需要定义哪些东西？</p>
+<p><strong>参考答案</strong>：需要启动集合、内部策略和终止规则：在哪里可以开始，开始后怎么走，何时结束。因为一个 option 持续多个时间步，上层更新需要累计期间奖励，并按持续时间 <span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 使用 <span class="reading-math" data-tex="\gamma^k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>γ</mi><mi>k</mi></msup></mrow><annotation encoding="application/x-tex">\gamma^k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0435em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span></span></span></span></span> 折扣后续价值。</p>
+<p><strong>问题 2</strong>：时间抽象为什么既能简化问题，也可能限制最优解？</p>
+<p><strong>参考答案</strong>：上层不用每一步都决策，可以复用长行为。但如果提供的技能无法完成某种必要动作组合，上层再聪明也无法选择它。Options 提供组织技能的框架，并不自动保证技能集合足够好，也不自动解决技能发现。</p>
+<p><a href="index.html">系列首页</a> · <a href="06-sarsa.html">上一篇</a> · <a href="08-policy-gradient-theorem.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 07 天｜Options：把“到达门口”也当作一个动作
+    <textarea id="md-source" hidden readonly># 第 07 天｜Options：把“到达门口”也当作一个动作
 
 [系列首页](README.md) · [上一篇](06-sarsa.md) · [下一篇](08-policy-gradient-theorem.md)
 
@@ -192,16 +391,16 @@ k 是技能实际持续时间，所以未来价值要乘 γ 的 k 次方。若�
 
 [系列首页](README.md) · [上一篇](06-sarsa.md) · [下一篇](08-policy-gradient-theorem.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "07-options";
         const source = document.getElementById('md-source').value;

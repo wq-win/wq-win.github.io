@@ -7,7 +7,7 @@
     <title>第 48 天｜DreamerV3：为什么跨任务稳定，比单个任务高分更难 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,214 @@
                 <span class="text-gray-500">DreamerV3：为什么跨任务稳定，比单个任务高分更难</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="d626d893fe5451c79a43cc897e83fdbd2312411b36be9e63077460ed6f2bd577"><h1>第 48 天｜DreamerV3：为什么跨任务稳定，比单个任务高分更难</h1>
+<p><a href="index.html">系列首页</a> · <a href="47-instructgpt.html">上一篇</a> · <a href="49-dpo.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：<em>Mastering Diverse Domains through World Models</em>，2023。<a href="https://arxiv.org/abs/2301.04104">原论文</a>。</p>
+<p><strong>阅读范围</strong>：引用 arXiv 修订正文中的方法与基准结果。2023 指首次预印本年份，后续修订结果不能全部归入首版。各版本的完整差异与代码尚未逐项核实。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：世界模型算法跨任务的超参数敏感性</p>
+<p><strong>旧方法卡点</strong>：奖励尺度、观测类型和动态范围不同使同一配置难复用</p>
+<p><strong>作者主张</strong>：用离散潜变量、尺度稳健的预测与归一化等配方统一世界模型学习</p>
+<p><strong>论文证据</strong>：多领域基准展示固定超参数的广泛适用性</p>
+<p><strong>一句话</strong>：在模型驱动、潜在世界模型与Actor–Critic，多领域中，作者通过“用离散潜变量、尺度稳健的预测与归一化等配方统一世界模型学习”应对“世界模型算法跨任务的超参数敏感性”这一问题；证据边界或代价是：同一配方分别训练不等于单模型零样本通用。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>Symlog</strong>：保留符号的对数压缩。</li>
+<li><strong>Two-hot</strong>：在相邻离散桶分配目标概率。</li>
+<li><strong>离散潜变量</strong>：用离散随机编码描述隐状态。</li>
+<li><strong>KL平衡</strong>：分配动态与表示学习的正则压力。</li>
+<li><strong>跨域稳健性</strong>：在不同任务类型下保持训练有效。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“世界模型算法跨任务的超参数敏感性”放在模型驱动、潜在世界模型与Actor–Critic，多领域的边界内研究。奖励尺度、观测类型和动态范围不同使同一配置难复用。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>模型驱动、潜在世界模型与Actor–Critic，多领域</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>图像／状态经离散潜变量和递归记忆编码</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>离散或连续动作按任务设置</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>任务奖励的稳健编码与想象回报</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>预测继续概率及真实终止</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>延续Dreamer的“真实数据学模型、想象中学行为”，重点是让损失在很不同的数值范围仍可用。symlog压缩大值，two-hot在相邻桶分配监督，KL相关平衡控制潜在模型学习，回报尺度归一化稳定Actor。不是一个新公式包打天下，而是完整学习系统。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p><span class="reading-math" data-tex="symlog(x)=sign(x)\log(1+|x|),\quad symexp(y)=sign(y)(e^{|y|}-1)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>s</mi><mi>y</mi><mi>m</mi><mi>l</mi><mi>o</mi><mi>g</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><mi>s</mi><mi>i</mi><mi>g</mi><mi>n</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mi>log</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>1</mn><mo>+</mo><mi mathvariant="normal">∣</mi><mi>x</mi><mi mathvariant="normal">∣</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="1em"/><mi>s</mi><mi>y</mi><mi>m</mi><mi>e</mi><mi>x</mi><mi>p</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo><mo>=</mo><mi>s</mi><mi>i</mi><mi>g</mi><mi>n</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo><mo stretchy="false">(</mo><msup><mi>e</mi><mrow><mi mathvariant="normal">∣</mi><mi>y</mi><mi mathvariant="normal">∣</mi></mrow></msup><mo>−</mo><mn>1</mn><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">symlog(x)=sign(x)\log(1+|x|),\quad symexp(y)=sign(y)(e^{|y|}-1).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">sy</span><span class="mord mathnormal">m</span><span class="mord mathnormal" style="margin-right:0.01968em;">l</span><span class="mord mathnormal">o</span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mord mathnormal">i</span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mord mathnormal">n</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">∣</span><span class="mord mathnormal">x</span><span class="mord">∣</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">sy</span><span class="mord mathnormal">m</span><span class="mord mathnormal">e</span><span class="mord mathnormal">x</span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.188em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mord mathnormal">i</span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mord mathnormal">n</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.938em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">∣</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">y</span><span class="mord mtight">∣</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span>
+奖励／价值的分布预测与逆变换必须配套；Actor使用归一化的优势或回报信号时，不能把训练数值直接当原始任务回报。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">用真实轨迹训练离散潜在世界模型
+对不同预测头使用规定的尺度变换／分布损失
+平衡动态预测与表征KL目标
+从后验状态展开想象轨迹
+计算λ-return与稳健回报尺度
+更新Actor、Critic及目标统计
+继续真实交互
+跨任务保持论文规定的公共配置
+输出：每个任务训练出的模型与策略
+</code></pre>
+<p><strong>实现要点</strong>：同一配方分别训练不等于单模型零样本通用。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>尺度稳健的模型预测与KL损失，配想象Actor–Critic</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>用离散潜变量、尺度稳健的预测与归一化等配方统一世界模型学习</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>任务分数、跨领域稳健性、扩展趋势</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>视觉控制、Atari、ProcGen、DMLab、Minecraft等</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>各任务在线经验</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>领域专用算法及PPO等</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>各域数据预算不同，固定超参不代表同样计算量</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>任务分数、跨领域稳健性、扩展趋势</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>完整种子与区间按基准图，本文未逐项核实</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>一套训练配方能否减少跨任务调参</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：同一配方分别训练不等于单模型零样本通用。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>图1</td>
+<td>跨基准汇总</td>
+<td>支持广域适用性</td>
+<td>不是单模型同时掌握全部</td>
+</tr>
+<tr>
+<td>图3</td>
+<td>世界模型与行为训练流程</td>
+<td>明确继承和修改接口</td>
+<td>流程不证明鲁棒性</td>
+</tr>
+<tr>
+<td>图4</td>
+<td>长视频预测</td>
+<td>展示潜在预测能力</td>
+<td>视觉合理不等于物理正确</td>
+</tr>
+<tr>
+<td>消融／扩展结果（具体图表编号本文未核实）</td>
+<td>稳定化组件与模型尺度</td>
+<td>检验训练配方</td>
+<td>不可忽略版本变化</td>
+</tr>
+</tbody></table></div>
+<p><strong>结论边界</strong>：多领域基准展示固定超参数的广泛适用性。同一配方分别训练不等于单模型零样本通用。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者主张</strong>是强通用训练配方。<strong>本文分析</strong>：固定超参的范围必须包含哪些参数可以随任务变动的说明；环境信息、预处理与动作编码也可能包含专业设计。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>任务A每步奖励0.01，B可得1000。原始平方误差会让大值任务主导数值尺度；symlog把1000压到约6.91，同时保留符号和顺序，但输出解码与评估仍应回到原单位。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>固定超参数具体包括哪些，不包括哪些？</li>
+<li>预测更清晰是否一定提高控制？</li>
+<li>首版与后续修订结果应怎样引用？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>世界模型算法跨任务的超参数敏感性</td>
+<td>用离散潜变量、尺度稳健的预测与归一化等配方统一世界模型学习</td>
+<td>统一不同任务的数值范围，减少同一训练机制的尺度敏感性</td>
+<td>多领域基准展示固定超参数的广泛适用性</td>
+<td>同一配方分别训练不等于单模型零样本通用</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>原始资料的可用范围见文首说明。本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：为什么跨任务使用同一套训练配置很困难？</p>
+<p><strong>参考答案</strong>：不同任务的奖励、价值和观测尺度差异很大，同一个损失或学习率可能被大数值任务主导。DreamerV3 通过数值变换、归一化等设计改善训练尺度，例如 symlog 压缩大幅度数值，同时保留符号与顺序。</p>
+<p><strong>问题 2</strong>：多个任务使用相同配置成功，是否意味着一个模型能零样本完成它们？</p>
+<p><strong>参考答案</strong>：不是。相同训练配方可以在各任务分别训练，检验的是算法配置的通用性；单模型零样本泛化则要求无需任务训练就适应新环境。两者的训练数据、参数共享和评估条件明显不同。</p>
+<p><a href="index.html">系列首页</a> · <a href="47-instructgpt.html">上一篇</a> · <a href="49-dpo.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 48 天｜DreamerV3：为什么跨任务稳定，比单个任务高分更难
+    <textarea id="md-source" hidden readonly># 第 48 天｜DreamerV3：为什么跨任务稳定，比单个任务高分更难
 
 [系列首页](README.md) · [上一篇](47-instructgpt.md) · [下一篇](49-dpo.md)
 
@@ -190,16 +393,16 @@ $$symlog(x)=sign(x)\log(1+|x|),\quad symexp(y)=sign(y)(e^{|y|}-1).$$
 
 [系列首页](README.md) · [上一篇](47-instructgpt.md) · [下一篇](49-dpo.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "48-dreamerv3";
         const source = document.getElementById('md-source').value;

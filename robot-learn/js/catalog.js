@@ -1,5 +1,19 @@
 window.SERIES_POSTS = [
   {
+    "slug": "00-reading-guide",
+    "file": "00-reading-guide.md",
+    "title": "Day 0｜机器人学习阅读入门：从一次示范到真实动作",
+    "cardTitle": "Day 0 · 入门导读",
+    "day": 0,
+    "year": null,
+    "kind": "guide",
+    "question": "先弄清概念的作用、联系和符号约定，再沿时间线读论文。",
+    "excerpt": "机器人学习的入门准备：核心概念、中英文术语、贯穿例子和容易混淆的区别。",
+    "eraId": "overview",
+    "eraYears": "",
+    "eraLabel": "入门导读"
+  },
+  {
     "slug": "00-timeline",
     "file": "00-发展时间线总览.md",
     "kind": "overview",
@@ -1632,5 +1646,6 @@ window.SERIES_SLUG_MAP = {
   "100-core-vla.md": "100-core-vla",
   "100-core-vla": "100-core-vla",
   "101-系列总结.md": "101-epilogue",
-  "101-系列总结": "101-epilogue"
+  "101-系列总结": "101-epilogue",
+  "00-reading-guide.md": "00-reading-guide"
 };

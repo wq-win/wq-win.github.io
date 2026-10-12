@@ -7,7 +7,7 @@
     <title>100｜KISS-ICP：把简单基线做好，究竟能走多远 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,145 @@
                 <span class="text-gray-500">KISS-ICP：把简单基线做好，究竟能走多远</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="1be91fb6f4032f46f7afc926b0996365615769eda3eb1ad0517dc6987d18dacb"><h1>100｜KISS-ICP：把简单基线做好，究竟能走多远</h1>
+<p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="099-fastlio2.html">上一篇</a></p>
+<p><strong>论文</strong>：Ignacio Vizzo、Tiziano Guadagnino、Benedikt Mersch、Louis Wiesmann、Jens Behley、Cyrill Stachniss，<em>KISS-ICP: In Defense of Point-to-Point ICP—Simple, Accurate, and Robust Registration If Done the Right Way</em>，2022 年预印本，2023 年发表。<a href="https://arxiv.org/html/2209.15397v2">原文 v2</a> · <a href="https://github.com/PRBonn/kiss-icp">官方代码</a>。</p>
+<p><strong>阅读范围</strong>：核对方法、参数表、实验与消融正文；文章依据 v2，不能把后续代码版本默认为原实验实现。未重跑数据集。下文例子和矩阵解释是教学推导。</p>
+<h2 id="一分钟理解不是随便运行一次-icp">一分钟理解：不是随便运行一次 ICP</h2>
+<p>两个点云一对齐就偏了，原因可能不是损失函数不够先进，而是输入畸变、初始运动预测差、对应距离阈值不合适，或者地图采样不均。把这些问题都留着，再增加复杂组件，未必能得到稳定系统。</p>
+<p>KISS-ICP 重新组织一个纯激光里程计基线：合理运动预测和去畸变、分层采样、局部点地图、自适应对应阈值、鲁棒点到点配准。它的价值在于证明这套基础组合有竞争力，而不是声称任意简化都优于复杂方法。</p>
+<p>一句话：在连续激光扫描定位中，通过整理运动补偿、采样和数据关联，让经典点到点 ICP 获得较好的跨场景表现，代价是仍依赖短时运动可预测性、足够重叠和可区分几何。</p>
+<p>论文没有把 IMU、回环或位姿图优化作为这套核心系统的必需部分。没有这些模块降低了集成负担，也意味着不能把它当成具有绝对定位和全局漂移校正的完整导航系统。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>ICP</strong>交替更新对应与变换；<strong>鲁棒核</strong>限制异常残差影响；<strong>恒速模型</strong>用上一小段运动预测下一段；<strong>体素采样</strong>按空间密度保留点；<strong>局部收敛</strong>只说明初值附近优化稳定，不能保证全局正确。</p>
+<h2 id="背景连续扫描和任意配准不同">背景：连续扫描和任意配准不同</h2>
+<p>拿两个完全陌生、相隔很远的点云做全局配准，必须解决大范围初始化问题。机器人连续扫描则通常拥有前一时刻运动估计。可以先预测“这次大致在哪里”，再让 ICP 求剩下的修正量。</p>
+<p>输入为按时间到达的点云，运动补偿还需要逐点采样时间。状态输出是位姿序列，地图保存局部几何。这里没有学习策略、奖励函数或训练集拟合；实验是在固定算法与参数下处理传感器序列。</p>
+<p>这并不意味着连续数据总容易。若丢帧造成时间间隔突然变长，或设备在一帧内快速加减速，前一帧速度就可能失去预测价值。判断输入是否满足局部配准条件，比单看算法名称重要。</p>
+<h2 id="方法围绕预测误差设计配准">方法：围绕预测误差设计配准</h2>
+<h3 id="运动预测和去畸变">运动预测和去畸变</h3>
+<p>假设 <span class="reading-math" data-tex="T_{t-2},T_{t-1}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mrow><mi>t</mi><mo>−</mo><mn>2</mn></mrow></msub><mo separator="true">,</mo><msub><mi>T</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">T_{t-2},T_{t-1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8917em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">2</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span> 为连续位姿，在近似相同采样间隔下，可把上一步相对变换作为下一步预测：</p>
+<p><span class="reading-math" data-tex="\Delta T_{pred}=T_{t-2}^{-1}T_{t-1},
+\qquad \widehat T_t=T_{t-1}\Delta T_{pred}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Δ</mi><msub><mi>T</mi><mrow><mi>p</mi><mi>r</mi><mi>e</mi><mi>d</mi></mrow></msub><mo>=</mo><msubsup><mi>T</mi><mrow><mi>t</mi><mo>−</mo><mn>2</mn></mrow><mrow><mo>−</mo><mn>1</mn></mrow></msubsup><msub><mi>T</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo separator="true">,</mo><mspace width="2em"/><msub><mover accent="true"><mi>T</mi><mo stretchy="true">^</mo></mover><mi>t</mi></msub><mo>=</mo><msub><mi>T</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mi mathvariant="normal">Δ</mi><msub><mi>T</mi><mrow><mi>p</mi><mi>r</mi><mi>e</mi><mi>d</mi></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\Delta T_{pred}=T_{t-2}^{-1}T_{t-1},
+\qquad \widehat T_t=T_{t-1}\Delta T_{pred}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord">Δ</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="mord mathnormal mtight">re</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2381em;vertical-align:-0.3148em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.4436em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">2</span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3148em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9233em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">T</span></span><span class="svg-align" style="width:calc(100% - 0.1667em);margin-left:0.1667em;top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.24em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.24em" viewBox="0 0 1062 239" preserveAspectRatio="none"><path d="M529 0h5l519 115c5 1 9 5 9 10 0 1-1 2-1 3l-4 22
+c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mord">Δ</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="mord mathnormal mtight">re</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>“匀速”是一个局部近似，不是对整条轨迹恒速的假设。机器人可以转弯和加速，只要短时间预测还足够接近，几何配准就有机会补上偏差。若帧间隔变化，上式需要按时间解释，不能无条件复制同一个位移。</p>
+<p>将扫描内每个点按其相对时间补偿到共同参考后，再执行配准。没有 IMU 不等于没有运动补偿；这里运动来自已有位姿。也不等于没有时间要求：点自身的时间和扫描起终时间仍必须有意义。</p>
+<h3 id="两种密度服务两种任务">两种密度服务两种任务</h3>
+<p>登记到地图的点云可以较密，参与当前求解的点云可以更稀。前者为未来查询保留空间覆盖，后者控制当前计算负担。体素采样保留真实观测点，有助于避免用格子中心替代实际表面造成离散化偏移。</p>
+<p>从统计角度看，下采样也改变了权重：一块近处墙面若有数万个点，远处角落只有几十点，直接使用全部点可能让墙面支配目标。空间均衡采样不仅是加速操作，还会影响哪些几何区域决定变换。</p>
+<h3 id="为什么对应阈值应该随运动预测误差变化">为什么对应阈值应该随运动预测误差变化</h3>
+<p>若预测已经非常准确，过大搜索范围会引入错误对应；预测误差较大时，过小范围又会把真实对应全部拒绝。论文 §III-D 用已观察到的运动修正估计阈值尺度，而不是每个场景都重新手调固定距离。</p>
+<p>其中的几何关系可独立推导。一个距离不超过 <span class="reading-math" data-tex="r_{max}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>r</mi><mrow><mi>m</mi><mi>a</mi><mi>x</mi></mrow></msub></mrow><annotation encoding="application/x-tex">r_{max}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">ma</span><span class="mord mathnormal mtight">x</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 的点，因旋转误差 <span class="reading-math" data-tex="\theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>θ</mi></mrow><annotation encoding="application/x-tex">\theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span></span></span></span></span> 与平移误差 <span class="reading-math" data-tex="\Delta t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">Δ</mi><mi>t</mi></mrow><annotation encoding="application/x-tex">\Delta t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">Δ</span><span class="mord mathnormal">t</span></span></span></span></span> 造成的位置偏差满足：</p>
+<p><span class="reading-math" data-tex="\|\Delta Rp+\Delta t-p\|
+\le 2r_{max}\sin(\theta/2)+\|\Delta t\|."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">∥</mi><mi mathvariant="normal">Δ</mi><mi>R</mi><mi>p</mi><mo>+</mo><mi mathvariant="normal">Δ</mi><mi>t</mi><mo>−</mo><mi>p</mi><mi mathvariant="normal">∥</mi><mo>≤</mo><mn>2</mn><msub><mi>r</mi><mrow><mi>m</mi><mi>a</mi><mi>x</mi></mrow></msub><mi>sin</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>θ</mi><mi mathvariant="normal">/</mi><mn>2</mn><mo stretchy="false">)</mo><mo>+</mo><mi mathvariant="normal">∥</mi><mi mathvariant="normal">Δ</mi><mi>t</mi><mi mathvariant="normal">∥</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\|\Delta Rp+\Delta t-p\|
+\le 2r_{max}\sin(\theta/2)+\|\Delta t\|.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">∥Δ</span><span class="mord mathnormal">Rp</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord">Δ</span><span class="mord mathnormal">t</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mord">∥</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">ma</span><span class="mord mathnormal mtight">x</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">sin</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mord">/2</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">∥Δ</span><span class="mord mathnormal">t</span><span class="mord">∥.</span></span></span></span></span></span></p>
+<p>旋转项是圆上的弦长上界，平移项来自三角不等式。同样一度的角度误差，在远处点上会变成更大的米制位移；因此阈值不能只看平移速度。</p>
+<p>论文从历史修正的平方平均构造尺度，排除过小修正后用于匹配门限。这里的平方均值是以零为参考的量，不是先减去样本均值的标准样本方差。把它解释成经过严格概率校准的置信区间，会超出这一实用启发式的证据。</p>
+<h3 id="鲁棒点到点目标">鲁棒点到点目标</h3>
+<p>在当前对应集合 <span class="reading-math" data-tex="\mathcal C"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="script">C</mi></mrow><annotation encoding="application/x-tex">\mathcal C</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathcal" style="margin-right:0.05834em;">C</span></span></span></span></span> 上，通用写法为：</p>
+<p><span class="reading-math" data-tex="\min_{R,t}\sum_{(p,q)\in\mathcal C}\rho\bigl(\|Rp+t-q\|\bigr)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mrow><mi>R</mi><mo separator="true">,</mo><mi>t</mi></mrow></munder><munder><mo>∑</mo><mrow><mo stretchy="false">(</mo><mi>p</mi><mo separator="true">,</mo><mi>q</mi><mo stretchy="false">)</mo><mo>∈</mo><mi mathvariant="script">C</mi></mrow></munder><mi>ρ</mi><mo fence="true" stretchy="true" minsize="1.2em" maxsize="1.2em">(</mo><mi mathvariant="normal">∥</mi><mi>R</mi><mi>p</mi><mo>+</mo><mi>t</mi><mo>−</mo><mi>q</mi><mi mathvariant="normal">∥</mi><mo fence="true" stretchy="true" minsize="1.2em" maxsize="1.2em">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\min_{R,t}\sum_{(p,q)\in\mathcal C}\rho\bigl(\|Rp+t-q\|\bigr).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.566em;vertical-align:-1.516em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3557em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">t</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8804em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.809em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight">p</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span><span class="mclose mtight">)</span><span class="mrel mtight">∈</span><span class="mord mathcal mtight" style="margin-right:0.05834em;">C</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.516em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">ρ</span><span class="mopen"><span class="delimsizing size1">(</span></span><span class="mord">∥</span><span class="mord mathnormal">Rp</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6984em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">t</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.35em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mord">∥</span><span class="mclose"><span class="delimsizing size1">)</span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>点到点残差不需要法向估计，减少了局部法向在稀疏或噪声数据下的不稳定来源。论文使用鲁棒核降低大残差影响，并迭代更新对应与位姿。鲁棒核和距离门限作用不同：门限决定哪些对应进入优化，核函数决定进入后的相对影响。</p>
+<p>ICP 仍是局部方法。最近点不一定是真实同一物理点，对应关系随估计更新也可能跳变。小的最终增量可能表示找到好解，也可能表示停在一个错误的局部稳定位置。</p>
+<pre><code class="language-text">输入：连续点云及逐点时间，历史位姿和局部地图
+从最近运动估计当前位姿与扫描内运动
+按逐点时间做去畸变
+得到较密的地图更新点集和较稀的配准点集
+从历史预测修正统计匹配距离尺度
+以运动预测为初值反复：
+    搜索局部地图近邻，拒绝超过门限的对应
+    求鲁棒点到点位姿修正
+    更新当前位姿，检查修正是否足够小
+记录实际运动相对预测的偏差，供未来阈值更新
+将地图更新点集变换入地图，限制体素容量和局部范围
+输出位姿及地图
+</code></pre>
+<p>这是模块级伪代码。原文使用增量收敛条件，未用固定最大迭代数作为其停止策略；工程系统若另设超时，应同时定义超时后的失败状态，不能把被中断结果当成正常收敛。</p>
+<h2 id="实验已经去畸变的数据不能验证去畸变">实验：已经去畸变的数据不能验证去畸变</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>检查项</th>
+<th>原文设置与含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>基准</td>
+<td>KITTI、MulRan、Newer College、NCLT 等不同平台数据</td>
+</tr>
+<tr>
+<td>KITTI 主比较</td>
+<td>使用已补偿点云，对相关方法关闭再次运动补偿</td>
+</tr>
+<tr>
+<td>运动补偿消融</td>
+<td>改用 KITTI raw，才能比较有无去畸变</td>
+</tr>
+<tr>
+<td>基线</td>
+<td>里程计与带回环的系统分开标注，不能忽略额外后端</td>
+</tr>
+<tr>
+<td>参数</td>
+<td>表 I 列统一参数；最大量程仍与传感器及场景有关</td>
+</tr>
+<tr>
+<td>指标</td>
+<td>相对平移/旋转误差、部分 ATE 和处理频率</td>
+</tr>
+<tr>
+<td>重复</td>
+<td>MulRan 的多次采集平均不等于同一序列多随机种子重复</td>
+</tr>
+<tr>
+<td>未确认项</td>
+<td>全部随机种子、调参预算与各设备尾部延迟未逐项核实</td>
+</tr>
+</tbody></table></div>
+<p>三组核心结果分别说明：</p>
+<ol>
+<li><strong>表 II：主基准。</strong> KITTI 00–10、11–21 的平均相对平移误差为 0.50%、0.61%。它支持一个简单里程计具有竞争力；该表不是证明本方法去畸变能力的实验。</li>
+<li><strong>表 V：输入畸变消融。</strong> 在 raw 数据上，不去畸变为 0.91%，恒速补偿为 0.49%，IMU 补偿为 0.51%。这说明在该协议下简单预测很有效，不说明 IMU 在所有运动下都多余。</li>
+<li><strong>表 VI：门限消融。</strong> 平均自适应误差 0.50%，几个固定门限约 0.51%–0.53%。主要意义是减少逐场景挑门限；提升幅度不能夸大成性能数量级变化。</li>
+</ol>
+<p>还要保留失败边界：表 IV 的 Newer College 长序列中，KISS-ICP 为 0.96%，CT-ICP 为 0.58%，原文解释涉及后者额外回环。作者也明确指出 NCLT 真值和缺帧问题，因此该数据上的精确排序应谨慎看待。</p>
+<h2 id="新意限制与可以迁移的研究思想">新意、限制与可以迁移的研究思想</h2>
+<p>这篇论文的新意主要是系统选择、对应阈值设计和充分的组合检验。它没有重新发明 ICP，而是追问：哪些复杂性解决了真实瓶颈，哪些只是掩盖基础实现中的缺陷？这对阅读新方法很有帮助，因为公平基线应该先把基本输入与调度做好。</p>
+<p>以下是根据机制的分析。恒速模型遇到一帧内的强非匀速运动会失准；大面积动态物体可能共同支持错误运动；长走廊和重复结构削弱唯一性；错误配准反过来更新阈值，还可能形成自我强化。自适应并不等于永不失稳。</p>
+<p>少参数也不是零参数。量程、体素尺度、启动门限和终止条件都隐含工程取舍。统一参数在若干数据集有效，是实验证据；它不能覆盖所有雷达噪声、时间采样模式和极端运动。</p>
+<h2 id="一个自构实验与五个前置概念">一个自构实验与五个前置概念</h2>
+<p><strong>未运行实验</strong>：固定同一原始序列，逐步增加丢帧间隔，比较固定门限和自适应门限。记录预测误差、有效对应数、最终漂移、迭代数和处理延迟。再加入一段长时间静止，检查门限是否缩得过小。这个实验能检验阈值机制对“历史误差可以预测未来”这一假设有多敏感。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>经典ICP基线容易被输入畸变、采样和门限拖累</td>
+<td>恒速补偿、双层采样、自适应门限和鲁棒点配准</td>
+<td>让输入与初值更符合局部配准条件，减少场景调参</td>
+<td>表II/V/VI，另有表IV的较差场景</td>
+<td>无全局漂移校正；非匀速、动态物体和重复几何仍可能失败；少参数不等于无假设</td>
+</tr>
+</tbody></table></div>
+<h2 id="读懂了吗三问三答">读懂了吗：三问三答</h2>
+<h3 id="1为什么用已经去畸变的-kitti-点云无法验证自己的去畸变模块">1．为什么用已经去畸变的 KITTI 点云，无法验证自己的去畸变模块？</h3>
+<p><strong>答</strong>：输入已包含上游补偿的收益，再次处理不能隔离本模块贡献，还可能重复补偿。需要原始扫描及正确逐点时间，在相同后端下比较有无补偿，才能判断因果作用。</p>
+<h3 id="2自适应门限变大是否意味着系统更鲁棒">2．自适应门限变大，是否意味着系统更鲁棒？</h3>
+<p><strong>答</strong>：不一定。它可能挽回因初值误差而落在较远处的正确对应，也可能纳入更多错配。应该一起查看几何一致性、有效对应分布和最终误差，而不能把接受点数越多当作越好。</p>
+<h3 id="3这篇论文是否证明复杂方法没有价值">3．这篇论文是否证明复杂方法没有价值？</h3>
+<p><strong>答</strong>：没有。它证明合理实现的简单基线在所测条件下很强，并揭示某些复杂组件的收益需要重新隔离验证。复杂方法仍可能解决恒速失效、稀少重叠或全局漂移等这里没有覆盖的问题；判断标准应是新增能力及其代价。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 100｜KISS-ICP：把简单基线做好，究竟能走多远
+    <textarea id="md-source" hidden readonly># 100｜KISS-ICP：把简单基线做好，究竟能走多远
 
 [总览](00-发展时间线总览.md) · [目录](README.md) · [上一篇](099-fastlio2.md)
 
@@ -190,9 +324,9 @@ ICP 仍是局部方法。最近点不一定是真实同一物理点，对应关�
 
 **答**：没有。它证明合理实现的简单基线在所测条件下很强，并揭示某些复杂组件的收益需要重新隔离验证。复杂方法仍可能解决恒速失效、稀少重叠或全局漂移等这里没有覆盖的问题；判断标准应是新增能力及其代价。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

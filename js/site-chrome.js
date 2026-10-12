@@ -62,7 +62,7 @@
 
     const LOOK = {
         cursor: ['system', 'dot', 'comet', 'spark'],
-        bg: ['static', 'drift']
+        bg: ['static', 'orbs', 'aurora', 'stars']
     };
 
     function readPref(key, fallback) {
@@ -97,25 +97,35 @@
         const cursor = LOOK.cursor.indexOf(readPref('mylog-cursor', 'system')) >= 0
             ? readPref('mylog-cursor', 'system')
             : 'system';
-        const bg = LOOK.bg.indexOf(readPref('mylog-bg', 'static')) >= 0
-            ? readPref('mylog-bg', 'static')
-            : 'static';
+        const savedBg = readPref('mylog-bg', 'orbs');
+        const bg = global.SiteBackground ? global.SiteBackground.getState().mode
+            : savedBg === 'drift' ? 'orbs'
+            : LOOK.bg.includes(savedBg) ? savedBg : 'orbs';
         const fancy = (cursor === 'comet' || cursor === 'spark') && fxEnabled();
         if (cursor === 'system') document.documentElement.removeAttribute('data-cursor');
         else if ((cursor === 'comet' || cursor === 'spark') && !fancy) document.documentElement.dataset.cursor = 'dot';
         else document.documentElement.dataset.cursor = cursor;
-        if (bg === 'static') document.documentElement.removeAttribute('data-bg');
-        else document.documentElement.dataset.bg = bg;
+        document.documentElement.dataset.bg = bg;
+        if (global.SiteBackground) global.SiteBackground.sync();
         if (document.body) setCursorFX(fancy ? cursor : '');
         return { cursor: cursor, bg: bg };
     }
 
+    let backgroundLoading;
     function ensureBgLayer() {
-        if (document.getElementById('site-bg') || !document.body) return;
-        const el = document.createElement('div');
-        el.id = 'site-bg';
-        el.setAttribute('aria-hidden', 'true');
-        document.body.insertBefore(el, document.body.firstChild);
+        if (global.SiteBackground) {
+            global.SiteBackground.init();
+            return;
+        }
+        if (!backgroundLoading) {
+            backgroundLoading = loadScript(scriptBase() + 'site-background.js').then(() => {
+                if (global.SiteBackground) global.SiteBackground.init();
+                else {
+                    const status = document.getElementById('look-bg-status');
+                    if (status) status.textContent = '背景设置暂不可用，请刷新重试';
+                }
+            });
+        }
     }
 
     const cursorFX = {
@@ -338,7 +348,7 @@
     function resizeCursorFX() {
         const canvas = cursorFX.canvas;
         if (!canvas || !cursorFX.ctx) return;
-        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
         const w = window.innerWidth;
         const h = window.innerHeight;
         canvas.width = Math.round(w * dpr);
@@ -385,9 +395,12 @@
     }
 
     function setCursorFX(mode) {
-        const want = (mode === 'comet' || mode === 'spark') && fxEnabled() ? mode : '';
+        const want = (mode === 'comet' || mode === 'spark') && fxEnabled() && !document.hidden ? mode : '';
+        if (want && cursorFX.mode === want && cursorFX.raf) return;
         if (!want) {
             cursorFX.mode = '';
+            cursorFX.trail = [];
+            cursorFX.sparks = [];
             if (cursorFX.raf) {
                 cancelAnimationFrame(cursorFX.raf);
                 cursorFX.raf = 0;
@@ -417,6 +430,12 @@
 
     applyStoredTheme();
     applyStoredLook();
+    document.addEventListener('visibilitychange', applyStoredLook);
+    global.addEventListener('pagehide', () => setCursorFX(''));
+    global.addEventListener('pageshow', applyStoredLook);
+    const cursorMotionQuery = global.matchMedia('(prefers-reduced-motion: reduce)');
+    if (cursorMotionQuery.addEventListener) cursorMotionQuery.addEventListener('change', applyStoredLook);
+    else cursorMotionQuery.addListener(applyStoredLook);
 
     function navLink(href, label, extraClass) {
         const cls = extraClass || 'text-gray-700 hover:text-primary transition-all-300 font-medium';
@@ -482,10 +501,10 @@
                     <i class="fa fa-search"></i>
                 </button>
                 <div class="look-wrap">
-                    <button id="look-toggle" class="w-9 h-9 rounded-full border border-gray-200 text-gray-600 hover:text-primary hover:border-primary" title="外观：鼠标与背景" aria-label="外观：鼠标与背景" aria-expanded="false" aria-haspopup="true">
+                    <button id="look-toggle" class="w-9 h-9 rounded-full border border-gray-200 text-gray-600 hover:text-primary hover:border-primary" title="外观：鼠标与背景" aria-label="外观：鼠标与背景" aria-expanded="false" aria-haspopup="dialog" aria-controls="look-panel">
                         <i class="fa fa-paint-brush"></i>
                     </button>
-                    <div id="look-panel" class="look-panel hidden" role="menu">
+                    <div id="look-panel" class="look-panel hidden" role="dialog" aria-label="外观设置">
                         <h3>外观</h3>
                         <div class="look-row">
                             <span>鼠标</span>
@@ -498,9 +517,25 @@
                         </div>
                         <div class="look-row">
                             <span>背景</span>
-                            <div class="look-chips" data-look="bg">
+                            <div class="look-chips look-chips-grid" data-look="bg" role="group" aria-label="背景样式">
                                 <button type="button" data-bg="static">静态</button>
-                                <button type="button" data-bg="drift">光斑</button>
+                                <button type="button" data-bg="orbs">A 浮光</button>
+                                <button type="button" data-bg="aurora">B 极光</button>
+                                <button type="button" data-bg="stars">C 星尘</button>
+                            </div>
+                        </div>
+                        <div class="look-motion-controls">
+                            <div class="look-motion-setting">
+                                <label class="look-motion-label" for="look-bg-strength">强度 <output id="look-bg-strength-value" for="look-bg-strength">45%</output></label>
+                                <input id="look-bg-strength" type="range" min="0" max="100" step="5" value="45" disabled>
+                            </div>
+                            <div class="look-motion-setting">
+                                <label class="look-motion-label" for="look-bg-speed">速度 <output id="look-bg-speed-value" for="look-bg-speed">1.00×</output></label>
+                                <input id="look-bg-speed" type="range" min="0.25" max="2" step="0.25" value="1" disabled>
+                            </div>
+                            <div class="look-motion-footer">
+                                <span id="look-bg-status" role="status" aria-live="polite">正在载入背景设置…</span>
+                                <button id="look-bg-pause" type="button" aria-pressed="false" disabled>暂停</button>
                             </div>
                         </div>
                     </div>
@@ -600,10 +635,14 @@
     function syncLookPanel() {
         const look = applyStoredLook();
         document.querySelectorAll('#look-panel [data-cursor]').forEach((btn) => {
-            btn.classList.toggle('is-on', btn.getAttribute('data-cursor') === look.cursor);
+            const selected = btn.getAttribute('data-cursor') === look.cursor;
+            btn.classList.toggle('is-on', selected);
+            btn.setAttribute('aria-pressed', String(selected));
         });
         document.querySelectorAll('#look-panel [data-bg]').forEach((btn) => {
-            btn.classList.toggle('is-on', btn.getAttribute('data-bg') === look.bg);
+            const selected = btn.getAttribute('data-bg') === look.bg;
+            btn.classList.toggle('is-on', selected);
+            btn.setAttribute('aria-pressed', String(selected));
         });
     }
 
@@ -615,6 +654,7 @@
         toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     }
 
+    let lookDismissBound = false;
     function bindLook() {
         const toggle = document.getElementById('look-toggle');
         const panel = document.getElementById('look-panel');
@@ -633,18 +673,38 @@
                 syncLookPanel();
             }
             if (bgBtn) {
-                writePref('mylog-bg', bgBtn.getAttribute('data-bg'));
+                const mode = bgBtn.getAttribute('data-bg');
+                if (global.SiteBackground) global.SiteBackground.setMode(mode);
+                else writePref('mylog-bg', mode);
                 syncLookPanel();
             }
         });
+        if (lookDismissBound) return;
+        lookDismissBound = true;
         document.addEventListener('click', (event) => {
-            if (!panel.classList.contains('hidden') && !event.target.closest('.look-wrap')) {
+            const panel = document.getElementById('look-panel');
+            if (panel && !panel.classList.contains('hidden') && !event.target.closest('.look-wrap')) {
                 setLookPanelOpen(false);
             }
         });
         document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape') setLookPanelOpen(false);
+            const toggle = document.getElementById('look-toggle');
+            if (event.key === 'Escape' && toggle && toggle.getAttribute('aria-expanded') === 'true') {
+                setLookPanelOpen(false);
+                toggle.focus();
+            }
         });
+    }
+
+    let chromeScrollBound = false;
+    function updateBackToTop() {
+        const button = document.getElementById('back-to-top');
+        if (!button) return;
+        const show = window.pageYOffset > 300;
+        button.classList.toggle('opacity-0', !show);
+        button.classList.toggle('invisible', !show);
+        button.classList.toggle('opacity-100', show);
+        button.classList.toggle('visible', show);
     }
 
     function bindChrome() {
@@ -671,15 +731,11 @@
         }
         bindLook();
         if (backToTopButton) {
-            window.addEventListener('scroll', () => {
-                if (window.pageYOffset > 300) {
-                    backToTopButton.classList.remove('opacity-0', 'invisible');
-                    backToTopButton.classList.add('opacity-100', 'visible');
-                } else {
-                    backToTopButton.classList.add('opacity-0', 'invisible');
-                    backToTopButton.classList.remove('opacity-100', 'visible');
-                }
-            });
+            if (!chromeScrollBound) {
+                chromeScrollBound = true;
+                window.addEventListener('scroll', updateBackToTop, { passive: true });
+            }
+            updateBackToTop();
             backToTopButton.addEventListener('click', () => {
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             });
@@ -705,7 +761,20 @@
 
     function loadExtras(root) {
         const base = scriptBase();
-        const files = ['site-config.js', 'search.js', 'related-data.js', 'glossary-data.js', 'reader.js'];
+        const article = document.getElementById('article-body');
+        const files = ['site-config.js', 'search.js'];
+        if (article) {
+            if (!document.getElementById('reading-guide-style')) {
+                const style = document.createElement('link');
+                style.id = 'reading-guide-style';
+                style.rel = 'stylesheet';
+                style.href = base + '../css/reading-guide.css';
+                document.head.appendChild(style);
+            }
+            files.push('related-data.js', 'glossary-data.js', 'reading-symbols.js', 'reading-guide.js');
+        }
+        // Reader also owns saved progress on series hubs, but games need no paper data.
+        if (article || document.getElementById('series-catalog') || document.getElementById('rl-catalog')) files.push('reader.js');
         return files.reduce((chain, file) => chain.then(() => loadScript(base + file)), Promise.resolve())
             .then(() => {
                 if (global.SiteSearch) {

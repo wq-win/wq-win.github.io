@@ -7,7 +7,7 @@
     <title>050 · FLAN：从会续写文本，到能按说明执行新任务 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,138 @@
                 <span class="text-gray-500">050 · FLAN：从会续写文本，到能按说明执行新任务</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="df8407a35bc460e958288cfb14a77da0de4c088e7fea06c1c24b2cef0f9e0455"><h1>050 · FLAN：从会续写文本，到能按说明执行新任务</h1>
+<p><a href="index.html">返回目录</a> · <a href="049-truthfulqa.html">上一篇：TruthfulQA</a> · <a href="051-t0.html">下一篇：T0</a></p>
+<p>论文：Jason Wei等，<em>Finetuned Language Models Are Zero-Shot Learners</em>，2021年公开，ICLR 2022。<a href="https://arxiv.org/pdf/2109.01652">原始论文</a>。依据§2训练与划分、§3–4结果及附录C的完整表格；未复现137B训练。本篇是原始FLAN，不将后来的FLAN-T5、Flan Collection等结果混为同一论文。</p>
+<h2 id="一分钟理解">一分钟理解</h2>
+<p>语言模型可能知道很多，却不知道用户希望它把这些知识用来做哪件事。FLAN把已有监督数据包装成自然语言任务说明，再进行多任务微调，希望模型学到“读懂说明并执行”的共同模式，迁移到没有参加指令训练的任务类型。</p>
+<p>关键不只是多任务训练，还包括用可读指令连接不同任务，并采用整个任务簇留出的评估。论文中的“零样本”是对留出任务而言；模型之前已经见过许多其他任务的标注与指令。</p>
+<p>一句话：在大语言模型的跨任务迁移中，通过将多种监督数据改写为指令—回答并混合微调，提高部分未见任务的零样本表现，代价是标注和模板工程、额外训练以及不均匀的任务收益。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>指令微调</strong>用自然语言说明组织监督训练；<strong>任务簇留出</strong>排除整类训练任务；<strong>数据混合</strong>决定哪些任务获得多少训练概率；<strong>模板敏感性</strong>衡量同任务不同措辞造成的变化；<strong>零样本迁移</strong>是不为目标任务额外示范或微调，不等于从未接受其他监督。</p>
+<h2 id="背景与严格的问题定义">背景与严格的问题定义</h2>
+<p>通用自回归预训练优化文本续写，任务说明和正确响应的关系并不总在语料中被系统呈现。为每个新任务做全量微调又需要新训练；few-shot提示则需要挑选并放入示例。作者研究能否在训练阶段学习一种更通用的任务接口，使测试时只给说明也能工作。</p>
+<p>输入是模板化指令与任务样本，输出为目标文本。基础模型LaMDA-PT是137B稠密decoder-only Transformer，只有语言模型预训练，不是已经完成对话微调的LaMDA。FLAN进行全参数监督微调；它与前面的Prompt Tuning不同，并非只学习几个连续提示向量。</p>
+<p>任务之间可能共享内容和格式，所以“没见过这个数据集”还不够。§2.2规定，评估某数据集时，与它同任务簇的其他数据集也不能用于该轮指令训练。例如测自然语言推断，就排除所有相关推断训练集。</p>
+<p>因此主结果不是一个同时在全部任务上留出的统一检查点：评估多个任务簇需要分别训练多个模型，每个模型留出不同簇。这一点决定了复现成本，也决定如何理解“FLAN的平均成绩”。</p>
+<h2 id="方法到底改了什么">方法到底改了什么</h2>
+<p>作者整理62个文本数据集，分成12个任务簇，每个数据集人工编写约10种模板。多数模板描述原任务，最多3种反转任务方向，例如从情感分类改成按给定情感生成评论，以增加训练形式多样性。</p>
+<p>设任务索引为 <span class="reading-math" data-tex="j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span></span></span></span></span>，模板为 <span class="reading-math" data-tex="\tau"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>τ</mi></mrow><annotation encoding="application/x-tex">\tau</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span></span></span></span></span>，原样本 <span class="reading-math" data-tex="(x,y)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>x</mi><mo separator="true">,</mo><mi>y</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(x,y)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span></span></span></span></span> 被映射为输入 <span class="reading-math" data-tex="I_\tau(x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>I</mi><mi>τ</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">I_\tau(x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span> 和输出 <span class="reading-math" data-tex="O_\tau(x,y)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>O</mi><mi>τ</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo separator="true">,</mo><mi>y</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">O_\tau(x,y)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">O</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span></span></span></span></span>，目标仍为：</p>
+<p><span class="reading-math" data-tex="L(\theta)=\mathbb E_{j,\tau,(x,y)}
+\left[-\sum_t\log p_\theta\big(O_t\mid I_\tau(x),O_{&lt;t}\big)\right]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>L</mi><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>=</mo><msub><mi mathvariant="double-struck">E</mi><mrow><mi>j</mi><mo separator="true">,</mo><mi>τ</mi><mo separator="true">,</mo><mo stretchy="false">(</mo><mi>x</mi><mo separator="true">,</mo><mi>y</mi><mo stretchy="false">)</mo></mrow></msub><mrow><mo fence="true">[</mo><mo>−</mo><munder><mo>∑</mo><mi>t</mi></munder><mi>log</mi><mo>⁡</mo><msub><mi>p</mi><mi>θ</mi></msub><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">(</mo><msub><mi>O</mi><mi>t</mi></msub><mo>∣</mo><msub><mi>I</mi><mi>τ</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><msub><mi>O</mi><mrow><mo>&lt;</mo><mi>t</mi></mrow></msub><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">)</mo><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L(\theta)=\mathbb E_{j,\tau,(x,y)}
+\left[-\sum_t\log p_\theta\big(O_t\mid I_\tau(x),O_{&lt;t}\big)\right].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">L</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3em;vertical-align:-1.25em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.5198em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span><span class="mpunct mtight">,</span><span class="mopen mtight">(</span><span class="mord mathnormal mtight">x</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">y</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3552em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size4">[</span></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="delimsizing size1">(</span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">O</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">O</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span><span class="mord"><span class="delimsizing size1">)</span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size4">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这里期望包含数据集抽样、样本抽样与模板抽样。没有新的奖励模型或策略梯度，改变的是监督任务的组织和呈现方式。对分类任务，还把候选类别作为OPTIONS附在输入，降低模型在“是”“确实”“正确”等表达间分散概率的影响。</p>
+<pre><code class="language-text">输入：预训练LaMDA-PT、数据集集合、任务簇映射、指令模板
+对目标评估簇 C：
+  移除属于 C 及规定相关簇的训练数据
+  对其余每个数据集最多保留30K训练样例
+  按论文的有上限混合权重抽取数据集
+  抽取样例，并随机选择该数据集的指令模板
+  形成“指令+输入+候选项 → 目标回答”
+  用目标序列似然更新完整语言模型
+  训练30K步后固定检查点
+  在 C 的每个任务上测试多种说明，报告模板平均与开发集选模板结果
+输出：该留出簇对应的零样本迁移表现
+</code></pre>
+<p>方法直觉是任务间共享“遵循说明”的规律。实验可以支持这种组合有用，但不能直接证明模型形成了独立可解释的“指令理解模块”；参数、数据内容和输出格式的效果仍交织在一起。</p>
+<h2 id="训练与评估预算">训练与评估预算</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原始论文设置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>预训练基础</td>
+<td>137B LaMDA-PT，语料token化后2.49T BPE token、32K词表，约10%非英语数据</td>
+</tr>
+<tr>
+<td>指令来源</td>
+<td>62数据集、12任务簇，人工模板约10种/数据集；每轮排除目标簇</td>
+</tr>
+<tr>
+<td>混合规则</td>
+<td>每数据集至多30K训练样例，按样例量比例混合并设3K混合率上限</td>
+</tr>
+<tr>
+<td>微调预算</td>
+<td>30K梯度步，批量8192 token，Adafactor学习率3×10⁻⁵；输入1024、目标256，使用packing</td>
+</tr>
+<tr>
+<td>算力</td>
+<td>指令微调约60小时，TPUv3 128核；这是一个训练配置的成本，不含所有留出模型与消融</td>
+</tr>
+<tr>
+<td>检查点</td>
+<td>统一取30K步最终检查点，不逐测试任务选训练步数</td>
+</tr>
+<tr>
+<td>评价口径</td>
+<td>每任务多个模板平均；另报告用开发集选择的模板在测试集表现</td>
+</tr>
+<tr>
+<td>对照</td>
+<td>同基础LaMDA-PT、GPT-3 175B、GLaM及任务监督模型；跨模型数据和预训练预算不同</td>
+</tr>
+</tbody></table></div>
+<p>表格中的模板标准差表示措辞敏感性，不能当作多个训练随机种子的误差条。不同任务还可能以TFDS验证集作为测试，具体划分在附录G；不能仅看到“test”一词便假定所有来源都有同样的隐藏集。</p>
+<h2 id="五组证据及其限度">五组证据及其限度</h2>
+<p><strong>证据一：图5与附录表2，基础模型前后比较。</strong> RTE上LaMDA-PT零样本73.3%，FLAN模板平均78.3±7.9%；BoolQ为81.0%对80.2±3.1%，并非提升。NQ则从3.2到18.6±2.7，变化明显。指令训练对需要明确任务格式的部分任务帮助很大，但不能把平均收益写成每个任务都进步。</p>
+<p><strong>证据二：附录表3与图8，去掉指令的消融。</strong> 四类任务平均，正常指令训练与指令评估为55.2，无模板训练后用指令评估为37.3；训练仅用数据集名后用自然指令评估为46.6，同样用数据集名评估为47.0。支持自然语言指令不只是装饰。但无模板对照同时带来训练—测试接口差异，所以更有解释力的是同时看多个对照，而不是仅引用最弱一项。</p>
+<p><strong>证据三：图6，任务簇数量。</strong> 在固定留出簇下，从1个训练簇增加至7个，平均分由49.9增至63.5，中途也有59.3到59.2的小降。表明更多任务覆盖在该加入顺序中有益，但簇数量、数据内容和任务相关性同时变化，不能据此给各个簇作独立贡献排名。</p>
+<p><strong>证据四：图7，模型规模。</strong> 小规模配置中指令微调可能伤害未见任务，大规模配置获益。作者提出小模型容量被训练任务占据的可能解释，但没有直接测出一个“容量耗尽”变量；应把它保留为解释假设，不能当作已证明机理，更不能转成小模型永远不适合指令训练的结论。</p>
+<p><strong>证据五：§3负结果及附录表2。</strong> 七个常识与指代任务中仅三个超过LaMDA-PT。HellaSwag平均56.4对基础57.0，表明原先就接近文本补全的任务未必受益。论文也报告对非英语方向翻译相对较弱，可能涉及语料比例和分词器，但缺少完全独立控制这些因素的因果实验。</p>
+<p>“超过GPT-3的25项中的20项”使用开发集选择模板的口径。模板平均更接近随手给一条合理说明的预期，最佳开发模板则包含额外选择信息；两类数字都可有价值，但需要明确标注。</p>
+<h2 id="贡献局限与小例子">贡献、局限与小例子</h2>
+<p>FLAN把跨任务泛化从提示工程问题推进到训练数据设计问题：不仅问“提示怎么写”，还问“模型是否在训练中系统学过执行说明”。它展示了数据转换与任务混合可以改变零样本接口，不需要首先发明新网络结构。</p>
+<p>“未见任务簇”仍依赖人工聚类。比如问答、推断、阅读理解之间存在共享推理步骤，簇边界不可能完全切断知识迁移。预训练文本也可能与评估样本重叠，附录污染分析降低疑虑但不能证明所有可疑来源都被排除。</p>
+<p><strong>自构例子：</strong> 训练只给翻译、摘要和情感任务，测试要求判断“所有猫是动物，因此这只猫是动物”是否可由前提推出。如果模型正确输出类别，说明某些说明执行模式可能跨任务迁移；仍需大量未见推断样例来排除仅靠措辞线索。再把说明改成相反标签顺序，能检验它是否读了OPTIONS，而不是总输出某个高频词。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>续写模型不稳定理解任务接口</td>
+<td>指令化多任务监督微调</td>
+<td>将说明与正确响应系统关联</td>
+<td>图5、附录表2</td>
+<td>部分任务退步，需要数据和模板</td>
+</tr>
+<tr>
+<td>仅留数据集难证明跨任务</td>
+<td>留出整个任务簇</td>
+<td>减少同类任务训练泄漏</td>
+<td>§2.2</td>
+<td>每簇不同检查点，聚类有边界</td>
+</tr>
+<tr>
+<td>无法区分指令与普通多任务收益</td>
+<td>无指令、任务名、多簇消融</td>
+<td>检查说明和训练多样性的作用</td>
+<td>图6、图8、附录表3</td>
+<td>模板接口与数据内容仍可能混杂</td>
+</tr>
+</tbody></table></div>
+<h2 id="自测与答案">自测与答案</h2>
+<p><strong>1. 为什么FLAN用监督数据训练，还能称为零样本学习？</strong></p>
+<p>零样本是针对评估的留出任务簇。模型用其他任务训练，但评估时没有该簇指令训练数据，也不依赖该任务的上下文示例。它不是完全无监督模型，必须交代迁移粒度。</p>
+<p><strong>2. 论文所有任务成绩是否来自同一个FLAN检查点？</strong></p>
+<p>不是。为严格留出不同任务簇，作者分别训练相应模型，再评估各自留出的任务。把成绩拼起来当作单一部署模型同时具备的纯留出表现，会误解评估设计，也低估复现预算。</p>
+<p><strong>3. 若增加数据集后效果提高，为什么还不能说任务多样性是唯一原因？</strong></p>
+<p>任务数量增加时，数据内容、相关性、混合比例和覆盖范围也改变。图6支持该顺序下加入任务有益，要隔离多样性，还需固定总数据和更新预算，比较相同数量的重复任务与不同任务，以及多个加入顺序。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 050 · FLAN：从会续写文本，到能按说明执行新任务
+    <textarea id="md-source" hidden readonly># 050 · FLAN：从会续写文本，到能按说明执行新任务
 
 [返回目录](README.md) · [上一篇：TruthfulQA](049-truthfulqa.md) · [下一篇：T0](051-t0.md)
 
@@ -78,7 +205,7 @@
 
 $$
 L(\theta)=\mathbb E_{j,\tau,(x,y)}
-\left[-\sum_t\log p_\theta\big(O_t\mid I_\tau(x),O_{<t}\big)\right].
+\left[-\sum_t\log p_\theta\big(O_t\mid I_\tau(x),O_{&lt;t}\big)\right].
 $$
 
 这里期望包含数据集抽样、样本抽样与模板抽样。没有新的奖励模型或策略梯度，改变的是监督任务的组织和呈现方式。对分类任务，还把候选类别作为OPTIONS附在输入，降低模型在“是”“确实”“正确”等表达间分散概率的影响。
@@ -158,9 +285,9 @@ FLAN把跨任务泛化从提示工程问题推进到训练数据设计问题：�
 
 任务数量增加时，数据内容、相关性、混合比例和覆盖范围也改变。图6支持该顺序下加入任务有益，要隔离多样性，还需固定总数据和更新预算，比较相同数量的重复任务与不同任务，以及多个加入顺序。
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

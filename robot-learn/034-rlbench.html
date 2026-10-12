@@ -7,7 +7,7 @@
     <title>034｜RLBench：面向视觉操作的任务集合 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,16 +42,203 @@
                 <span class="text-gray-500">RLBench：面向视觉操作的任务集合</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="ff83074a8639689ce4ada5076a778e7269023d1a008c5ca4edf9dceea7ab45a4"><h1>034｜RLBench：面向视觉操作的任务集合</h1>
+<p><a href="index.html">系列首页</a> · <a href="033-mbpo.html">上一篇</a> · <a href="035-rubiks.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>RLBench: The Robot Learning Benchmark &amp; Learning Environment</em>，Stephen James 等，2019。<a href="https://arxiv.org/abs/1909.12271">论文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p>如果两个机器人算法分别在自建的三个任务上测试，即使各自成功率都很高，也难以知道谁更通用。一个方法可能只是选择了更容易的物体、初始位置或成功条件。RLBench 试图解决的首先是<strong>研究如何比较</strong>，其次才是机器人如何学习。</p>
+<p>它提供统一操作场景、丰富任务、可生成的规划器示范和任务构建工具，并提出少样本测试协议。读这篇论文时，不应该寻找一个不存在的“新损失函数胜过 PPO”的故事。它的贡献属于研究基础设施。</p>
+<p>一句话总结：在视觉操作研究中，通过标准化任务层次、示范生成和评估接口，改善方法比较与复用的条件，限制是仿真、脚本专家和任务定义仍影响结果。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：</p>
+<ul>
+<li><strong>基准</strong>：固定任务与协议，让不同方法的结果可比较。</li>
+<li><strong>示范分布</strong>：专家会提供哪些状态动作，而非所有可能状态。</li>
+<li><strong>少样本适应</strong>：利用既有知识和少量新任务数据形成能力。</li>
+<li><strong>特权信息</strong>：训练或专家可获得、部署策略不应直接使用的信息。</li>
+<li><strong>成功谓词</strong>：把任务完成转成程序可判断的条件。</li>
+</ul>
+<h2 id="二背景到底什么叫一个新任务">二、背景：到底什么叫一个新任务</h2>
+<p>“拿红苹果”和“拿绿苹果”算两个任务吗？“拿苹果”和“打开抽屉”又是什么关系？如果论文可以随意命名，很容易把微小外观变化包装成跨任务泛化。</p>
+<p>RLBench 区分三个层次：</p>
+<ul>
+<li><strong>任务</strong>：操作结构，例如堆叠物块。</li>
+<li><strong>变体</strong>：同一任务中改变目标对象、颜色或要求。</li>
+<li><strong>回合</strong>：特定变体中的一次场景配置与执行。</li>
+</ul>
+<p>这不是语言游戏，而是决定训练—测试泄漏的位置。若训练和测试只是物体坐标不同，结果支持空间配置泛化；若测试要求完成以前没有训练过的操作结构，才接近新任务适应。</p>
+<p>原论文版本提供一百种手工设计任务，使用桌面机械臂和多种观察。它允许强化学习、模仿学习、多任务学习等路线，但这些路线不必共享同一训练目标。任务完成给出稀疏成功反馈，状态或观察、动作接口则有多种选择。</p>
+<p>动作空间尤其不能省略。直接输出关节力矩，与输出末端位姿并调用运动规划器执行，算法承担的困难不同。两篇文章都写“RLBench 成功率”，若接口不同，仍不能直接认为分数可比。</p>
+<h2 id="三方法一个可重复的操作实验如何组成">三、方法：一个可重复的操作实验如何组成</h2>
+<h3 id="1-把任务逻辑与机器人场景分开">1. 把任务逻辑与机器人场景分开</h3>
+<p>基础场景负责机械臂、桌面、相机、物理交互。任务文件负责对象、变体初始化、语言描述和成功条件。这个分层使新增任务不必重写整个仿真平台。</p>
+<p>一种教学性表示是：</p>
+<p><span class="reading-math" data-tex="\mathcal T=\{\nu_1,\ldots,\nu_m\},\qquad
+\xi\sim p(\xi\mid\nu),\qquad
+\tau\sim p(\tau\mid\pi,\xi)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="script">T</mi><mo>=</mo><mo stretchy="false">{</mo><msub><mi>ν</mi><mn>1</mn></msub><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><msub><mi>ν</mi><mi>m</mi></msub><mo stretchy="false">}</mo><mo separator="true">,</mo><mspace width="2em"/><mi>ξ</mi><mo>∼</mo><mi>p</mi><mo stretchy="false">(</mo><mi>ξ</mi><mo>∣</mo><mi>ν</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><mi>τ</mi><mo>∼</mo><mi>p</mi><mo stretchy="false">(</mo><mi>τ</mi><mo>∣</mo><mi>π</mi><mo separator="true">,</mo><mi>ξ</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\mathcal T=\{\nu_1,\ldots,\nu_m\},\qquad
+\xi\sim p(\xi\mid\nu),\qquad
+\tau\sim p(\tau\mid\pi,\xi).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathcal" style="margin-right:0.25417em;">T</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">{</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.06366em;">ν</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0637em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.06366em;">ν</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0637em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">m</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">}</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.04601em;">ξ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∼</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04601em;">ξ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.06366em;">ν</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∼</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.04601em;">ξ</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="\mathcal T"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="script">T</mi></mrow><annotation encoding="application/x-tex">\mathcal T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathcal" style="margin-right:0.25417em;">T</span></span></span></span></span> 是任务，<span class="reading-math" data-tex="\nu"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ν</mi></mrow><annotation encoding="application/x-tex">\nu</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.06366em;">ν</span></span></span></span></span> 是变体，<span class="reading-math" data-tex="\xi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ξ</mi></mrow><annotation encoding="application/x-tex">\xi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.04601em;">ξ</span></span></span></span></span> 是回合配置，<span class="reading-math" data-tex="\tau"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>τ</mi></mrow><annotation encoding="application/x-tex">\tau</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span></span></span></span></span> 是执行轨迹。前两个采样决定“考试出什么题”，最后一个分布才包含策略如何作答。</p>
+<p>这里没有要最小化的新 RLBench 损失函数。一个行为克隆方法可以最小化专家动作误差，一个强化学习方法可以最大化完成奖励。基准应该固定题目与评分方式，让方法保留合理自由，而不是让方法通过修改评分获得优势。</p>
+<h3 id="2-从航点与运动规划生成示范">2. 从航点与运动规划生成示范</h3>
+<p>任务设计者给出关键运动位置和操作逻辑，规划器连接航点，形成可重复生成的专家轨迹。生成示范不意味着每个可能场景都一定规划成功；系统还提供任务验证工具来检查可执行性。</p>
+<p>它与人工遥操作数据的区别值得认真理解。规划器示范具有较一致的结构和动作风格，便于控制数据量；但这种风格未必代表人类或真实机械臂会产生的恢复动作。</p>
+<p>“可以持续生成示范”描述生成能力，不能在实验表中写成训练数据量无限。实际方法必须记录用了多少条轨迹、哪些变体、多少次失败后重采样。否则数据规模会成为隐形超参数。</p>
+<h3 id="3-成功条件是实验语义的一部分">3. 成功条件是实验语义的一部分</h3>
+<p>任务名是给人看的，代码里的条件才决定算法得分。例如“取下锅盖”可能需要物体到达检测区域，并且仍被夹爪持有。只判断空间位置，会容许另一种行为：把盖子碰飞到目标区域。</p>
+<p>可用逻辑条件写出一个教学例子：</p>
+<p><span class="reading-math" data-tex="\mathrm{success}(s)
+=\mathrm{held}(s,\mathrm{lid})
+\land\mathrm{inside}(s,\mathrm{lid},\mathrm{target})."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mrow><mi mathvariant="normal">s</mi><mi mathvariant="normal">u</mi><mi mathvariant="normal">c</mi><mi mathvariant="normal">c</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">s</mi><mi mathvariant="normal">s</mi></mrow><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>=</mo><mrow><mi mathvariant="normal">h</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">l</mi><mi mathvariant="normal">d</mi></mrow><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mrow><mi mathvariant="normal">l</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">d</mi></mrow><mo stretchy="false">)</mo><mo>∧</mo><mrow><mi mathvariant="normal">i</mi><mi mathvariant="normal">n</mi><mi mathvariant="normal">s</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">d</mi><mi mathvariant="normal">e</mi></mrow><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mrow><mi mathvariant="normal">l</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">d</mi></mrow><mo separator="true">,</mo><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">g</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">t</mi></mrow><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\mathrm{success}(s)
+=\mathrm{held}(s,\mathrm{lid})
+\land\mathrm{inside}(s,\mathrm{lid},\mathrm{target}).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathrm">success</span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathrm">held</span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathrm">lid</span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">∧</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathrm">inside</span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathrm">lid</span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathrm">target</span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这说明为什么奖励定义不能只看自然语言描述。条件过弱会允许奖励投机；条件过强也可能把合理完成方式判为失败。研究者应检查具体任务谓词，而非笼统假定“成功”完全对应人类意图。</p>
+<h3 id="4-少样本协议的逻辑">4. 少样本协议的逻辑</h3>
+<p>先在训练任务上学习可复用能力，再给未见任务少量示范，最后在新的回合配置中评估。这里的少样本数量指<strong>测试任务提供的示范数</strong>，不是整个系统一生只看过几条数据。</p>
+<p>用教学公式表示：</p>
+<p><span class="reading-math" data-tex="\pi_{\mathcal T}^{\mathrm{adapt}}
+=A(\theta,D_{\mathcal T}^{K}),\qquad
+S_K=\mathbb E_{\mathcal T,\xi}
+[\mathbf1\{\mathrm{success}(\pi_{\mathcal T}^{\mathrm{adapt}},\xi)\}]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msubsup><mi>π</mi><mi mathvariant="script">T</mi><mrow><mi mathvariant="normal">a</mi><mi mathvariant="normal">d</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">p</mi><mi mathvariant="normal">t</mi></mrow></msubsup><mo>=</mo><mi>A</mi><mo stretchy="false">(</mo><mi>θ</mi><mo separator="true">,</mo><msubsup><mi>D</mi><mi mathvariant="script">T</mi><mi>K</mi></msubsup><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><msub><mi>S</mi><mi>K</mi></msub><mo>=</mo><msub><mi mathvariant="double-struck">E</mi><mrow><mi mathvariant="script">T</mi><mo separator="true">,</mo><mi>ξ</mi></mrow></msub><mo stretchy="false">[</mo><mn mathvariant="bold">1</mn><mo stretchy="false">{</mo><mrow><mi mathvariant="normal">s</mi><mi mathvariant="normal">u</mi><mi mathvariant="normal">c</mi><mi mathvariant="normal">c</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">s</mi><mi mathvariant="normal">s</mi></mrow><mo stretchy="false">(</mo><msubsup><mi>π</mi><mi mathvariant="script">T</mi><mrow><mi mathvariant="normal">a</mi><mi mathvariant="normal">d</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">p</mi><mi mathvariant="normal">t</mi></mrow></msubsup><mo separator="true">,</mo><mi>ξ</mi><mo stretchy="false">)</mo><mo stretchy="false">}</mo><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\pi_{\mathcal T}^{\mathrm{adapt}}
+=A(\theta,D_{\mathcal T}^{K}),\qquad
+S_K=\mathbb E_{\mathcal T,\xi}
+[\mathbf1\{\mathrm{success}(\pi_{\mathcal T}^{\mathrm{adapt}},\xi)\}].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.2605em;vertical-align:-0.2935em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.967em;"><span style="top:-2.4065em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathcal mtight" style="margin-right:0.25417em;">T</span></span></span></span><span style="top:-3.1809em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">adapt</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2935em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1413em;vertical-align:-0.25em;"></span><span class="mord mathnormal">A</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-2.453em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathcal mtight" style="margin-right:0.25417em;">T</span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">K</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">K</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2605em;vertical-align:-0.2935em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathcal mtight" style="margin-right:0.25417em;">T</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.04601em;">ξ</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord mathbf">1</span><span class="mopen">{</span><span class="mord"><span class="mord mathrm">success</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.967em;"><span style="top:-2.4065em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathcal mtight" style="margin-right:0.25417em;">T</span></span></span></span><span style="top:-3.1809em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">adapt</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2935em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.04601em;">ξ</span><span class="mclose">)}]</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="\theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>θ</mi></mrow><annotation encoding="application/x-tex">\theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span></span></span></span></span> 是训练任务学到的参数，<span class="reading-math" data-tex="A"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span> 可以是微调、记忆或条件推理，<span class="reading-math" data-tex="D_{\mathcal T}^{K}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>D</mi><mi mathvariant="script">T</mi><mi>K</mi></msubsup></mrow><annotation encoding="application/x-tex">D_{\mathcal T}^{K}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1167em;vertical-align:-0.2753em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-2.4247em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathcal mtight" style="margin-right:0.25417em;">T</span></span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">K</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2753em;"><span></span></span></span></span></span></span></span></span></span></span> 是新任务的 <span class="reading-math" data-tex="K"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>K</mi></mrow><annotation encoding="application/x-tex">K</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">K</span></span></span></span></span> 条示范。不同 <span class="reading-math" data-tex="A"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span> 都可研究，但测试信息必须清楚界定。</p>
+<h3 id="5-教学伪代码">5. 教学伪代码</h3>
+<pre><code class="language-text">固定基准版本、观察模式、动作模式和任务划分
+对训练任务：
+    选择变体与回合配置
+    用规划器生成指定数量示范
+    按所研究方法训练共享参数
+
+对每个未见测试任务：
+    抽取 K 条适应示范
+    由方法产生适应该任务的策略
+    对独立的新回合配置：
+        重置场景
+        只用允许的观察执行策略
+        根据固定成功条件评分
+汇报每任务结果与跨任务平均，保留随机种子和失败记录
+</code></pre>
+<p>这段是评估流程的教学化整理，不是原论文发布了某个可直接运行的少样本算法。它刻意强调适应数据与评估回合分离：不能拿同一段示范的初始配置反复调参后，再称之为新配置泛化。</p>
+<h2 id="四实验与证据如何组织">四、实验与证据如何组织</h2>
+<p>RLBench 原始论文主要描述平台与挑战，没有报告一套新学习算法在全部任务上的训练曲线。下面相应区分平台属性和后续方法应报告的内容。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原论文内容</th>
+<th>做方法比较时还需要固定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>任务集合</td>
+<td>一百种任务及变体</td>
+<td>具体版本、所选任务、是否全量</td>
+</tr>
+<tr>
+<td>示范</td>
+<td>规划器结合航点生成</td>
+<td>实际轨迹数、失败过滤、数据种子</td>
+</tr>
+<tr>
+<td>观察</td>
+<td>图像、深度、分割及本体信息等接口</td>
+<td>到底启用了哪些；是否特权信息</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>多种关节或末端控制接口</td>
+<td>控制频率、执行器与规划调用</td>
+</tr>
+<tr>
+<td>指标</td>
+<td>完成与否；少样本协议</td>
+<td>回合数、每任务均值、不确定性</td>
+</tr>
+<tr>
+<td>训练预算</td>
+<td>未提出统一算法训练结果</td>
+<td>更新次数、算力、调参和适应成本</td>
+</tr>
+</tbody></table></div>
+<p>原文挑战保留一部分任务做测试，并建议比较不同示范数量。后来的论文若使用另一任务子集或固定变体，是新的实验协议，不能把其结果直接贴到原始挑战名下。</p>
+<p>对于随机性，生成场景种子、示范种子与模型训练种子承担不同作用。只改变环境初始位置、保持模型权重不变，衡量的是该策略的场景波动；训练多个模型才涉及优化稳定性。两者最好分别报告。</p>
+<h2 id="五结果哪些图支持什么结论">五、结果：哪些图支持什么结论</h2>
+<p>以下依据<a href="https://arxiv.org/html/1909.12271">原文第III—VI节</a>。</p>
+<ol>
+<li><strong>图1，任务示例</strong>：展示多样操作结构，支持集合的广度；不能证明某个模型已经掌握这些任务。</li>
+<li><strong>图2—3，场景与观察</strong>：说明传感器和输入选择，支持平台可用于视觉研究；不意味着每个方法都使用完全相同的信息。</li>
+<li><strong>图4，任务层次</strong>：解释任务、变体和回合的区别，是判断泛化类型的重要依据；它不是泛化性能实验。</li>
+<li><strong>图6，任务代码示例</strong>：展示成功条件如何落实为程序逻辑；说明可扩展性，不自动证明所有任务条件都无漏洞。</li>
+<li><strong>图7，描述与示范长度统计</strong>：显示语言和时间长度的变化；图中示范约百至千步的范围不能当作每个任务的统一评估时限。</li>
+</ol>
+<p>因此，本文可支持的最重要结论是“构建了可研究这些问题的平台”，不是“解决了少样本操作”。作者对未来研究机会的期待属于研究议程，而非已完成的算法比较。</p>
+<h2 id="六贡献与局限基准也有假设">六、贡献与局限：基准也有假设</h2>
+<p>标准基准减少了每篇文章重新建场景的成本，使数据量、观察和动作接口更容易被明确讨论。但基准本身不是中性的自然界切片：哪些任务易于航点规划，哪些物理效果能被仿真器稳定表现，都会影响收录范围。</p>
+<p>作者明确承认渲染和物理并不等同真实世界。真实部署还会遇到感知标定、摩擦变化、柔性物体和执行器延迟。因此 RLBench 高分是可控仿真中的能力证据，不能替代真机评估。</p>
+<p>本文分析还包括：如果测试时仍可调用知晓目标航点的专家，就可能把答案的一部分泄漏给学习器。生成训练示范时使用特权信息是允许设计；评估策略拿到同样信息则改变了问题。应按阶段追踪信息流。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>自建任务难比较</td>
+<td>共享任务环境</td>
+<td>固定题目和评分</td>
+<td>场景及任务接口</td>
+<td>版本差异仍要控制</td>
+</tr>
+<tr>
+<td>示范采集昂贵</td>
+<td>规划器生成</td>
+<td>降低重复实验成本</td>
+<td>航点与构建工具</td>
+<td>专家风格与可规划性偏差</td>
+</tr>
+<tr>
+<td>泛化概念模糊</td>
+<td>任务／变体／回合层次</td>
+<td>明确信息变化</td>
+<td>图4与挑战协议</td>
+<td>边界仍有人为定义</td>
+</tr>
+<tr>
+<td>少样本缺共同测试</td>
+<td>留出任务并给少量示范</td>
+<td>区分预训练与适应</td>
+<td>第V节</td>
+<td>原文未证明算法已解决</td>
+</tr>
+</tbody></table></div>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<p><strong>自构例子，未运行</strong>：研究者训练机器人把杯子放到架上。测试A只移动杯子起点；测试B换成另一颜色杯子；测试C要求先打开柜门再放杯子。A主要考配置变化，B考目标或外观变体，C可能涉及新操作结构。即使三者都得到八成成功，也不应该统称为同一种泛化。</p>
+<p>一个有用的自查是写下“测试变化由哪个变量产生”。如果连任务、变体、回合都没有区分，成功率再精确也难解释。</p>
+<p>值得进一步检查的是：任务平均是否被简单任务支配？生成器失败过滤是否偷偷减少困难场景？换动作空间后，性能变化究竟来自策略还是底层规划器？这些问题会直接影响后面 PerAct、扩散策略与 VLA 论文的阅读。</p>
+<p>阅读范围为原论文平台、任务构建与挑战协议全文；本文没有运行任务生成器，也未以当前软件接口替代原始版本描述。</p>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：用同一 RLBench 名称，为什么两篇文章的成功率仍可能不可比？</strong></p>
+<p>答：任务子集、变体、示范量、观察模式、动作接口和评估回合都可能不同。特别是末端目标加规划器，与直接关节控制，分担了不同难度。必须对齐协议后才适合比较数值。</p>
+<p><strong>问题2：可以生成大量示范，为什么还值得研究少样本？</strong></p>
+<p>答：少样本约束的是对新测试任务给学习器的示范量。训练任务可以提供丰富数据，用于学习可迁移结构；测试时仍需限制新任务信息。生成器能力强并不要求评估时把所有示范都交给模型。</p>
+<p><strong>问题3：图1展示一百种任务，是否证明系统拥有一百种自主技能？</strong></p>
+<p>答：不证明。任务可定义、专家可生成示范和学习策略可闭环完成，是三个不同命题。基准论文主要提供前两项基础，第三项必须由具体算法在独立评估回合中证明。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 034｜RLBench：面向视觉操作的任务集合
+    <textarea id="md-source" hidden readonly># 034｜RLBench：面向视觉操作的任务集合
 
 [系列首页](README.md) · [上一篇](033-mbpo.md) · [下一篇](035-rubiks.md)
 
-**原论文**：*RLBench: The Robot Learning Benchmark & Learning Environment*，Stephen James 等，2019。[论文](https://arxiv.org/abs/1909.12271)。
+**原论文**：*RLBench: The Robot Learning Benchmark &amp; Learning Environment*，Stephen James 等，2019。[论文](https://arxiv.org/abs/1909.12271)。
 
 ## 一、先用一分钟讲明白
 
@@ -229,9 +417,9 @@ RLBench 原始论文主要描述平台与挑战，没有报告一套新学习算
 答：不证明。任务可定义、专家可生成示范和学习策略可闭环完成，是三个不同命题。基准论文主要提供前两项基础，第三项必须由具体算法在独立评估回合中证明。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

@@ -7,7 +7,7 @@
     <title>085｜RDT-1B：双臂控制的扩散基础模型 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,169 @@
                 <span class="text-gray-500">RDT-1B：双臂控制的扩散基础模型</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="bb1fb2c3e895d7b98121177cddb71316b044c278502a8c29f9c229e3a5601e57"><h1>085｜RDT-1B：双臂控制的扩散基础模型</h1>
+<p><a href="index.html">系列首页</a> · <a href="084-robotwin.html">上一篇</a> · <a href="086-hil-serl.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>RDT-1B: a Diffusion Foundation Model for Bimanual Manipulation</em>，Songming Liu、Lingxuan Wu 等，2024。<a href="https://arxiv.org/abs/2410.07864">论文</a>。</p>
+<h2 id="一一分钟理解把不同机器人的经验转成双臂动作能力">一、一分钟理解：把不同机器人的经验转成双臂动作能力</h2>
+<p>RDT-1B 想解决两类瓶颈。第一，双臂的可行动作常有多种模式，简单平均可能导致两只手都犹豫；第二，目标双臂数据少，但其他机器人的动作格式又不一样。</p>
+<p>它使用扩散 Transformer 生成连续动作块，并设计有物理含义的统一空间，让关节角、末端位移、速度等分别占据固定位置。先在多机器人数据预训练，再用目标双臂示范微调。</p>
+<p>论文支持在特定双臂平台上的新物体、新房间和少样本任务适应。作者明确说明，目标是用多机器人数据改善目标双臂操作，而不是已经构建一个无需适配就控制所有机器人的模型。</p>
+<p>一句话：在双臂示范稀缺且动作多模态的场景，通过语义一致的数据接口与大规模扩散预训练，改善目标平台的操作和泛化，代价是昂贵训练、仍需目标数据，以及有限任务的评价范围。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>动作多模态</strong>表示一个状态下有多种合理行为；<strong>干净样本预测</strong>让扩散网络直接恢复动作；<strong>可用性掩码</strong>区分零值和缺失；<strong>交叉注意力</strong>让动作表示读取图像或语言；<strong>动作块吞吐</strong>统计生成动作条目，不能替代闭环频率。</p>
+<h2 id="二背景与问题定义">二、背景与问题定义</h2>
+<p>这是语言条件、视觉驱动的离线模仿学习。输入含两帧三视角图像、当前本体状态、语言和控制频率；输出为动作块。没有学习价值函数，没有通过在线环境奖励继续优化。</p>
+<p>双臂动作维度大只是困难之一。真正棘手的是协作关系：一只手固定瓶子，另一只手拧盖，与两只手同时抢瓶子在局部位置上可能相近，任务意义却不同。</p>
+<p>动作条件需要包含时间尺度。相同位移在 5 Hz 和 50 Hz 下意味着不同速度，控制频率输入使网络有机会区分数据来源。它不保证模型对任意频率都稳定，只是提供必要上下文。</p>
+<p><strong>阅读范围</strong>：依据 <a href="https://arxiv.org/html/2410.07864v1">2024 年 v1 正文与附录</a>，核查统一动作空间、扩散目标、硬件、统计和基线适配。本文未独立复现，评价的独立训练种子数量未核实。</p>
+<h2 id="三方法物理语义动作分布与网络结构">三、方法：物理语义、动作分布与网络结构</h2>
+<h3 id="1-统一格式不等于抹去物理意义">1. 统一格式不等于抹去物理意义</h3>
+<p>128 维向量为左右臂关节位置、关节速度、末端位置、旋转、速度、夹爪和底座等保留槽位。单臂映射到右臂部分；没有的变量填充，并附加可用性掩码。</p>
+<p>为什么必须有掩码？“速度为零”和“没有速度传感器”不能用同一个零表达。编码前拼接 128 维可用性标记，能让模型区分缺失与静止。</p>
+<p>论文统一米、弧度等单位，而非对每个数据集分别缩到相同区间。这保留跨数据集的尺度含义，但并没有自动对齐所有机器人的基座坐标与运动学。槽位语义一致是必要条件，不是完整的形态不变性证明。</p>
+<h3 id="2-扩散直接预测干净动作">2. 扩散直接预测干净动作</h3>
+<p>RDT 使用干净样本预测，而不是只预测噪声。教学形式为：</p>
+<p><span class="reading-math" data-tex="A^k=\sqrt{\bar\alpha_k}A+\sqrt{1-\bar\alpha_k}\epsilon,
+\qquad
+\mathcal L=\mathbb E\|A-f_\theta(A^k,k,o,\ell,c)\|^2."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>A</mi><mi>k</mi></msup><mo>=</mo><msqrt><msub><mover accent="true"><mi>α</mi><mo>ˉ</mo></mover><mi>k</mi></msub></msqrt><mi>A</mi><mo>+</mo><msqrt><mrow><mn>1</mn><mo>−</mo><msub><mover accent="true"><mi>α</mi><mo>ˉ</mo></mover><mi>k</mi></msub></mrow></msqrt><mi>ϵ</mi><mo separator="true">,</mo><mspace width="2em"/><mi mathvariant="script">L</mi><mo>=</mo><mi mathvariant="double-struck">E</mi><mi mathvariant="normal">∥</mi><mi>A</mi><mo>−</mo><msub><mi>f</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msup><mi>A</mi><mi>k</mi></msup><mo separator="true">,</mo><mi>k</mi><mo separator="true">,</mo><mi>o</mi><mo separator="true">,</mo><mi mathvariant="normal">ℓ</mi><mo separator="true">,</mo><mi>c</mi><mo stretchy="false">)</mo><msup><mi mathvariant="normal">∥</mi><mn>2</mn></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">A^k=\sqrt{\bar\alpha_k}A+\sqrt{1-\bar\alpha_k}\epsilon,
+\qquad
+\mathcal L=\mathbb E\|A-f_\theta(A^k,k,o,\ell,c)\|^2.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8991em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1972em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8428em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8028em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1972em;"><span></span></span></span></span></span><span class="mord mathnormal">A</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0755em;vertical-align:-0.1944em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8811em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8411em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1589em;"><span></span></span></span></span></span><span class="mord mathnormal">ϵ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathcal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathbb">E</span><span class="mord">∥</span><span class="mord mathnormal">A</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1491em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">o</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">ℓ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">c</span><span class="mclose">)</span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="A"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span> 是动作块，<span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 是噪声阶段，<span class="reading-math" data-tex="o"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>o</mi></mrow><annotation encoding="application/x-tex">o</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">o</span></span></span></span></span> 是观测，<span class="reading-math" data-tex="\ell"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">ℓ</mi></mrow><annotation encoding="application/x-tex">\ell</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">ℓ</span></span></span></span></span> 是语言，<span class="reading-math" data-tex="c"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi></mrow><annotation encoding="application/x-tex">c</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">c</span></span></span></span></span> 是控制频率。虽然损失仍是 MSE，它与直接确定性回归不同：网络每次还条件于随机噪声样本，整体采样可以表示多个动作模式。</p>
+<p>因此不能说“使用 MSE 就必然平均动作”。导致平均模式问题的是对多模态条件分布直接做单值预测，而不是所有出现平方误差的训练方法。</p>
+<h3 id="3-不同模态怎样进入-transformer">3. 不同模态怎样进入 Transformer</h3>
+<p>图像采用冻结 SigLIP，语言采用冻结 T5-XXL，低维状态、动作、频率经适配器编码。连续物理量使用包含 Fourier 特征的映射，旨在表示更细的变化。</p>
+<p>网络交替在不同层注入图像和语言条件，避免图像 token 数量过多时语言被忽略。QK 归一化和 RMSNorm 用于数值稳定，输出端的非线性 MLP 把内部表示映射回动作。</p>
+<p>这些设计有消融依据，但“没有 MLP 就无法描述非线性动力学”的表述过强：前面的 Transformer 本身已经非线性。更准确地说，是该实验配置的解码结构改变了学习效果。</p>
+<h3 id="4-动作块与推理频率">4. 动作块与推理频率</h3>
+<p>模型一次产生 64 个未来动作，采样时使用 5 步 DPM-Solver++。报告的每秒动作数量是整块吞吐，不等于每秒获得同样数量的新视觉反馈。</p>
+<p>如果每秒生成约 6 块，每块 64 动作，算术上就能达到约 384 个动作条目每秒。但只有在重新观察并生成新块时才发生新的闭环决策。动作吞吐与反馈频率不能混为一谈。</p>
+<pre><code class="language-text">把各数据集动作按物理量填入统一槽位
+附加缺失掩码，统一单位和相机顺序
+从多机器人混合数据中抽取动作块
+编码两帧图像、语言、本体状态和控制频率
+给动作块加噪，训练网络预测干净动作
+在目标双臂示范上微调
+部署时采样噪声，经少量去噪步骤生成动作块
+按执行机制运行，再利用新观测更新
+</code></pre>
+<h2 id="四实验设置与预算">四、实验设置与预算</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>论文内容</th>
+<th>解释</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>上游数据</td>
+<td>46 数据集，超过百万轨迹</td>
+<td>含多种机器人与数据源</td>
+</tr>
+<tr>
+<td>目标数据</td>
+<td>超过 6k 轨迹、300 任务、15 个以上场景</td>
+<td>目标双臂适配</td>
+</tr>
+<tr>
+<td>预训练</td>
+<td>48 H100，1M 更新，约一个月</td>
+<td>不是低成本从零训练</td>
+</tr>
+<tr>
+<td>微调</td>
+<td>同样 GPU，130k 更新，约三天</td>
+<td>使用 500k 预训练检查点起步</td>
+</tr>
+<tr>
+<td>评价</td>
+<td>7 类任务与多个子条件</td>
+<td>不是完整 300 任务测试</td>
+</tr>
+<tr>
+<td>少样本</td>
+<td>交接 5 条、折短裤 1 条相关示范</td>
+<td>仍利用大量其他任务数据</td>
+</tr>
+<tr>
+<td>硬件</td>
+<td>Cobot Mobile ALOHA，双臂静态操作</td>
+<td>没有自主移动训练或评价</td>
+</tr>
+<tr>
+<td>重复</td>
+<td>杯子/房间每条件 8 次；若干任务 25 次</td>
+<td>小样本不确定性仍大</td>
+</tr>
+</tbody></table></div>
+<p>标题 1B 对应主策略约 1.2B 参数，冻结语言和视觉编码器也有计算成本。仅报可训练主干规模不能代表整个系统内存。</p>
+<p>预训练跑到 1M 更新，但附录 H 明确微调采用 500k 检查点。这两句话描述不同阶段，不应把实际微调初始化写成最后预训练模型。训练扩散时间步附录为 1000；正文谈从较多采样步加速到 5 步，不能把训练噪声级数与推理迭代数统一成一个参数。</p>
+<h2 id="五五组证据怎么理解">五、五组证据怎么理解</h2>
+<p><strong>表 3：新对象和场景。</strong> 洗杯子、在新房间倒水支持视觉条件变化下的迁移。每个条件只有少量重复，对“任意家庭环境”没有足够覆盖。所有实验先经过目标双臂数据微调，零样本指这些具体新元素没有额外示范。</p>
+<p><strong>表 3：少样本。</strong> 折短裤为 68%，交接完整任务为 40%。它们支持相关任务示范很少时仍有适应能力，但不代表从一条轨迹、完全没有其他机器人经验，就能学会任意新技能。</p>
+<p><strong>表 3 与附录 H：整体指标。</strong> 整体性能先平均完整任务和附加要求，再按能力维度平均。它不是简单统计所有尝试中完整任务成功的比例。以机器人狗任务为例，操作遥控器总分和“走直线”还有不同列；这里控制的是遥控器，不是学习四足步态。</p>
+<p><strong>表 2：消融。</strong> 较小模型在某个新房间条件与大模型同为 62.5%，说明规模收益不是逐项严格增加。预训练、扩散与规模整体有帮助，但只测三个选定条件，无法证明每个组件在所有任务中都不可缺。</p>
+<p><strong>图 4：结构选择。</strong> 归一化影响训练稳定，MLP 解码与交替条件注入影响所测子任务。部分结构消融使用无预训练模型，不能直接当作完整大规模系统上的全因子消融。</p>
+<p>基线比较有重要条件：OpenVLA 和 Octo 最终采用各评价任务相关示范微调，因为全数据训练没有取得足够收敛；RDT 则使用大规模多任务适配。ACT 未加入语言条件，无法评价相同的指令跟随。它们是有实际意义的系统比较，却不是只替换动作分布的严格因果实验。</p>
+<h2 id="六贡献成本与局限">六、贡献、成本与局限</h2>
+<p>RDT 的贡献在于把大规模连续动作建模和异构机器人数据结合，并将结果落在双臂任务上。统一动作接口比简单补零更有语义，条件注入设计也关注了机器人语言控制中的不平衡。</p>
+<p>成本包括数据清洗、语言扩写、单位和动作映射，以及长时间预训练。表面上“一条示范学折叠”背后有大量其他数据、强视觉语言编码器和目标平台适配，必须一起理解。</p>
+<p>我的分析是，物理单位统一很有价值，但对跨形态规律的证据仍需更直接实验：例如固定训练量，对比单位一致、每源归一化和错误单位三种方案，在新臂长或新控制频率下测试。现有结果不能把“可解释接口”升级为“学到了可证明的统一物理模型”。</p>
+<h2 id="七教学例子与五个前置概念">七、教学例子与五个前置概念</h2>
+<p><strong>自构例子，未运行</strong>：两个机器人都报告速度 0.1，但一组单位是米每秒，另一组是厘米每秒。若直接混合，网络会学习冲突映射；统一单位可消除这个人为冲突。之后即便单位相同，臂长与负载仍可能不同，需要观测或平台数据帮助适配。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>双臂数据少且格式异构</td>
+<td>物理槽位与大规模扩散 Transformer</td>
+<td>共享表示并表达协作动作多模态</td>
+<td>目标平台泛化和消融</td>
+<td>昂贵训练；有限评价；跨形态仍需适配</td>
+</tr>
+</tbody></table></div>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：使用 MSE 的扩散为什么不等于确定性动作平均？</strong></p>
+<p>答案：扩散网络条件于噪声级别和随机样本，逐步恢复分布中的不同模式；确定性回归只给一个输出。损失形式相似，不代表整个生成机制相同。</p>
+<p><strong>问题2：每秒约 381 个动作是不是 381 Hz 视觉闭环？</strong></p>
+<p>答案：不是。数字主要来自每块 64 个动作的吞吐，新的动作块约每秒生成数次。反馈更新率取决于重新观察、推理和执行机制。</p>
+<p><strong>问题3：统一成 128 维，是否就能直接控制没见过的机械臂？</strong></p>
+<p>答案：不能。它统一物理量槽位和单位，尚未自动消除运动学、坐标系、负载和控制器差异。论文目标是借其他机器人数据帮助目标双臂，目标平台仍经过微调。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 085｜RDT-1B：双臂控制的扩散基础模型
+    <textarea id="md-source" hidden readonly># 085｜RDT-1B：双臂控制的扩散基础模型
 
 [系列首页](README.md) · [上一篇](084-robotwin.md) · [下一篇](086-hil-serl.md)
 
@@ -185,9 +343,9 @@ RDT 的贡献在于把大规模连续动作建模和异构机器人数据结合�
 答案：不能。它统一物理量槽位和单位，尚未自动消除运动学、坐标系、负载和控制器差异。论文目标是借其他机器人数据帮助目标双臂，目标平台仍经过微调。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

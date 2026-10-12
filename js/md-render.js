@@ -99,8 +99,10 @@
     }
 
     function mountMarkdown(container, markdown, options) {
-        container.innerHTML = renderMarkdown(markdown, options);
-        renderMath(container);
+        if (!container.dataset.staticReading) {
+            container.innerHTML = renderMarkdown(markdown, options);
+            renderMath(container);
+        }
         renderMermaid();
     }
 

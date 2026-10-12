@@ -7,7 +7,7 @@
     <title>017｜渐进网络：像素策略如何迁移到真机 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,196 @@
                 <span class="text-gray-500">渐进网络：像素策略如何迁移到真机</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="54a5455501a14828ddc57e5e268859183b5e71a66a957560034d0f95738ab1f8"><h1>017｜渐进网络：像素策略如何迁移到真机</h1>
+<p><a href="index.html">系列首页</a> · <a href="016-visual-foresight.html">上一篇</a> · <a href="018-domain-randomization.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>Sim-to-Real Robot Learning from Pixels with Progressive Nets</em>，Andrei A. Rusu 等，2016。<a href="https://arxiv.org/abs/1610.04286">原文</a>。</p>
+<h2 id="一保留会的东西再学习现实差异">一、保留会的东西，再学习现实差异</h2>
+<p>仿真中学会伸手，不代表真实相机里的机械臂也能照做。直接从头训练浪费已有能力，直接微调又可能破坏原来有用的特征。本文采用渐进网络：冻结仿真策略，增加一条新网络，通过横向连接读取旧网络的中间表示，再在真机上学习。</p>
+<p>它不是零样本部署，也不是把仿真渲染做得更逼真。核心问题是已有策略能否成为真机学习的起点，并减少真实探索量。</p>
+<p>作者报告了视觉到动作的机器人迁移与后续任务复用。实验支持局限于目标到达及相关移动目标任务。一句话概括：通过冻结旧网络、增加适应分支并复用表示，改善真机学习速度和调参稳定性，代价是仍需真实交互，且网络随任务增加。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个概念分别是：<strong>sim-to-real gap</strong>指渲染、传感器和动力学差异；<strong>微调</strong>在新数据上更新已有参数；<strong>灾难性遗忘</strong>指新任务更新损害旧功能；<strong>渐进网络</strong>冻结旧列并为新任务添加新列；<strong>Actor–Critic</strong>通过价值估计辅助策略更新。</p>
+<h2 id="二问题设定与预备概念">二、问题设定与预备概念</h2>
+<p>仿真使用 MuJoCo，真实平台是 Jaco 机械臂。初始任务是朝视觉目标到达：观察 RGB，输出各关节的速度选择。目标附近获得奖励，越界、碰桌或自碰撞会终止回合。任务不是连续力矩控制，也不是接触丰富的装配。</p>
+<p>奖励是外部任务反馈，真实平台通过颜色目标跟踪与末端相对位置自动给出。政策只从图像行动，并不表示训练系统只有图像、没有额外用于评分与安全终止的信息。这种训练与部署信息差异应明确保留。</p>
+<h2 id="三方法横向读取而非覆盖旧参数">三、方法：横向读取，而非覆盖旧参数</h2>
+<p>第 <span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 列在第 <span class="reading-math" data-tex="i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span></span> 层的教学形式为：</p>
+<p><span class="reading-math" data-tex="h_i^{(k)}=
+f\left(
+W_i^{(k)}h_{i-1}^{(k)}
++\sum_{j&lt;k}U_i^{(k:j)}h_{i-1}^{(j)}
+\right)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msubsup><mi>h</mi><mi>i</mi><mrow><mo stretchy="false">(</mo><mi>k</mi><mo stretchy="false">)</mo></mrow></msubsup><mo>=</mo><mi>f</mi><mrow><mo fence="true">(</mo><msubsup><mi>W</mi><mi>i</mi><mrow><mo stretchy="false">(</mo><mi>k</mi><mo stretchy="false">)</mo></mrow></msubsup><msubsup><mi>h</mi><mrow><mi>i</mi><mo>−</mo><mn>1</mn></mrow><mrow><mo stretchy="false">(</mo><mi>k</mi><mo stretchy="false">)</mo></mrow></msubsup><mo>+</mo><munder><mo>∑</mo><mrow><mi>j</mi><mo>&lt;</mo><mi>k</mi></mrow></munder><msubsup><mi>U</mi><mi>i</mi><mrow><mo stretchy="false">(</mo><mi>k</mi><mo>:</mo><mi>j</mi><mo stretchy="false">)</mo></mrow></msubsup><msubsup><mi>h</mi><mrow><mi>i</mi><mo>−</mo><mn>1</mn></mrow><mrow><mo stretchy="false">(</mo><mi>j</mi><mo stretchy="false">)</mo></mrow></msubsup><mo fence="true">)</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">h_i^{(k)}=
+f\left(
+W_i^{(k)}h_{i-1}^{(k)}
++\sum_{j&lt;k}U_i^{(k:j)}h_{i-1}^{(j)}
+\right).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.3217em;vertical-align:-0.2769em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.0448em;"><span style="top:-2.4231em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.2198em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2769em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.6em;vertical-align:-1.55em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen"><span class="delimsizing mult"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:2.05em;"><span style="top:-4.05em;"><span class="pstrut" style="height:5.6em;"></span><span style="width:0.875em;height:3.600em;"><svg xmlns="http://www.w3.org/2000/svg" width="0.875em" height="3.600em" viewBox="0 0 875 3600"><path d="M863,9c0,-2,-2,-5,-6,-9c0,0,-17,0,-17,0c-12.7,0,-19.3,0.3,-20,1
+c-5.3,5.3,-10.3,11,-15,17c-242.7,294.7,-395.3,682,-458,1162c-21.3,163.3,-33.3,349,
+-36,557 l0,84c0.2,6,0,26,0,60c2,159.3,10,310.7,24,454c53.3,528,210,
+949.7,470,1265c4.7,6,9.7,11.7,15,17c0.7,0.7,7,1,19,1c0,0,18,0,18,0c4,-4,6,-7,6,-9
+c0,-2.7,-3.3,-8.7,-10,-18c-135.3,-192.7,-235.5,-414.3,-300.5,-665c-65,-250.7,-102.5,
+-544.7,-112.5,-882c-2,-104,-3,-167,-3,-189
+l0,-92c0,-162.7,5.7,-314,17,-454c20.7,-272,63.7,-513,129,-723c65.3,
+-210,155.3,-396.3,270,-559c6.7,-9.3,10,-15.3,10,-18z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.55em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.0448em;"><span style="top:-2.4231em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.2198em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2769em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.0448em;"><span style="top:-2.4231em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.2198em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3352em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4382em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">U</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.0448em;"><span style="top:-2.4231em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.2198em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mrel mtight">:</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2769em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.0448em;"><span style="top:-2.4231em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.2198em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3352em;"><span></span></span></span></span></span></span><span class="mclose"><span class="delimsizing mult"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:2.05em;"><span style="top:-4.05em;"><span class="pstrut" style="height:5.6em;"></span><span style="width:0.875em;height:3.600em;"><svg xmlns="http://www.w3.org/2000/svg" width="0.875em" height="3.600em" viewBox="0 0 875 3600"><path d="M76,0c-16.7,0,-25,3,-25,9c0,2,2,6.3,6,13c21.3,28.7,42.3,60.3,
+63,95c96.7,156.7,172.8,332.5,228.5,527.5c55.7,195,92.8,416.5,111.5,664.5
+c11.3,139.3,17,290.7,17,454c0,28,1.7,43,3.3,45l0,9
+c-3,4,-3.3,16.7,-3.3,38c0,162,-5.7,313.7,-17,455c-18.7,248,-55.8,469.3,-111.5,664
+c-55.7,194.7,-131.8,370.3,-228.5,527c-20.7,34.7,-41.7,66.3,-63,95c-2,3.3,-4,7,-6,11
+c0,7.3,5.7,11,17,11c0,0,11,0,11,0c9.3,0,14.3,-0.3,15,-1c5.3,-5.3,10.3,-11,15,-17
+c242.7,-294.7,395.3,-681.7,458,-1161c21.3,-164.7,33.3,-350.7,36,-558
+l0,-144c-2,-159.3,-10,-310.7,-24,-454c-53.3,-528,-210,-949.7,
+-470,-1265c-4.7,-6,-9.7,-11.7,-15,-17c-0.7,-0.7,-6.7,-1,-18,-1z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.55em;"><span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="W"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>W</mi></mrow><annotation encoding="application/x-tex">W</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span></span></span></span></span> 是新列内部权重，<span class="reading-math" data-tex="U"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>U</mi></mrow><annotation encoding="application/x-tex">U</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">U</span></span></span></span></span> 是从旧列读取特征的横向连接，<span class="reading-math" data-tex="f"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>f</mi></mrow><annotation encoding="application/x-tex">f</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span></span></span></span></span> 为非线性。旧列参数冻结，新列可以学习使用、转换或忽略旧特征。保留旧列意味着旧能力不会因参数覆盖而丢失，但并不保证新任务一定获得正迁移。</p>
+<p>在机器人场景中，仿真列可以较宽，真机列较窄。原因是昂贵的视觉控制基础已经学过，新列主要处理差异。不同列还可以接不同模态，例如后来加入关节角和速度；这比固定结构的直接微调灵活。</p>
+<h3 id="一个容易漏掉的初始化设计">一个容易漏掉的初始化设计</h3>
+<p>新列随机初始化可能让初始行动完全失去仿真技能。原文因此把旧列输出连接复制到新列输出，来自新隐藏分支的输出权重初始为零，使新策略起初与旧策略一致。</p>
+<p>这不是把新列永久关掉。输出权重仍可训练，之后逐步引入新特征。冻结旧网络解决保留问题，输出初始化解决早期探索问题，两者作用不同。没有这个区分，就容易把所有加速都归因于“不遗忘”。</p>
+<h3 id="策略如何产生多关节动作">策略如何产生多关节动作</h3>
+<p>原文对9个自由度各输出三个速度选项：正、负、零。动作分布因子化：</p>
+<p><span class="reading-math" data-tex="\pi(a|s)=\prod_{j=1}^{9}\pi_j(a_j|s)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>π</mi><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">∣</mi><mi>s</mi><mo stretchy="false">)</mo><mo>=</mo><munderover><mo>∏</mo><mrow><mi>j</mi><mo>=</mo><mn>1</mn></mrow><mn>9</mn></munderover><msub><mi>π</mi><mi>j</mi></msub><mo stretchy="false">(</mo><msub><mi>a</mi><mi>j</mi></msub><mi mathvariant="normal">∣</mi><mi>s</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\pi(a|s)=\prod_{j=1}^{9}\pi_j(a_j|s).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.2149em;vertical-align:-1.4138em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8011em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∏</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">9</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>每个关节一个三分类头，另有一个价值输出，因此输出维度为28。共享隐藏表示仍能协调关节，但给定表示后的独立采样结构限制了联合分布表达；它与直接枚举 <span class="reading-math" data-tex="3^9"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mn>3</mn><mn>9</mn></msup></mrow><annotation encoding="application/x-tex">3^9</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord"><span class="mord">3</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">9</span></span></span></span></span></span></span></span></span></span></span></span> 种组合不同。</p>
+<p>策略使用优势 Actor–Critic 更新。教学目标可写为：</p>
+<p><span class="reading-math" data-tex="L_\pi=-\mathbb E[\log\pi(a_t|s_t)\hat A_t]
+-\beta H(\pi),\qquad
+L_V=\mathbb E[(V(s_t)-\hat R_t)^2]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mi>π</mi></msub><mo>=</mo><mo>−</mo><mi mathvariant="double-struck">E</mi><mo stretchy="false">[</mo><mi>log</mi><mo>⁡</mo><mi>π</mi><mo stretchy="false">(</mo><msub><mi>a</mi><mi>t</mi></msub><mi mathvariant="normal">∣</mi><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo><msub><mover accent="true"><mi>A</mi><mo>^</mo></mover><mi>t</mi></msub><mo stretchy="false">]</mo><mo>−</mo><mi>β</mi><mi>H</mi><mo stretchy="false">(</mo><mi>π</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><msub><mi>L</mi><mi>V</mi></msub><mo>=</mo><mi mathvariant="double-struck">E</mi><mo stretchy="false">[</mo><mo stretchy="false">(</mo><mi>V</mi><mo stretchy="false">(</mo><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mo>−</mo><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mi>t</mi></msub><msup><mo stretchy="false">)</mo><mn>2</mn></msup><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_\pi=-\mathbb E[\log\pi(a_t|s_t)\hat A_t]
+-\beta H(\pi),\qquad
+L_V=\mathbb E[(V(s_t)-\hat R_t)^2].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord">−</span><span class="mord mathbb">E</span><span class="mopen">[</span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">A</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1111em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">]</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.22222em;">V</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathbb">E</span><span class="mopen">[(</span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">]</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这部分沿用已有强化学习框架。本文改的是知识如何跨域保留和接入，不是提出新的策略梯度定理。</p>
+<pre><code class="language-text">在仿真中：
+    用 A3C 训练宽网络列，选择表现好的配置
+转移到真实机器人：
+    冻结仿真列
+    新建较窄真实列及横向连接
+    复制旧输出路径，新分支输出权重置零
+    用真实交互与任务奖励更新新列和横向连接
+    保持旧列参数不变
+扩展到相关新任务：
+    冻结已有列
+    新增列，可接收额外本体感知输入
+    用新任务数据训练，复用先前视觉与控制特征
+</code></pre>
+<p>伪代码表达方法关系，未包含具体并行线程或安全控制实现。真实训练不是靠删除仿真器名称就能运行，底层速度限制和评分机制仍需复现。</p>
+<h2 id="四实验与预算核对">四、实验与预算核对</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文信息及含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>输入</td>
+<td>64×64 RGB，扩展任务加入18维关节角与速度</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>6个机械臂关节加3个手指自由度，每个三种速度</td>
+</tr>
+<tr>
+<td>奖励</td>
+<td>手掌距目标10厘米内每步+1，回合最多50步</td>
+</tr>
+<tr>
+<td>仿真预算</td>
+<td>达到稳定表现约5000万步，作者报告CPU集群约24小时</td>
+</tr>
+<tr>
+<td>真机预算</td>
+<td>每个主要实验约6万步、约4小时</td>
+</tr>
+<tr>
+<td>主基线</td>
+<td>从头训练窄/宽网络、微调、渐进窄/宽网络</td>
+</tr>
+<tr>
+<td>调参</td>
+<td>仿真中搜索30种配置并选择；迁移相关参数另用模拟迁移设置调节</td>
+</tr>
+<tr>
+<td>统计</td>
+<td>图4的5次运行混合了种子与超参数变化；图6每种扰动300次配置试验</td>
+</tr>
+<tr>
+<td>泛化维度</td>
+<td>颜色、视角的模拟变化，以及从静态目标到动态目标的相关任务迁移</td>
+</tr>
+</tbody></table></div>
+<p>仿真预算不可从总学习成本中抹掉。方法减少的是昂贵真机探索，而非无条件减少所有计算。此外，作者估算完全在真机完成同等仿真步数需要53天，这是速率换算，不是实际运行了53天的对照。</p>
+<h2 id="五五项证据">五、五项证据</h2>
+<p>依据<a href="https://arxiv.org/pdf/1610.04286">原始 PDF</a>。论文2016年首次公开，CoRL2017，所读PDF为2018年v2。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>位置</th>
+<th>观察</th>
+<th>结论边界</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>图1–2、第2节</td>
+<td>冻结列与横向连接结构</td>
+<td>明确复用机制，不是零数据迁移证明</td>
+</tr>
+<tr>
+<td>表1、图4</td>
+<td>宽列与窄列在仿真学习表现不同</td>
+<td>支持分阶段容量配置，不能推出越窄越好</td>
+</tr>
+<tr>
+<td>图5、第4.2节</td>
+<td>渐进方法真机获得奖励，从头对照在给定预算失败</td>
+<td>说明实际预算下迁移价值，不证明从头永远学不会</td>
+</tr>
+<tr>
+<td>图6</td>
+<td>模拟颜色/视角扰动中，渐进方法对配置更稳健</td>
+<td>300次并非300次真机试验</td>
+</tr>
+<tr>
+<td>图7、第4.3节</td>
+<td>复用静态任务知识加速动态目标学习</td>
+<td>是相关任务课程，不是任意新技能即学即会</td>
+</tr>
+</tbody></table></div>
+<p>图5的约34分是回合奖励，表示到达目标区域后持续获得奖励的能力，不能说成34%成功率。最大50步也不等于所有回合都能获得50分，机器人需要移动时间并满足安全条件。</p>
+<p>原文平滑曲线覆盖在原始奖励上，有助观察趋势；仍不能将视觉平滑当成误差条或重复训练置信区间。稳健性的更直接证据来自图6的大量配置比较。</p>
+<h2 id="六贡献成本与适用边界">六、贡献、成本与适用边界</h2>
+<p>这项工作的价值是把仿真知识变成可以组合的资源。旧视觉表示可以继续服务于新任务，新列学习现实差异；加入新的传感器，也不一定需要推倒重建整个系统。</p>
+<p>参数冻结保证旧路径保持，但存储与推理成本会随列数量增加。若新列读取所有旧列，长期扩展还涉及选择、压缩与维护问题。这是结构分析，原文没有在上百个任务上测量其规模极限。</p>
+<p>另一风险是旧知识可能不适合新域。横向连接理论上可以忽略旧特征，但学习如何忽略仍需数据。对于完全不同形态、观察视角或动作接口，本文简单到达实验没有提供广泛保证。它展示的是迁移学习机制可行，不是通用机器人基础模型已经形成。</p>
+<h2 id="七一个自构例子">七、一个自构例子</h2>
+<p>未运行的教学例子：仿真列学会从灰色机械臂图像判断手掌在哪，并向红色目标移动。真实画面有反光和阴影。新列不必重新学习全部控制关系，而可修正视觉特征，再通过旧列提供的动作倾向开始探索。</p>
+<p>假设新分支一开始随机给出强烈左转，可能立刻撞到边界，根本采不到有效奖励。输出初始化让它先沿旧策略行动，才有机会积累现实差异的数据。这解释了“知识复用”与“探索起点”为什么必须同时考虑。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>仿真策略直接部署失效，微调可能破坏知识</td>
+<td>冻结旧列，增加可读取旧特征的新列</td>
+<td>保留控制起点并学习域差异</td>
+<td>图5–7</td>
+<td>真机仍需训练，容量增长，任务范围窄</td>
+</tr>
+</tbody></table></div>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：冻结旧参数，为什么新策略还能适应？</strong></p>
+<p>答案：新列拥有可训练参数和横向连接，能重组旧表示并形成自己的输出。冻结的是知识来源，不是整个计算图；新任务学习发生在新增路径上。</p>
+<p><strong>问题2：仿真训练5000万步、真机6万步，能说算法只需6万步吗？</strong></p>
+<p>答案：只能说迁移阶段用了约6万真机步。总资源还包括仿真预训练与调参，但真实交互往往成本更高，因此把两类预算分列比混成单个数字更有意义。</p>
+<p><strong>问题3：旧任务不遗忘是否意味着新任务不会负迁移？</strong></p>
+<p>答案：不是。旧列功能保留与新列学得好是两个命题。旧特征可能无关甚至误导，新列虽可忽略它们，仍需要足够数据识别何者有用。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 017｜渐进网络：像素策略如何迁移到真机
+    <textarea id="md-source" hidden readonly># 017｜渐进网络：像素策略如何迁移到真机
 
 [系列首页](README.md) · [上一篇](016-visual-foresight.md) · [下一篇](018-domain-randomization.md)
 
@@ -76,7 +261,7 @@ $$
 h_i^{(k)}=
 f\left(
 W_i^{(k)}h_{i-1}^{(k)}
-+\sum_{j<k}U_i^{(k:j)}h_{i-1}^{(j)}
++\sum_{j&lt;k}U_i^{(k:j)}h_{i-1}^{(j)}
 \right).
 $$
 
@@ -192,9 +377,9 @@ $$
 答案：不是。旧列功能保留与新列学得好是两个命题。旧特征可能无关甚至误导，新列虽可忽略它们，仍需要足够数据识别何者有用。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

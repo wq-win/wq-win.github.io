@@ -7,7 +7,7 @@
     <title>第 53 天｜DeepSeek-R1：区分纯RL探索、完整训练管线与蒸馏 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,214 @@
                 <span class="text-gray-500">DeepSeek-R1：区分纯RL探索、完整训练管线与蒸馏</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="e01f4dd80de8857f9fb1b55403a3693f14047e535437f93e8eb13496bf8530c1"><h1>第 53 天｜DeepSeek-R1：区分纯RL探索、完整训练管线与蒸馏</h1>
+<p><a href="index.html">系列首页</a> · <a href="52-grpo.html">上一篇</a> · <a href="54-dapo.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：DeepSeek-AI，<em>DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning</em>，2025。<a href="https://arxiv.org/html/2501.12948v1">初版正文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p><strong>研究问题</strong>：大模型推理行为能否通过强化学习增强</p>
+<p><strong>旧方法卡点</strong>：只模仿推理数据难区分自主探索和数据复制的贡献</p>
+<p><strong>作者主张</strong>：研究R1-Zero的直接RL，再用冷启动、推理RL、拒绝采样SFT和其他RL构建R1</p>
+<p><strong>论文证据</strong>：R1-Zero的AIME2024 pass@1由15.6提高到71.0，完整R1与蒸馏另有结果</p>
+<p><strong>一句话</strong>：在大模型可验证推理后训练；多个不同训练路径中，作者通过“研究R1-Zero的直接RL，再用冷启动、推理RL、拒绝采样SFT和其他RL构建R1”应对“大模型推理行为能否通过强化学习增强”这一问题；证据边界或代价是：不是从随机权重开始，也不能把小模型蒸馏成绩当独立RL涌现。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>冷启动</strong>：RL之前使用少量格式良好数据。</li>
+<li><strong>可验证奖励</strong>：能以规则或执行器判断的反馈。</li>
+<li><strong>拒绝采样</strong>：从生成候选中筛选合格样本。</li>
+<li><strong>蒸馏</strong>：把大模型行为迁移给小模型。</li>
+<li><strong>Pass@k</strong>：k候选至少一次成功的指标，需按论文定义。</li>
+</ol>
+<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>本篇将“大模型推理行为能否通过强化学习增强”放在大模型可验证推理后训练；多个不同训练路径的边界内研究。只模仿推理数据难区分自主探索和数据复制的贡献。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>本文设定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>研究场景</td>
+<td>大模型可验证推理后训练；多个不同训练路径</td>
+</tr>
+<tr>
+<td>状态／观测</td>
+<td>题目与推理／回答前缀</td>
+</tr>
+<tr>
+<td>动作</td>
+<td>token</td>
+</tr>
+<tr>
+<td>奖励或学习信号</td>
+<td>正确性与格式规则等；完整R1还含其他任务反馈</td>
+</tr>
+<tr>
+<td>终止／边界</td>
+<td>EOS／生成预算；超长处理影响结果</td>
+</tr>
+</tbody></table></div>
+<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<p>R1-Zero从预训练DeepSeek-V3基础出发，核心RL采用GRPO式更新。完整R1加入冷启动改善可读性与语言混杂，经过多阶段数据筛选和训练；蒸馏小模型使用大模型生成数据。论文贡献更多是研究结果与训练流程，不是全新策略梯度定理。</p>
+<h3 id="关键公式与符号">关键公式与符号</h3>
+<p>核心仍是组相对优势与裁剪目标；规则奖励 <span class="reading-math" data-tex="r=r_{accuracy}+r_{format}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi><mo>=</mo><msub><mi>r</mi><mrow><mi>a</mi><mi>c</mi><mi>c</mi><mi>u</mi><mi>r</mi><mi>a</mi><mi>c</mi><mi>y</mi></mrow></msub><mo>+</mo><msub><mi>r</mi><mrow><mi>f</mi><mi>o</mi><mi>r</mi><mi>m</mi><mi>a</mi><mi>t</mi></mrow></msub></mrow><annotation encoding="application/x-tex">r=r_{accuracy}+r_{format}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight">cc</span><span class="mord mathnormal mtight">u</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">cy</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">or</span><span class="mord mathnormal mtight">ma</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是示意，具体规则与权重以版本为准。正确性奖励可验证最终结果，但不逐token证明推理真实或必要。</p>
+<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
+<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<pre><code class="language-text">路径A：R1-Zero
+  从预训练基座出发
+  多次采同题回答→规则评分→GRPO更新
+路径B：完整R1
+  冷启动数据SFT
+  推理定向RL
+  生成并筛选推理／非推理训练数据
+  再SFT，再进行多场景RL
+路径C：蒸馏
+  用R1生成的筛选数据监督训练较小模型
+三条路径分别评估，不混成同一个算法成绩
+</code></pre>
+<p><strong>实现要点</strong>：不是从随机权重开始，也不能把小模型蒸馏成绩当独立RL涌现。</p>
+<h3 id="三种优化要分开">三种“优化”要分开</h3>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>这里具体是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数学目标／训练损失</td>
+<td>不同阶段分别使用SFT与GRPO等RL目标；无新的统一梯度公式</td>
+</tr>
+<tr>
+<td>机制改变</td>
+<td>研究R1-Zero的直接RL，再用冷启动、推理RL、拒绝采样SFT和其他RL构建R1</td>
+</tr>
+<tr>
+<td>评价改善的指标</td>
+<td>pass@1、重复平均、多数票各自定义</td>
+</tr>
+</tbody></table></div>
+<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>实验要素</th>
+<th>原文设定与证据范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境与任务</td>
+<td>数学、代码及综合能力基准</td>
+</tr>
+<tr>
+<td>数据来源与规模</td>
+<td>预训练基座、RL题目、冷启动／筛选数据；路径各不同</td>
+</tr>
+<tr>
+<td>对比基线</td>
+<td>R1-Zero、R1、不同基座／蒸馏模型及外部模型</td>
+</tr>
+<tr>
+<td>训练预算与资源</td>
+<td>原文未给足以完整等成本复现全部流程的账本</td>
+</tr>
+<tr>
+<td>指标及其含义</td>
+<td>pass@1、重复平均、多数票各自定义</td>
+</tr>
+<tr>
+<td>随机性与不确定性</td>
+<td>多次生成不等于多次独立训练</td>
+</tr>
+<tr>
+<td>实际验证的假设</td>
+<td>RL、冷启动和蒸馏分别能带来什么</td>
+</tr>
+</tbody></table></div>
+<p><strong>实验解读（本文分析）</strong>：不是从随机权重开始，也不能把小模型蒸馏成绩当独立RL涌现。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
+<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>证据定位</th>
+<th>比较什么／观察到什么</th>
+<th>支持什么</th>
+<th>不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>§2.2 图2</td>
+<td>R1-Zero训练中AIME表现</td>
+<td>直接RL能增强此基座推理表现</td>
+<td>不证明从零获得推理</td>
+</tr>
+<tr>
+<td>§2.2行为分析</td>
+<td>响应长度、自检等样例</td>
+<td>提出行为变化观察</td>
+<td>单例aha不是因果证明</td>
+</tr>
+<tr>
+<td>完整模型主结果表（具体图表编号本文未核实）</td>
+<td>R1与其他模型</td>
+<td>支持多基准表现</td>
+<td>成本／数据未全匹配</td>
+</tr>
+<tr>
+<td>蒸馏结果表（具体图表编号本文未核实）</td>
+<td>小模型监督蒸馏</td>
+<td>展示数据迁移价值</td>
+<td>不是每个小模型独立RL</td>
+</tr>
+</tbody></table></div>
+<p>15.6→71.0是指定基座与AIME2024评估下的R1-Zero曲线，不能与多数投票或完整R1最终表直接拼接。响应变长是可观察现象，但长度增加本身不是推理质量的独立证据。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p><strong>作者描述</strong>R1-Zero有可读性和语言混合等问题。<strong>本文分析</strong>：可验证题对RL友好，开放式目标的奖励更难可靠；高分仍可能受数据覆盖、验证器和采样预算影响。</p>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<h3 id="教学例子">教学例子</h3>
+<p>以下是教学推演，不是原论文实验。</p>
+<p>模型输出十次“让我再检查一下”但最终答案错误，长度与自检措辞都增加了，正确性却没提高。判断推理增强需要看相同题目、相同采样预算下的真实答案质量。</p>
+<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
+<ol>
+<li>RL新增了什么行为，如何与基座已有能力区分？</li>
+<li>如何控制长输出导致的额外计算收益？</li>
+<li>开放任务没有可靠验证器时可沿用多少配方？</li>
+</ol>
+<h2 id="方法与证据总结">方法与证据总结</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据／理论证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>大模型推理行为能否通过强化学习增强</td>
+<td>研究R1-Zero的直接RL，再用冷启动、推理RL、拒绝采样SFT和其他RL构建R1</td>
+<td>可靠结果反馈与数据筛选可增强预训练基座已有能力</td>
+<td>R1-Zero的AIME2024 pass@1由15.6提高到71.0，完整R1与蒸馏另有结果</td>
+<td>不是从随机权重开始，也不能把小模型蒸馏成绩当独立RL涌现</td>
+</tr>
+</tbody></table></div>
+<h2 id="资料与阅读范围">资料与阅读范围</h2>
+<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
+<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h2 id="自测两题">自测两题</h2>
+<p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
+<p><strong>问题 1</strong>：R1-Zero、完整 R1 和蒸馏模型分别说明什么？</p>
+<p><strong>参考答案</strong>：R1-Zero 研究预训练基座在没有前置 SFT 的特定 RL 流程中如何变化；完整 R1 使用冷启动及多阶段训练改善能力和输出；蒸馏模型从大模型生成数据中学习。它们不能统称为“同样通过纯 RL 学会推理”。</p>
+<p><strong>问题 2</strong>：出现更长的反思文字，为什么不能单独证明推理更强？</p>
+<p><strong>参考答案</strong>：反思文字可能是有效计算，也可能只是重复表达。需要在匹配题目与生成预算后，检查正确率、鲁棒性和泛化。预训练知识、验证器、采样数量与训练数据都可能影响成绩，不能仅凭文本风格归因。</p>
+<p><a href="index.html">系列首页</a> · <a href="52-grpo.html">上一篇</a> · <a href="54-dapo.html">下一篇</a></p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 第 53 天｜DeepSeek-R1：区分纯RL探索、完整训练管线与蒸馏
+    <textarea id="md-source" hidden readonly># 第 53 天｜DeepSeek-R1：区分纯RL探索、完整训练管线与蒸馏
 
 [系列首页](README.md) · [上一篇](52-grpo.md) · [下一篇](54-dapo.md)
 
@@ -189,16 +392,16 @@ R1-Zero从预训练DeepSeek-V3基础出发，核心RL采用GRPO式更新。完�
 
 [系列首页](README.md) · [上一篇](52-grpo.md) · [下一篇](54-dapo.md)
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
     <script src="js/common.js"></script>
-    <script src="js/render.js"></script>
+    <script src="../js/md-render.js"></script>
     <script>
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
         RLChrome.mountChrome({ root: '../' });
         const currentSlug = "53-r1";
         const source = document.getElementById('md-source').value;

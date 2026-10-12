@@ -1,5 +1,19 @@
 window.RL_POSTS = [
   {
+    "slug": "00-reading-guide",
+    "file": "00-reading-guide.md",
+    "title": "Day 0｜强化学习阅读入门：先分清谁决策、谁评价、数据从哪里来",
+    "cardTitle": "Day 0 · 入门导读",
+    "day": 0,
+    "year": null,
+    "kind": "guide",
+    "question": "先弄清概念的作用、联系和符号约定，再沿时间线读论文。",
+    "excerpt": "强化学习的入门准备：核心概念、中英文术语、贯穿例子和容易混淆的区别。",
+    "eraId": "overview",
+    "eraYears": "",
+    "eraLabel": "入门导读"
+  },
+  {
     "slug": "00-timeline",
     "file": "00-强化学习发展时间线总览.md",
     "title": "强化学习发展时间线总览：从早期基础到 2026 年",
@@ -868,5 +882,6 @@ window.RL_SLUG_MAP = {
   "58-factor.md": "58-factor",
   "59-ttpo.md": "59-ttpo",
   "60-draco.md": "60-draco",
-  "61-系列收尾.md": "61-epilogue"
+  "61-系列收尾.md": "61-epilogue",
+  "00-reading-guide.md": "00-reading-guide"
 };

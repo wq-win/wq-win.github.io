@@ -7,7 +7,7 @@
     <title>057｜RT-1：大规模真实机器人动作序列 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,177 @@
                 <span class="text-gray-500">RT-1：大规模真实机器人动作序列</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="7d3e9261d9377a7be1547225a14ee44b897c1853e64e6ac0b7f7b5e523d7d5c3"><h1>057｜RT-1：大规模真实机器人动作序列</h1>
+<p><a href="index.html">系列首页</a> · <a href="056-vima.html">上一篇</a> · <a href="058-uni-pi.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>RT-1: Robotics Transformer for Real-World Control at Scale</em>，Anthony Brohan 等，首次公开2022年；本文阅读2023年8月v2正文与附录。<a href="https://arxiv.org/abs/2212.06817">论文</a>。</p>
+<h2 id="一一分钟理解真正昂贵的是持续积累可复用的机器人经验">一、一分钟理解：真正昂贵的是持续积累可复用的机器人经验</h2>
+<p>RT-1 的问题是，能不能把大量厨房操作示范放进一个模型，让它执行新的物体—动作组合，而不为每条指令单独训练？作者用13台机器人、17个月采集约13万条真实示范，并设计一个能以3 Hz输出动作的视觉语言策略。</p>
+<p>它没有让语言模型先写计划再选择技能。RT-1自身是低层操作策略：图像先被语言调制，再压缩成少量token，Transformer根据短历史预测机械臂、底盘或终止命令。长任务实验则把这个策略放入已有SayCan系统。</p>
+<p>表2中，已见任务成功率97%，未见组合76%，干扰物83%，新背景59%。这些数字说明多任务真实控制有明显进步，也说明换厨房远比训练场表现困难。</p>
+<p>一句话：在相近真实厨房操作分布中，通过多样化示范和适合实时控制的视觉语言Transformer，改善了组合泛化与干扰鲁棒性，代价是昂贵数据采集、低频动作接口和有限的新运动能力。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：行为克隆拟合专家动作；FiLM用条件信号调制特征；TokenLearner学习压缩视觉信息；动作离散化把连续值变成分类标签；组合泛化重组已见概念而非发明新控制机制。</p>
+<h2 id="二问题定义700多条指令不等于700种动作机制">二、问题定义：700多条指令不等于700种动作机制</h2>
+<p>机器人有7自由度机械臂、双指夹爪和移动底盘。策略读取自然语言指令及最近六张图像，输出末端平移旋转、夹爪开度、底盘平移转向，以及选择控制机械臂、底盘或结束的模式。</p>
+<p>这是离线行为克隆，训练使用成功示范。论文§3以最终二元奖励描述任务目标，但实际优化不是策略梯度或Q学习，而是专家动作分类损失。在线执行时不断重新观察，直到预测终止或达到步数限制。</p>
+<p>表1的744项按语言指令计数。例如“移动可乐到苹果旁”和“移动可乐到水瓶旁”是不同指令，但共享移动技能。原文将它们按动词组织成技能家族。这个计数适合描述组合覆盖，不适合直接与另一论文的任务模板数比较。</p>
+<p>“未见任务”主要是已知物体与已知技能的新组合。若测试拿起苹果，训练中仍可以见过苹果用于其他动作、拿起动作用于其他物体。作者在§7明确承认，模型还不能生成完全没有见过的新运动。</p>
+<p>训练场是按办公室厨房搭建的真实机器人教室，不是物理仿真；另外两个办公室厨房提供背景、布局、照明等变化。这个区分重要，因为主结果的真实部署优势建立在真实示范上。</p>
+<h2 id="三方法让大一点的策略赶上控制周期">三、方法：让大一点的策略赶上控制周期</h2>
+<h3 id="1-语言在视觉编码早期介入">1. 语言在视觉编码早期介入</h3>
+<p>图像经过ImageNet预训练的EfficientNet-B3。自然语言先由Universal Sentence Encoder编码，再通过FiLM调制视觉特征。教学形式为</p>
+<p><span class="reading-math" data-tex="\operatorname{FiLM}(h,i)
+=(1+\gamma(i))\odot h+\beta(i)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">FiLM</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>h</mi><mo separator="true">,</mo><mi>i</mi><mo stretchy="false">)</mo><mo>=</mo><mo stretchy="false">(</mo><mn>1</mn><mo>+</mo><mi>γ</mi><mo stretchy="false">(</mo><mi>i</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo>⊙</mo><mi>h</mi><mo>+</mo><mi>β</mi><mo stretchy="false">(</mo><mi>i</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\operatorname{FiLM}(h,i)
+=(1+\gamma(i))\odot h+\beta(i).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">FiLM</span></span><span class="mopen">(</span><span class="mord mathnormal">h</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">i</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">(</span><span class="mord mathnormal">i</span><span class="mclose">))</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊙</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">h</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mopen">(</span><span class="mord mathnormal">i</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="h"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi></mrow><annotation encoding="application/x-tex">h</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">h</span></span></span></span></span> 是中间视觉特征，<span class="reading-math" data-tex="i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span></span> 是指令，<span class="reading-math" data-tex="\gamma,\beta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi><mo separator="true">,</mo><mi>β</mi></mrow><annotation encoding="application/x-tex">\gamma,\beta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span></span></span></span></span>是语言产生的缩放偏移。将新增分支初始化为零，使整个调制最初等于恒等映射，避免一插入语言层就破坏预训练视觉表示。</p>
+<p>直觉上，“拿苹果”和“关抽屉”需要注意不同区域。早期条件化让后续压缩保留与当前任务有关的信息。但注意力图只能展示相关位置，不足以独立证明网络形成了完整物理理解。</p>
+<h3 id="2-先压缩视觉再处理时间">2. 先压缩视觉，再处理时间</h3>
+<p>每张300×300图像形成9×9×512特征，即81个视觉语言token。TokenLearner把它们压缩为8个；六帧共48个token进入8层Transformer。视觉语言编码部分约16M参数，Transformer约19M，总计35M。</p>
+<p>这与VIMA的对象检测不同：TokenLearner学的是软加权特征组合，没有显式要求一个token对应一个物体。它更容易端到端训练，但不能把压缩槽位直接解释为可读对象清单。</p>
+<h3 id="3-动作分类而不是逐维慢慢生成">3. 动作分类，而不是逐维慢慢生成</h3>
+<p>连续动作分量在各自范围内均匀离散成256档，模式变量表示机械臂、底盘或终止。监督目标可以写成</p>
+<p><span class="reading-math" data-tex="\mathcal L
+=-\mathbb E_{(i,x,a)\sim D}
+\sum_{t,j}\log p_\theta(b_{t,j}\mid i,x_{t-5:t}),"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="script">L</mi><mo>=</mo><mo>−</mo><msub><mi mathvariant="double-struck">E</mi><mrow><mo stretchy="false">(</mo><mi>i</mi><mo separator="true">,</mo><mi>x</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>∼</mo><mi>D</mi></mrow></msub><munder><mo>∑</mo><mrow><mi>t</mi><mo separator="true">,</mo><mi>j</mi></mrow></munder><mi>log</mi><mo>⁡</mo><msub><mi>p</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>b</mi><mrow><mi>t</mi><mo separator="true">,</mo><mi>j</mi></mrow></msub><mo>∣</mo><mi>i</mi><mo separator="true">,</mo><msub><mi>x</mi><mrow><mi>t</mi><mo>−</mo><mn>5</mn><mo>:</mo><mi>t</mi></mrow></msub><mo stretchy="false">)</mo><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">\mathcal L
+=-\mathbb E_{(i,x,a)\sim D}
+\sum_{t,j}\log p_\theta(b_{t,j}\mid i,x_{t-5:t}),</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathcal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4638em;vertical-align:-1.4138em;"></span><span class="mord">−</span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.5198em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight">i</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">x</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">a</span><span class="mclose mtight">)</span><span class="mrel mtight">∼</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">D</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3552em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">i</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">5</span><span class="mrel mtight">:</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="b_{t,j}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>b</mi><mrow><mi>t</mi><mo separator="true">,</mo><mi>j</mi></mrow></msub></mrow><annotation encoding="application/x-tex">b_{t,j}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>为第<span class="reading-math" data-tex="j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span></span></span></span></span>个动作分量的离散标签。不同输出头共享视觉历史特征。该式是教学概括：实现仍需对应动作掩码与有效模式。</p>
+<p>最终RT-1不在动作维度之间进行自回归生成。它采用序列模型处理观测历史，不等于每次动作都要按语言模型的方式逐token解码。消融显示后者会增加延迟，却没有整体收益。</p>
+<p>离散分布可以表示一个分量上的多个峰，而单高斯回归常把它们平均到不合理位置。但各维分布有多个峰，不意味着完整联合动作分布的相关性问题已经消失。</p>
+<pre><code class="language-text">输入：成功示范、每条示范的语言指令
+训练：
+  取最近六帧和对应专家动作
+  用语言FiLM调制EfficientNet视觉特征
+  每帧用TokenLearner压缩为八个token
+  Transformer聚合带位置编码的图像历史
+  并行预测离散动作分量与模式
+  最小化专家动作交叉熵
+  用经过视觉转换的模拟器辅助选择检查点
+部署：
+  缓存旧帧token，只编码新帧
+  读取最近六帧，预测本步动作
+  经过固定时序等待后交给底层轨迹控制
+  继续观察，直到终止命令或步数上限
+</code></pre>
+<p>数学优化的是示范动作概率；算法改变的是表征、离散动作与推理路径；实验评价是成功率和延迟。RT-1本体没有价值函数和环境模型。SayCan扩展中的可行性价值来自另行训练的MT-OPT，不应归为RT-1网络内部组件。</p>
+<h2 id="四实验怎样组织">四、实验怎样组织</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文设置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>主数据</td>
+<td>约130k成功真实示范，13台机器人，17个月</td>
+</tr>
+<tr>
+<td>任务</td>
+<td>表1共744条语言指令；多条指令共享技能</td>
+</tr>
+<tr>
+<td>对比</td>
+<td>同数据训练Gato架构变体、BC-Z、BC-Z XL</td>
+</tr>
+<tr>
+<td>参数约束</td>
+<td>RT-1 35M；Gato变体37M，受实时推理限制</td>
+</tr>
+<tr>
+<td>输入与控制</td>
+<td>六帧图像、语言；策略3 Hz，底层轨迹跟踪负责实际运动</td>
+</tr>
+<tr>
+<td>测试</td>
+<td>全文超过3000次真实试验，含已见、组合、背景、干扰及长任务</td>
+</tr>
+<tr>
+<td>选模</td>
+<td>附录C.3用RetinaGAN转换的模拟器做real-to-sim策略排序</td>
+</tr>
+<tr>
+<td>混合仿真数据</td>
+<td>另加518k成功仿真轨迹；先通过多任务RL获得采集策略</td>
+</tr>
+<tr>
+<td>跨机器人数据</td>
+<td>209k条QT-Opt成功抓取，与本机示范混合</td>
+</tr>
+<tr>
+<td>训练资源</td>
+<td>本文未逐项确认训练更新总量、计算设备及每项独立训练种子数</td>
+</tr>
+</tbody></table></div>
+<p>选模中使用模拟器，不表示主模型训练示范来自模拟器。模拟器只要能较好排序检查点就有帮助，不要求模拟成功率等于真实成功率；这也是论文明确强调的用途边界。</p>
+<p>v2正文§6.1说已见评估超过200项、未见指令21项，附录D.1则说已见744项、未见53项，并在表8列出53项。两处口径不同，本文保留表2结果及其技能加权说明，不推断每个百分数的唯一原始试验分母。超过3000次是全实验总量，也不能视作每个模型每个类别有3000次。</p>
+<h2 id="五五组证据及其边界">五、五组证据及其边界</h2>
+<p><strong>表2：相同示范数据下的架构比较。</strong> RT-1已见97%，BC-Z72%，差25个百分点；未见76%，Gato变体52%，差24个百分点；干扰物83%对最强基线47%，差36个百分点；背景59%对41%，差18个百分点。这里不是相对增加25%、24%等。结果支持整套设计，但不能单凭此表归因于Transformer，因为预训练、历史与动作表示也不同。</p>
+<p><strong>表13：哪些组件重要。</strong> 去除ImageNet预训练后未见成功率76%降至43%；改成单高斯连续动作也为43%；去掉历史后干扰表现83%降至50%。自回归动作推理为36 ms，完整模型15 ms，而背景成功率反而65%高于59%。因此“每个组件都在每个指标上更好”不成立。离散动作对这组多样示范有效，也不证明所有连续分布策略都差，扩散策略就不是单高斯。</p>
+<p><strong>表7：多样性与数量。</strong> 保留97%数据却只保留75%任务，综合泛化从73降到54；保留全部任务但只用51%数据则为50。作者据此强调多样性。但删除的是示范最少的任务，改变了长尾覆盖；实验支持“这组长尾技能有价值”，不能升格为任意数据集上增加类别永远优于增加样本。</p>
+<p><strong>表4、表5：异构数据可以互补。</strong> 混入仿真后，仅在仿真见过物体的已见技能真实成功率23%升到87%，新组合7%升到33%；原真实物体92%变90%，是小幅下降，不能称完全不变。跨机器人混合使本机抓箱内物体22%升至39%，差17个百分点、结果约1.77倍。只用Kuka数据在本机为0%，说明需要本机经验作为桥梁，不是无需适配的任意机器人迁移。</p>
+<p><strong>表6与附录D.3：长任务系统。</strong> 15条高层指令平均9.6步、平均2.4个操作技能；SayCan搭配RT-1在两个厨房执行均为67%，规划87%。第二厨房BC-Z为13%、Gato变体0%。这支持低层技能可靠性对组合任务的重要性。50步结果来自补充视频展示，不能当作15条系统评估的平均长度，更不能把SayCan的规划能力算成RT-1独立产生。</p>
+<p>对应方法、表格与附录见<a href="https://arxiv.org/html/2212.06817">论文全文</a>。本文核对上述正文与附录，未独立复现网络训练或机器人试验。</p>
+<h2 id="六贡献成本与适用范围">六、贡献、成本与适用范围</h2>
+<p>RT-1的贡献是一个可扩展的真实机器人学习系统：数据组织、语言条件视觉、紧凑token、离散动作和延迟管理共同工作。仅把模型换成Transformer，无法自动获得相同能力；没有覆盖足够技能与物体关系的数据，组合泛化没有可组合的基础。</p>
+<p>原文§7承认模仿学习能力受示范限制、难以产生未见运动、操作不够灵巧、背景泛化仍不足。这里的3 Hz足以支撑部分厨房动作，却不是面向高速接触控制的通用频率。</p>
+<p>部署延迟也有两层：表13的15 ms只是网络推理。附录C.1还安排从图像状态采集起等待固定280 ms后施加动作，以降低时序抖动；实际闭环还包含相机、通信和执行。不能由15 ms倒推出机器人能以约67 Hz有效纠错。</p>
+<p>本文进一步的分析是：成功数据采集和real-to-sim选模都需要持续工程维护。若新环境反复导致失败，纯离线策略不会自动把失败转换成纠错经验；必须补数据或引入新的学习机制。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>单任务示范难复用</td>
+<td>大规模语言条件多任务BC</td>
+<td>共享对象与动作规律</td>
+<td>表2、表7</td>
+<td>真实采集17个月</td>
+</tr>
+<tr>
+<td>大网络控制太慢</td>
+<td>TokenLearner与特征缓存</td>
+<td>缩短序列、避免重复计算</td>
+<td>§5.1、表13</td>
+<td>压缩及低频接口</td>
+</tr>
+<tr>
+<td>多样动作被平均</td>
+<td>分量离散分类</td>
+<td>表达非单峰边缘分布</td>
+<td>表13</td>
+<td>量化与联合相关性</td>
+</tr>
+<tr>
+<td>新技能数据不足</td>
+<td>混合仿真和异构机器人轨迹</td>
+<td>借本机经验建立迁移桥梁</td>
+<td>表4、表5</td>
+<td>非无条件跨形态迁移</td>
+</tr>
+</tbody></table></div>
+<h2 id="七一个教学例子">七、一个教学例子</h2>
+<p>自构例子，未运行：训练有“拿苹果”“移动香蕉到碗边”，测试“移动苹果到碗边”。语言FiLM突出苹果与碗，视觉历史帮助判断苹果是否已被抓住，策略输出末端移动和夹爪命令。成功依赖它学到了可复用的物体与动作关系。</p>
+<p>换成“削苹果皮”则不同：即便词语能被语言编码器理解，控制数据里没有刀具接触、施力和旋转的运动范式，已有组合能力也不足以凭空制造技能。</p>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：RT-1是Transformer，为什么不需要逐个动作token生成？</strong></p>
+<p>答案：Transformer可以处理输入历史后并行产生多个输出分量。最终模型去掉动作维度的自回归依赖以降低延迟；历史序列建模与输出自回归是两个独立设计选择。</p>
+<p><strong>问题2：15 ms网络推理是否等于约67 Hz机器人闭环？</strong></p>
+<p>答案：不是。还存在相机、传输、固定等待和执行延迟。论文实际命令频率是3 Hz，附录还控制从状态采集到动作施加的固定时序。评估实时能力必须看端到端闭环。</p>
+<p><strong>问题3：跨机器人混合数据的39%结果说明了什么，为什么0%对照很关键？</strong></p>
+<p>答案：混合本机数据与Kuka成功抓取，使本机箱内抓取从22%升到39%，支持经验互补；只用Kuka数据则0%，说明形态和场景差异不会被模型自动消除。本机数据提供映射桥梁，因此证据是条件迁移，不是任意机器人之间直接通用。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 057｜RT-1：大规模真实机器人动作序列
+    <textarea id="md-source" hidden readonly># 057｜RT-1：大规模真实机器人动作序列
 
 [系列首页](README.md) · [上一篇](056-vima.md) · [下一篇](058-uni-pi.md)
 
@@ -203,9 +369,9 @@ RT-1的贡献是一个可扩展的真实机器人学习系统：数据组织、�
 答案：混合本机数据与Kuka成功抓取，使本机箱内抓取从22%升到39%，支持经验互补；只用Kuka数据则0%，说明形态和场景差异不会被模型自动消除。本机数据提供映射桥梁，因此证据是条件迁移，不是任意机器人之间直接通用。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
