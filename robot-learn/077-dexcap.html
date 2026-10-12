@@ -7,7 +7,7 @@
     <title>077｜DexCap：便携式灵巧操作数据采集 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,190 @@
                 <span class="text-gray-500">DexCap：便携式灵巧操作数据采集</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="8768e4261bd05596ac8ed025fcee70de1aa5927291a07b15176b50bd0dfd5529"><h1>077｜DexCap：便携式灵巧操作数据采集</h1>
+<p><a href="index.html">系列首页</a> · <a href="076-human2humanoid.html">上一篇</a> · <a href="078-droid.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>DexCap: Scalable and Portable Mocap Data Collection System for Dexterous Manipulation</em>，2024，arXiv v1。<a href="https://arxiv.org/abs/2403.07788">论文</a>。</p>
+<h2 id="一一分钟理解先让人自然做再把动作交给机器人">一、一分钟理解：先让人自然做，再把动作交给机器人</h2>
+<p>遥操作灵巧手很慢，纯视频估计人手又常被物体遮挡。DexCap 把手指动捕、手腕定位和胸前深度相机组合起来，让人在没有机器人的地方也能采集三维操作数据。</p>
+<p>与硬件配套的 DexIL 将人手数据重定向到机器人，使用点云扩散策略学习；困难接触任务再加入人在机器人执行中的纠正。</p>
+<p>作者证明一些任务可只用人手数据训练机器人策略。它没有证明所有灵巧任务都能免除机器人数据：剪纸与准备茶的完整成功，依赖额外纠正数据且成功率仍有限。</p>
+<p>一句话：在人到机器人灵巧操作迁移中，通过同步三维动捕、观察对齐与动作重定向，提高数据采集效率并减少初始机器人示范依赖，代价是标定、形体差异、接触力缺失和部分任务的在机纠正。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：</p>
+<ul>
+<li><strong>动捕</strong>：测量身体或手部的运动轨迹。</li>
+<li><strong>手眼/多传感器标定</strong>：建立不同传感器坐标之间的转换。</li>
+<li><strong>逆运动学</strong>：从目标指尖或末端位置求关节配置。</li>
+<li><strong>形体鸿沟</strong>：人体与机器人几何、接触和动力学的差异。</li>
+<li><strong>残差纠正</strong>：在当前策略输出上叠加小修改，而非完全替代。</li>
+</ul>
+<h2 id="二背景人手视频为什么不足以直接做动作标签">二、背景：人手视频为什么不足以直接做动作标签</h2>
+<p>学习器需要两种东西：当时看到什么，以及应发给机器人什么命令。人手在图像里的位置并不直接等于机械臂末端在世界中的六维位姿；手指被遮挡时，指尖接触点还可能估错。</p>
+<p>DexCap分别解决手指相对手背的位置、手腕的全局位姿、胸部移动时相机的世界位姿。所有流对齐到共同坐标，才能把环境观察与手部运动绑定。</p>
+<p>部署机器人是双 Franka 加四指 LEAP 手。人有五指，LEAP有四指，尺度也不同，因此“动作捕捉准确”并不意味着“机器人动作正确”。丢弃小指、匹配其余指尖是一种具体对应假设。</p>
+<p>学习阶段是离线行为克隆，不使用奖励或critic。之后人的纠正属于数据增补与监督微调，也不是让策略自行根据回报优化。任务成功率是外部评价指标。<a href="https://arxiv.org/html/2403.07788v1">系统与算法：§III–IV</a>。</p>
+<h2 id="三方法数据系统与学习系统各负责哪一段">三、方法：数据系统与学习系统各负责哪一段</h2>
+<h3 id="1-同步采集与坐标系">1. 同步采集与坐标系</h3>
+<p>手套记录指尖运动，腕部 T265 通过视觉惯性定位记录手腕位姿，胸前深度相机记录环境，另一台胸部跟踪相机估计相机运动。启动时用固定卡槽建立相对变换，再把跟踪相机装到手上。</p>
+<p>教学上，若手腕坐标为<span class="reading-math" data-tex="T_{WH}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mrow><mi>W</mi><mi>H</mi></mrow></msub></mrow><annotation encoding="application/x-tex">T_{WH}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">W</span><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，指尖在腕部坐标为<span class="reading-math" data-tex="p_H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mi>H</mi></msub></mrow><annotation encoding="application/x-tex">p_H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，则：</p>
+<p><span class="reading-math" data-tex="p_W=T_{WH}[p_H^\top,1]^\top."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>p</mi><mi>W</mi></msub><mo>=</mo><msub><mi>T</mi><mrow><mi>W</mi><mi>H</mi></mrow></msub><mo stretchy="false">[</mo><msubsup><mi>p</mi><mi>H</mi><mi mathvariant="normal">⊤</mi></msubsup><mo separator="true">,</mo><mn>1</mn><msup><mo stretchy="false">]</mo><mi mathvariant="normal">⊤</mi></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">p_W=T_{WH}[p_H^\top,1]^\top.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">W</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1491em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">W</span><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose"><span class="mclose">]</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>环境点云同样转换到<span class="reading-math" data-tex="W"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>W</mi></mrow><annotation encoding="application/x-tex">W</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span></span></span></span></span>。两者必须使用一致时刻和标定；否则即使每个传感器单独准确，也可能得到“手指穿过物体”的错误训练样本。</p>
+<p>论文的便携设备造价是历史硬件口径，不含用于执行与评估的整套双臂机器人。便携采集并不等于低成本完成整个机器人实验。</p>
+<h3 id="2-重定向不只改动作也改观察">2. 重定向不只改动作，也改观察</h3>
+<p>机器人手通过指尖IK匹配人类接触位置，腕姿提供初始化。末端位姿与手指关节组成状态<span class="reading-math" data-tex="s_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">s_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，初始人手数据动作标签取下一目标状态<span class="reading-math" data-tex="a_t=s_{t+1}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>a</mi><mi>t</mi></msub><mo>=</mo><msub><mi>s</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">a_t=s_{t+1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span>。</p>
+<p>环境RGB-D转点云并稳定到世界坐标；还可以将场景与手轨迹一起调整到机器人可达区域，删除无关表面，加入重定向后的机器人手点。这样减少训练看到人手、部署看到机器人手的外观差异。</p>
+<p>不能把加入机器人手点描述成渲染出了真实机器人接触结果。它主要修正可见形体表示，并没有改变原来人手与物体的动力学。</p>
+<h3 id="3-点云扩散行为克隆">3. 点云扩散行为克隆</h3>
+<p>Perceiver压缩点集合，结合本体历史作为动作扩散条件。教学损失写为：</p>
+<p><span class="reading-math" data-tex="\mathcal L_{\rm diff}
+=\mathbb E\|\epsilon-\epsilon_\theta(A_k,k,P_{t-h:t},s_{t-h:t})\|^2,"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="script">L</mi><mrow><mi mathvariant="normal">d</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">f</mi><mi mathvariant="normal">f</mi></mrow></msub><mo>=</mo><mi mathvariant="double-struck">E</mi><mi mathvariant="normal">∥</mi><mi>ϵ</mi><mo>−</mo><msub><mi>ϵ</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>A</mi><mi>k</mi></msub><mo separator="true">,</mo><mi>k</mi><mo separator="true">,</mo><msub><mi>P</mi><mrow><mi>t</mi><mo>−</mo><mi>h</mi><mo>:</mo><mi>t</mi></mrow></msub><mo separator="true">,</mo><msub><mi>s</mi><mrow><mi>t</mi><mo>−</mo><mi>h</mi><mo>:</mo><mi>t</mi></mrow></msub><mo stretchy="false">)</mo><msup><mi mathvariant="normal">∥</mi><mn>2</mn></msup><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">\mathcal L_{\rm diff}
+=\mathbb E\|\epsilon-\epsilon_\theta(A_k,k,P_{t-h:t},s_{t-h:t})\|^2,</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathcal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight" style="margin-right:0.07778em;">diff</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathbb">E</span><span class="mord">∥</span><span class="mord mathnormal">ϵ</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">ϵ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mathnormal mtight">h</span><span class="mrel mtight">:</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mathnormal mtight">h</span><span class="mrel mtight">:</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mpunct">,</span></span></span></span></span></span></p>
+<p>其中<span class="reading-math" data-tex="P"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi></mrow><annotation encoding="application/x-tex">P</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span></span></span></span></span>是点云，<span class="reading-math" data-tex="A_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>A</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">A_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>是加噪动作序列。它学习多种可行运动的分布，而非直接平均不同抓取模式。</p>
+<h3 id="4-纠正分两种模式">4. 纠正分两种模式</h3>
+<p>小误差用残差修改策略动作，大误差可用脚踏切换到遥操作接管。收集到的纠正数据与初始数据按来源对半采样微调。</p>
+<p>关键细节是记录<strong>发送给控制器的命令</strong>，不是只记录机器人实际到达位置。接触时命令与实际位置的偏差可能产生夹持力；如果把实际位置作为目标回写，会丢掉施力意图。</p>
+<pre><code class="language-text">采集人手数据：
+    标定手套、腕部定位和胸部相机
+    同步记录手指、手腕、胸部位姿与RGB-D
+    标注任务起止，剔除复位片段
+
+转换与学习：
+    把点云和手轨迹转到统一机器人工作区
+    指尖IK得到机器人腕部与手指目标
+    用点云历史训练扩散动作策略
+
+可选纠正：
+    策略执行时，人提供残差或切换接管
+    保存实际观察与发出的纠正命令
+    初始数据和纠正数据等概率混合，微调策略
+
+自主评估：
+    固定模型，用机器人点云和本体状态闭环执行
+</code></pre>
+<h2 id="四实验设置哪些数据真正来自机器人">四、实验设置：哪些数据真正来自机器人</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>论文设置</th>
+<th>要验证的问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>基础任务</td>
+<td>海绵抓取、收球、擦盘</td>
+<td>纯人手数据能否迁移</td>
+</tr>
+<tr>
+<td>更难任务</td>
+<td>包装、剪纸、准备茶</td>
+<td>形体和接触差异何时暴露</td>
+</tr>
+<tr>
+<td>初始数据</td>
+<td>前三任务201/129/82条；包装96条</td>
+<td>人直接操作产生</td>
+</tr>
+<tr>
+<td>工具任务</td>
+<td>剪纸104条、准备茶55条</td>
+<td>单靠动捕是否足够</td>
+</tr>
+<tr>
+<td>纠正数据</td>
+<td>相关任务各30次人类纠正试验</td>
+<td>在机少量数据的增益</td>
+</tr>
+<tr>
+<td>频率</td>
+<td>动捕60Hz后降至20Hz；纠正直接20Hz</td>
+<td>时间标签对齐</td>
+</tr>
+<tr>
+<td>模型输入</td>
+<td>点云保存5000点，训练抽1000点，历史3</td>
+<td>存储规模与网络输入不同</td>
+</tr>
+<tr>
+<td>训练</td>
+<td>3000 epoch，batch16；扩散训练100/推理10步</td>
+<td>对照共享主要预算</td>
+</tr>
+<tr>
+<td>评价</td>
+<td>通常每模型每任务20次；包装每物体5次</td>
+<td>分母因实验而异</td>
+</tr>
+<tr>
+<td>尚未确认</td>
+<td>训练随机种子、总GPU时长、逐帧标定误差</td>
+<td>不补造精度或置信区间</td>
+</tr>
+</tbody></table></div>
+<p>依据 §V 与附录 A-C/A-E。机器人控制并非严格每个策略查询都固定间隔：到目标误差足够小才查询下一动作，超过最多10步也会继续。因此记录的20Hz接口与有效策略更新节奏不能简单等同。</p>
+<p>包装的“野外数据”是实验室之外采集的人手示范，再转到机器人工作空间学习，并不是机器人在任意野外场景自主工作。实验中复用了同一胸前观察相机，也降低了部分传感器差异。</p>
+<h2 id="五五处证据跨形体学习在哪里成功在哪里仍缺数据">五、五处证据：跨形体学习在哪里成功，在哪里仍缺数据</h2>
+<p><strong>证据1：图8/9的采集质量与吞吐。</strong> 论文展示遮挡时动捕优于视觉估计的例子，收球数据采集约比遥操作快三倍。它支持便携系统对这一采集任务的价值；不能把定性画面转成毫米精度证明，也不能把一项吞吐比当所有任务的固定倍数。</p>
+<p><strong>证据2：表 I 的纯动捕学习。</strong> 默认方法三任务平均约72%，但收球60%低于原始点云扩散的70%。Perceiver整体更好，仍不意味着每项都优于PointNet。图像方法失败也发生在明显人—机器人外观差异下，不能理解成RGB普遍不适合灵巧控制。</p>
+<p><strong>证据3：表 II 的包装泛化。</strong> 初始数据完整任务47%，未见物体40%；加30次纠正后分别57%、42%。提升主要在已训练物体，未见实例增益很小。不能把“纠正有效”扩大为自动提高全部分布外泛化。</p>
+<p><strong>证据4：表 III/IV 的困难任务。</strong> 剪纸与准备茶在纯动捕数据下完整成功均为0，纠正后分别20%与25%。这些结果最能说明接触和工具使用的形体鸿沟仍在。剪纸成功标准是切开纸带超过3毫米，不能写成已验证完整精密裁剪作业。</p>
+<p><strong>证据5：附录 A-G 的标签选择。</strong> 纠正记录控制命令，结合作者对剪刀握持、箱体稳定的失败解释，支持几何轨迹不足以表达全部施力需求。现有实验没有直接测量并匹配人体与机器人接触力，因此“已解决动力学对应”过强。<a href="https://arxiv.org/html/2403.07788v1">实验与实现附录</a>。</p>
+<p>这些对照主要固定初始数据比较架构，纠正阶段则新增机器人分布数据。性能提高不能只归到微调算法；新增状态覆盖、机器人观察与命令标签同时产生作用。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p>贡献在于让人手示范成为相对完整的观察—动作数据源，而不是只用于视觉预训练或高层提示。配套三维处理把移动相机、手部形态差异和机器人可达空间放进同一个流程。</p>
+<p>作者直接观察到缺乏力信息、盖子离开相机视野以及精细工具抓取失败。本文的分析是：指尖位置匹配只约束接触几何，不约束手掌接触、摩擦、闭合力和工具柄内部接触。越是依赖这些变量，纯位置重定向越难。</p>
+<p>“无需机器人采集初始数据”减少了机器人占用，但并不删除预处理成本。人工标注任务边界、点云工作区调整、重定向质量检查与后续纠正都需要资源。论文展示便携潜力，尚未形成互联网规模的实际数据验证。</p>
+<p>动作纠正也受人反应延迟影响。错误开始到人接管之间的标签如何处理，会影响模型究竟学习恢复还是继续错误；把整段纠正轨迹视为同质专家数据，需要谨慎设计。</p>
+<h2 id="七自构例子与前置概念">七、自构例子与前置概念</h2>
+<p><strong>教学例子，未运行。</strong> 人拿剪刀时，拇指深入一个环孔，另一指顶住另一个环孔。机器人手较大，即使两个指尖落在对应位置，手指中节也可能挡在环外。IK误差很小，工具依旧无法稳定受力，这不是视觉定位精度能单独解决的。</p>
+<p>人类纠正让目标关节继续闭合，而接触中的实际关节只移动少许。记录“命令更闭合”能保留施力偏差；只记录实际关节位置，下一次控制器可能不再产生足够握力。</p>
+<p>再看视角：人弯腰时胸部相机变低，未经稳定的图像变化很大；转换到世界坐标后，桌上同一物体位置较稳定。但若SLAM漂移，两只手与点云可能逐渐错位，所以统一坐标仍需要质量验证。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>遥操作采集慢</td>
+<td>便携人手动捕</td>
+<td>人直接完成动作</td>
+<td>图9吞吐</td>
+<td>仍需设备与标定</td>
+</tr>
+<tr>
+<td>人机观察不同</td>
+<td>世界坐标点云与机器人手点</td>
+<td>减少外观与视角差异</td>
+<td>表I架构比较</td>
+<td>接触动力学未对齐</td>
+</tr>
+<tr>
+<td>几何迁移无法稳定施力</td>
+<td>在机纠正与混合微调</td>
+<td>补充真实控制分布</td>
+<td>表III/IV</td>
+<td>难任务成功率仍低</td>
+</tr>
+</tbody></table></div>
+<p>阅读范围：核对 v1 硬件、重定向、学习、结果和实现附录；未独立搭建或复现。本文将无需在机初始数据的结果与加入纠正后的结果分别呈现。</p>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：DexCap与DexIL分别是什么？</strong></p>
+<p>答案：DexCap是采集三维手部和环境数据的设备系统；DexIL是把数据重定向并训练机器人策略的算法流程。设备记录准确与策略任务成功是两个独立层面的评价，不能互相替代。</p>
+<p><strong>问题2：为什么要记录纠正命令，而不是只记录机器人实际到达的位置？</strong></p>
+<p>答案：位置控制中目标与实际位置的偏差可以产生接触力。实际位置不包含完整施力意图；把它直接当目标，可能使下一次执行失去夹持或推压需要的力。</p>
+<p><strong>问题3：这篇证明了仅靠人类视频就能学会剪纸吗？</strong></p>
+<p>答案：没有。初始数据不是普通视频，而是动捕、定位和深度同步数据；剪纸纯初始数据完整成功为0，加入在机人类纠正后为20%。准确理解需要同时保留数据类型、纠正条件和具体成功标准。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 077｜DexCap：便携式灵巧操作数据采集
+    <textarea id="md-source" hidden readonly># 077｜DexCap：便携式灵巧操作数据采集
 
 [系列首页](README.md) · [上一篇](076-human2humanoid.md) · [下一篇](078-droid.md)
 
@@ -215,9 +394,9 @@ $$
 答案：没有。初始数据不是普通视频，而是动捕、定位和深度同步数据；剪纸纯初始数据完整成功为0，加入在机人类纠正后为20%。准确理解需要同时保留数据类型、纠正条件和具体成功标准。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

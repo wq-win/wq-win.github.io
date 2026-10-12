@@ -7,7 +7,7 @@
     <title>030｜QT-Opt：大规模视觉抓取的 Q 学习 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,200 @@
                 <span class="text-gray-500">QT-Opt：大规模视觉抓取的 Q 学习</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="e841967ad372f539eed2bebb90522e0460150803171b825b746a2b5ec7d7cbf9"><h1>030｜QT-Opt：大规模视觉抓取的 Q 学习</h1>
+<p><a href="index.html">系列首页</a> · <a href="029-pets.html">上一篇</a> · <a href="031-dexterous.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>QT-Opt: Scalable Deep Reinforcement Learning for Vision-Based Robotic Manipulation</em>，Dmitry Kalashnikov 等，2018。<a href="https://arxiv.org/abs/1806.10293">论文</a>。</p>
+<h2 id="一一分钟理解不是找一个抓点而是学会一整段抓取">一、一分钟理解：不是找一个抓点，而是学会一整段抓取</h2>
+<p>看到瓶子直立时，最好的动作可能先把它推倒；物体滑出夹爪时，最好的动作可能重新张开并调整。单次抓点评分很难表示这些“现在不抓，之后更好抓”的选择。QT-Opt 将移动、开合与结束都纳入连续决策，用最终抓取结果训练视觉 Q 函数。</p>
+<p>它不训练显式 Actor，而是对 Q 网络使用 CEM 搜索当前动作。旧机器人日志和新采集的数据一起训练，使大量不同物体的经验能够复用。算法之外，异步目标生成、分布式训练和自动结果标记同样是系统的重要部分。</p>
+<p>原文最高 96% 成功率来自 58 万次历史抓取加 2.8 万次在线联合微调，并采用抓到后放回的测试协议；只用历史数据为 87%。这些条件是结论的一部分。</p>
+<p>一句话：在视觉闭环抓取中，通过可复用数据的连续动作 Q 学习，学到重抓与抓前操作，改善未见物体上的抓取表现，代价是大规模真机数据和分布式计算。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>Q 函数</strong>评价动作及后续结果；<strong>软 TD 标签</strong>可为连续估计值；<strong>CEM</strong>搜索高分候选；<strong>离策略学习</strong>复用旧策略数据；<strong>闭环控制</strong>每步用新观测调整动作。</p>
+<h2 id="二设定从抓哪里改成接下来做什么">二、设定：从“抓哪里”改成“接下来做什么”</h2>
+<p>七台 KUKA LBR IIWA 各配两指夹爪和肩后 RGB 相机。输入是 472×472 图像，还包括夹爪开闭状态与相对箱底高度。论文部分图片出现腕部相机，但实验没有使用它。说“只用 RGB”指主要视觉模态，并不意味着网络完全没有本体状态。</p>
+<p>动作包括三维位置变化、用正余弦表示的偏航角变化、开夹爪、闭夹爪与结束命令。动作向量含连续和离散成分，不能直接等同于七维关节力矩。最多执行 20 步，或策略主动结束。最终夹爪在要求高度上持有物体记成功，自动标签通过放下物体后的背景差分等流程判定。</p>
+<p>论文将当前观测近似作为 Markov 状态，但也承认 POMDP 更一般。单帧不能完整确定被遮挡物体、摩擦或物体是否稳定夹住；闭环图像可以帮助修正，仍不等于所有隐变量都已观测。</p>
+<p>这是无模型、离策略强化学习，可先离线训练，再通过在线新数据联合微调。这里“on-policy 数据”指当时策略新采集的数据，学习算法仍使用回放与 Q 更新，不是改成 PPO 一类在线策略梯度。</p>
+<h2 id="三方法连续动作的最大值用搜索求">三、方法：连续动作的最大值用搜索求</h2>
+<h3 id="1-用长期-q-值代替下一次抓取分类">1. 用长期 Q 值代替下一次抓取分类</h3>
+<p>网络输入观测 <span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span> 与候选动作 <span class="reading-math" data-tex="a"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi></mrow><annotation encoding="application/x-tex">a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span></span></span></span></span>，输出 <span class="reading-math" data-tex="Q_\theta(s,a)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>Q</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">Q_\theta(s,a)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span></span></span></span></span>。教学形式的标签为：</p>
+<p><span class="reading-math" data-tex="a^*=\operatorname{CEMargmax}_a Q_{\bar\theta_1}(s',a),"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>a</mi><mo>∗</mo></msup><mo>=</mo><msub><mrow><mi mathvariant="normal">CEMargmax</mi><mo>⁡</mo></mrow><mi>a</mi></msub><msub><mi>Q</mi><msub><mover accent="true"><mi>θ</mi><mo>ˉ</mo></mover><mn>1</mn></msub></msub><mo stretchy="false">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">a^*=\operatorname{CEMargmax}_a Q_{\bar\theta_1}(s&#x27;,a),</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7387em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.139em;vertical-align:-0.3372em;"></span><span class="mop"><span class="mop"><span class="mord mathrm">CEMargmax</span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.0573em;"><span style="top:-2.4559em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2441em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.4629em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord mtight">ˉ</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3173em;"><span style="top:-2.357em;margin-left:-0.0278em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3372em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mpunct">,</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="y=r+\gamma(1-d)\min_{i=1,2}
+Q_{\bar\theta_i}(s',a^*)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>y</mi><mo>=</mo><mi>r</mi><mo>+</mo><mi>γ</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>d</mi><mo stretchy="false">)</mo><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mrow><mi>i</mi><mo>=</mo><mn>1</mn><mo separator="true">,</mo><mn>2</mn></mrow></munder><msub><mi>Q</mi><msub><mover accent="true"><mi>θ</mi><mo>ˉ</mo></mover><mi>i</mi></msub></msub><mo stretchy="false">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo separator="true">,</mo><msup><mi>a</mi><mo>∗</mo></msup><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">y=r+\gamma(1-d)\min_{i=1,2}
+Q_{\bar\theta_i}(s&#x27;,a^*).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.6657em;vertical-align:-0.8638em;"></span><span class="mord mathnormal">d</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3723em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">=</span><span class="mord mtight">1</span><span class="mpunct mtight">,</span><span class="mord mtight">2</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8638em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.4629em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord mtight">ˉ</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:-0.0278em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3372em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi></mrow><annotation encoding="application/x-tex">d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span> 是终止标志。CEM 近似找出目标 Q 下的最好动作，两个滞后目标网络取较小值，限制乐观估计。它们是同一学习网络的不同滞后版本，不是把 TD3 的两个独立训练 Critic 原封不动搬来。</p>
+<p>第一目标采用保留旧参数权重 0.9999 的指数平均，第二目标再滞后约 6000 次梯度更新。目标生成也异步进行，因此训练标签可能继续滞后；这是稳定性与吞吐的工程折中。</p>
+<h3 id="2-搜索器取代-actor">2. 搜索器取代 Actor</h3>
+<p>CEM 每轮采样 64 个动作，选最好的 6 个拟合新分布，共两轮。训练生成 TD 目标与真实执行都使用它。相比限定二次型 Q，任意神经网络可表达多个分离抓点；相比 Actor，省去一个需要跟随不断变化 Q 的最大化网络。</p>
+<p>代价是每次决策要评价多组候选。动作维数、可行约束和多峰结构会影响搜索效果。两轮 CEM 是近似优化，不保证全局最大值。</p>
+<h3 id="3-交叉熵拟合软标签">3. 交叉熵拟合软标签</h3>
+<p>网络末端输出有界值，使用交叉熵：</p>
+<p><span class="reading-math" data-tex="L_Q=-\mathbb E[y\log Q_\theta(s,a)
++(1-y)\log(1-Q_\theta(s,a))]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mi>Q</mi></msub><mo>=</mo><mo>−</mo><mi mathvariant="double-struck">E</mi><mo stretchy="false">[</mo><mi>y</mi><mi>log</mi><mo>⁡</mo><msub><mi>Q</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>+</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>y</mi><mo stretchy="false">)</mo><mi>log</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><msub><mi>Q</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_Q=-\mathbb E[y\log Q_\theta(s,a)
++(1-y)\log(1-Q_\theta(s,a))].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">Q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">−</span><span class="mord mathbb">E</span><span class="mopen">[</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">))]</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这里 <span class="reading-math" data-tex="y"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">y</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span></span></span></span> 可以是 TD 生成的连续软标签，不只是实际成功的零一标签。网络学习长期评价，因此一次推物动作可以因后续更容易抓住而获高分。</p>
+<p>奖励描述需要读细。导言突出终局二元奖励，但第 5 节还使用每步 -0.05 的时间惩罚。原文也说明惩罚理论上可能使标签超出零到一区间，只是在其实验中未观察到该问题。因此不能无条件把所有 Q 输出称为精确成功概率，更不能省掉时间代价后声称完全没有奖励塑形。</p>
+<h3 id="4-数据与目标计算解耦">4. 数据与目标计算解耦</h3>
+<p>机器人把转移送入回放系统；约一千个 Bellman 更新作业执行 CEM 并生成标签；十个训练 worker 对 Q 网络更新。约 120 万参数的视觉网络需要多达 1500 万梯度更新。模型规模按今天标准不大，但图像、候选动作和大量重复更新让计算仍很重。</p>
+<p>教学伪代码：</p>
+<pre><code class="language-text">用弱脚本探索策略启动真实抓取，自动记录终局结果
+将多机器人历史日志载入回放池
+并行重复：
+    数据端：当前策略与探索收集新抓取，追加日志
+    标签端：抽转移，在下一观测上用 CEM 搜索动作
+            用两个滞后目标 Q 的较小值生成 TD 标签
+    训练端：对图像、动作和低维状态训练 Q 的交叉熵
+            更新目标网络
+部署每一步：
+    读新图像、夹爪状态与高度
+    CEM 搜索移动、开合及结束动作
+    执行动作；若未结束，重新观测并再决策
+</code></pre>
+<h2 id="四实验设置58-万次不是-58-万张图">四、实验设置：58 万次不是 58 万张图</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>原文设置与意义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>数据</td>
+<td>约 58 万完整抓取尝试，包含多步转移；不能当成图像张数</td>
+</tr>
+<tr>
+<td>采集</td>
+<td>七机器人、约一千训练物体；累计约 800 机器人小时，跨数月实验复用</td>
+</tr>
+<tr>
+<td>启动探索</td>
+<td>成功率约 15–30% 的弱脚本，学习策略达到约 50% 后接管</td>
+</tr>
+<tr>
+<td>在线增量</td>
+<td>最佳结果额外约 2.8 万次当前策略抓取</td>
+</tr>
+<tr>
+<td>放回评估</td>
+<td>每台机器人 102 次，共七台；抓起物体放回原箱</td>
+</tr>
+<tr>
+<td>清箱评估</td>
+<td>28 个物体、30 次尝试，重复五次，报告前 10/20/30 次</td>
+</tr>
+<tr>
+<td>对照</td>
+<td>早期手眼抓取模型，分别用原数据与适配后的本数据训练</td>
+</tr>
+<tr>
+<td>信息条件</td>
+<td>同一类肩后视觉系统，QT-Opt 还利用动作设计与低维状态</td>
+</tr>
+<tr>
+<td>不确定性</td>
+<td>七台多次抓取不等于多个独立训练种子；置信区间未逐项确认</td>
+</tr>
+</tbody></table></div>
+<p>与旧方法比较时，原方法使用约 90 万抓取数据；适配 QT-Opt 数据时，因为动作格式不同，还要过滤部分抓取，留下约 40 万。它们不是完全同一数据、同一动作能力、只替换一个损失函数的纯消融。</p>
+<p>作者明确承认，真实数据跨多个实验逐步积累，限制了严格控制变量比较；因此另提供仿真消融。自主采集并不意味着零人力，物体更换、设备维护和实验组织仍存在。</p>
+<h2 id="五五组证据96-的边界在哪里">五、五组证据：96% 的边界在哪里</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>位置</th>
+<th>观察</th>
+<th>结论边界</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>表 1</td>
+<td>历史训练 87%，联合微调 96%，旧方法 78%</td>
+<td>支持数据复用加新经验，但不能把 96% 写成纯离线结果</td>
+</tr>
+<tr>
+<td>表 1 清箱</td>
+<td>前 10/20/30 次成功率 88/88/76%</td>
+<td>难物体剩余会改变评估分布，放回成功率不是清箱可靠性</td>
+</tr>
+<tr>
+<td>表 2</td>
+<td>图像 53%，加夹爪状态 58%，再加高度 70%</td>
+<td>支持低维状态作用，条件为离线 250 万更新及指定奖励</td>
+</tr>
+<tr>
+<td>表 3–4</td>
+<td>时间惩罚、学习终止各有帮助</td>
+<td>成功来自完整 MDP 设计，不全由 CEM 或 Q 网络解释</td>
+</tr>
+<tr>
+<td>表 5–6</td>
+<td>裁剪双 Q 为 81% 对 63%；32 万抓取为 78%，58 万为 87%</td>
+<td>支持目标稳定与数据规模，但属于各自消融设置</td>
+</tr>
+</tbody></table></div>
+<p>从 78% 到 96% 是增加 18 个百分点；失败率由 22% 到 4%，按四舍五入数计算减少约 81.8%，原失败率是新失败率的 5.5 倍。成功率相对提高与失败率相对下降是不同指标。</p>
+<p>在线微调从 87% 到 96%，增加九个百分点。作者推测新数据提供类似困难负例挖掘的作用，纠正策略自己的乐观外推。这是机制解释；要确认因果，仍应控制在线样本数、对象分布和失败状态覆盖。</p>
+<p>清箱五次仅两次在 30 抓以内全部清空，旧方法一次。即使放回测试非常好，也不能写成“可靠清空任何杂物箱”。末尾小物体可能卡在角落，密集场景还会反复重抓。附录扰动网球测试为 28/38 对 4/25，支持闭环反应能力，但试验数和场景都有限。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p>QT-Opt 的贡献是将长期视觉 Q 学习、连续动作搜索、自监督真机数据与异步系统组合成有效抓取流程。它说明复杂抓前行为可以从终局目标中出现，而不必逐个编写推倒、重抓技能脚本。</p>
+<p>但起步阶段仍有弱脚本探索，状态还使用夹爪与高度，动作空间、边界和终止流程也由人设计。“自动学到策略”不等于整个机器人系统没有先验。</p>
+<p>本文的分析是，固定相机布局、工作箱与两指夹爪限制了泛化范围。未见物体泛化不同于未见机器人、相机位姿或家庭场景泛化。单帧状态近似在遮挡和接触判断上也有边界。算法能够离线训练，不意味着任何日志都充分：附录表 9 的仿真比较显示脚本数据与探索数据的混合明显优于单一来源，数据覆盖本身是能力来源。</p>
+<h2 id="七一个推倒瓶子的教学例子">七、一个推倒瓶子的教学例子</h2>
+<p>自构例子，未运行：直立瓶口难夹，直接闭爪的成功率低。向侧面推不会立刻得到奖励，但瓶子倒下后容易横向夹住。若成功轨迹被记录，Bellman 更新能把后续抓取价值传回推瓶动作。纯粹“下一次闭爪能不能成功”的分类器不容易表示这个长期作用。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>抓点预测忽略前置动作</td>
+<td>长期 Q 目标</td>
+<td>后续成功传回准备动作</td>
+<td>图 4</td>
+<td>长期值可能外推错误</td>
+</tr>
+<tr>
+<td>Actor 与 Q 耦合</td>
+<td>CEM 直接搜索 Q</td>
+<td>省去最大化网络</td>
+<td>4.2 节</td>
+<td>多候选计算</td>
+</tr>
+<tr>
+<td>新物体需要丰富经验</td>
+<td>多机器人日志复用</td>
+<td>扩大视觉与交互覆盖</td>
+<td>表 1、6</td>
+<td>真机数据规模大</td>
+</tr>
+<tr>
+<td>高估和终止判断</td>
+<td>滞后双目标、学习结束</td>
+<td>减少错误自举</td>
+<td>表 4–5</td>
+<td>依赖 MDP 细节</td>
+</tr>
+</tbody></table></div>
+<p>阅读范围：核对<a href="https://arxiv.org/html/1806.10293">正文、真机消融与数据分布实验</a>，未独立复现或逐帧复评全部视频。部署吞吐与各训练阶段总算力未重新测量。</p>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：QT-Opt 没有 Actor，为什么仍然有策略？</strong></p>
+<p>答案：策略可以由计算过程定义，而不必是一张独立神经网络。给定状态，用 CEM 近似最大化 Q 的动作就是隐式策略。省掉 Actor 不等于省掉决策计算。</p>
+<p><strong>问题2：为什么 96% 抓取成功不意味着 96% 概率清空一个箱子？</strong></p>
+<p>答案：单次放回测试与连续清箱分布不同，清箱后期留下更难对象。完整清箱又要求一串事件成功，不能用单次平均值替代。原文专门设置不放回协议揭示这个差别。</p>
+<p><strong>问题3：推瓶动作没有即时奖励，怎样学出它有价值？</strong></p>
+<p>答案：它把系统带到更容易成功抓取的下一状态。下一状态的高价值经 TD 目标向前传播，使推瓶获得较高 Q。前提是数据中有足够的相关转移与成功后续，否则模型仍可能只是猜测。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 030｜QT-Opt：大规模视觉抓取的 Q 学习
+    <textarea id="md-source" hidden readonly># 030｜QT-Opt：大规模视觉抓取的 Q 学习
 
 [系列首页](README.md) · [上一篇](029-pets.md) · [下一篇](031-dexterous.md)
 
@@ -203,9 +392,9 @@ QT-Opt 的贡献是将长期视觉 Q 学习、连续动作搜索、自监督真�
 答案：它把系统带到更容易成功抓取的下一状态。下一状态的高价值经 TD 目标向前传播，使推瓶获得较高 Q。前提是数据中有足够的相关转移与成功后续，否则模型仍可能只是猜测。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

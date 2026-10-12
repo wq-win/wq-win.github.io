@@ -7,7 +7,7 @@
     <title>060｜PaLM-E：将连续感知送入语言模型 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,202 @@
                 <span class="text-gray-500">PaLM-E：将连续感知送入语言模型</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="c85409646d68a135fd5b87f87b0ac8cfe5ccc9ba93f6b0b88f43de3714eedbe4"><h1>060｜PaLM-E：将连续感知送入语言模型</h1>
+<p><a href="index.html">系列首页</a> · <a href="059-genaug.html">上一篇</a> · <a href="061-diffusion-policy.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>PaLM-E: An Embodied Multimodal Language Model</em>，Danny Driess 等，2023年；本文阅读2023年3月v1正文及附录。<a href="https://arxiv.org/abs/2303.03378">论文</a>。</p>
+<h2 id="一一分钟理解让规划器直接看而不是只听场景描述">一、一分钟理解：让规划器直接看，而不是只听场景描述</h2>
+<p>SayCan主要把语言模型与技能可行性分数组合；PaLM-E进一步把图像、连续状态或三维场景表示直接嵌入语言模型。模型既能回答“红块在蓝块下面吗”，也能生成“先移开蓝块，再抓红块”这样的步骤。</p>
+<p>它输出的仍是文本。真正的末端或关节动作来自已有低层控制器，例如移动操作使用RT-1。因此PaLM-E是一种具身视觉语言规划模型，不能等同于后来的直接动作输出VLA。</p>
+<p>实验最有价值的发现是跨域共同训练：大量视觉语言数据与少量机器人任务一起训练，能够改善有限机器人示范下的规划。但收益随任务和冻结方式变化；真实长任务主要有定性展示，不能把问答F1当成整机成功率。</p>
+<p>一句话：在已有低层技能的机器人系统中，通过把感知编码插入预训练语言模型并混合训练，改善了场景接地和部分任务规划，代价是巨大预训练资源、低层能力依赖，以及难以由文本准确率保证的物理执行。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：接地把符号与当前感知联系起来；软提示以连续向量影响语言模型；对象中心表示分离实体；分层控制区分技能选择和动作执行；灾难性遗忘指新任务训练损害原有能力。</p>
+<h2 id="二研究背景知道词义还要知道眼前的几何">二、研究背景：知道词义，还要知道眼前的几何</h2>
+<p>“把红块拿起来”可能要求先移走压在上面的蓝块。语言常识知道“上方障碍要先移开”，但纯文本模型没有眼前物体的精确配置。另一方面，一般视觉问答模型即使会识别颜色，也未必会把识别结果转成可执行的任务顺序。</p>
+<p>PaLM-E考察三个机器人领域：</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>场景</th>
+<th>输入与任务</th>
+<th>输出及执行</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>TAMP仿真</td>
+<td>物体位置、图像或对象场景表示；抓取和堆叠规划</td>
+<td>文本步骤，既有任务运动规划方法执行与判定</td>
+</tr>
+<tr>
+<td>Language-Table</td>
+<td>桌面彩色块图像；推拢、分类、相对位置指令</td>
+<td>短语言命令，Interactive Language低层策略</td>
+</tr>
+<tr>
+<td>移动操作</td>
+<td>厨房图像、用户命令、历史步骤</td>
+<td>导航与操作技能文本，已有控制系统与RT-1</td>
+</tr>
+</tbody></table></div>
+<p>学习本身是监督式文本预测，不通过环境奖励更新PaLM-E。成功条件随任务定义：有的检查计划可行性，有的运行机器人，有的只是判别回答。终止由生成的done或terminate等命令及环境流程决定。</p>
+<p>假设也很明确：系统已经拥有一个小规模可执行技能集合。PaLM-E从训练数据与提示学习哪些技能可用，论文没有再用一个强制过滤器保证输出都落在技能集合中。因而生成语句合理，不等于它对应的技能存在。</p>
+<h2 id="三方法连续观测如何变成语言模型能处理的输入">三、方法：连续观测如何变成语言模型能处理的输入</h2>
+<h3 id="1-不必把每张图先转成文字">1. 不必把每张图先转成文字</h3>
+<p>语言模型内部处理的本来就是向量。设词嵌入为<span class="reading-math" data-tex="\gamma(w)\in\mathbb R^k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi><mo stretchy="false">(</mo><mi>w</mi><mo stretchy="false">)</mo><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mi>k</mi></msup></mrow><annotation encoding="application/x-tex">\gamma(w)\in\mathbb R^k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8491em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span></span></span></span></span>，感知编码器将观测变成<span class="reading-math" data-tex="q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi></mrow><annotation encoding="application/x-tex">q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span></span></span></span>个同维向量：</p>
+<p><span class="reading-math" data-tex="\phi(O)\in\mathbb R^{q\times k}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>ϕ</mi><mo stretchy="false">(</mo><mi>O</mi><mo stretchy="false">)</mo><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><mi>q</mi><mo>×</mo><mi>k</mi></mrow></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\phi(O)\in\mathbb R^{q\times k}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">ϕ</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">O</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8991em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span><span class="mbin mtight">×</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>输入序列可以交错排列为</p>
+<p><span class="reading-math" data-tex="X=[\gamma(\text{问题}),\phi(I),
+\gamma(\text{历史步骤}),\gamma(\text{请继续})]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>X</mi><mo>=</mo><mo stretchy="false">[</mo><mi>γ</mi><mo stretchy="false">(</mo><mtext>问题</mtext><mo stretchy="false">)</mo><mo separator="true">,</mo><mi>ϕ</mi><mo stretchy="false">(</mo><mi>I</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><mi>γ</mi><mo stretchy="false">(</mo><mtext>历史步骤</mtext><mo stretchy="false">)</mo><mo separator="true">,</mo><mi>γ</mi><mo stretchy="false">(</mo><mtext>请继续</mtext><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">X=[\gamma(\text{问题}),\phi(I),
+\gamma(\text{历史步骤}),\gamma(\text{请继续})].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">(</span><span class="mord text"><span class="mord cjk_fallback">问题</span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">ϕ</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">(</span><span class="mord text"><span class="mord cjk_fallback">历史步骤</span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">(</span><span class="mord text"><span class="mord cjk_fallback">请继续</span></span><span class="mclose">)]</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>图像向量直接进入已有自注意力层，无需先挑一个词表ID或生成场景描述。视觉信息也可以插在句子不同位置，不局限于固定前缀。</p>
+<p>这种接口沿用语言模型的序列和位置编码机制；它并不表示图像已经被无损翻译成语言概念。感知编码器与投影层需要通过任务训练把信息变成模型可利用的表示。</p>
+<h3 id="2-不同表示提供不同先验">2. 不同表示提供不同先验</h3>
+<p>状态编码器用MLP嵌入物体位置、大小、颜色等。ViT把图像转成网格token，再通过投影层匹配语言模型维度。对象中心ViT使用真值物体掩码分开对象，这是额外监督，不能和无掩码视觉输入视作同信息量。</p>
+<p>OSRT通过多视角新视角合成学习对象槽位，再把槽位映射成多个语言空间向量。它不需要真值实例分割，但需要域内视觉表示学习。相关实验中OSRT和语言模型冻结，只训练小型投影接口。</p>
+<p>对象指代采用“Object 1 is &lt;对象向量&gt;”之类输入，让生成计划可以引用obj_1。低层接口也须理解这些对象索引，否则规划与执行的指代会断开。索引减少同色物体的语言歧义，但不是免费的场景解析。</p>
+<h3 id="3-仍然是目标文本的交叉熵">3. 仍然是目标文本的交叉熵</h3>
+<p>设<span class="reading-math" data-tex="y_{1:L}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>y</mi><mrow><mn>1</mn><mo>:</mo><mi>L</mi></mrow></msub></mrow><annotation encoding="application/x-tex">y_{1:L}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1</span><span class="mrel mtight">:</span><span class="mord mathnormal mtight">L</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>为目标答案或计划，优化</p>
+<p><span class="reading-math" data-tex="\mathcal L
+=-\mathbb E_D\sum_{\ell=1}^{L}
+\log p_\theta(y_\ell\mid X,y_{&lt;\ell})."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="script">L</mi><mo>=</mo><mo>−</mo><msub><mi mathvariant="double-struck">E</mi><mi>D</mi></msub><munderover><mo>∑</mo><mrow><mi mathvariant="normal">ℓ</mi><mo>=</mo><mn>1</mn></mrow><mi>L</mi></munderover><mi>log</mi><mo>⁡</mo><msub><mi>p</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>y</mi><mi mathvariant="normal">ℓ</mi></msub><mo>∣</mo><mi>X</mi><mo separator="true">,</mo><msub><mi>y</mi><mrow><mo>&lt;</mo><mi mathvariant="normal">ℓ</mi></mrow></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\mathcal L
+=-\mathbb E_D\sum_{\ell=1}^{L}
+\log p_\theta(y_\ell\mid X,y_{&lt;\ell}).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathcal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.1304em;vertical-align:-1.3021em;"></span><span class="mord">−</span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">D</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8283em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">ℓ</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">L</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3021em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">ℓ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mtight">ℓ</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>损失只覆盖非提示部分的文本。梯度可以更新编码器、投影与语言模型，也可以冻结部分组件。冻结语言模型不是“模型完全不学习”，感知接口仍能学；全量微调也不是必然更优，后面的实验会展示取舍。</p>
+<p>模型家族以PaLM为骨干：8B语言模型加4B视觉模型为12B；62B加22B为84B；540B加22B为562B。最大模型展示视觉语言能力，并不意味着每项机器人数字都来自562B。</p>
+<pre><code class="language-text">输入：视觉语言问答、机器人计划、场景判断等混合数据
+训练：
+  按混合比例抽取样本
+  把感知观测编码成语言嵌入维度的向量序列
+  与提示文字交错排列
+  自回归预测目标答案或下一步计划文本
+  仅在目标文本上计算交叉熵
+  按实验配置更新全部模型或仅感知接口
+机器人执行：
+  输入任务、当前观测与已执行步骤
+  生成下一条技能描述
+  交给已有低层策略执行
+  获取新观测，必要时重新规划
+  生成终止命令后结束
+</code></pre>
+<p>数学目标是文本预测，机制是连续感知接入与共同训练，改善指标则包括规划成功、执行成功、F1和语言能力。PaLM-E内部没有本文训练的TD价值函数，也没有显式物理世界模型；可行性问答不等于经过贝尔曼更新的价值估计。</p>
+<h2 id="四实验设计数据比例评估单位与技能依赖">四、实验设计：数据比例、评估单位与技能依赖</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文设置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>完整混合</td>
+<td>具身数据采样权重约8.9%；其余主要为视觉语言数据，另含少量文本</td>
+</tr>
+<tr>
+<td>TAMP完整数据</td>
+<td>96,000训练场景，训练3–5个物体，测试更多物体与指代变化</td>
+</tr>
+<tr>
+<td>TAMP低数据</td>
+<td>使用1%该域数据；两个规划任务各320例，不是全系统仅640例</td>
+</tr>
+<tr>
+<td>Language-Table</td>
+<td>各任务10/20/40等示范扫描；任务3最大80例</td>
+</tr>
+<tr>
+<td>追加微调</td>
+<td>附录B.2为预训练PaLM-E再训练9000步</td>
+</tr>
+<tr>
+<td>桌面评估</td>
+<td>任务2、3各80个仿真rollout；任务1用测试集文本预测准确率</td>
+</tr>
+<tr>
+<td>移动计划数据</td>
+<td>来自SayCan运行的2912条序列</td>
+</tr>
+<tr>
+<td>移动评估</td>
+<td>可行性、失败检测报告F1；真实厨房长任务为定性评估</td>
+</tr>
+<tr>
+<td>预训练与外部控制</td>
+<td>PaLM、ViT及已有机器人低层策略均提供先验和能力</td>
+</tr>
+<tr>
+<td>资源及统计</td>
+<td>本文未核实全系列训练总算力、各表独立训练种子与完整置信区间</td>
+</tr>
+</tbody></table></div>
+<p>8.9%是训练抽样配比，不是说机器人原始数据量占所有互联网样本8.9%。也不能用低数据规划示范数替代低层策略所需的全部训练数据。</p>
+<p>控制时间要按实验区分：真实桌面展示§6.3描述高层1 Hz、低层5 Hz；附录B.2的数据采集与仿真评估使用每4秒一个高层命令、低层10 Hz。它们不应被合并为一个统一频率，比较纠错速度时需指定场景。</p>
+<h2 id="五五组证据正迁移也有条件">五、五组证据：正迁移也有条件</h2>
+<p><strong>表1：低数据下的跨域帮助。</strong> ViT-4B、冻结预训练语言模型时，单机器人数据在两个TAMP规划任务分别30.6%、32.9%；完整混合为74.1%、74.6%。第一项提高43.5个百分点，结果约2.42倍。该比较支持共同训练在此设置中的正迁移，但额外数据和任务正是新增资源，不是同总数据预算下的免费提高。</p>
+<p><strong>表1、表7：对象结构与预训练各有作用。</strong> 低数据OSRT为82.5%、76.2%，高于对应单域ViT；完整数据、8物体测试中，状态输入加预训练语言模型为91.3%、89.3%，无预训练为24.6%、6.7%。这支持结构化输入和预训练对组合扩展有帮助。但状态向量来自真值信息，不能直接宣称视觉模型已经达到同样的八物体泛化。</p>
+<p><strong>表2与附录B.2：桌面任务不能全部叫执行成功率。</strong> 完整混合、未冻结的12B模型在三项最大示范设置为80.0、57.5、50.0；84B为90.0、53.8、64.4。扩大模型两项改善、一项下降。任务1是单步指令预测测试，任务2、3才运行闭环仿真；直接平均三列会混合不同评估单位。追加少量微调提升若干设置，却也没有随示范数量严格单调。</p>
+<p><strong>表4、附录表9/10：解冻带来取舍。</strong> 完整混合12B冻结语言模型时，失败检测F1为0.91、可行性0.87；解冻后分别0.77和0.91。可行性提升并不代表失败检测同步提升。F1综合精确率与召回率，不是“机器人91%执行成功”。真实厨房计划的图5展示则提供另一级定性证据，没有同表列出统一长任务成功率。</p>
+<p><strong>附录表8：大模型保留语言能力较好，但不完美。</strong> 解冻多模态训练后，12B相对其PaLM骨干平均NLG从32.4降至4.1，562B对应53.8降至51.7。作者据此认为扩大规模缓解遗忘。这是所测模型和混合训练条件的实验趋势，不是规模保证；也不能用“保持语言能力”掩盖小模型严重退化。</p>
+<p>以上来自<a href="https://arxiv.org/html/2303.03378">原文正文与附录</a>。本文核对v1方法和上述表格，未独立训练或复现真实系统；图示的单次成功不替代重复执行统计。</p>
+<h2 id="六贡献和局限接地发生在接口也受接口限制">六、贡献和局限：接地发生在接口，也受接口限制</h2>
+<p>PaLM-E的重要思想是，让语言模型直接参与感知条件下的任务决策，而不是把视觉先压成一段人工风格文字。它证明同一个模型可以共享问答、场景判断和规划训练，并让外部视觉语言任务帮助低数据机器人学习。</p>
+<p>代价首先是资源：大规模语言视觉预训练、多种机器人训练数据，以及已经能执行短指令的控制器。其次是能力分工：规划器看到“拿杯子”，不会自动掌握杯子的力控制；如果低层策略做不到，正确计划也无法完成。</p>
+<p>作者讨论表示、冻结和共同训练的不同效果，并以实验说明泛化。本文进一步的分析是，文本交叉熵没有直接惩罚碰撞或长任务失败；训练中常见的合理语句可能在当前身体上不可执行。对象指代错误、漏检和反馈延迟会同时影响计划，需要闭环评估而不能只测语言输出。</p>
+<p>示例中的单样本泛化也有先验背景：真实桌面实验是在一个模型上为100种长任务各提供一个训练例，并复用已有低层策略。“每种新高层任务一个例子”不能缩写成“机器人只看一次就学会全部动作”。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>语言规划缺现场感知</td>
+<td>连续观测嵌入语言空间</td>
+<td>保留图像与几何信息</td>
+<td>表1、图5</td>
+<td>表示质量仍是瓶颈</td>
+</tr>
+<tr>
+<td>机器人计划数据少</td>
+<td>跨域共同训练</td>
+<td>共享视觉语言先验</td>
+<td>表1、表2</td>
+<td>额外数据和预训练成本</td>
+</tr>
+<tr>
+<td>同色对象难指代</td>
+<td>对象槽位与实体标签</td>
+<td>保持计划对象身份</td>
+<td>表7</td>
+<td>需要对应低层索引</td>
+</tr>
+<tr>
+<td>多模态微调遗忘语言</td>
+<td>研究冻结与规模</td>
+<td>保留骨干或提高容量</td>
+<td>附录表8</td>
+<td>冻结/解冻各有任务取舍</td>
+</tr>
+</tbody></table></div>
+<h2 id="七一个具体例子">七、一个具体例子</h2>
+<p>自构例子，未运行：红块被蓝块压住，目标是“拿红块”。输入不仅包含指令，还包含当前图像。模型生成“移开蓝块”，低层策略执行后再拍图。如果人把蓝块放回去，下一次视觉反馈可以促使规划器重新处理障碍，而不是机械执行之前整条计划。</p>
+<p>这里有两种可能失败：模型误读叠放关系，或低层策略无法稳定抓蓝块。前者是感知规划问题，后者是执行问题。只看最终失败不能诊断原因；只看计划文本正确也不能证明系统成功。</p>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：PaLM-E和RT-1最重要的输出差别是什么？</strong></p>
+<p>答案：PaLM-E输出答案或技能步骤文本，RT-1输出机器人动作分量。前者可以以RT-1作为低层控制器。把两者连接起来不意味着PaLM-E本身学习了全部运动控制。</p>
+<p><strong>问题2：为什么640个TAMP规划例并不等于整个系统仅用了640个训练样本？</strong></p>
+<p>答案：640只是低数据设置两个规划任务的例数。模型还可能使用其他TAMP问答、完整混合数据、语言视觉预训练，以及独立低层控制器训练。衡量数据效率要明确哪一层新增数据少。</p>
+<p><strong>问题3：解冻语言模型是否一定优于冻结？</strong></p>
+<p>答案：不是。表4完整混合下解冻提高可行性F1，却降低失败检测F1；附录还显示语言遗忘。选择需依据目标任务、保留能力和训练数据，而不是认为可训练参数更多必然更好。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 060｜PaLM-E：将连续感知送入语言模型
+    <textarea id="md-source" hidden readonly># 060｜PaLM-E：将连续感知送入语言模型
 
 [系列首页](README.md) · [上一篇](059-genaug.md) · [下一篇](061-diffusion-policy.md)
 
@@ -105,7 +296,7 @@ $$
 
 OSRT通过多视角新视角合成学习对象槽位，再把槽位映射成多个语言空间向量。它不需要真值实例分割，但需要域内视觉表示学习。相关实验中OSRT和语言模型冻结，只训练小型投影接口。
 
-对象指代采用“Object 1 is <对象向量>”之类输入，让生成计划可以引用obj_1。低层接口也须理解这些对象索引，否则规划与执行的指代会断开。索引减少同色物体的语言歧义，但不是免费的场景解析。
+对象指代采用“Object 1 is &lt;对象向量&gt;”之类输入，让生成计划可以引用obj_1。低层接口也须理解这些对象索引，否则规划与执行的指代会断开。索引减少同色物体的语言歧义，但不是免费的场景解析。
 
 ### 3. 仍然是目标文本的交叉熵
 
@@ -114,7 +305,7 @@ OSRT通过多视角新视角合成学习对象槽位，再把槽位映射成多�
 $$
 \mathcal L
 =-\mathbb E_D\sum_{\ell=1}^{L}
-\log p_\theta(y_\ell\mid X,y_{<\ell}).
+\log p_\theta(y_\ell\mid X,y_{&lt;\ell}).
 $$
 
 损失只覆盖非提示部分的文本。梯度可以更新编码器、投影与语言模型，也可以冻结部分组件。冻结语言模型不是“模型完全不学习”，感知接口仍能学；全量微调也不是必然更优，后面的实验会展示取舍。
@@ -213,9 +404,9 @@ PaLM-E的重要思想是，让语言模型直接参与感知条件下的任务�
 答案：不是。表4完整混合下解冻提高可行性F1，却降低失败检测F1；附录还显示语言遗忘。选择需依据目标任务、保留能力和训练数据，而不是认为可训练参数更多必然更好。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

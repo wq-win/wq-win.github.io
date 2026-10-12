@@ -7,7 +7,7 @@
     <title>038｜CQL：离线机器人数据为什么需要保守估值 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,193 @@
                 <span class="text-gray-500">CQL：离线机器人数据为什么需要保守估值</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="230c6a2885229bd183c5689d6fecfbb91b66261dd06efb1ff71d4e0fe27820bd"><h1>038｜CQL：离线机器人数据为什么需要保守估值</h1>
+<p><a href="index.html">系列首页</a> · <a href="037-dreamer.html">上一篇</a> · <a href="039-awac.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>Conservative Q-Learning for Offline Reinforcement Learning</em>，Aviral Kumar 等，2020；本文核对 arXiv v3。<a href="https://arxiv.org/abs/2006.04779">论文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p>机械臂积累了许多旧操作记录，能否不再冒险试错，直接学出更好的策略？普通 SAC 虽然能重复使用旧经验，却不保证在完全离线时稳定：它可能选中数据里没有、价值网络却误判很好的动作，而离线训练没有机会去环境中纠错。</p>
+<p>CQL 在价值学习里增加保守正则：压低缺乏数据支持却被模型看好的动作，相对保留数据动作的价值。策略仍追求高回报，但依据的价值更谨慎。</p>
+<p>一句话总结：在固定机器人经验数据上，通过直接正则化 Q 值抑制分布外动作的过度乐观，改善离线学习，代价是可能过于保守且仍受数据覆盖限制。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：</p>
+<ul>
+<li><strong>离线强化学习</strong>：训练时只用固定记录，不再采集交互。</li>
+<li><strong>自举误差</strong>：目标依赖已有价值估计，使误差可能递归传播。</li>
+<li><strong>分布外动作</strong>：数据很少支持、却被学习策略提出的动作。</li>
+<li><strong>log-sum-exp</strong>：可微软最大，关注数值较大的候选。</li>
+<li><strong>悲观估计</strong>：在证据不足时避免把回报估得过高。</li>
+</ul>
+<h2 id="二研究背景离策略为什么还不够">二、研究背景：离策略为什么还不够</h2>
+<p>离策略学习允许训练数据来自旧策略；离线学习进一步要求训练期间不能再收集新环境经验。这多出的限制改变了错误纠正机制。</p>
+<p>在在线 SAC 中，若策略误以为某个危险动作很好，它可能执行后看到失败，从而下调价值。离线时，同一个虚高值可以不断进入 Bellman 目标，再被策略最大化，形成自我强化。</p>
+<p>本文适用于连续或离散动作，机器人相关实验包括灵巧手、迷宫运动和厨房操作。不同数据集有不同状态、奖励与动作定义；不能用一套“机械臂末端位移奖励”概括全篇。</p>
+<p>CQL 不需要学习环境动力学，也不必额外拟合完整行为策略密度。它保留价值自举框架，把主要修改放在 critic 目标。部署时状态仍可能偏离数据，保守动作价值并不自动修复所有状态分布变化。</p>
+<h2 id="三方法为何是压低一部分保留另一部分">三、方法：为何是压低一部分、保留另一部分</h2>
+<h3 id="1-先看-bellman-误差漏掉了什么">1. 先看 Bellman 误差漏掉了什么</h3>
+<p>数据集为 <span class="reading-math" data-tex="D=\{(s,a,r,s')\}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>D</mi><mo>=</mo><mo stretchy="false">{</mo><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo separator="true">,</mo><mi>r</mi><mo separator="true">,</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">D=\{(s,a,r,s&#x27;)\}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0019em;vertical-align:-0.25em;"></span><span class="mopen">{(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7519em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">)}</span></span></span></span></span>。标准价值训练最小化：</p>
+<p><span class="reading-math" data-tex="L_{\mathrm{TD}}(Q)=
+\frac12\mathbb E_D[(Q(s,a)-y)^2]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mrow><mi mathvariant="normal">T</mi><mi mathvariant="normal">D</mi></mrow></msub><mo stretchy="false">(</mo><mi>Q</mi><mo stretchy="false">)</mo><mo>=</mo><mfrac><mn>1</mn><mn>2</mn></mfrac><msub><mi mathvariant="double-struck">E</mi><mi>D</mi></msub><mo stretchy="false">[</mo><mo stretchy="false">(</mo><mi>Q</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>−</mo><mi>y</mi><msup><mo stretchy="false">)</mo><mn>2</mn></msup><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_{\mathrm{TD}}(Q)=
+\frac12\mathbb E_D[(Q(s,a)-y)^2].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">TD</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">Q</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.0074em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">2</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">D</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">[(</span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">]</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>它只约束数据中出现的动作 <span class="reading-math" data-tex="a"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi></mrow><annotation encoding="application/x-tex">a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span></span></span></span></span>。但目标 <span class="reading-math" data-tex="y"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">y</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span></span></span></span> 会查询策略在下一状态提出的新动作，策略优化又会搜索高 Q 动作。未被直接约束的地方，恰好最容易被最大化操作利用。</p>
+<p>单纯把所有 Q 都压低不够理想：所有动作一起减去相同常数，排序可能完全不变，而且会让数据支持的好动作也过度悲观。CQL 的相对正则更有针对性。</p>
+<h3 id="2-cqlh-的核心公式">2. CQL(H) 的核心公式</h3>
+<p>在有限动作空间中：</p>
+<p><span class="reading-math" data-tex="L_{\mathrm{CQL}}=
+L_{\mathrm{TD}}
++\alpha\mathbb E_{s\sim D}
+\left[
+\log\sum_a\exp Q(s,a)
+-\mathbb E_{a\sim D(\cdot\mid s)}Q(s,a)
+\right]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mrow><mi mathvariant="normal">C</mi><mi mathvariant="normal">Q</mi><mi mathvariant="normal">L</mi></mrow></msub><mo>=</mo><msub><mi>L</mi><mrow><mi mathvariant="normal">T</mi><mi mathvariant="normal">D</mi></mrow></msub><mo>+</mo><mi>α</mi><msub><mi mathvariant="double-struck">E</mi><mrow><mi>s</mi><mo>∼</mo><mi>D</mi></mrow></msub><mrow><mo fence="true">[</mo><mi>log</mi><mo>⁡</mo><munder><mo>∑</mo><mi>a</mi></munder><mi>exp</mi><mo>⁡</mo><mi>Q</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>−</mo><msub><mi mathvariant="double-struck">E</mi><mrow><mi>a</mi><mo>∼</mo><mi>D</mi><mo stretchy="false">(</mo><mo>⋅</mo><mo>∣</mo><mi>s</mi><mo stretchy="false">)</mo></mrow></msub><mi>Q</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_{\mathrm{CQL}}=
+L_{\mathrm{TD}}
++\alpha\mathbb E_{s\sim D}
+\left[
+\log\sum_a\exp Q(s,a)
+-\mathbb E_{a\sim D(\cdot\mid s)}Q(s,a)
+\right].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">CQL</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">TD</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:3em;vertical-align:-1.25em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">s</span><span class="mrel mtight">∼</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">D</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size4">[</span></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">exp</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.5198em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mrel mtight">∼</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">D</span><span class="mopen mtight">(</span><span class="mord mtight">⋅</span><span class="mrel mtight">∣</span><span class="mord mathnormal mtight">s</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3552em;"><span></span></span></span></span></span></span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size4">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>第一项 log-sum-exp 是软最大值，特别关注当前预测很高的动作；第二项减去数据动作价值，在最小化时相对抬高这些受证据支持的动作。<span class="reading-math" data-tex="\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span> 控制保守程度。</p>
+<p>从梯度更容易理解。对某个动作，正则的导数具有下面的结构：</p>
+<p><span class="reading-math" data-tex="\frac{\partial L_{\mathrm{reg}}}{\partial Q(s,a)}
+=\alpha[\mathrm{softmax}(Q(s,\cdot))_a-\hat\pi_\beta(a\mid s)]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mfrac><mrow><mi mathvariant="normal">∂</mi><msub><mi>L</mi><mrow><mi mathvariant="normal">r</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">g</mi></mrow></msub></mrow><mrow><mi mathvariant="normal">∂</mi><mi>Q</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo></mrow></mfrac><mo>=</mo><mi>α</mi><mo stretchy="false">[</mo><mrow><mi mathvariant="normal">s</mi><mi mathvariant="normal">o</mi><mi mathvariant="normal">f</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">m</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">x</mi></mrow><mo stretchy="false">(</mo><mi>Q</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mo>⋅</mo><mo stretchy="false">)</mo><msub><mo stretchy="false">)</mo><mi>a</mi></msub><mo>−</mo><msub><mover accent="true"><mi>π</mi><mo>^</mo></mover><mi>β</mi></msub><mo stretchy="false">(</mo><mi>a</mi><mo>∣</mo><mi>s</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\frac{\partial L_{\mathrm{reg}}}{\partial Q(s,a)}
+=\alpha[\mathrm{softmax}(Q(s,\cdot))_a-\hat\pi_\beta(a\mid s)].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.3074em;vertical-align:-0.936em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3714em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight" style="margin-right:0.01389em;">reg</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.936em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mopen">[</span><span class="mord"><span class="mord mathrm">softmax</span></span><span class="mopen">(</span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">⋅</span><span class="mclose">)</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05278em;">β</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mclose">)]</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>如果它被 Q 分布赋予很高概率，但行为数据很少支持，梯度下降会压低它；数据中常见却被低估的动作则可能相对上升。这里的行为分布是解释经验期望的记号，不要求实际训练一个行为策略网络。</p>
+<h3 id="3-连续动作不能直接枚举">3. 连续动作不能直接枚举</h3>
+<p>机器人动作是连续向量，<span class="reading-math" data-tex="\sum_a"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mo>∑</mo><mi>a</mi></msub></mrow><annotation encoding="application/x-tex">\sum_a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0497em;vertical-align:-0.2997em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.0017em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2997em;"><span></span></span></span></span></span></span></span></span></span></span> 要换成积分或采样近似。常见实现从均匀分布与策略分布提议动作，再做重要性加权近似。采样分布、密度校正和动作范围都会影响结果，不能把有限动作公式原样当成连续代码。</p>
+<p>论文还讨论以先前策略为参考的 CQL 变体，用于减轻高维动作采样方差。它在部分灵巧手任务上更稳定，但不代表任何场景都更优。</p>
+<h3 id="4-保守下界到底保证了什么">4. 保守下界到底保证了什么</h3>
+<p>论文先分析逐点压低的版本，再分析加入数据项后更紧的策略期望下界。后者并不要求每一个动作的 Q 都低于真实 Q：</p>
+<p><span class="reading-math" data-tex="\mathbb E_{a\sim\pi}[\hat Q(s,a)]
+\le V^\pi(s)"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="double-struck">E</mi><mrow><mi>a</mi><mo>∼</mo><mi>π</mi></mrow></msub><mo stretchy="false">[</mo><mover accent="true"><mi>Q</mi><mo>^</mo></mover><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mo>≤</mo><msup><mi>V</mi><mi>π</mi></msup><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\mathbb E_{a\sim\pi}[\hat Q(s,a)]
+\le V^\pi(s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mrel mtight">∼</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">Q</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)]</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span></span></p>
+<p>是不同于 <span class="reading-math" data-tex="\hat Q(s,a)\le Q^\pi(s,a)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>Q</mi><mo>^</mo></mover><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>≤</mo><msup><mi>Q</mi><mi>π</mi></msup><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\hat Q(s,a)\le Q^\pi(s,a)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">Q</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span></span></span></span></span> 对所有动作成立的命题。必须保留足够惩罚、采样误差、支持条件和函数近似假设。</p>
+<p>“安全策略改进”在这里是统计意义上的回报界，不能翻译成真实机器人不会碰撞。若奖励没有表达损坏风险，再保守的奖励价值也不等于工程安全保证。</p>
+<h3 id="5-教学伪代码">5. 教学伪代码</h3>
+<pre><code class="language-text">输入固定数据集 D；训练期间不新增环境数据
+初始化 Q 网络、目标网络和连续动作策略
+
+重复：
+    从 D 抽取 (s, a_data, r, s_next, done)
+    根据下一状态策略动作构造 Bellman 目标
+    在 s 上采样候选动作，近似软最大 Q
+    正则 = 候选动作软最大 Q - 数据动作 Q
+    更新 Q：TD 误差 + alpha × 正则
+    更新策略，使其偏向保守 Q 下的高价值动作
+    按实现更新目标网络与可选 alpha
+
+评估时另行运行策略；评估反馈不混回离线训练
+</code></pre>
+<p>与 MBPO 不同，这里没有生成下一状态的世界模型。被额外采样的是动作，用来约束价值函数；不是在虚拟环境里造一批转移。</p>
+<h2 id="四实验如何验证">四、实验如何验证</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原论文实验内容</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>连续控制</td>
+<td>不同质量和混合组成的 D4RL 数据</td>
+</tr>
+<tr>
+<td>机器人操作</td>
+<td>Adroit 灵巧手、Franka 厨房等</td>
+</tr>
+<tr>
+<td>对照</td>
+<td>BC、离线 SAC、BEAR、BRAC 等</td>
+</tr>
+<tr>
+<td>离散视觉</td>
+<td>固定 Atari 回放数据的子集</td>
+</tr>
+<tr>
+<td>指标</td>
+<td>D4RL 归一化回报或相应游戏回报</td>
+</tr>
+<tr>
+<td>重复</td>
+<td>主要 D4RL 表格平均四个种子</td>
+</tr>
+<tr>
+<td>数据成本</td>
+<td>数据固定；梯度更新与环境评估应分开计算</td>
+</tr>
+</tbody></table></div>
+<p>数据质量不能只用总条数描述。专家与随机轨迹的混合，可能覆盖更多状态，却让行为分布更复杂；短演示很优质，也可能只覆盖一条狭窄路径。这些因素会改变价值估计能否拼接出有效策略。</p>
+<p>表格中的许多对照数值来自基准已有报告。比较同一数据集是合理基础，但不等于所有方法在同机器上以相同调参预算重跑。原文附录给出训练细节，实际复现仍需锁定数据版本。</p>
+<h2 id="五结果机器人数据上的强项与失效">五、结果：机器人数据上的强项与失效</h2>
+<p>依据<a href="https://arxiv.org/html/2006.04779">原文第6节、表1—3及第3节定理</a>。</p>
+<ol>
+<li><strong>表1，混合运动数据</strong>：CQL 在若干混合数据上显著优于离线 SAC，支持价值正则对复杂行为分布有用；简单专家数据中，BC 仍可能很强。</li>
+<li><strong>表2，pen-human</strong>：BC 为 34.4，CQL(H) 为 37.5，另一 CQL 变体为 55.8。它们是归一化分数，不能直接称作百分之多少成功。</li>
+<li><strong>表2，pen-cloned</strong>：BC 为 56.9，两个 CQL 变体均更低。这是必须保留的反例，说明保守 RL 不保证优于模仿。</li>
+<li><strong>表2，厨房与迷宫</strong>：支持利用不同轨迹片段完成组合目标，但大迷宫仍远未满分，数据覆盖与长程学习没有被彻底解决。</li>
+<li><strong>定理3.1—3.6</strong>：解释不同保守目标及条件性改进界；理论范围不等于任意深度实现均拥有逐状态证书。</li>
+</ol>
+<p>厨房归一化分数还涉及完成子任务数量。一个高平均分可能来自许多回合完成部分任务，而非同样比例的回合完成整条操作链。使用“完整成功率”前必须回到数据集指标定义。</p>
+<p>实验中的提升回答“从这份固定记录中能否学得更好”。它不能回答数据中从未出现的物体、相机和接触方式是否泛化良好，也不能证明离线评估已经足以替代部署验证。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p>作者的贡献是将离线保守性直接放进 Q 学习，使已有价值或 actor–critic 框架容易接入。无需精确拟合复杂行为密度，是面对多人、多策略数据时有吸引力的特点。</p>
+<p>代价是额外动作采样与正则系数选择。<span class="reading-math" data-tex="\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span> 太小可能保留虚高值，太大又可能抑制数据附近真正有用的改进。连续动作维度高时，软最大近似还可能有很大方差。</p>
+<p>本文分析：悲观并不会创造缺失证据。如果所有记录都只到达门前，从未成功转动把手，算法无法仅靠价值惩罚知道正确接触方式。离线学习能力始终与数据覆盖以及奖励信息有关。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>OOD 动作虚高</td>
+<td>软最大 Q 惩罚</td>
+<td>压制易被策略利用的高估</td>
+<td>混合数据结果</td>
+<td>采样近似与系数敏感</td>
+</tr>
+<tr>
+<td>全部压低过于悲观</td>
+<td>减去数据动作 Q</td>
+<td>相对保留可信动作</td>
+<td>理论目标比较</td>
+<td>下界不是逐点保证</td>
+</tr>
+<tr>
+<td>行为分布复杂</td>
+<td>不显式拟合行为网络</td>
+<td>避免密度模型瓶颈</td>
+<td>多源数据实验</td>
+<td>仍依赖经验支持</td>
+</tr>
+<tr>
+<td>长序列数据零散</td>
+<td>保守 Bellman 学习</td>
+<td>传播并组合回报信息</td>
+<td>厨房和迷宫</td>
+<td>覆盖不足仍失败</td>
+</tr>
+</tbody></table></div>
+<h2 id="七帮助建立理解">七、帮助建立理解</h2>
+<p><strong>自构例子，未运行</strong>：一个状态中数据只记录了向左移动，真实回报约为五；网络偶然把未见的向右动作预测成二十。普通离线 actor 会被二十吸引。CQL 的软最大主要对向右施压，同时数据项保留向左的相对价值，从而减少这个未经验证的诱惑。</p>
+<p>若向右实际上回报三十，CQL 也可能错过它。这不是逻辑矛盾，而是固定数据下保守改进的代价：缺少证据时宁可谨慎，不能同时保证探索到所有更优行为。</p>
+<p>后续可检验：如何从离线数据选 <span class="reading-math" data-tex="\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span> 而不偷用在线调参？数据覆盖改善后是否应减弱惩罚？保守 critic 与模仿 actor 如何组合？这些问题连接了 IQL 与离线到在线方法。</p>
+<p>阅读范围为原文目标、主要定理陈述、方法和实验表；全部证明及数据预处理未逐项复算，本文未独立复现。</p>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：CQL 是否只是给所有 Q 值减去一个常数？</strong></p>
+<p>答：不是。正则对当前 Q 偏好的动作施压，同时相对保留数据动作。它改变动作间的价值差，而统一减常数通常不会改变排序，也不能有针对性地解决 OOD 高估。</p>
+<p><strong>问题2：为什么 CQL 可以优于行为克隆，却又不保证一定优于它？</strong></p>
+<p>答：价值学习可以利用奖励比较并拼接数据中的较好行为，超过对所有动作一视同仁的模仿；但价值误差、过度保守或很窄的数据会限制这种改进。优质专家数据下，BC 可能更直接有效。</p>
+<p><strong>问题3：论文的下界能否保证部署动作安全？</strong></p>
+<p>答：不能这样理解。下界针对满足假设时的奖励价值，而且更紧版本主要针对策略期望。物理安全需要任务奖励和约束明确表达相关风险，并另行验证真实系统行为。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 038｜CQL：离线机器人数据为什么需要保守估值
+    <textarea id="md-source" hidden readonly># 038｜CQL：离线机器人数据为什么需要保守估值
 
 [系列首页](README.md) · [上一篇](037-dreamer.md) · [下一篇](039-awac.md)
 
@@ -227,9 +409,9 @@ $$
 答：不能这样理解。下界针对满足假设时的奖励价值，而且更紧版本主要针对策略期望。物理安全需要任务奖励和约束明确表达相关风险，并另行验证真实系统行为。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

@@ -7,7 +7,7 @@
     <title>029｜PETS：用概率集成模型做控制规划 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,210 @@
                 <span class="text-gray-500">PETS：用概率集成模型做控制规划</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="ade4eae27f9335edf0e57793349af08498f83039cf8f40314cc5c07ef52db9fa"><h1>029｜PETS：用概率集成模型做控制规划</h1>
+<p><a href="index.html">系列首页</a> · <a href="028-deepmimic.html">上一篇</a> · <a href="030-qt-opt.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>Deep Reinforcement Learning in a Handful of Trials using Probabilistic Dynamics Models</em>，Kurtland Chua 等，2018。<a href="https://arxiv.org/abs/1805.12114">论文</a>。</p>
+<h2 id="一一分钟理解规划时不要只相信一条未来">一、一分钟理解：规划时不要只相信一条未来</h2>
+<p>神经网络预测“推一下，物体会到这里”，规划器就可能专挑模型最乐观的动作。但数据少时，这个预测也许只是猜测；即使模型已充分学习，摩擦和执行噪声仍会让结果不同。PETS 为这两种不确定性分别留出表达方式，再让多条可能的未来参与动作选择。</p>
+<p>其名称展开为 Probabilistic Ensembles with Trajectory Sampling：多个概率动力学网络组成集成，粒子轨迹传播未来，CEM 搜索高回报动作序列。它没有必须训练的 Actor，决策直接来自模型预测控制。</p>
+<p>作者报告在 HalfCheetah 达到比较性能所需样本相对 SAC 少约八倍、相对 PPO 少约 125 倍。这是原文特定基准和曲线口径的结果，不是任意机器人任务的倍率，更不是运行时间加速比。</p>
+<p>一句话：在连续控制中，通过同时建模数据随机性与模型未知性，并在规划中传播它们，改善模型驱动学习的数据效率，代价是部署时反复执行大量预测与动作搜索。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>异方差</strong>表示噪声大小依赖输入；<strong>Bootstrap</strong>用重采样构建多模型；<strong>粒子传播</strong>以样本表示未来分布；<strong>CEM</strong>迭代聚焦较好的候选解；<strong>MPC</strong>利用新观测不断重规划。</p>
+<h2 id="二背景两种不知道有什么不同">二、背景：两种不知道有什么不同</h2>
+<p><strong>偶然不确定性</strong>来自系统或测量随机性，例如同样控制信号导致略有不同的接触结果；更多同类数据不一定让这种随机性消失。<strong>认知不确定性</strong>来自数据不足，不同模型都能解释现有数据，却对未见动作产生不同预测；进一步采样可能缩小这种分歧。</p>
+<p>单个输出均值和方差的网络，能学习输入相关的噪声，却不自然等于对模型知识不足的贝叶斯后验。多个确定性网络能表现模型分歧，却没有单模型内部的条件噪声。PETS 用概率网络的集成同时表达两者。</p>
+<p>场景是单智能体、在线数据聚合、模型驱动控制。四个任务都在 MuJoCo 仿真：摆杆摆起、七自由度 PR2 到达、PR2 推物、HalfCheetah。状态与动作连续，使用任务奖励评价预测轨迹；任务状态由模拟器提供，不是从 RGB 视频学到的潜在状态。没有真实 PR2 硬件实验可以从这里直接引用。</p>
+<h2 id="三方法模型是什么规划怎样使用它">三、方法：模型是什么，规划怎样使用它</h2>
+<h3 id="1-每个网络输出一个分布">1. 每个网络输出一个分布</h3>
+<p>第 <span class="reading-math" data-tex="b"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>b</mi></mrow><annotation encoding="application/x-tex">b</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">b</span></span></span></span></span> 个模型输出状态变化的均值与对角方差：</p>
+<p><span class="reading-math" data-tex="\Delta s\sim\mathcal N(\mu_b(s,a),\Sigma_b(s,a)),
+\qquad s'=s+\Delta s."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Δ</mi><mi>s</mi><mo>∼</mo><mi mathvariant="script">N</mi><mo stretchy="false">(</mo><msub><mi>μ</mi><mi>b</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><msub><mi mathvariant="normal">Σ</mi><mi>b</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>=</mo><mi>s</mi><mo>+</mo><mi mathvariant="normal">Δ</mi><mi>s</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\Delta s\sim\mathcal N(\mu_b(s,a),\Sigma_b(s,a)),
+\qquad s&#x27;=s+\Delta s.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">Δ</span><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∼</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0519em;vertical-align:-0.25em;"></span><span class="mord mathcal" style="margin-right:0.14736em;">N</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">b</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord">Σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">b</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">))</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">Δ</span><span class="mord mathnormal">s</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>预测增量比从零预测整个下一状态更容易利用短时运动结构；角度输入使用正弦和余弦，避免 <span class="reading-math" data-tex="-\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><mi>π</mi></mrow><annotation encoding="application/x-tex">-\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord">−</span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span></span></span></span></span> 与 <span class="reading-math" data-tex="\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>π</mi></mrow><annotation encoding="application/x-tex">\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span></span></span></span></span> 被看作很远。</p>
+<p>高斯负对数似然忽略常数后可写为：</p>
+<p><span class="reading-math" data-tex="L_b=\sum_n
+(\Delta s_n-\mu_b)^\top\Sigma_b^{-1}
+(\Delta s_n-\mu_b)+\log\det\Sigma_b."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mi>b</mi></msub><mo>=</mo><munder><mo>∑</mo><mi>n</mi></munder><mo stretchy="false">(</mo><mi mathvariant="normal">Δ</mi><msub><mi>s</mi><mi>n</mi></msub><mo>−</mo><msub><mi>μ</mi><mi>b</mi></msub><msup><mo stretchy="false">)</mo><mi mathvariant="normal">⊤</mi></msup><msubsup><mi mathvariant="normal">Σ</mi><mi>b</mi><mrow><mo>−</mo><mn>1</mn></mrow></msubsup><mo stretchy="false">(</mo><mi mathvariant="normal">Δ</mi><msub><mi>s</mi><mi>n</mi></msub><mo>−</mo><msub><mi>μ</mi><mi>b</mi></msub><mo stretchy="false">)</mo><mo>+</mo><mi>log</mi><mo>⁡</mo><mi>det</mi><mo>⁡</mo><msub><mi mathvariant="normal">Σ</mi><mi>b</mi></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_b=\sum_n
+(\Delta s_n-\mu_b)^\top\Sigma_b^{-1}
+(\Delta s_n-\mu_b)+\log\det\Sigma_b.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">b</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3em;vertical-align:-1.25em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mopen">(</span><span class="mord">Δ</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1905em;vertical-align:-0.2914em;"></span><span class="mord"><span class="mord mathnormal">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">b</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span><span class="mord"><span class="mord">Σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.4086em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">b</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2914em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord">Δ</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">b</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">det</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord">Σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">b</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>第一项要求均值预测合理，第二项避免模型无限增大方差来逃避误差。附录还限制预测对数方差的上下界，减轻未见输入处方差塌缩或爆炸。这个实现细节很重要：给网络加一个“uncertainty”输出头，并不保证它在分布外知道自己不知道。</p>
+<h3 id="2-bootstrap-让模型保留分歧">2. Bootstrap 让模型保留分歧</h3>
+<p>从当前全部数据中有放回抽样，为每个网络生成训练集。原文使用五个模型。集成预测为：</p>
+<p><span class="reading-math" data-tex="p(s'|s,a)\approx\frac1B\sum_{b=1}^B p_b(s'|s,a)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>p</mi><mo stretchy="false">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mi mathvariant="normal">∣</mi><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>≈</mo><mfrac><mn>1</mn><mi>B</mi></mfrac><munderover><mo>∑</mo><mrow><mi>b</mi><mo>=</mo><mn>1</mn></mrow><mi>B</mi></munderover><msub><mi>p</mi><mi>b</mi></msub><mo stretchy="false">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mi mathvariant="normal">∣</mi><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">p(s&#x27;|s,a)\approx\frac1B\sum_{b=1}^B p_b(s&#x27;|s,a).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0519em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.1304em;vertical-align:-1.3021em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05017em;">B</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8283em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">b</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">B</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3021em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">b</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>网络间均值差异反映认知不确定性的近似，单网络预测方差反映条件噪声。它是实用估计，而不是严格证明校准的置信区间。五个模型如果结构偏差相同，也可能一致地猜错。</p>
+<h3 id="3-粒子轨迹避免把多种未来压成平均世界">3. 粒子轨迹避免把多种未来压成平均世界</h3>
+<p>对一个候选动作序列，初始化多个相同当前状态的粒子，随后从模型预测分布中采样下一状态。每条粒子代表一种可能的未来，回报取粒子平均：</p>
+<p><span class="reading-math" data-tex="\hat J(a_{0:H-1})
+=\frac1P\sum_{p=1}^P\sum_{t=0}^{H-1}r(s_t^{(p)},a_t)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mover accent="true"><mi>J</mi><mo>^</mo></mover><mo stretchy="false">(</mo><msub><mi>a</mi><mrow><mn>0</mn><mo>:</mo><mi>H</mi><mo>−</mo><mn>1</mn></mrow></msub><mo stretchy="false">)</mo><mo>=</mo><mfrac><mn>1</mn><mi>P</mi></mfrac><munderover><mo>∑</mo><mrow><mi>p</mi><mo>=</mo><mn>1</mn></mrow><mi>P</mi></munderover><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>0</mn></mrow><mrow><mi>H</mi><mo>−</mo><mn>1</mn></mrow></munderover><mi>r</mi><mo stretchy="false">(</mo><msubsup><mi>s</mi><mi>t</mi><mrow><mo stretchy="false">(</mo><mi>p</mi><mo stretchy="false">)</mo></mrow></msubsup><mo separator="true">,</mo><msub><mi>a</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\hat J(a_{0:H-1})
+=\frac1P\sum_{p=1}^P\sum_{t=0}^{H-1}r(s_t^{(p)},a_t).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.09618em;">J</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0833em;"><span class="mord">^</span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">0</span><span class="mrel mtight">:</span><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.2316em;vertical-align:-1.4032em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8283em;"><span style="top:-1.8829em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4032em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8283em;"><span style="top:-1.8829em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mrel mtight">=</span><span class="mord mtight">0</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2671em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.0448em;"><span style="top:-2.4542em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span><span style="top:-3.2198em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight">p</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2458em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>原文用 20 个粒子。TS1 每一步重新选择集成成员；TS∞ 让一条粒子轨迹始终使用同一成员。后者更像“一次可能世界的动力学保持一致”，前者更像每步重新混合模型不确定性。两者都不是只取模型均值。</p>
+<p>这种差异在摩擦未知时尤其直观：一条轨迹从头到尾都按低摩擦发展，比第一步低摩擦、第二步高摩擦交替，更符合固定物理世界的假设。TS∞ 还能按成员分组分离粒子内与模型间的方差。</p>
+<h3 id="4-cem-搜索动作mpc-保持闭环">4. CEM 搜索动作，MPC 保持闭环</h3>
+<p>CEM 先采样一批动作序列，保留回报较高者，用这些“精英”调整下一轮采样分布。重复几轮后执行最好序列的第一步，收到真实观测再重新规划。</p>
+<p>模型训练目标是预测似然，规划目标是任务期望回报，CEM 是求解后者的无梯度优化器。PETS 没有在损失里直接惩罚所有不确定性，也没有专门最大化信息增益。作者把利用认知不确定性进行定向探索留给后续研究。</p>
+<p>教学伪代码：</p>
+<pre><code class="language-text">先用随机控制器采集一个回合
+每轮训练：
+    为五个概率网络分别 bootstrap 当前数据
+    拟合状态增量的高斯似然
+    每个控制时刻：
+        初始化候选动作序列分布
+        重复 CEM 搜索：
+            为每个候选序列创建 20 个状态粒子
+            用概率集成推进粒子并累计任务奖励
+            按粒子平均回报选精英，更新动作分布
+        只执行选中序列的第一动作
+        将真实转移加入数据集
+    回合结束后重新训练动力学模型
+</code></pre>
+<h2 id="四实验模型选择与传播方式分开检验">四、实验：模型选择与传播方式分开检验</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>原文设置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境规模</td>
+<td>Cartpole 状态/动作 4/1；PR2 任务 14/7；HalfCheetah 17/6</td>
+</tr>
+<tr>
+<td>模型</td>
+<td>单确定性 D、单概率 P、确定性集成 DE、概率集成 PE、GP 基线</td>
+</tr>
+<tr>
+<td>传播</td>
+<td>均值 E、矩匹配 MM、分布采样 DS、轨迹采样 TS1/TS∞</td>
+</tr>
+<tr>
+<td>网络</td>
+<td>三个隐藏层，通常每层 500，HalfCheetah 每层 250，swish</td>
+</tr>
+<tr>
+<td>数据规模</td>
+<td>主结果在少于十万时间步或一百回合范围内学习</td>
+</tr>
+<tr>
+<td>重复与曲线</td>
+<td>图 3 对十次实验的“历史最好回报”求平均</td>
+</tr>
+<tr>
+<td>对照</td>
+<td>PPO、DDPG、SAC、确定性模型驱动方法、多个 GP 方案</td>
+</tr>
+<tr>
+<td>SAC 数据</td>
+<td>来自作者提供数据，而非声称所有算法在同一脚本重跑</td>
+</tr>
+<tr>
+<td>额外实验</td>
+<td>动作噪声、规划长度、CEM 与随机搜索、线性模型</td>
+</tr>
+<tr>
+<td>成本范围</td>
+<td>交互步数明确，全部硬件耗时及等调参预算未逐项确认</td>
+</tr>
+</tbody></table></div>
+<p>图 3 中一步代表 0.01 秒模拟物理时间，Cartpole 为 0.02 秒；它不是计算一次决策只花 0.01 秒。作者讨论实时控制需要快速优化，但不能用物理步长反推实际吞吐。</p>
+<p>附录 A.8 为隔离优化器效果，直接用真实仿真动力学评价 CEM 与随机搜索：都使用 2500 个候选样本，CEM 分五轮各 500，随机搜索一次采 2500。这个实验支持搜索器的作用，不是概率模型本身的消融。</p>
+<h2 id="五五处证据与正确的结论强度">五、五处证据与正确的结论强度</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>位置</th>
+<th>观察</th>
+<th>支持什么，不能证明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>图 3</td>
+<td>少量数据下达到较高的历史最好回报</td>
+<td>支持数据效率，不能证明每轮当前策略同样稳定</td>
+</tr>
+<tr>
+<td>图 4</td>
+<td>概率集成通常强于只含一种不确定性的模型</td>
+<td>支持两类表达共同有用，Cartpole 有例外</td>
+</tr>
+<tr>
+<td>附录图 A.8</td>
+<td>长规划对不同模型传播方式影响不同</td>
+<td>支持控制误差累积的重要性，不存在所有任务通用最优长度</td>
+</tr>
+<tr>
+<td>附录图 A.9、A.12</td>
+<td>加动作噪声后概率模型更稳健</td>
+<td>支持所测噪声类型，不是任意接触不确定性的保证</td>
+</tr>
+<tr>
+<td>附录图 A.11</td>
+<td>同候选数量下 CEM 优于纯随机搜索</td>
+<td>说明提升不能全部归功于网络集成</td>
+</tr>
+</tbody></table></div>
+<p>图 3 绘制“截至当前见过的最大回报”，所以曲线单调向上不表示学习没有退化。若某方法早期偶然出现一次高回报，后来表现下降，这种画法仍保留高值。它适合展示已达到能力，但评估部署可靠性还应看当前模型的独立重复回报。</p>
+<p>作者的 HalfCheetah 八倍与 125 倍样本差，是其报告的特定比较，本文不再从压缩曲线重新拟合精确阈值。不能把这些倍率推广到 Cartpole，因为低维任务上 GP-MM 略好。图 4 还提示模型类型的影响通常大于传播方式的精细差别，避免把结论过度归因于 TS∞ 这一个选择。</p>
+<h2 id="六贡献与边界不确定性有用但不是护身符">六、贡献与边界：不确定性有用，但不是护身符</h2>
+<p>论文明确承认集成、概率网络和 MPC 都有先例；贡献在于系统组合、比较与证明这种组合在若干基准上能同时兼顾数据效率和较高性能。这里的“证明”是实验论证，没有任意系统的全局性能定理。</p>
+<p>作者还报告，尝试直接通过模型梯度训练参数化策略未得到有效算法，并讨论可能的梯度问题。模型既能规划好，不代表对它反向传播就一定能训练出同样好的 Actor。预测、优化与策略参数化是三个相互影响的环节。</p>
+<p>本文的分析是：高维动作序列搜索仍很昂贵，长时任务的信用分配也受规划窗口限制。高斯输出可能不适合单一步骤的复杂多峰接触，集成分歧不保证发现共同偏差。任务奖励若错误，模型准确只会帮助更有效地优化错误目标。</p>
+<h2 id="七一个两条未来不能平均的例子">七、一个“两条未来不能平均”的例子</h2>
+<p>自构例子，未运行：机器人向物体侧面推进，低摩擦模型预测物体向左滑开，高摩擦模型预测停在原处。若只传播平均位置，规划器可能想象出一个两种物理情况都不会出现的中间位置，进而选择错误的第二步。粒子保留两个分支，对每个分支分别计算后续奖励，避免在平均幻象中规划。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>少数据网络过拟合</td>
+<td>概率模型集成</td>
+<td>表达噪声与知识不足</td>
+<td>图 4</td>
+<td>校准不保证</td>
+</tr>
+<tr>
+<td>平均未来失真</td>
+<td>多粒子轨迹传播</td>
+<td>保留不同可能结果</td>
+<td>图 1、A.7</td>
+<td>多次前向计算</td>
+</tr>
+<tr>
+<td>随机动作搜索低效</td>
+<td>CEM</td>
+<td>聚焦高回报区域</td>
+<td>图 A.11</td>
+<td>仍可能局部最优</td>
+</tr>
+<tr>
+<td>长时模型误差</td>
+<td>只执行首步再规划</td>
+<td>经常用真实状态纠偏</td>
+<td>算法 1</td>
+<td>部署计算持续存在</td>
+</tr>
+</tbody></table></div>
+<p>阅读范围：核对<a href="https://arxiv.org/html/1805.12114">完整方法、实验与附录</a>，未独立复现。正文讨论均为原始状态控制实验，不将其等同于后来的视频世界模型。</p>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：一个概率网络输出很大方差，就一定代表缺少数据吗？</strong></p>
+<p>答案：不一定。它可能学到了固有噪声，也可能在未见输入上输出任意数值。PETS 用网络间分歧近似知识不足，并用方差边界改善数值行为，但两者仍需要校准检查。</p>
+<p><strong>问题2：TS∞ 为什么固定集成成员？</strong></p>
+<p>答案：每个成员代表一种可能的动力学函数。如果世界在规划期间固定，整条轨迹使用同一函数更能保持时间一致性；单模型内部仍可每步采样随机噪声。固定模型不等于固定下一状态。</p>
+<p><strong>问题3：既然模型能衡量不确定性，PETS 是否主动选择最有学习价值的动作？</strong></p>
+<p>答案：原算法主要最大化模型下的期望任务回报，并没有显式信息增益目标。区分认知与偶然不确定性让主动探索成为可能，但不能把未来方向写成已经实现的机制。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 029｜PETS：用概率集成模型做控制规划
+    <textarea id="md-source" hidden readonly># 029｜PETS：用概率集成模型做控制规划
 
 [系列首页](README.md) · [上一篇](028-deepmimic.md) · [下一篇](030-qt-opt.md)
 
@@ -211,9 +410,9 @@ CEM 先采样一批动作序列，保留回报较高者，用这些“精英”�
 答案：原算法主要最大化模型下的期望任务回报，并没有显式信息增益目标。区分认知与偶然不确定性让主动探索成为可能，但不能把未来方向写成已经实现的机制。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

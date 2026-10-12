@@ -7,7 +7,7 @@
     <title>082｜OpenVLA：开源视觉语言动作模型 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,153 @@
                 <span class="text-gray-500">OpenVLA：开源视觉语言动作模型</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="d719b658072dc5177173eacb9179651a10df037f46ef805066efffdf85f4334e"><h1>082｜OpenVLA：开源视觉语言动作模型</h1>
+<p><a href="index.html">系列首页</a> · <a href="081-robocasa.html">上一篇</a> · <a href="083-diffusion-rl.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>OpenVLA: An Open-Source Vision-Language-Action Model</em>，Moo Jin Kim、Karl Pertsch 等，2024。<a href="https://arxiv.org/abs/2406.09246">论文</a>。</p>
+<h2 id="一一分钟理解让视觉语言模型直接输出动作">一、一分钟理解：让视觉语言模型直接输出动作</h2>
+<p>OpenVLA 将已经具备视觉语言知识的模型继续训练成机器人策略：看一张图、读一条指令，然后输出末端位移、旋转和夹爪动作。它沿用 RT-2 的动作 token 思路，重点解决开放使用、机器人数据训练和低成本适配问题。</p>
+<p>它不是先写一段计划再调用技能库，也不是通过奖励自主发现动作。主体训练是大规模示范上的监督学习。动作成功依赖视觉语义知识、机器人示范和执行接口共同作用。</p>
+<p>实验支持它在多个物体和多指令任务中有较强适应能力；窄任务的精细控制并非总优于 Diffusion Policy。它的重要性在于提供可研究、可微调的 VLA 起点，而非已经实现高可靠通用操作。</p>
+<p>一句话：在需要语言接地与少量目标示范适配的操作场景，通过将预训练视觉语言模型转为动作预测器，改善多任务控制与泛化，代价是上游训练昂贵、单步自回归推理慢和精细动作能力有限。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：<strong>VLM</strong>用图像条件生成语言表示；<strong>动作离散化</strong>把连续量编码为有限符号；<strong>自回归</strong>逐个预测条件符号；<strong>LoRA</strong>限制可训练权重变化的秩；<strong>非阻塞控制</strong>让机器人在模型计算时继续执行，因此延迟直接影响闭环。</p>
+<h2 id="二背景与设定">二、背景与设定</h2>
+<p>这是离线模仿学习。输入是单张第三人称图像和语言指令；原始版本没有观测历史、本体状态或多相机输入。输出主要采用 7 维单臂末端控制动作。不要把后续 OpenVLA-OFT 等扩展能力倒写进这篇原论文。</p>
+<p>预训练语料提供物体和语言知识，机器人数据提供观察到动作的映射。看懂“红杯子”不等于知道夹爪应旋转多少；反过来，只会把杯子抓起来也不一定能从多个物体中选择指令指定的那个。</p>
+<p>任务奖励不是训练优化对象。实验用人工定义的成功或部分成功评分，不同任务评分规则并不完全一致。终止依赖具体任务的成功、失败和评价流程，不能把动作 token 结束标志当成机器人任务结束。</p>
+<p><strong>阅读范围</strong>：依据 <a href="https://arxiv.org/html/2406.09246v1">2024 年 v1 正文及附录</a>，核查架构、训练数据、微调、量化和逐任务评分。本文未独立复现，未逐项确认所有训练运行的随机种子。</p>
+<h2 id="三方法动作怎样进入语言模型">三、方法：动作怎样进入语言模型</h2>
+<h3 id="1-融合视觉特征再接入语言主干">1. 融合视觉特征，再接入语言主干</h3>
+<p>模型基于 Prismatic：DINOv2 和 SigLIP 分别编码图像，将相应 patch 特征按通道拼接，由投影器映射到 Llama 2 的嵌入空间。</p>
+<p>作者把 DINOv2 与空间信息、SigLIP 与语义信息联系起来，这是有背景依据的设计解释。最终系统同时改变数据和模型，不能把全部性能差异归功于其中一个编码器。</p>
+<h3 id="2-每个动作维度变成离散-token">2. 每个动作维度变成离散 token</h3>
+<p>对一个连续动作维度，取训练分布的第 1 与第 99 百分位作为离散范围，划分为 256 个区间。这减少极端离群值拉大区间造成的精度损失，但也意味着范围外动作需要截断或边界处理。</p>
+<p>教学上，设分位点为 <span class="reading-math" data-tex="l,u"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>l</mi><mo separator="true">,</mo><mi>u</mi></mrow><annotation encoding="application/x-tex">l,u</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.01968em;">l</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">u</span></span></span></span></span>：</p>
+<p><span class="reading-math" data-tex="b(a)=\operatorname{clip}
+\left(\left\lfloor256\frac{a-l}{u-l}\right\rfloor,0,255\right)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>b</mi><mo stretchy="false">(</mo><mi>a</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="normal">clip</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><mrow><mo fence="true">⌊</mo><mn>256</mn><mfrac><mrow><mi>a</mi><mo>−</mo><mi>l</mi></mrow><mrow><mi>u</mi><mo>−</mo><mi>l</mi></mrow></mfrac><mo fence="true">⌋</mo></mrow><mo separator="true">,</mo><mn>0</mn><mo separator="true">,</mo><mn>255</mn><mo fence="true">)</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">b(a)=\operatorname{clip}
+\left(\left\lfloor256\frac{a-l}{u-l}\right\rfloor,0,255\right).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">b</span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em;"></span><span class="mop"><span class="mord mathrm">clip</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">(</span></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">⌊</span></span><span class="mord">256</span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3714em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord mathnormal" style="margin-right:0.01968em;">l</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord mathnormal" style="margin-right:0.01968em;">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7693em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">⌋</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">255</span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">)</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>反解可取区间中心。这个表达解释离散化，不替代具体实现的边界约定。256 个动作符号被映射到词表中保留给动作使用的位置，不能理解成给模型自然语言输出“0.012 米”就完成了控制。</p>
+<h3 id="3-自回归目标与物理误差不同">3. 自回归目标与物理误差不同</h3>
+<p>训练损失只计算动作 token：</p>
+<p><span class="reading-math" data-tex="\mathcal L=-\sum_{j=1}^{d}\log p_\theta
+(b_j\mid I,\ell,b_{&lt;j})."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="script">L</mi><mo>=</mo><mo>−</mo><munderover><mo>∑</mo><mrow><mi>j</mi><mo>=</mo><mn>1</mn></mrow><mi>d</mi></munderover><mi>log</mi><mo>⁡</mo><msub><mi>p</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>b</mi><mi>j</mi></msub><mo>∣</mo><mi>I</mi><mo separator="true">,</mo><mi mathvariant="normal">ℓ</mi><mo separator="true">,</mo><msub><mi>b</mi><mrow><mo>&lt;</mo><mi>j</mi></mrow></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\mathcal L=-\sum_{j=1}^{d}\log p_\theta
+(b_j\mid I,\ell,b_{&lt;j}).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathcal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.2499em;vertical-align:-1.4138em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8361em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">ℓ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="I"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi></mrow><annotation encoding="application/x-tex">I</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">I</span></span></span></span></span> 是图像，<span class="reading-math" data-tex="\ell"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">ℓ</mi></mrow><annotation encoding="application/x-tex">\ell</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">ℓ</span></span></span></span></span> 是指令，<span class="reading-math" data-tex="d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi></mrow><annotation encoding="application/x-tex">d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span> 为动作维度。模型先预测某个动作分量，再条件于已有分量预测下一个。这里的序列首先是同一动作向量的编码，不是未来很多时间步的动作块。</p>
+<p>交叉熵并不直接表示物理距离。相邻 bin 和相距很远的 bin 都是分类错误；机器人闭环还会放大或修正误差。因此高 token 准确率是训练诊断量，不是成功率的替代品。</p>
+<h3 id="4-机器人微调与-lora">4. 机器人微调与 LoRA</h3>
+<p>完整微调更新模型参数，包括视觉编码器。低秩适配则把某个权重变化写成：</p>
+<p><span class="reading-math" data-tex="W'=W+BA,\qquad \operatorname{rank}(BA)\le r."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>W</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>=</mo><mi>W</mi><mo>+</mo><mi>B</mi><mi>A</mi><mo separator="true">,</mo><mspace width="2em"/><mi mathvariant="normal">rank</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>B</mi><mi>A</mi><mo stretchy="false">)</mo><mo>≤</mo><mi>r</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">W&#x27;=W+BA,\qquad \operatorname{rank}(BA)\le r.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8019em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mord mathnormal">A</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mord mathrm">rank</span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mord mathnormal">A</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>冻结大矩阵 <span class="reading-math" data-tex="W"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>W</mi></mrow><annotation encoding="application/x-tex">W</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span></span></span></span></span>，训练小矩阵 <span class="reading-math" data-tex="A,B"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi><mo separator="true">,</mo><mi>B</mi></mrow><annotation encoding="application/x-tex">A,B</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">A</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span></span></span></span></span>，减少优化器状态和梯度存储；前向激活及基础权重仍需要显存。只训练 1.4% 参数不等于只需 1.4% 总显存。</p>
+<pre><code class="language-text">准备经过清洗、动作语义一致的机器人轨迹
+以分位数定义每维动作的离散区间
+对每条训练样本：
+    编码单张图像与语言指令
+    将专家动作映射成 token 序列
+    用动作 token 交叉熵更新模型
+新任务：使用目标示范全量微调或训练低秩适配器
+部署：
+    获取当前图像和任务
+    自回归预测动作分量 token
+    反离散化并按目标机器人统计还原尺度
+    执行动作，获取下一张图像
+</code></pre>
+<h2 id="四实验设计与预算">四、实验设计与预算</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>论文设置</th>
+<th>检验问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>机器人预训练</td>
+<td>约 970k Open X 轨迹；训练混合后期调整</td>
+<td>大规模动作经验</td>
+</tr>
+<tr>
+<td>主训练预算</td>
+<td>64 A100、14 天、约 21500 A100 小时，batch 2048</td>
+<td>上游计算成本</td>
+</tr>
+<tr>
+<td>开箱评价</td>
+<td>WidowX 17 任务各 10 次；Google 12 任务各 5 次</td>
+<td>多种分布变化</td>
+</tr>
+<tr>
+<td>新任务适配</td>
+<td>Franka 两个设置，7 任务，每任务 10–150 示范</td>
+<td>下游数据效率</td>
+</tr>
+<tr>
+<td>全量微调</td>
+<td>8 A100，每任务约 5–15 小时</td>
+<td>获得新策略的训练成本</td>
+</tr>
+<tr>
+<td>对照</td>
+<td>RT-X、Octo、完整及接口匹配的 Diffusion Policy</td>
+<td>系统表现与接口影响</td>
+</tr>
+<tr>
+<td>参数效率</td>
+<td>33 次评价的选定任务子集</td>
+<td>LoRA 与冻结策略</td>
+</tr>
+<tr>
+<td>量化</td>
+<td>8 个 Bridge 任务，80 次评价</td>
+<td>显存、速度和闭环表现</td>
+</tr>
+</tbody></table></div>
+<p>数据混合不是始终固定：DROID 在训练中以较保守权重加入，最终三分之一训练移除。论文的 970k 是整体训练资源描述，不应推成每个阶段始终均匀采样同一集合。</p>
+<p>参数效率与量化实验还有关键限定：§5.3–5.4 使用较小数据混合、仅 SigLIP 的简化版本。它们不是最终双视觉编码器主模型在所有任务上的逐项复验。</p>
+<p>OpenVLA 的开放性也有范围：提供机器人训练部分的代码、数据配方与权重，但基础视觉和语言组件的完整上游训练数据并未全部开放。</p>
+<h2 id="五五组证据与解释">五、五组证据与解释</h2>
+<p><strong>图 3、表 4：WidowX。</strong> OpenVLA 平均 70.6%，RT-2-X 50.6%，差约 20 个百分点。然而部分任务允许 0.5 分，这不是全部由二元完整成功构成的频率。语义泛化类别中 RT-2-X 仍占优，不能说 OpenVLA 每种泛化都更好。</p>
+<p><strong>图 4、表 5：Google。</strong> 85.0% 对 78.3%，误差区间较宽，论文按接近表现解读。主张的跨平台平均优势不能代替单个平台的统计强度。29 任务也不是 29 个全新机器人。</p>
+<p><strong>图 5、表 6：下游适配。</strong> OpenVLA 聚合较强，但倒物体等窄任务中 Diffusion Policy 可以更好。擦桌任务允许把一部分物体扫入簸箕获得部分分数，因此分数百分比不能直接说成完成整个清扫任务的比例。</p>
+<p><strong>表 1：低秩微调。</strong> 全量约 69.7%，rank 32 LoRA 约 68.2%，在此小评价集上相近；batch 16 的 LoRA 显存仍约 59.7 GB。降低参数训练量有价值，但“消费显卡可适配”依赖 batch 等配置，不能拿该表直接声称 24 GB 就能以相同设置训练。</p>
+<p><strong>表 2：量化。</strong> bfloat16 约 71.3%，int8 58.1%，int4 71.9%。8 位并非因精度更低就必然比 4 位差；作者观察到 int8 在评价 GPU 上推理只有约 1.2 Hz，改变了非阻塞控制时序，而 int4 约 3 Hz。离线 token 准确率接近，支持延迟解释，但若要严格分离，仍应做固定控制频率的对照。</p>
+<p>附录 C 说明 Bridge 数据的首步全零动作导致冻结问题，OpenVLA 清洗该数据；RT-2-X 无法重训，评价时采用第二可能动作的查询办法。这是透明且重要的系统差异，不能把对比结果解释为纯架构的因果优势。</p>
+<h2 id="六贡献成本与局限">六、贡献、成本与局限</h2>
+<p>主要贡献是开放 VLA 及其训练适配实践：让视觉语言预训练和机器人动作数据真正形成可用的控制模型。低秩适配和量化本身来自已有机器学习方法，新价值在机器人闭环中的验证。</p>
+<p>上游数据、训练时间与基础模型知识都是成本。下游少量示范学习不是从零具备能力；与从零训练方法比较时必须保留这一背景。</p>
+<p>作者承认单图像接口、吞吐和可靠性不足。我的分析是，这三个限制互相影响：缺历史会加剧遮挡和速度推断困难；慢推理会改变动作持续时间；单步预测缺少时间结构。改善最终控制未必需要扩大语言模型，可能更需要动作分块、时序设计或感知接口。</p>
+<h2 id="七教学例子与五个前置概念">七、教学例子与五个前置概念</h2>
+<p><strong>自构例子，未运行</strong>：同一个权重模型以 5 Hz 与 1 Hz 控制推杯子。即使每次预测的位移都正确，后者可能长时间持有旧目标，错过纠偏机会。再加入“统一 1 Hz”“同样动作但插值执行”两组，记录成功、超调与接触冲击，可区分模型误差和控制时序误差。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>VLA 难获取、难适配</td>
+<td>开放模型、丰富示范训练及低秩微调</td>
+<td>复用语义与控制经验</td>
+<td>多平台、下游与效率实验</td>
+<td>大量上游成本；单图像、慢推理与部分评分</td>
+</tr>
+</tbody></table></div>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：为什么动作 token 准确率高仍可能操作失败？</strong></p>
+<p>答案：离散分类没有直接表达物理误差大小，而且动作会改变下一步观测。小误差累积、错误动作持续时间或接触状态变化，都可能让离线正确率无法代表闭环成功。</p>
+<p><strong>问题2：为什么不能据此宣布扩散策略被 VLA 全面取代？</strong></p>
+<p>答案：窄任务中扩散可以更好，完整扩散策略还使用不同历史、本体信息和动作块。实验显示 VLA 对多物体、多指令任务有优势，不等于所有接触精度和时序需求都更优。</p>
+<p><strong>问题3：8 位不如 4 位，应该先怀疑什么？</strong></p>
+<p>答案：先核实硬件实现和控制频率。量化可能减少显存却增加算子开销，推理变慢会改变机器人行为。固定频率重新比较，才能更清楚判断数值精度与延迟分别贡献多少。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 082｜OpenVLA：开源视觉语言动作模型
+    <textarea id="md-source" hidden readonly># 082｜OpenVLA：开源视觉语言动作模型
 
 [系列首页](README.md) · [上一篇](081-robocasa.md) · [下一篇](083-diffusion-rl.md)
 
@@ -99,7 +241,7 @@ $$
 
 $$
 \mathcal L=-\sum_{j=1}^{d}\log p_\theta
-(b_j\mid I,\ell,b_{<j}).
+(b_j\mid I,\ell,b_{&lt;j}).
 $$
 
 $I$ 是图像，$\ell$ 是指令，$d$ 为动作维度。模型先预测某个动作分量，再条件于已有分量预测下一个。这里的序列首先是同一动作向量的编码，不是未来很多时间步的动作块。
@@ -197,9 +339,9 @@ OpenVLA 的开放性也有范围：提供机器人训练部分的代码、数据
 答案：先核实硬件实现和控制频率。量化可能减少显存却增加算子开销，推理变慢会改变机器人行为。固定频率重新比较，才能更清楚判断数值精度与延迟分别贡献多少。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

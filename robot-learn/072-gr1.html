@@ -7,7 +7,7 @@
     <title>072｜GR-1：视频预测预训练与机器人动作学习 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,186 @@
                 <span class="text-gray-500">GR-1：视频预测预训练与机器人动作学习</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="ee6478cc2806b12aec77ca5cd1bf02489d989e3ba46c2f1753155e8233844be4"><h1>072｜GR-1：视频预测预训练与机器人动作学习</h1>
+<p><a href="index.html">系列首页</a> · <a href="071-mimicgen.html">上一篇</a> · <a href="073-mobile-aloha.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>Unleashing Large-Scale Video Generative Pre-training for Visual Robot Manipulation</em>，2023，本文依据 arXiv v2。<a href="https://arxiv.org/abs/2312.13139">论文</a>。</p>
+<h2 id="一一分钟理解先学接下来会看到什么">一、一分钟理解：先学“接下来会看到什么”</h2>
+<p>人类视频没有机器人的电机标签，却包含物体如何被抓取、移动和放置的信息。GR-1 的主张是：先用这类视频训练一个预测未来画面的序列模型，再用机器人示范教它预测动作，可以获得比仅模仿机器人轨迹更好的泛化。</p>
+<p>它的动作分支与未来画面分支共享 Transformer。未来图像是一项训练任务，不是部署时先画电影、再运行逆动力学取动作的两阶段管线。</p>
+<p>作者声称视频生成预训练帮助多任务控制。CALVIN 与真实机械臂结果支持这个方向；还不能据此说模型学到了可用于任意反事实规划的物理世界模型。</p>
+<p>一句话：在语言条件视觉操作中，通过人类视频未来预测预训练与机器人动作联合学习，提高任务链和场景变化下的表现，代价是额外视频数据、预训练计算和仍然不可缺少的机器人动作示范。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：</p>
+<ul>
+<li><strong>因果注意力</strong>：每个预测只读取允许的历史信息，避免未来标签泄漏。</li>
+<li><strong>查询 token</strong>：从共享模型读取特定输出的可学习入口，不等于真实未来数据。</li>
+<li><strong>辅助任务</strong>：通过另一种监督信号帮助学习表征，而非直接优化最终评价指标。</li>
+<li><strong>行为克隆</strong>：拟合示范动作的监督学习，不包含在线试错。</li>
+<li><strong>任务链指标</strong>：连续完成多项任务，对单步小错误的积累更敏感。</li>
+</ul>
+<h2 id="二问题背景视觉表征之外还要学习时间">二、问题背景：视觉表征之外，还要学习时间</h2>
+<p>R3M 等方法先学习视觉特征，再训练控制器。GR-1 更进一步，把“如何整合一段视觉历史”也放进预训练。单帧中杯子和夹爪的距离可能相同，但历史能区分正在接近、刚刚放下或抓取失败。</p>
+<p>设定是离线监督学习：语言指令<span class="reading-math" data-tex="l"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>l</mi></mrow><annotation encoding="application/x-tex">l</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.01968em;">l</span></span></span></span></span>、图像历史<span class="reading-math" data-tex="o_{t-h:t}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>o</mi><mrow><mi>t</mi><mo>−</mo><mi>h</mi><mo>:</mo><mi>t</mi></mrow></msub></mrow><annotation encoding="application/x-tex">o_{t-h:t}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mathnormal mtight">h</span><span class="mrel mtight">:</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span>、末端和夹爪状态<span class="reading-math" data-tex="s_{t-h:t}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mrow><mi>t</mi><mo>−</mo><mi>h</mi><mo>:</mo><mi>t</mi></mrow></msub></mrow><annotation encoding="application/x-tex">s_{t-h:t}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mathnormal mtight">h</span><span class="mrel mtight">:</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span>进入模型，输出当前动作<span class="reading-math" data-tex="a_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>a</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">a_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>以及未来图像。没有在线奖励最大化、价值函数或环境搜索。</p>
+<p>CALVIN 中动作是末端位移、欧拉角增量和夹爪开关。真实实验使用 Kinova Gen2，任务包括物体搬运和抽屉操作。成功由评估规则判定；训练不以这个成功标量作强化学习奖励。</p>
+<p>所谓“零样本新场景”，是机器人训练用 A/B/C 场景，评估用 D；不是完全没有机器人训练，也不是语言和视觉预训练从未见过类似物体。新语言评估是同义指令变化，不能等同于新技能组合。这个边界影响我们如何理解标题中的泛化。<a href="https://arxiv.org/html/2312.13139v2#S3">任务定义与设置：§3.1、§4.1</a>。</p>
+<h2 id="三方法共享骨干两种预测">三、方法：共享骨干，两种预测</h2>
+<h3 id="1-输入如何变成序列">1. 输入如何变成序列</h3>
+<p>语言由冻结 CLIP 文本编码器处理；图像由冻结 MAE 预训练 ViT 编码，保留全局与压缩后的局部信息；本体状态经线性映射。每个时间步还有用于读出结果的 [OBS] 和 [ACT] 查询 token。</p>
+<p>预训练没有机器人状态和动作，所以输入只有语言、图像与观察查询。微调加入状态与动作查询。这种接口让同一时间模型先接触人类视频，再接触机器人轨迹。</p>
+<p>因果掩码不仅防止看到未来，也阻止其他 token 读取这些预测查询 token。<strong>动作头不是读取解码出的未来 RGB 图像再决策。</strong> 两个输出共享对过去信息的表示，视频损失通过参数学习间接帮助动作；这比“模型先想象再行动”的口号更准确。</p>
+<h3 id="2-损失函数及其含义">2. 损失函数及其含义</h3>
+<p>按原文式3：</p>
+<p><span class="reading-math" data-tex="\mathcal L=
+\mathcal L_{\rm arm}+\mathcal L_{\rm gripper}
++\mathcal L_{\rm video}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="script">L</mi><mo>=</mo><msub><mi mathvariant="script">L</mi><mrow><mi mathvariant="normal">a</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">m</mi></mrow></msub><mo>+</mo><msub><mi mathvariant="script">L</mi><mrow><mi mathvariant="normal">g</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">p</mi><mi mathvariant="normal">p</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">r</mi></mrow></msub><mo>+</mo><msub><mi mathvariant="script">L</mi><mrow><mi mathvariant="normal">v</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">d</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">o</mi></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\mathcal L=
+\mathcal L_{\rm arm}+\mathcal L_{\rm gripper}
++\mathcal L_{\rm video}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathcal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathcal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">arm</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathcal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3175em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">gripper</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathcal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">video</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>连续机械臂动作使用 Smooth-L1，夹爪二分类使用交叉熵，未来图像使用像素重建误差。教学上可写：</p>
+<p><span class="reading-math" data-tex="\mathcal L_{\rm video}
+=\mathbb E\|\hat o_{t+\Delta t}-o_{t+\Delta t}\|_2^2."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="script">L</mi><mrow><mi mathvariant="normal">v</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">d</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">o</mi></mrow></msub><mo>=</mo><mi mathvariant="double-struck">E</mi><mi mathvariant="normal">∥</mi><msub><mover accent="true"><mi>o</mi><mo>^</mo></mover><mrow><mi>t</mi><mo>+</mo><mi mathvariant="normal">Δ</mi><mi>t</mi></mrow></msub><mo>−</mo><msub><mi>o</mi><mrow><mi>t</mi><mo>+</mo><mi mathvariant="normal">Δ</mi><mi>t</mi></mrow></msub><msubsup><mi mathvariant="normal">∥</mi><mn>2</mn><mn>2</mn></msubsup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\mathcal L_{\rm video}
+=\mathbb E\|\hat o_{t+\Delta t}-o_{t+\Delta t}\|_2^2.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathcal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">video</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathbb">E</span><span class="mord">∥</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">o</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">Δ</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">Δ</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>具体实现对图像 patch 做归一化，不能把这简式误当作未经处理的原始 RGB 损失。Smooth-L1 在小误差处像平方损失、大误差处像绝对误差，减轻少数异常动作标签的影响。</p>
+<p>优化目标是三种监督误差；机制改变是共享时间表征与预训练；实验指标是完成任务数量和成功率。像素误差减少本身不是控制性能定理。</p>
+<h3 id="3-教学伪代码">3. 教学伪代码</h3>
+<pre><code class="language-text">阶段一：视频预训练
+冻结 CLIP 文本编码器和 MAE 图像编码器
+重复采样带语言描述的人类视频片段：
+    编码过去图像和语言
+    用因果 Transformer 的观察查询预测未来帧
+    最小化视频重建损失，更新时序骨干和预测头
+
+阶段二：机器人微调
+重复采样带语言的机器人示范序列：
+    输入过去图像、末端状态、夹爪状态与语言
+    观察查询输出未来帧，动作查询输出当前机械臂和夹爪动作
+    更新视频损失 + 动作 Smooth-L1 + 夹爪交叉熵
+
+部署：
+    维护历史窗口
+    前向计算当前动作
+    执行动作、读取新观察、滚动窗口
+</code></pre>
+<p>这不是 MPC：没有采样候选动作并比较预测未来的回报，也没有 Bellman 备份。视频中没有动作标签的阶段，更不可能直接从损失中恢复机器人关节控制规律。</p>
+<h2 id="四实验怎样验证">四、实验怎样验证</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文设置</th>
+<th>需要注意的解释</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>视频数据</td>
+<td>从 Ego4D 抽取80万短片、800万帧</td>
+<td>数据集总时长不是实际训练片段时长</td>
+</tr>
+<tr>
+<td>模型</td>
+<td>195M总参数、46M可训练；12层时序Transformer</td>
+<td>冻结编码器仍贡献预训练知识</td>
+</tr>
+<tr>
+<td>CALVIN数据</td>
+<td>带语言轨迹用于GR-1；部分基线还用无语言数据</td>
+<td>不是所有方法同数据接口</td>
+</tr>
+<tr>
+<td>预训练/微调</td>
+<td>50/20 epoch，batch 1024/512</td>
+<td>不能仅按机器人样本量比较总计算</td>
+</tr>
+<tr>
+<td>时间窗口</td>
+<td>长度10；机器人未来预测间隔3步</td>
+<td>预测间隔是数据步，不自动等于3秒</td>
+</tr>
+<tr>
+<td>CALVIN评估</td>
+<td>1000条五任务指令链，每任务最多360步</td>
+<td>失败便停止该链</td>
+</tr>
+<tr>
+<td>真实数据</td>
+<td>搬运1775条，抽屉2856条</td>
+<td>是机器人演示，不是人类视频直接零样本控制</td>
+</tr>
+<tr>
+<td>基线</td>
+<td>RT-1、HULC、MCIL、MT-R3M，随场景适用</td>
+<td>MT-R3M控制骨干可训练参数匹配</td>
+</tr>
+<tr>
+<td>尚未确认</td>
+<td>全部训练种子、真实各子条件试验次数及置信区间、GPU总时长</td>
+<td>不把单表差值当稳定统计规律</td>
+</tr>
+</tbody></table></div>
+<p>来源为 §3.3、§4、附录 A.1–A.3。CALVIN 原始24小时 play 数据中，只有少部分带语言；不能把“1%有标签”误读成只在所有机器人数据的1%信息条件下公平击败同预算方法。GR-1 另外使用大规模视频、MAE 和 CLIP 先验。</p>
+<p>真实“见过对象”还混合了训练场景与增加干扰物、背景变化的场景；该列不是纯原场景成绩。未见实例和未见类别的定义也不同：前者换同类物体实例，后者换机器人训练中没有的类别。</p>
+<h2 id="五五处证据以及它们不能证明什么">五、五处证据，以及它们不能证明什么</h2>
+<p><strong>证据1：表1的任务链。</strong> ABCD→D 的首任务成功率由 HULC 的88.9%到 GR-1 的94.9%，增加6个百分点；平均完成长度由3.06到4.21。完整五任务成功率是73.1%，因此不能把94.9%写成“五任务全部完成率”。链式指标说明连续可靠性比单任务成绩更苛刻。</p>
+<p><strong>证据2：表1的新场景。</strong> ABC→D 首任务85.4%，完整链40.1%。它支持跨这个基准场景布局和外观的迁移，不证明跨任意机械臂或真实厨房迁移。与训练含 D 的结果相比仍有明显下降。</p>
+<p><strong>证据3：表4的结构消融。</strong> 平均链长度从去掉两项的3.33，到只保留未来预测的3.82，再到完整预训练的4.21。可见架构与辅助目标本身已有贡献；不能把相对外部基线的所有优势都归因于额外视频。并且这不是完整二乘二消融：缺少“预训练后移除预测任务”的对应条件。</p>
+<p><strong>证据4：表5的预测距离。</strong> 不使用视频预训练时，未来1/3/5步对应平均长度3.61/3.82/3.67。中间间隔较好，说明“预测越远越有用”并不成立。远期画面可能含有对当前动作不必要的不确定性。</p>
+<p><strong>证据5：表2与图6。</strong> 真实未见类别成功率只有30%，低于未见实例73%；作者观察到颜色相近物体混淆。图6展示的未来画面是定性证据，没有证明预测误差与控制收益之间的单调关系。<a href="https://arxiv.org/html/2312.13139v2">实验表格与消融：原文</a>。</p>
+<p>附录表7也有局部退步，例如滑动板向右与开抽屉的完整模型并非略去视频分支版本的全面胜者。因此结论应是整体改善，而不是每项技能都需要视频预测。</p>
+<h2 id="六贡献与局限预测视觉变化不等于理解全部物理">六、贡献与局限：预测视觉变化，不等于理解全部物理</h2>
+<p>新意主要在预训练与控制的接口：不是只换一个更强视觉编码器，而是让同一时序模型在两种数据上工作。冻结编码器降低训练自由度，同时保留已有视觉语言知识。</p>
+<p>作者将收益解释为预测未来提供行动线索。这是受到消融支持的解释，但严格说，辅助目标也可能起到表示正则化作用；现有实验不能唯一确定它学会了哪种“因果理解”。</p>
+<p>本文进一步分析：这里的未来预测没有显式以候选动作作为输入，不能回答“如果我改成另一个动作，物体会怎样”。要变成用于规划的动作条件世界模型，需要新的接口、训练覆盖和反事实验证。观察序列预测与控制动力学模型有联系，却不能互相替代。</p>
+<p>代价是训练图像解码器与额外数据处理；像素目标还可能偏重背景和大面积静态区域。两个未来都合理时，平方损失可能平均出模糊结果。看上去清晰的未来帧也未必包含接触力、滑移或机器人执行延迟这些关键变量。</p>
+<p>作者讨论扩展无语言视频、比较不同视频来源和增加机器人任务。它们仍是未来方向，不是已经被这篇实验覆盖的能力。</p>
+<h2 id="七自构小例子与知识连接">七、自构小例子与知识连接</h2>
+<p><strong>教学例子，未运行。</strong> 当前相机看到夹爪靠近番茄。语言说“放到盘子上”，历史显示夹爪已经闭合并上抬。未来预测训练鼓励表示保留番茄是否随夹爪移动；动作头可利用这种时序信息继续向盘子移动。</p>
+<p>若番茄实际滑落，而图像背景占绝大多数像素，预测仍可能得到很低平均误差。这个例子说明应该单独分析操作对象区域的误差，以及失败后动作是否能恢复，不能只比较整帧 MSE。</p>
+<p>再考虑“把红块向右推”与“把红块向左推”。相同历史、不同语言可以对应不同未来；模型应使用语言条件区分。若语言编码对“左/右”不敏感，增加更多视觉预测不会自动修复这种语义错误。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>机器人标注少</td>
+<td>人类视频预训练</td>
+<td>学到交互与时间规律</td>
+<td>小数据和场景实验</td>
+<td>仍需动作示范</td>
+</tr>
+<tr>
+<td>只监督动作信号稀疏</td>
+<td>联合预测未来图像</td>
+<td>增加共享表示约束</td>
+<td>表4消融</td>
+<td>像素目标不等于控制</td>
+</tr>
+<tr>
+<td>静态特征缺时序</td>
+<td>因果多模态Transformer</td>
+<td>利用动作阶段和历史</td>
+<td>CALVIN任务链</td>
+<td>未验证反事实动力学</td>
+</tr>
+</tbody></table></div>
+<p>阅读范围：核对 arXiv v2 的方法、实验与附录 A；未独立复现训练，未核实各真实子条件完整重复统计。版本年份按首次公开2023标记。</p>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：GR-1 是否先生成未来视频，再根据视频反推动作？</strong></p>
+<p>答案：不是。观察查询和动作查询共享对输入历史的编码，各有输出头；掩码还阻止其他位置直接读取查询 token。未来预测主要通过共享参数和训练损失帮助动作学习，不是部署时显式逆动力学管线。</p>
+<p><strong>问题2：首任务成功94.9%为什么不意味着五任务链成功94.9%？</strong></p>
+<p>答案：后续任务必须在前一任务成功的状态继续执行，任何失败都会终止链。原文同条件五任务成功率为73.1%。链长分布和首任务概率衡量不同可靠性层次，不能交换使用。</p>
+<p><strong>问题3：怎样验证收益真来自预测“动态”，而不只是多一个损失？</strong></p>
+<p>答案：可在相同数据和预算下对比真实未来、当前帧重建、打乱时间的未来标签，并分别测对象运动区域预测与闭环任务成绩。若真实时间关系在匹配条件下仍显著更好，才更支持时序动态学习的解释；这是未运行的后续实验设计。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 072｜GR-1：视频预测预训练与机器人动作学习
+    <textarea id="md-source" hidden readonly># 072｜GR-1：视频预测预训练与机器人动作学习
 
 [系列首页](README.md) · [上一篇](071-mimicgen.md) · [下一篇](073-mobile-aloha.md)
 
@@ -210,9 +385,9 @@ $$
 答案：可在相同数据和预算下对比真实未来、当前帧重建、打乱时间的未来标签，并分别测对象运动区域预测与闭环任务成绩。若真实时间关系在匹配条件下仍显著更好，才更支持时序动态学习的解释；这是未运行的后续实验设计。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

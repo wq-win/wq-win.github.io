@@ -7,7 +7,7 @@
     <title>010｜视觉运动策略：从相机到机械臂动作 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,168 @@
                 <span class="text-gray-500">视觉运动策略：从相机到机械臂动作</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="5d1622b0f3caa865c8df65ae992d38425d8e817b18e246e7b8c19b9e21af976d"><h1>010｜视觉运动策略：从相机到机械臂动作</h1>
+<p><a href="index.html">系列首页</a> · <a href="009-gps.html">上一篇</a> · <a href="011-ddpg.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>End-to-End Training of Deep Visuomotor Policies</em>，Levine、Finn、Darrell、Abbeel，2015 首版／JMLR 2016。<a href="https://arxiv.org/abs/1504.00702">原文</a>。</p>
+<h2 id="一视觉识别正确不代表机器人就能操作成功">一、视觉识别正确，不代表机器人就能操作成功</h2>
+<p>传统流水线先估计物体位置，再把位置交给控制器。这个分工清楚，但感知目标通常是几何误差最小，未必最适合实际操作。例如拧瓶盖需要同时关注瓶口、瓶盖和夹爪相对姿态，单纯估计瓶子中心可能丢掉关键接触信息。</p>
+<p>这篇论文把图像特征与力矩输出连接起来，用引导式策略搜索联合训练。局部控制器在训练时使用更完整状态，视觉策略执行时只使用图像和机器人自身配置。<a href="https://arxiv.org/html/1504.00702">原文 §4–5</a></p>
+<p>一句话：通过任务反馈塑造视觉特征，感知与动作可以共同适应精细操作；代价是受控训练信息、局部动力学拟合与数据覆盖要求，端到端不意味着没有初始化和工程结构。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念是空间 softmax、局部线性模型、时变高斯策略、分布一致性与特权训练信息。它们分别解释视觉压缩、轨迹优化、教师分布、交替训练和部署信息差。</p>
+<h2 id="二训练与执行的信息权限不同">二、训练与执行的信息权限不同</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>要素</th>
+<th>训练时</th>
+<th>最终策略执行时</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>图像</td>
+<td>用于视觉策略</td>
+<td>使用</td>
+</tr>
+<tr>
+<td>机器人关节配置</td>
+<td>使用</td>
+<td>使用</td>
+</tr>
+<tr>
+<td>目标物体精确位置</td>
+<td>局部优化可获得</td>
+<td>不直接输入视觉策略</td>
+</tr>
+<tr>
+<td>局部动力学</td>
+<td>由交互数据拟合以优化轨迹</td>
+<td>不必每步在线规划</td>
+</tr>
+<tr>
+<td>输出</td>
+<td>局部策略分布与视觉网络参数</td>
+<td>电机力矩</td>
+</tr>
+<tr>
+<td>反馈</td>
+<td>任务成本与引导动作</td>
+<td>观察形成闭环</td>
+</tr>
+</tbody></table></div>
+<p>实验通过机器人另一只手移动目标并提供位置监督，控制左臂外观以避免视觉捷径。这个设计让训练可以更可靠地知道目标在哪里，但也说明数据并非完全来自无标注随手拍摄。</p>
+<p>将训练中的特权状态转化为部署时可用观察策略，是整套方法的重要思想。不能因为最终不输入精确目标位置，就说训练从未使用位置信息。</p>
+<h2 id="三网络为什么先提取空间点">三、网络为什么先提取空间点</h2>
+<p>卷积响应经过空间 softmax：</p>
+<p><span class="reading-math" data-tex="s_{cij}=\frac{e^{a_{cij}}}{\sum_{i'j'}e^{a_{ci'j'}}}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>s</mi><mrow><mi>c</mi><mi>i</mi><mi>j</mi></mrow></msub><mo>=</mo><mfrac><msup><mi>e</mi><msub><mi>a</mi><mrow><mi>c</mi><mi>i</mi><mi>j</mi></mrow></msub></msup><mrow><munder><mo>∑</mo><mrow><msup><mi>i</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><msup><mi>j</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup></mrow></munder><msup><mi>e</mi><msub><mi>a</mi><mrow><mi>c</mi><msup><mi>i</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><msup><mi>j</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup></mrow></msub></msup></mrow></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">s_{cij}=\frac{e^{a_{cij}}}{\sum_{i&#x27;j&#x27;}e^{a_{ci&#x27;j&#x27;}}}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">c</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4632em;vertical-align:-1.1218em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3414em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1783em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6828em;"><span style="top:-2.786em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6828em;"><span style="top:-2.786em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6898em;"><span style="top:-3.0884em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.3448em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.6068em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">c</span><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8496em;"><span style="top:-2.8496em;margin-right:0.1em;"><span class="pstrut" style="height:2.5556em;"></span><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8496em;"><span style="top:-2.8496em;margin-right:0.1em;"><span class="pstrut" style="height:2.5556em;"></span><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4009em;"><span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">c</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2819em;"><span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.1218em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>对每个通道计算期望坐标：</p>
+<p><span class="reading-math" data-tex="f_{cx}=\sum_{ij}s_{cij}x_{ij},\qquad
+f_{cy}=\sum_{ij}s_{cij}y_{ij}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>f</mi><mrow><mi>c</mi><mi>x</mi></mrow></msub><mo>=</mo><munder><mo>∑</mo><mrow><mi>i</mi><mi>j</mi></mrow></munder><msub><mi>s</mi><mrow><mi>c</mi><mi>i</mi><mi>j</mi></mrow></msub><msub><mi>x</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo separator="true">,</mo><mspace width="2em"/><msub><mi>f</mi><mrow><mi>c</mi><mi>y</mi></mrow></msub><mo>=</mo><munder><mo>∑</mo><mrow><mi>i</mi><mi>j</mi></mrow></munder><msub><mi>s</mi><mrow><mi>c</mi><mi>i</mi><mi>j</mi></mrow></msub><msub><mi>y</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">f_{cx}=\sum_{ij}s_{cij}x_{ij},\qquad
+f_{cy}=\sum_{ij}s_{cij}y_{ij}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">c</span><span class="mord mathnormal mtight">x</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4638em;vertical-align:-1.4138em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">c</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">cy</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4638em;vertical-align:-1.4138em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">c</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这样得到一组可微的特征点，再与关节配置结合预测力矩。分类网络常有意忽略物体在图像的精确位置，而操作任务恰恰需要“在哪里”。</p>
+<p>该表示也有限制：一个通道若同时激活两个相似位置，期望坐标可能落在两者中间，那里未必有真实物体。因此 soft-argmax 的紧凑性不等于完整保留视觉歧义。</p>
+<h2 id="四引导训练如何连接感知与控制">四、引导训练如何连接感知与控制</h2>
+<p>局部控制器在小范围数据上拟合动力学，以任务成本优化连续动作。全局视觉策略通过监督拟合这些动作分布。两者还要受到一致性约束，避免局部控制器不断选择视觉策略无法实现的行为。</p>
+<p>论文使用 BADMM 形式组织交替优化。概念上，目标是降低局部策略的任务成本，同时让它与参数化策略的行动分布相符。约束不是只要求在已记录点上动作接近，还关系到两者运行时产生的状态分布。</p>
+<p>视觉网络不需要沿真实物理系统反向传播：局部控制优化生成训练目标，监督阶段把损失传到视觉层。端到端描述的是网络感知到动作的可联合优化，不是环境可微。</p>
+<h2 id="五教学伪代码">五、教学伪代码</h2>
+<pre><code class="language-text">输入：相机图像、机器人状态、训练时目标位姿、任务成本
+初始化视觉特征：用机器人自动产生的位姿标签训练
+初始化局部时变线性高斯控制器
+循环：
+    从多个训练条件收集局部控制轨迹
+    拟合局部动力学
+    在任务成本和策略一致性约束下更新局部控制器
+    用对应图像、状态、动作分布训练视觉策略
+    更新约束乘子与相关权重
+    采集新轨迹，继续交替优化
+执行：
+    图像 -&gt; 空间特征点
+    特征点 + 关节配置 -&gt; 力矩
+</code></pre>
+<p>局部动力学只需要覆盖更新附近，但这也意味着更新不能随意跳远。相机时间戳与关节状态应同步；如果图像落后于动作，网络输入不再代表同一物理时刻，这种问题不会由监督损失自动识别。</p>
+<h2 id="六一个接触特征的例子">六、一个接触特征的例子</h2>
+<p>教学构造：抓着瓶盖接近瓶口，瓶子中心估计误差只有几毫米，但夹爪稍微倾斜。一个只输入瓶子位置的控制器可能仍然垂直下压，导致卡住。联合策略可以利用夹爪边缘与瓶口边缘的相对视觉变化，调整姿态和力矩。</p>
+<p>这个解释不是说论文证明了每个特征点都有明确语义。特征可视化显示网络关注哪里，但不能独立证明这些点对成功具有因果必要性。要验证，需要遮蔽、替换或受控扰动相关区域，并保持其他条件一致。</p>
+<p>再考虑两个外观相同瓶子。若同一通道同时关注它们，软坐标可能落在中间；若训练数据总把目标放左边，网络可能学到位置捷径。增加视觉干扰与目标位置测试，是区分这类捷径和有效任务特征的方式。</p>
+<h2 id="七实验分别检验了哪些环节">七、实验分别检验了哪些环节</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>位置</th>
+<th>检验对象</th>
+<th>证据意义</th>
+<th>不能证明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>§6.1</td>
+<td>模拟控制中的算法比较</td>
+<td>引导优化可训练复杂策略</td>
+<td>模拟分数直接等于真机效果</td>
+</tr>
+<tr>
+<td>表 2、§6.2</td>
+<td>PR2 局部控制器受目标扰动</td>
+<td>局部优化与反馈具有一定鲁棒性</td>
+<td>视觉策略对所有扰动稳定</td>
+</tr>
+<tr>
+<td>表 3、§6.3</td>
+<td>空间 softmax 与替代架构</td>
+<td>紧凑位置表示有助于该定位任务</td>
+<td>所有视觉任务都适合特征点</td>
+</tr>
+<tr>
+<td>图 8–9、§6.4</td>
+<td>挂衣架、插块、锤子、瓶盖</td>
+<td>联合感知控制的任务表现</td>
+<td>通用家庭操作已解决</td>
+</tr>
+<tr>
+<td>图 10–11、§6.5</td>
+<td>联合训练前后的特征点</td>
+<td>任务训练改变视觉关注</td>
+<td>可视化等于因果归因</td>
+</tr>
+</tbody></table></div>
+<p>表 3 中特征点架构的位姿误差为 <span class="reading-math" data-tex="1.30\pm0.73"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1.30</mn><mo>±</mo><mn>0.73</mn></mrow><annotation encoding="application/x-tex">1.30\pm0.73</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1.30</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">±</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.73</span></span></span></span></span> 厘米，softmax 后接普通全连接变体为 <span class="reading-math" data-tex="2.59\pm1.19"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2.59</mn><mo>±</mo><mn>1.19</mn></mrow><annotation encoding="application/x-tex">2.59\pm1.19</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2.59</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">±</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1.19</span></span></span></span></span> 厘米。它们是三维目标点的平均欧氏误差，不是任务成功率。将差值 1.29 厘米称为“成功率提升”是指标混淆。</p>
+<p>视觉预训练使用 1000 张机器人运动采集图像，并使用 ImageNet 初始化的首层滤波器。原文明确区分训练目标位置、未见位置／抓姿以及视觉干扰测试。对比结果不能被简化成“完全从零、没有外部数据”。</p>
+<h2 id="八作者明确承认的视觉边界">八、作者明确承认的视觉边界</h2>
+<p>原文 §6.4 指出，靠近或遮挡目标的干扰以及背景剧烈变化会明显损害表现。§6.5 也说明特征点表示假定相应特征可见且只有一个实例，这在复杂场景中是很强的简化。</p>
+<p>从系统角度还可以推断：精细力矩控制依赖动作频率、时延与硬件状态，跨机器人迁移不能只复制网络权重。这个推断来自控制接口，不是该论文已经报告的跨本体失败实验。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>几何感知目标未必适合实际动作</td>
+<td>特征点网络与引导式联合优化</td>
+<td>让视觉表示服务于任务控制</td>
+<td>表 3、图 9–11</td>
+<td>受控训练信息、预训练与视觉覆盖</td>
+</tr>
+</tbody></table></div>
+<p>阅读范围为 arXiv 完整主文中的方法和实验，版本以页面所示内容为准；首次公开于 2015 年，JMLR 发表版为 2016 年。本文没有独立执行 PR2 实验，也未把所有计算资源与随机重复设定重新核算。</p>
+<h2 id="九自测题与参考答案">九、自测题与参考答案</h2>
+<p><strong>问题 1：端到端视觉控制是否要求对真实机器人动力学求导？</strong></p>
+<p>参考答案：不要求。局部控制优化产生动作分布目标，监督阶段把误差从动作输出传回视觉特征。环境交互用于生成和更新训练数据，网络内部可微不意味着真实环境需要可微。</p>
+<p><strong>问题 2：训练用精确目标位姿、执行不用，是否构成信息泄漏？</strong></p>
+<p>参考答案：这种特权训练本身是明确的方法设定，不自动等于评估泄漏。关键是部署策略不能直接获得测试时不允许的信息，实验必须如实说明训练信息成本，并与具有可比信息的基线比较。</p>
+<p><strong>问题 3：空间 softmax 在两个同样强的响应峰之间会输出什么，为什么可能有问题？</strong></p>
+<p>参考答案：期望坐标可能位于两峰中间，而不是任一真实特征处。它用单点压缩了多峰歧义，可能误导控制。更复杂目标、遮挡与重复实例需要额外表示或训练处理。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 010｜视觉运动策略：从相机到机械臂动作
+    <textarea id="md-source" hidden readonly># 010｜视觉运动策略：从相机到机械臂动作
 
 [系列首页](README.md) · [上一篇](009-gps.md) · [下一篇](011-ddpg.md)
 
@@ -116,8 +273,8 @@ $$
     更新约束乘子与相关权重
     采集新轨迹，继续交替优化
 执行：
-    图像 -> 空间特征点
-    特征点 + 关节配置 -> 力矩
+    图像 -&gt; 空间特征点
+    特征点 + 关节配置 -&gt; 力矩
 ~~~
 
 局部动力学只需要覆盖更新附近，但这也意味着更新不能随意跳远。相机时间戳与关节状态应同步；如果图像落后于动作，网络输入不再代表同一物理时刻，这种问题不会由监督损失自动识别。
@@ -173,9 +330,9 @@ $$
 参考答案：期望坐标可能位于两峰中间，而不是任一真实特征处。它用单点压缩了多峰歧义，可能误导控制。更复杂目标、遮挡与重复实例需要额外表示或训练处理。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

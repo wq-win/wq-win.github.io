@@ -7,7 +7,7 @@
     <title>076｜Human2Humanoid：把人的全身运动映射到机器人 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,187 @@
                 <span class="text-gray-500">Human2Humanoid：把人的全身运动映射到机器人</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="209869469ca9658f52bb1328b40c88c013ff043a9f57e36e0fe9bcbd2b458288"><h1>076｜Human2Humanoid：把人的全身运动映射到机器人</h1>
+<p><a href="index.html">系列首页</a> · <a href="075-dp3.html">上一篇</a> · <a href="077-dexcap.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>Learning Human-to-Humanoid Real-Time Whole-Body Teleoperation</em>，Tairan He、Zhengyi Luo 等，2024，arXiv v1。<a href="https://arxiv.org/abs/2403.04436">论文</a>。</p>
+<h2 id="一一分钟理解人能做不代表机器人能照搬">一、一分钟理解：人能做，不代表机器人能照搬</h2>
+<p>人类动作捕捉中有大量走路、挥手和踢腿，但人体与人形机器人的质量、关节和力矩上限不同。直接把人体姿势变成机器人关节角，可能得到形似却会跌倒的动作。</p>
+<p>H2O 先做运动重定向，再用模拟中的强跟踪策略筛掉难以执行的动作，最后训练能用真实传感器信息工作的全身跟踪策略。部署时人对着相机动作，机器人在线跟随。</p>
+<p>作者展示了真实 H1 的动态遥操作。这里“RGB相机”指捕捉操作者的入口；实际机器人线速度估计还使用外部动捕，并非整个系统只有一台相机。</p>
+<p>一句话：在人到人形机器人的全身遥操作中，通过模拟筛选参考动作与面向部署的RL跟踪，提高可执行性和运动覆盖，代价是参考筛选偏差、姿态估计误差和现实状态估计条件。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：</p>
+<ul>
+<li><strong>运动重定向</strong>：把一个身体的动作映射到另一身体的可表达姿态。</li>
+<li><strong>正运动学</strong>：由关节角计算身体关键点位置。</li>
+<li><strong>特权信息</strong>：训练或筛选可用、部署不便获得的状态。</li>
+<li><strong>域随机化</strong>：在训练中变化动力学参数以提高迁移稳健性。</li>
+<li><strong>MPJPE</strong>：关键点位置误差平均值，需注明坐标与单位。</li>
+</ul>
+<h2 id="二问题定义谁在决定任务谁在维持平衡">二、问题定义：谁在决定任务，谁在维持平衡</h2>
+<p>H2O 是目标条件强化学习，动作目标来自人的姿态，低层关节目标由策略产生。人决定“做什么动作”，策略解决“在机器人动力学下怎样跟踪且不倒”。</p>
+<p>训练在模拟中完成，使用 PPO 和动作跟踪奖励，再迁移真实 H1。19维动作是关节位置目标，PD控制器转换为力矩。它不是视觉语言模型，也不是直接从RGB图像端到端输出19个电机命令：先有人体姿态估计与几何表示。</p>
+<p>机器人观察包含关节位置速度、根部速度与角速度、投影重力、上一动作。目标以选定身体关键点及相关差值、速度表达。训练时可使用更完整的身体真值计算奖励，部署策略输入不需要同样完整的真值。</p>
+<p>终止条件包括躯干过低、倾斜过大或跟踪误差过大。奖励既鼓励动作相似，也惩罚越界、力矩、急剧变化与打滑；因此“模仿”不是纯监督回归，而是在环境中学习受动力学约束的行为。<a href="https://arxiv.org/html/2403.04436v1">设定：§III、V</a>。</p>
+<h2 id="三方法把重定向与可执行性分开">三、方法：把重定向与可执行性分开</h2>
+<h3 id="1-形体拟合与运动重定向">1. 形体拟合与运动重定向</h3>
+<p>先调整 SMPL 人体形状，使对应关键点结构更接近 H1，再优化机器人姿态匹配选定人体点。教学形式为：</p>
+<p><span class="reading-math" data-tex="\min_{q_t}\sum_j\|FK_j(q_t)-\hat p_{j,t}\|^2,"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><msub><mi>q</mi><mi>t</mi></msub></munder><munder><mo>∑</mo><mi>j</mi></munder><mi mathvariant="normal">∥</mi><mi>F</mi><msub><mi>K</mi><mi>j</mi></msub><mo stretchy="false">(</mo><msub><mi>q</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mo>−</mo><msub><mover accent="true"><mi>p</mi><mo>^</mo></mover><mrow><mi>j</mi><mo separator="true">,</mo><mi>t</mi></mrow></msub><msup><mi mathvariant="normal">∥</mi><mn>2</mn></msup><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">\min_{q_t}\sum_j\|FK_j(q_t)-\hat p_{j,t}\|^2,</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.4638em;vertical-align:-1.4138em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.4em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2963em;"><span style="top:-2.357em;margin-left:-0.0359em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8361em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">∥</span><span class="mord mathnormal" style="margin-right:0.13889em;">F</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1502em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">p</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mpunct">,</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="FK_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>F</mi><msub><mi>K</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">FK_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">F</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>是机器人正运动学，<span class="reading-math" data-tex="\hat p"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>p</mi><mo>^</mo></mover></mrow><annotation encoding="application/x-tex">\hat p</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">p</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span></span></span></span></span>是已调整形体后的参考点。它解决的是几何对应，不保证速度、力矩和接触可行。</p>
+<p>直接复制关节角的问题，在于两棵运动链的轴方向与长度不同。即使肩肘角相同，手可能落到不同位置；足部初始间距不合适，还可能产生内八姿态。</p>
+<h3 id="2-sim-to-data-的筛选器">2. sim-to-data 的筛选器</h3>
+<p>一个有完整刚体状态、没有域随机化负担的特权策略，尝试跟踪重定向动作。失败片段被丢弃，留下较容易由该机器人执行的集合。</p>
+<p>这不是教师动作蒸馏：特权策略主要用于判断哪些参考应保留；后续部署策略再通过 RL 训练跟踪这些参考。论文约1万条重定向序列保留约8500条。</p>
+<p>作者将特权跟踪器视作性能上界。更谨慎的理解是它是一个较强的<strong>经验筛选器</strong>：优化失败不等于物理不可行，成功也不保证现实可行。数据清洗可能把真正困难但可实现的技能排除，这是一种能力与数据之间的循环依赖。</p>
+<h3 id="3-面向实时部署的目标状态">3. 面向实时部署的目标状态</h3>
+<p>完整部署目标使用肩、肘、手、踝共8点的参考位置、相对误差与参考速度。与只给位置的版本相比，这些量帮助区分“目标在哪里”和“目标正在往哪里走”。</p>
+<p>PD形式为：</p>
+<p><span class="reading-math" data-tex="\tau_t=K_p(a_t-q_t)-K_d\dot q_t."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>τ</mi><mi>t</mi></msub><mo>=</mo><msub><mi>K</mi><mi>p</mi></msub><mo stretchy="false">(</mo><msub><mi>a</mi><mi>t</mi></msub><mo>−</mo><msub><mi>q</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mo>−</mo><msub><mi>K</mi><mi>d</mi></msub><msub><mover accent="true"><mi>q</mi><mo>˙</mo></mover><mi>t</mi></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\tau_t=K_p(a_t-q_t)-K_d\dot q_t.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.1132em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">p</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">d</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0556em;"><span class="mord">˙</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>PPO优化：</p>
+<p><span class="reading-math" data-tex="J(\pi)=\mathbb E\sum_t\gamma^t
+[r_{\rm track}+r_{\rm regularize}+r_{\rm penalty}]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>J</mi><mo stretchy="false">(</mo><mi>π</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="double-struck">E</mi><munder><mo>∑</mo><mi>t</mi></munder><msup><mi>γ</mi><mi>t</mi></msup><mo stretchy="false">[</mo><msub><mi>r</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">c</mi><mi mathvariant="normal">k</mi></mrow></msub><mo>+</mo><msub><mi>r</mi><mrow><mi mathvariant="normal">r</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">g</mi><mi mathvariant="normal">u</mi><mi mathvariant="normal">l</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">z</mi><mi mathvariant="normal">e</mi></mrow></msub><mo>+</mo><msub><mi>r</mi><mrow><mi mathvariant="normal">p</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">n</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">l</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">y</mi></mrow></msub><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">J(\pi)=\mathbb E\sum_t\gamma^t
+[r_{\rm track}+r_{\rm regularize}+r_{\rm penalty}].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3em;vertical-align:-1.25em;"></span><span class="mord mathbb">E</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8436em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">track</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">regularize</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight" style="margin-right:0.01389em;">penalty</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">]</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>例如动作变化惩罚<span class="reading-math" data-tex="-\lambda\|a_t-a_{t-1}\|^2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><mi>λ</mi><mi mathvariant="normal">∥</mi><msub><mi>a</mi><mi>t</mi></msub><mo>−</mo><msub><mi>a</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><msup><mi mathvariant="normal">∥</mi><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">-\lambda\|a_t-a_{t-1}\|^2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">−</span><span class="mord mathnormal">λ</span><span class="mord">∥</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span></span>鼓励平滑，但过强会延迟快速踢腿；跟踪与稳健之间确实有竞争关系。系数是工程选择，不是越大越好。</p>
+<h3 id="4-域随机化解决另一种误差">4. 域随机化解决另一种误差</h3>
+<p>训练随机化摩擦、质量、质心、PD增益和控制延迟，并施加扰动与不同地面。重定向解决人体—机器人几何差异，随机化解决模拟—现实动力学差异，二者不是同一类“泛化技巧”。</p>
+<pre><code class="language-text">离线：
+    使人体模型形体接近机器人
+    重定向人体动作到机器人关键点与关节参考
+    去除明显不适合的动作
+    用完整模拟状态训练特权跟踪器
+    用它过滤跟踪失败序列
+
+部署策略训练：
+    采样保留的参考动作
+    随机化机器人与地面参数
+    输入可部署本体状态和当前目标关键点信息
+    用PPO优化跟踪、平滑、约束奖励
+    发生跌倒或大误差时终止并重新采样
+
+实时：
+    RGB捕捉人 → 人体姿态估计 → 目标关键点
+    机器人状态估计 + 目标 → 关节目标 → PD控制
+</code></pre>
+<p>伪代码中的实时目标只有当前可获得信息；不能把模拟特权跟踪器访问的未来参考和完整全身速度照搬到现实策略。</p>
+<h2 id="四实验设置与证据范围">四、实验设置与证据范围</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文设置</th>
+<th>评价问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>人体来源</td>
+<td>AMASS，约1.3万原始序列，重定向约1万</td>
+<td>动作库如何转为机器人参考</td>
+</tr>
+<tr>
+<td>清洗后</td>
+<td>约8500条</td>
+<td>删去难跟踪动作是否帮助训练</td>
+</tr>
+<tr>
+<td>模拟比较</td>
+<td>特权策略、去清洗、简化目标、完整H2O</td>
+<td>状态设计与筛选的作用</td>
+</tr>
+<tr>
+<td>评估集合</td>
+<td>未清洗的重定向约1万条</td>
+<td>不是仅在筛选成功集合上测试</td>
+</tr>
+<tr>
+<td>成功条件</td>
+<td>跟踪过程中身体平均位置误差不超过0.5米阈值</td>
+<td>不是精细操作成功</td>
+</tr>
+<tr>
+<td>误差</td>
+<td>全局与根相对MPJPE，速度、加速度差</td>
+<td>区分漂移与身体姿态误差</td>
+</tr>
+<tr>
+<td>部署平台</td>
+<td>Unitree H1，RGB人体估计30Hz</td>
+<td>操作者视觉输入的频率</td>
+</tr>
+<tr>
+<td>机器人估计</td>
+<td>动捕线速度50Hz，其余内置传感器200Hz</td>
+<td>全系统并非纯RGB</td>
+</tr>
+<tr>
+<td>未逐项核实</td>
+<td>总模拟步数、训练GPU时间、种子数、真实各动作重复次数</td>
+<td>不推断统计稳定性或训练效率</td>
+</tr>
+</tbody></table></div>
+<p>表 II 给出例如20–60ms控制延迟随机化。这个范围描述训练扰动，不等于实测端到端遥操作延迟。RGB估计频率也不能自动当作机器人底层伺服频率。</p>
+<p>评估集合包含训练动作，因此总体成绩主要衡量大动作库覆盖与跟踪能力，并不是严格的全部未见动作测试。随机取小训练子集后的全库评估，才更接近部分未见参考的泛化问题，但仍不能替代明确的动作类别留出。</p>
+<h2 id="五五处证据从模拟跟踪到真实展示">五、五处证据：从模拟跟踪到真实展示</h2>
+<p><strong>证据1：图2/3的形体拟合。</strong> 调整人体形状后，重定向减少足部内八等异常。它支持几何对齐的重要性，但主要是例子，不是所有人体体型都适用的统计保证。</p>
+<p><strong>证据2：表 III 的清洗消融。</strong> 完整 H2O 成功率72.5%，不清洗67.9%，增加4.6个百分点，相对约6.8%。评估仍用未清洗集合，这是有意义的控制条件：不是简单通过删除困难测试让分数变高。但数据量与数据难度一同改变，不能只说“数量越少越好”。</p>
+<p><strong>证据3：表 III 的观察权限。</strong> 特权策略85.5%高于H2O，同时其输入778维，部署版本138维，且训练随机化条件不同。不能据此说部署版本算法更弱；现实可获取的信息和稳健要求改变了问题。简化目标版本53.2%也支持误差与速度信息有价值。</p>
+<p><strong>证据4：表 IV 的规模。</strong> 从小比例动作到完整清洗库，成功率整体上升。它支持更多可用动作增加覆盖，却没有证明动作数与性能遵循固定规模定律；重复动作、多样性和训练预算都可能影响结果。</p>
+<p><strong>证据5：图1、5–7的真实遥操作。</strong> 展示踢球、行走、后跳以及扰动下保持平衡。它证明系统可在真机运行这些行为，但缺少逐任务大样本成功率时，不能给踢球或接箱等能力编出可靠率。真实物体任务由人提供实时目标，不是机器人自主视觉规划。<a href="https://arxiv.org/html/2403.04436v1#S6">结果与部署：§VI</a>。</p>
+<p>表中 MPJPE 的毫米与速度误差的毫米/帧不能混用。根相对误差小可能同时存在较大全局漂移，两个坐标指标必须一起看。</p>
+<h2 id="六贡献与局限把可行性当作可学习的数据问题">六、贡献与局限：把可行性当作可学习的数据问题</h2>
+<p>贡献是将动作库筛选、可部署状态设计与模拟训练串联，推动图形学式全身动作跟踪走向真实人形机器人。它把“先有足够好的机器人参考动作”视作与策略网络同样关键的问题。</p>
+<p>作者承认表示维数与学习难度、随机化与跟踪精度、人体姿态估计延迟与精度之间都有折中。实时人类反馈主要依赖视觉，缺乏细致力反馈，也会限制接触操作。</p>
+<p>本文分析的另一点是：若筛选器从未学会高动态动作，就可能持续把这些动作视作不适合。要区分“物理不可能”与“训练尚未成功”，可以用不同优化方法、专门单动作训练或轨迹优化复核被删序列。现有实验不提供严格可行性证明。</p>
+<p>“无需操作者穿戴标记”是准确的接口特点；“没有外部状态估计设备”则不符合部署段。作者提到机载视觉或激光里程计可替换动捕，是可探索方向，不是已经在本文验证的配置。</p>
+<h2 id="七自构例子与知识连接">七、自构例子与知识连接</h2>
+<p><strong>教学例子，未运行。</strong> 人抬右脚踢球，人体较长的小腿让脚尖能到达某高度。机器人腿短，直接复制角度达不到；几何优化为了赶到该位置，可能要求极限关节角。再加入快速加速度，电机力矩可能不足。几何重定向、动态跟踪和现实执行依次增加约束。</p>
+<p>若目标脚位置正在左移，仅给当前位置时，策略不知道下一瞬间该向哪边准备；加上速度有助于提前调整。但速度由有噪声视频差分得到，过度依赖也可能放大抖动。这解释了更丰富目标状态的收益与现实代价。</p>
+<p>设身体各点相对根部姿势都正确，却整体向后漂了20厘米。根相对MPJPE可很小，全局MPJPE仍大。接触球或柜门时，全局位置比“动作看起来像”更关键。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>人体参考不适合机器人</td>
+<td>形体拟合与重定向</td>
+<td>减少几何失配</td>
+<td>图2/3</td>
+<td>不保证动态可行</td>
+</tr>
+<tr>
+<td>难动作干扰大规模训练</td>
+<td>模拟跟踪器清洗</td>
+<td>聚焦可学参考</td>
+<td>表III</td>
+<td>筛选器能力偏差</td>
+</tr>
+<tr>
+<td>模拟状态不能直接部署</td>
+<td>精简目标与随机化</td>
+<td>使用现实可估计信号</td>
+<td>表III及真机展示</td>
+<td>动捕、延迟、估计误差</td>
+</tr>
+</tbody></table></div>
+<p>阅读范围：核对 v1 方法、奖励表、随机化表、模拟结果与真实部署段；未独立复现。真实动作展示的重复统计和总训练预算未逐项确认。</p>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：H2O的特权策略是部署策略的动作教师吗？</strong></p>
+<p>答案：核心用途是筛选参考动作是否容易跟踪，之后部署策略用清洗后的参考重新做RL训练。不能把它简化成普通监督蒸馏；筛选对象主要是动作数据，而非只给学生每步动作标签。</p>
+<p><strong>问题2：一个动作被筛掉，是否证明H1物理上不可能完成？</strong></p>
+<p>答案：不证明。强跟踪器仍受模型、训练预算和优化限制。失败说明当前筛选条件下没跟上，可能是真实不可行，也可能只是策略尚未学会。需要额外可行性分析才能区分。</p>
+<p><strong>问题3：为什么“只用RGB遥操作”需要补充动捕条件？</strong></p>
+<p>答案：RGB用于估计人的动作；机器人还要知道自己的运动状态。本文用动捕估计机器人线速度，两者承担不同功能。说明这一点才能准确判断系统部署所需硬件，而不削弱它在人体输入接口上的贡献。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 076｜Human2Humanoid：把人的全身运动映射到机器人
+    <textarea id="md-source" hidden readonly># 076｜Human2Humanoid：把人的全身运动映射到机器人
 
 [系列首页](README.md) · [上一篇](075-dp3.md) · [下一篇](077-dexcap.md)
 
@@ -220,9 +396,9 @@ $$
 答案：RGB用于估计人的动作；机器人还要知道自己的运动状态。本文用动捕估计机器人线速度，两者承担不同功能。说明这一点才能准确判断系统部署所需硬件，而不削弱它在人体输入接口上的贡献。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

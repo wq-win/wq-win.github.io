@@ -7,7 +7,7 @@
     <title>074｜SERL：可实际运行的真机强化学习栈 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,185 @@
                 <span class="text-gray-500">SERL：可实际运行的真机强化学习栈</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="45eae7410de0047202154979613d38a63531f488efa0e2f35ded874717796b28"><h1>074｜SERL：可实际运行的真机强化学习栈</h1>
+<p><a href="index.html">系列首页</a> · <a href="073-mobile-aloha.html">上一篇</a> · <a href="075-dp3.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>SERL: A Software Suite for Sample-Efficient Robotic Reinforcement Learning</em>，Jianlan Luo、Zheyuan Hu 等，2024，arXiv v1。<a href="https://arxiv.org/abs/2401.16013">论文</a>。</p>
+<h2 id="一一分钟理解让一个rl公式变成能训练机械臂的系统">一、一分钟理解：让“一个RL公式”变成能训练机械臂的系统</h2>
+<p>写出 SAC 损失很容易，让真实机械臂稳定收集数据、自动获得奖励、完成复位且不因训练阻塞控制，却需要另一套工作。SERL 把这些环节组合成可用的软件系统。</p>
+<p>作者没有主张发明新的基础 RL 算法。核心是 RLPD 风格的高数据复用训练，加上示范、奖励分类器、可选双向复位策略、异步执行和接触控制。实验说明这套组合能在若干真实操作任务上快速训练。</p>
+<p>一句话：在接触丰富的真实操作中，通过把样本高效 RL 与奖励、复位和控制接口共同设计，改善训练墙钟时间与任务表现，代价是任务初始化、示范、控制参数和奖励判定的准备工作。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：</p>
+<ul>
+<li><strong>离策略学习</strong>：可利用与当前策略不同的历史行为数据。</li>
+<li><strong>UTD</strong>：每单位新环境数据执行多少次更新。</li>
+<li><strong>目标网络</strong>：缓慢更新的价值估计副本，用来稳定自举目标。</li>
+<li><strong>阻抗控制</strong>：让机器人表现出设定的弹簧和阻尼特性。</li>
+<li><strong>奖励投机</strong>：优化代理奖励却没有实现真实目标。</li>
+</ul>
+<h2 id="二背景真实环境没有廉价-reset">二、背景：真实环境没有廉价 reset()</h2>
+<p>模拟器里 reset 是函数调用；现实里，物体掉到桌角后必须有人或另一个策略把它放回去。模拟训练中多算几次梯度只影响运行时间；现实中若更新阻塞动作输出，控制频率变化会直接改变被学习的系统。</p>
+<p>SERL 面向在线、无模型、离策略机器人 RL，可借助已有示范。观察含图像和本体信息，实验描述还包括末端速度、力与力矩。它不是仅输入 RGB 的视觉系统。</p>
+<p>任务包括 PCB 插入、线缆卡入槽与物体往返搬运。策略输出末端六维增量，由底层控制器跟踪。奖励可来自本体位置条件、固定图像分类器或 VICE 式在线更新分类器。支持某种奖励机制，不代表所有实验都用了该机制。</p>
+<p>对于固定抓持物体，末端位置可代理插入完成；但其正确性依赖物体在夹爪中未滑动。对自由物体则需要看物体是否达到目标。这个区别说明奖励设计总包含任务假设。<a href="https://arxiv.org/html/2401.16013v1">问题与系统：§3–4</a>。</p>
+<h2 id="三方法五个环节要一起理解">三、方法：五个环节要一起理解</h2>
+<h3 id="1-核心rl沿用什么">1. 核心RL沿用什么</h3>
+<p>RLPD 的关键是高更新/数据比、示范与在线数据对半采样，以及 critic 的 LayerNorm。旧数据可以被多次使用，减少昂贵的真实交互；归一化缓解高复用下价值估计不稳定，但不是误差不会累积的证明。</p>
+<p>按本文 §4.1 的简化写法：</p>
+<p><span class="reading-math" data-tex="y=r+\gamma(1-d)\mathbb E_{a'\sim\pi}Q_{\bar\phi}(s',a'),
+\qquad
+\mathcal L_Q=\mathbb E(Q_\phi(s,a)-y)^2,"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>y</mi><mo>=</mo><mi>r</mi><mo>+</mo><mi>γ</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>d</mi><mo stretchy="false">)</mo><msub><mi mathvariant="double-struck">E</mi><mrow><msup><mi>a</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>∼</mo><mi>π</mi></mrow></msub><msub><mi>Q</mi><mover accent="true"><mi>ϕ</mi><mo>ˉ</mo></mover></msub><mo stretchy="false">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo separator="true">,</mo><msup><mi>a</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><msub><mi mathvariant="script">L</mi><mi>Q</mi></msub><mo>=</mo><mi mathvariant="double-struck">E</mi><mo stretchy="false">(</mo><msub><mi>Q</mi><mi>ϕ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>−</mo><mi>y</mi><msup><mo stretchy="false">)</mo><mn>2</mn></msup><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">y=r+\gamma(1-d)\mathbb E_{a&#x27;\sim\pi}Q_{\bar\phi}(s&#x27;,a&#x27;),
+\qquad
+\mathcal L_Q=\mathbb E(Q_\phi(s,a)-y)^2,</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1751em;vertical-align:-0.3732em;"></span><span class="mord mathnormal">d</span><span class="mclose">)</span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.328em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6828em;"><span style="top:-2.786em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mrel mtight">∼</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.4629em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight">ϕ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord mtight">ˉ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3732em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathcal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">Q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathbb">E</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">ϕ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mpunct">,</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="\mathcal L_\pi=-\mathbb E_s[
+\mathbb E_{a\sim\pi}Q_\phi(s,a)+\alpha\mathcal H(\pi(\cdot|s))]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="script">L</mi><mi>π</mi></msub><mo>=</mo><mo>−</mo><msub><mi mathvariant="double-struck">E</mi><mi>s</mi></msub><mo stretchy="false">[</mo><msub><mi mathvariant="double-struck">E</mi><mrow><mi>a</mi><mo>∼</mo><mi>π</mi></mrow></msub><msub><mi>Q</mi><mi>ϕ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>+</mo><mi>α</mi><mi mathvariant="script">H</mi><mo stretchy="false">(</mo><mi>π</mi><mo stretchy="false">(</mo><mo>⋅</mo><mi mathvariant="normal">∣</mi><mi>s</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\mathcal L_\pi=-\mathbb E_s[
+\mathbb E_{a\sim\pi}Q_\phi(s,a)+\alpha\mathcal H(\pi(\cdot|s))].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathcal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord">−</span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">s</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mrel mtight">∼</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">ϕ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mord mathcal" style="margin-right:0.00965em;">H</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mopen">(</span><span class="mord">⋅</span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mclose">))]</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这里<span class="reading-math" data-tex="d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi></mrow><annotation encoding="application/x-tex">d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span>是教学上补出的真实终止标志，<span class="reading-math" data-tex="\bar\phi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>ϕ</mi><mo>ˉ</mo></mover></mrow><annotation encoding="application/x-tex">\bar\phi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0257em;vertical-align:-0.1944em;"></span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">ϕ</span></span><span style="top:-3.2634em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">ˉ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span></span></span></span></span>是缓慢更新的目标参数，<span class="reading-math" data-tex="\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span>调节熵。原文展示的 critic 目标没有通常软 Bellman 形式里的下一步熵项，因此不应默默把另一版 SAC 公式作为本文逐字实现。具体复现需与对应版本配置对照。</p>
+<p>数学目标是回报与探索熵；机制是回放采样和更新组织；实验改善的是成功率、完成速度、训练墙钟。示范帮助探索启动，不把在线阶段变成行为克隆。</p>
+<h3 id="2-奖励模型不是不会犯错的裁判">2. 奖励模型不是不会犯错的裁判</h3>
+<p>固定分类器可用成功、失败图像训练，然后取<span class="reading-math" data-tex="r(s)=\log p(e|s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>=</mo><mi>log</mi><mo>⁡</mo><mi>p</mi><mo stretchy="false">(</mo><mi>e</mi><mi mathvariant="normal">∣</mi><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">r(s)=\log p(e|s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal">e</span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span>。若策略发现一个不成功但分类器高分的状态，就发生奖励投机。</p>
+<p>VICE 通过把策略到达的状态加入负样本并更新分类器，让裁判随策略变化；它是缓解机制，并非消除所有投机的保证。实际实验表2对线缆与搬运标为二分类器，PCB为真值式条件，不能把 VICE 的支持能力说成三个任务都用过的实证。</p>
+<h3 id="3-正反策略处理复位">3. 正反策略处理复位</h3>
+<p>自由物体搬运中，正向把右箱物体送到左箱，反向送回。两者各有策略、critic 与奖励。“无需人工逐次复位”在这里意味着学习了复位动作，不意味着物理世界无需恢复状态。</p>
+<p>若物体掉出两个策略可达范围，双向机制仍可能无法继续。这是闭合任务域的假设，不是一个抽象 reset 接口已经覆盖所有事故。</p>
+<h3 id="4-接触控制让探索可执行">4. 接触控制让探索可执行</h3>
+<p>高层约10Hz，底层阻抗控制约1kHz。若高层目标穿过硬表面，位置误差会积累为很大弹簧力。SERL 在实时层把目标与当前位姿的差限制在小范围，而不是把高层每次位移都限制成极小值。</p>
+<p>教学上，令目标误差按恢复方向定义为<span class="reading-math" data-tex="e=p_{\rm target}-p"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>e</mi><mo>=</mo><msub><mi>p</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">g</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">t</mi></mrow></msub><mo>−</mo><mi>p</mi></mrow><annotation encoding="application/x-tex">e=p_{\rm target}-p</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">e</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">target</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span></span></span></span></span>，弹簧力为<span class="reading-math" data-tex="K_pe"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>K</mi><mi>p</mi></msub><mi>e</mi></mrow><annotation encoding="application/x-tex">K_pe</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">p</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord mathnormal">e</span></span></span></span></span>。每个底层周期重新限制<span class="reading-math" data-tex="|e|\le\Delta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∣</mi><mi>e</mi><mi mathvariant="normal">∣</mi><mo>≤</mo><mi mathvariant="normal">Δ</mi></mrow><annotation encoding="application/x-tex">|e|\le\Delta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">∣</span><span class="mord mathnormal">e</span><span class="mord">∣</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">Δ</span></span></span></span></span>，自由空间里目标能随着机器人移动不断前进，接触时则不无限积累误差。此处明确符号约定，避免照抄原文误差正负号造成恢复方向混淆。</p>
+<p>限制的是控制参考，并非对现实所有碰撞力的无条件上界证明；模型近似、惯性与外力仍重要。</p>
+<h3 id="5-异步学习与相对坐标">5. 异步学习与相对坐标</h3>
+<p>actor持续输出动作，learner更新网络，环境执行并回传数据。控制不必等待一批梯度更新完成。观察的位置相对每回合初始末端框架表达，动作相对当前末端表达，从而减少对固定世界坐标的记忆。</p>
+<pre><code class="language-text">准备：少量示范、奖励判定、控制与复位方式
+初始化在线回放与策略、critic、目标网络
+actor循环：
+    读取图像与相对本体状态
+    运行最新策略，发送末端目标
+    实时控制层逐周期限制参考误差并执行
+    记录转移到在线回放
+    任务结束后运行脚本或反向策略复位
+learner循环：
+    从示范和在线回放各采一半
+    多次更新critic，再按配置更新策略和目标网络
+    定期把新参数交给actor
+若使用学习式奖励或双向策略：分别更新对应模型
+</code></pre>
+<h2 id="四实验设计与训练时间口径">四、实验设计与训练时间口径</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>原文设置</th>
+<th>解释</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>主平台</td>
+<td>Franka Panda，任务相关双相机</td>
+<td>不是跨所有机器人验证</td>
+</tr>
+<tr>
+<td>示范</td>
+<td>RL每任务20条；BC100条</td>
+<td>RL还收集在线交互，不能说总数据少五倍</td>
+</tr>
+<tr>
+<td>PCB</td>
+<td>随机初始末端、位置式奖励</td>
+<td>依赖固定抓持假设</td>
+</tr>
+<tr>
+<td>线缆</td>
+<td>随机初始末端、分类奖励</td>
+<td>验证变形与接触</td>
+</tr>
+<tr>
+<td>搬运</td>
+<td>正反向两策略、分类奖励</td>
+<td>自动复位成本在双策略中</td>
+</tr>
+<tr>
+<td>训练设备</td>
+<td>单RTX4090，预训练ResNet-10视觉骨干</td>
+<td>不是所有视觉知识从零</td>
+</tr>
+<tr>
+<td>表2时间</td>
+<td>PCB20分钟、线缆31分钟、双向搬运105分钟</td>
+<td>105分钟不能写成一个方向训练时间</td>
+</tr>
+<tr>
+<td>评价</td>
+<td>每任务100次</td>
+<td>有限试验的零失败并非永久可靠</td>
+</tr>
+<tr>
+<td>未逐项确认</td>
+<td>每项UTD、分类器样本规模、训练种子数</td>
+<td>不由算法惯例补数</td>
+</tr>
+</tbody></table></div>
+<p>表2与结果段有一个小差异：文字说 PCB 与线缆少于30分钟，但线缆表格列31分钟。这里采用逐任务表格，不把摘要中的平均时间范围覆盖具体实验。训练墙钟包含计算、复位和预期暂停；搭建硬件、采示范与设置奖励的全部项目成本不能因此视为零。</p>
+<h2 id="五五处实验证据">五、五处实验证据</h2>
+<p><strong>证据1：图6的RL与BC。</strong> 在100次评估中，RL三个任务均成功；BC使用更多人工示范仍明显更低。支持在线纠错有价值，但比较是完整学习流程，不是严格等信息的“RL损失对BC损失”。在线策略看到自身失误状态，BC没有同样分布。</p>
+<p><strong>证据2：图7的完成速度。</strong> 作者报告 RL 成功执行的周期更短。它支持在所测成功轨迹上动作更高效；应同时看失败率和所有尝试总时间，不能仅用成功样本时长评价生产吞吐。</p>
+<p><strong>证据3：图3的控制日志。</strong> 自由空间允许持续运动，接触时参考被限制，展示了低层机制如何改善执行条件。它没有单独量化“去掉限制后，学习成功率下降多少”，因此不能把软件整体增益全部归于这个组件。</p>
+<p><strong>证据4：表1的历史系统对比。</strong> 不同论文研究不同插入对象、控制器、奖励和示范预算。作者也承认直接比较困难。这张表可说明训练量级，而不能证明在相同基准、同硬件和同预算下击败所有方法。</p>
+<p><strong>证据5：图8对应的异地复现。</strong> 华盛顿大学搭建插孔任务后，报告19分钟学习、100/100成功、20条初始示范。它是有价值的独立地点证据；一个额外地点不能代替多团队、多硬件、长期维护的普适可用性验证。<a href="https://arxiv.org/html/2401.16013v1#S5">实验与讨论：§5–6</a>。</p>
+<p>这篇没有逐项完整因子消融，最稳健结论是系统组合有效。把“工程细节很关键”进一步说成“算法选择完全不重要”，超出了证据。</p>
+<h2 id="六贡献代价与适用边界">六、贡献、代价与适用边界</h2>
+<p>SERL 的贡献是降低真实 RL 集成门槛，并展示已有算法在合理控制和数据条件下能达到实用训练时间。它提供的是一个默认可研究的起点，不是把任务定义和机器人适配全部自动化。</p>
+<p>作者承认奖励与复位仍是开放问题，当前选择不适用于所有任务。不可逆装配、液体倾倒、物体破坏后很难由反向策略恢复；目标分类器也可能受到遮挡和背景相关性的影响。</p>
+<p>本文分析是：低层控制器改变了高层 RL 面对的动作后果，实际上定义了学习问题的一部分。同一个网络输出在两种阻抗设置下不再是相同动作语义。复现时若只复制超参数而换了控制器，不能简单认定算法结果不可复现。</p>
+<p>相对坐标可减少绝对位置过拟合，但世界中有固定障碍和方向相关重力。等价变换的适用范围受这些因素限制；移动目标的鲁棒性仍需通过实测确认。</p>
+<h2 id="七自构小例子与前置概念">七、自构小例子与前置概念</h2>
+<p><strong>教学例子，未运行。</strong> 一块连接器卡在孔边，高层继续下压。若目标距离当前位置累计到1厘米，弹簧项会持续增大。实时参考限制让控制器只保留小的恢复目标；机器人可在横向探索中找到孔，再继续下行。这解释了“合适的动作接口”为什么会改变可学性。</p>
+<p>再假设每秒得到10条转移、每条做20次更新。一小时只有3.6万真实转移，但可有大量梯度计算。高UTD节省的是交互，不自动节省GPU时间。异步也可能造成参数稍旧，应记录实际控制频率与参数同步间隔。</p>
+<p>若成功分类器把“夹爪挡住相机”误判为插入成功，策略可能学会遮挡。仅画出奖励上升曲线不能发现问题，必须用独立任务完成标准检验。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>真机样本贵</td>
+<td>示范混合与高UTD</td>
+<td>更多利用每次交互</td>
+<td>表2训练时间</td>
+<td>计算及价值误差压力</td>
+</tr>
+<tr>
+<td>接触探索难</td>
+<td>实时参考限制</td>
+<td>限制误差累积</td>
+<td>图3控制日志</td>
+<td>参数与硬件依赖</td>
+</tr>
+<tr>
+<td>复位需要人</td>
+<td>正反策略</td>
+<td>将恢复也变成任务</td>
+<td>搬运双向训练</td>
+<td>不可逆状态无法自动恢复</td>
+</tr>
+</tbody></table></div>
+<p>阅读范围：核对 v1 主文与坐标附录；未独立复现。具体代码版本的UTD、奖励阈值及终止掩码需要按所复现实验进一步核对，未以默认值代替证据。</p>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：SERL与RLPD是什么关系？</strong></p>
+<p>答案：RLPD是其中核心学习配方；SERL把它与奖励、复位、异步软件和控制器连起来。论文新意主要是系统集成与真实验证，不应把全部基础算法贡献归到SERL。</p>
+<p><strong>问题2：为什么低层参考限制不同于把策略动作缩小一百倍？</strong></p>
+<p>答案：底层每毫秒重新以当前状态限制目标，自由空间里可持续推进；把高层动作直接缩小，则每个策略周期允许的位移都很小，可能极大增加到达目标所需步数。两者对接触和自由运动的作用不同。</p>
+<p><strong>问题3：100次全成功能证明部署不会失败吗？</strong></p>
+<p>答案：不能。它说明在所测试验条件和样本量内未观察到失败。换初始分布、物体、控制器或运行更久都可能失败，且训练种子不确定性与执行重复不确定性不是同一层面的统计问题。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 074｜SERL：可实际运行的真机强化学习栈
+    <textarea id="md-source" hidden readonly># 074｜SERL：可实际运行的真机强化学习栈
 
 [系列首页](README.md) · [上一篇](073-mobile-aloha.md) · [下一篇](075-dp3.md)
 
@@ -212,9 +386,9 @@ SERL 的贡献是降低真实 RL 集成门槛，并展示已有算法在合理�
 答案：不能。它说明在所测试验条件和样本量内未观察到失败。换初始分布、物体、控制器或运行更久都可能失败，且训练种子不确定性与执行重复不确定性不是同一层面的统计问题。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>

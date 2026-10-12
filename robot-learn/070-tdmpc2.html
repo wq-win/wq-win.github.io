@@ -7,7 +7,7 @@
     <title>070｜TD-MPC2：可扩展的连续控制世界模型 | MyLog</title>
     <script src="/js/vendor/tailwind.js"></script>
     <link href="/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <script>
         tailwind.config = {
@@ -28,6 +28,7 @@
         }
     </script>
     <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
 </head>
 <body class="bg-gray-50 text-gray-800">
     <div id="site-header"></div>
@@ -41,12 +42,228 @@
                 <span class="text-gray-500">TD-MPC2：可扩展的连续控制世界模型</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="93d0f99e070f800c5119228c48a381e98e04ac4b7c9fe2773d98c94afc6727e6"><h1>070｜TD-MPC2：可扩展的连续控制世界模型</h1>
+<p><a href="index.html">系列首页</a> · <a href="069-eureka.html">上一篇</a> · <a href="071-mimicgen.html">下一篇</a></p>
+<p><strong>原论文</strong>：<em>TD-MPC2: Scalable, Robust World Models for Continuous Control</em>，Nicklas Hansen、Hao Su、Xiaolong Wang，首次公开于 2023，本文对应 2024 年 arXiv v2。<a href="https://arxiv.org/abs/2310.16828">论文</a>。</p>
+<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
+<p>世界模型不一定需要生成逼真的未来视频。对控制而言，它首先需要回答：尝试这串动作，回报会怎样，最后会到一个多好的状态？</p>
+<p>TD-MPC2 延续 TD-MPC 的短期潜空间规划与长期价值估计，但重点解决稳定性和扩展问题。它调整奖励与价值预测、潜变量归一化、策略先验和价值集成，并支持多任务不同维度的状态动作。</p>
+<p>实验支持其在多类连续控制任务上的较好数据效率，以及大模型从多任务混合经验中学习的可行性。这里主要是仿真控制，不能把“多个机器人形态”读成已经完成对应真实机器人的部署。</p>
+<p>一句话：在连续控制与多任务世界模型学习中，通过更稳定的表示、预测目标和策略规划组合，改善训练鲁棒性及模型扩展，代价是规划计算、数据规模和对任务回报定义的依赖。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<p>五个前置概念：</p>
+<ol>
+<li><strong>潜动力学</strong>：预测内部表示如何随动作变化。</li>
+<li><strong>终端价值</strong>：估计有限规划结束后的未来回报。</li>
+<li><strong>停止梯度</strong>：把某个目标视为常数，避免两侧同时追逐。</li>
+<li><strong>最大熵策略</strong>：在高回报之外保留动作分布多样性。</li>
+<li><strong>动作掩码</strong>：屏蔽当前任务不存在的动作维度。</li>
+</ol>
+<h2 id="二它继承了-td-mpc-的什么思想">二、它继承了 TD-MPC 的什么思想</h2>
+<p>TD-MPC 不需要预测每个像素，而学习与任务有关的潜状态。规划器向前预测一小段，再使用价值函数评价更远的未来。这样避免长时间滚动导致模型误差快速放大，又不完全短视。</p>
+<p>TD-MPC2 仍然包含五个组件：</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>组件</th>
+<th>输入输出</th>
+<th>控制中的作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>编码器 <span class="reading-math" data-tex="h"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi></mrow><annotation encoding="application/x-tex">h</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">h</span></span></span></span></span></td>
+<td>观测到潜状态</td>
+<td>把感知变成模型可操作的表示</td>
+</tr>
+<tr>
+<td>动力学 <span class="reading-math" data-tex="d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi></mrow><annotation encoding="application/x-tex">d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span></td>
+<td>潜状态、动作到下一潜状态</td>
+<td>在内部比较候选动作后果</td>
+</tr>
+<tr>
+<td>奖励头 <span class="reading-math" data-tex="R"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>R</mi></mrow><annotation encoding="application/x-tex">R</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span></span></span></span></td>
+<td>潜状态、动作到奖励</td>
+<td>评价短期收益</td>
+</tr>
+<tr>
+<td>价值头 <span class="reading-math" data-tex="Q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Q</mi></mrow><annotation encoding="application/x-tex">Q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span></span></span></span></span></td>
+<td>潜状态、动作到长期回报</td>
+<td>补偿有限规划时域</td>
+</tr>
+<tr>
+<td>策略先验 <span class="reading-math" data-tex="p"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi></mrow><annotation encoding="application/x-tex">p</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span></span></span></span></span></td>
+<td>潜状态到动作分布</td>
+<td>给规划提供有希望的候选</td>
+</tr>
+</tbody></table></div>
+<p>多任务时，各组件还接收任务嵌入 <span class="reading-math" data-tex="e"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>e</mi></mrow><annotation encoding="application/x-tex">e</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">e</span></span></span></span></span>。这是可学习任务标识，不等于自然语言理解，也不意味着能够自动识别一个未指定的新任务。</p>
+<p>单任务实验使用在线交互；大型多任务实验从固定混合质量回放数据训练；新任务适应又加入在线交互。三种数据条件需要分别解读。</p>
+<h2 id="三方法变化与公式直觉">三、方法变化与公式直觉</h2>
+<h3 id="31-潜状态一致性奖励和价值联合训练">3.1 潜状态一致性、奖励和价值联合训练</h3>
+<p>用简化教学记号表示：</p>
+<p><span class="reading-math" data-tex="L_{\rm model}
+=\sum_{t=0}^{H}\lambda^t
+\left[
+c_z\|d(z_t,a_t)-\operatorname{sg}(h(s_{t+1}))\|^2
++c_rL_r+c_qL_q
+\right]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mrow><mi mathvariant="normal">m</mi><mi mathvariant="normal">o</mi><mi mathvariant="normal">d</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">l</mi></mrow></msub><mo>=</mo><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>0</mn></mrow><mi>H</mi></munderover><msup><mi>λ</mi><mi>t</mi></msup><mrow><mo fence="true">[</mo><msub><mi>c</mi><mi>z</mi></msub><mi mathvariant="normal">∥</mi><mi>d</mi><mo stretchy="false">(</mo><msub><mi>z</mi><mi>t</mi></msub><mo separator="true">,</mo><msub><mi>a</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mo>−</mo><mi mathvariant="normal">sg</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>h</mi><mo stretchy="false">(</mo><msub><mi>s</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">)</mo><mo stretchy="false">)</mo><msup><mi mathvariant="normal">∥</mi><mn>2</mn></msup><mo>+</mo><msub><mi>c</mi><mi>r</mi></msub><msub><mi>L</mi><mi>r</mi></msub><mo>+</mo><msub><mi>c</mi><mi>q</mi></msub><msub><mi>L</mi><mi>q</mi></msub><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_{\rm model}
+=\sum_{t=0}^{H}\lambda^t
+\left[
+c_z\|d(z_t,a_t)-\operatorname{sg}(h(s_{t+1}))\|^2
++c_rL_r+c_qL_q
+\right].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">model</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.0954em;vertical-align:-1.2671em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8283em;"><span style="top:-1.8829em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mrel mtight">=</span><span class="mord mtight">0</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2671em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8436em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size1">[</span></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.04398em;">z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∥</span><span class="mord mathnormal">d</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mop"><span class="mord mathrm" style="margin-right:0.01389em;">sg</span></span><span class="mopen">(</span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mclose">))</span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size1">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="\operatorname{sg}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">sg</mi><mo>⁡</mo></mrow><annotation encoding="application/x-tex">\operatorname{sg}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mop"><span class="mord mathrm" style="margin-right:0.01389em;">sg</span></span></span></span></span></span> 表示目标不接收该项反向梯度，<span class="reading-math" data-tex="\lambda"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi></mrow><annotation encoding="application/x-tex">\lambda</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">λ</span></span></span></span></span> 对较远预测降权，<span class="reading-math" data-tex="c_z,c_r,c_q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>c</mi><mi>z</mi></msub><mo separator="true">,</mo><msub><mi>c</mi><mi>r</mi></msub><mo separator="true">,</mo><msub><mi>c</mi><mi>q</mi></msub></mrow><annotation encoding="application/x-tex">c_z,c_r,c_q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.04398em;">z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 控制损失相对尺度。潜状态预测必须保持与真实后续观测编码一致，同时服务奖励与价值预测。</p>
+<p>与直接用均方误差拟合任意量级标量不同，TD-MPC2 把奖励和价值变换到离散回归表示，以软目标交叉熵训练。这使不同回报量级的任务更容易共享训练配置。它并没有把连续机器人动作离散化成 RT-2 式文本 token。</p>
+<h3 id="32-simnorm-为什么能稳定表示">3.2 SimNorm 为什么能稳定表示</h3>
+<p>将潜向量分组，每组执行：</p>
+<p><span class="reading-math" data-tex="g_i=\operatorname{softmax}(z_i/\tau)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>g</mi><mi>i</mi></msub><mo>=</mo><mi mathvariant="normal">softmax</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>z</mi><mi>i</mi></msub><mi mathvariant="normal">/</mi><mi>τ</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">g_i=\operatorname{softmax}(z_i/\tau).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>每组分量非负、和为一，避免潜状态幅度无限增长，同时保留连续可微表示。它不是抽样一个离散类别，因此不等同于硬 one-hot 编码。</p>
+<p>一个值得亲手检查的原文细节是温度极限：按照式 5，<span class="reading-math" data-tex="\tau\to0^+"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>τ</mi><mo>→</mo><msup><mn>0</mn><mo>+</mo></msup></mrow><annotation encoding="application/x-tex">\tau\to0^+</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7713em;"></span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7713em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span></span></span></span></span></span></span></span></span> 时趋向尖锐，<span class="reading-math" data-tex="\tau\to\infty"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>τ</mi><mo>→</mo><mi mathvariant="normal">∞</mi></mrow><annotation encoding="application/x-tex">\tau\to\infty</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord">∞</span></span></span></span></span> 时趋向均匀；附录 H 的文字把这两个极限写反了。实验使用固定温度，不能由这个文字问题推导出实验无效，但学习公式时应以数学定义为准。</p>
+<h3 id="33-策略先验与价值集成">3.3 策略先验与价值集成</h3>
+<p>策略先验偏向高价值动作，同时保留熵，避免候选过早塌缩。用清楚的最小化约定可写为：</p>
+<p><span class="reading-math" data-tex="L_p=-\mathbb E\big[\widetilde Q(z,a)+\beta\mathcal H(p(\cdot\mid z))\big],
+\quad a\sim p."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mi>p</mi></msub><mo>=</mo><mo>−</mo><mi mathvariant="double-struck">E</mi><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">[</mo><mover accent="true"><mi>Q</mi><mo stretchy="true">~</mo></mover><mo stretchy="false">(</mo><mi>z</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>+</mo><mi>β</mi><mi mathvariant="script">H</mi><mo stretchy="false">(</mo><mi>p</mi><mo stretchy="false">(</mo><mo>⋅</mo><mo>∣</mo><mi>z</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">]</mo><mo separator="true">,</mo><mspace width="1em"/><mi>a</mi><mo>∼</mo><mi>p</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_p=-\mathbb E\big[\widetilde Q(z,a)+\beta\mathcal H(p(\cdot\mid z))\big],
+\quad a\sim p.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">p</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2933em;vertical-align:-0.35em;"></span><span class="mord">−</span><span class="mord mathbb">E</span><span class="mord"><span class="delimsizing size1">[</span></span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9433em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">Q</span></span><span class="svg-align" style="width:calc(100% - 0.1667em);margin-left:0.1667em;top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.26em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.26em" viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M200 55.538c-77 0-168 73.953-177 73.953-3 0-7
+-2.175-9-5.437L2 97c-1-2-2-4-2-6 0-4 2-7 5-9l20-12C116 12 171 0 207 0c86 0
+ 114 68 191 68 78 0 168-68 177-68 4 0 7 2 9 5l12 19c1 2.175 2 4.35 2 6.525 0
+ 4.35-2 7.613-5 9.788l-19 13.05c-92 63.077-116.937 75.308-183 76.128
+-68.267.847-113-73.952-191-73.952z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mord mathcal" style="margin-right:0.00965em;">H</span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord">⋅</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.35em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mclose">))</span><span class="mord"><span class="delimsizing size1">]</span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∼</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="\widetilde Q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>Q</mi><mo stretchy="true">~</mo></mover></mrow><annotation encoding="application/x-tex">\widetilde Q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1378em;vertical-align:-0.1944em;"></span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9433em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">Q</span></span><span class="svg-align" style="width:calc(100% - 0.1667em);margin-left:0.1667em;top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.26em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.26em" viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M200 55.538c-77 0-168 73.953-177 73.953-3 0-7
+-2.175-9-5.437L2 97c-1-2-2-4-2-6 0-4 2-7 5-9l20-12C116 12 171 0 207 0c86 0
+ 114 68 191 68 78 0 168-68 177-68 4 0 7 2 9 5l12 19c1 2.175 2 4.35 2 6.525 0
+ 4.35-2 7.613-5 9.788l-19 13.05c-92 63.077-116.937 75.308-183 76.128
+-68.267.847-113-73.952-191-73.952z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span></span></span></span></span> 表示按统计量缩放的价值，<span class="reading-math" data-tex="\beta&gt;0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>β</mi><mo>&gt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\beta&gt;0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span> 控制熵项。更新只作用于策略参数。原文式 4 的“最大化”与熵负号存在阅读歧义；<a href="https://raw.githubusercontent.com/nicklashansen/tdmpc2/main/tdmpc2/tdmpc2.py">官方代码的策略更新</a>采用对价值和熵之和取负的损失。该链接是持续维护版本，不能据此假定其所有细节与论文历史实验完全相同。</p>
+<p>多个 <span class="reading-math" data-tex="Q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Q</mi></mrow><annotation encoding="application/x-tex">Q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span></span></span></span></span> 头用于缓解目标估计偏差。计算 TD 目标时随机抽取两个目标价值头取较小值，而不是所有头都取最小。集成不提供确定的误差上界，不能把它当成物理安全证明。</p>
+<h3 id="34-短期规划加终端价值">3.4 短期规划加终端价值</h3>
+<p>规划候选动作的教学评分为：</p>
+<p><span class="reading-math" data-tex="G(a_{0:H})
+=\sum_{t=0}^{H-1}\gamma^tR(z_t,a_t)
++\gamma^HQ(z_H,a_H)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>G</mi><mo stretchy="false">(</mo><msub><mi>a</mi><mrow><mn>0</mn><mo>:</mo><mi>H</mi></mrow></msub><mo stretchy="false">)</mo><mo>=</mo><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>0</mn></mrow><mrow><mi>H</mi><mo>−</mo><mn>1</mn></mrow></munderover><msup><mi>γ</mi><mi>t</mi></msup><mi>R</mi><mo stretchy="false">(</mo><msub><mi>z</mi><mi>t</mi></msub><mo separator="true">,</mo><msub><mi>a</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mo>+</mo><msup><mi>γ</mi><mi>H</mi></msup><mi>Q</mi><mo stretchy="false">(</mo><msub><mi>z</mi><mi>H</mi></msub><mo separator="true">,</mo><msub><mi>a</mi><mi>H</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">G(a_{0:H})
+=\sum_{t=0}^{H-1}\gamma^tR(z_t,a_t)
++\gamma^HQ(z_H,a_H).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">G</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">0</span><span class="mrel mtight">:</span><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.0954em;vertical-align:-1.2671em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8283em;"><span style="top:-1.8829em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mrel mtight">=</span><span class="mord mtight">0</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2671em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8436em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1413em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span></span></span></span></span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>规划器采样动作段、在潜模型中展开、按评分更新候选分布，只执行第一步。策略先验提供部分候选，上一步计划平移后用于热启动。</p>
+<p>多任务时，状态和动作补零到统一长度，非法动作维被屏蔽。屏蔽不仅避免机器人执行不存在的关节，也防止策略在无效维度上虚增熵。</p>
+<pre><code class="language-text">初始化编码器、潜动力学、奖励头、Q 集成和策略先验
+循环：
+    编码当前观测及任务嵌入
+    用策略先验和采样分布提出动作序列
+    在潜空间预测短期奖励，并加终端价值
+    迭代更新候选分布，执行第一步
+    保存真实转移到回放
+    抽取连续片段：
+        更新潜一致性、奖励预测和 TD 价值预测
+        仅更新策略先验，使其兼顾价值与熵
+        更新目标价值网络
+多任务训练时屏蔽无效动作维，并使用对应任务嵌入
+</code></pre>
+<h2 id="四实验设置与比较口径">四、实验设置与比较口径</h2>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>原文设定及解释</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>主单任务</td>
+<td>104 个连续控制任务，跨 DMControl、Meta-World、ManiSkill2、MyoSuite</td>
+</tr>
+<tr>
+<td>视觉实验</td>
+<td>另外明确讨论十个图像输入控制任务；主要分析仍以状态输入为主</td>
+</tr>
+<tr>
+<td>对照</td>
+<td>SAC、原 TD-MPC、指定实现和配置的 DreamerV3；视觉另有相关基线</td>
+</tr>
+<tr>
+<td>不确定性</td>
+<td>主要学习曲线三种子及 95% 区间</td>
+</tr>
+<tr>
+<td>默认规划</td>
+<td>附录 H 列出时域、候选数量与迭代次数；高维动作有自动调整</td>
+</tr>
+<tr>
+<td>多任务数据</td>
+<td>80 任务，来自单任务策略回放的 5.45 亿转移</td>
+</tr>
+<tr>
+<td>多任务模型</td>
+<td>从百万级到 317M 参数；训练成本随模型增加</td>
+</tr>
+<tr>
+<td>新任务</td>
+<td>70 任务预训练，再对十个留出任务在线微调</td>
+</tr>
+<tr>
+<td>真实部署</td>
+<td>本文主实验没有构成全面真实机器人控制验证</td>
+</tr>
+</tbody></table></div>
+<p>“同一组超参数”并非所有数字恒定。原文按任务回合长度自动设置折扣与起始随机步数，高维动作调整规划迭代，多任务增大批量。更准确的含义是使用统一规则，减少逐任务手工搜索。</p>
+<p>基线批量、更新比例与参数规模也不同。横轴是环境交互量时，曲线比较样本效率；不能直接换成同算力或同墙钟时间的胜负。不同代码对 UTD 的计数还可能不同，不宜只看一个比例作成本换算。</p>
+<h2 id="五五组证据的强弱">五、五组证据的强弱</h2>
+<p>定位依据<a href="https://arxiv.org/html/2310.16828">原文 v2 结果与附录</a>。</p>
+<p><strong>图 4–6：单任务连续控制。</strong> 聚合和困难任务显示较强表现，但聚合领先不等于每个任务、每个阶段都领先。附录保留了某些基线更早成功的例子；视觉任务上作者使用的是相当而非全面压倒的结论。</p>
+<p><strong>图 7、表 1：模型扩展与成本。</strong> 80 任务模型从 5M 到 317M，归一化分数由 49.5 到 70.6，成本由约 4.2 到 33 GPU 天。增加 21.1 分不等于成功率提高 21.1 个百分点，因为分数混合了成功率和归一化回报。规模收益也伴随明显计算成本。</p>
+<p><strong>图 8、附录 E：新任务适应。</strong> 预训练后在低交互预算下优于从零训练，但仍需要新任务环境交互。任务嵌入从语义相似任务初始化，这包含人工选择，不能称为无任务知识的零样本泛化。</p>
+<p><strong>图 9、附录 G：稳定性机制。</strong> 消融支持多个组件共同起作用。梯度图为清晰仅展示每任务一个种子，能显示现象，不能单靠这些曲线估计罕见发散概率。</p>
+<p><strong>附录 J、表 10：离线数据覆盖。</strong> 附加测试时正则可以改善部分配置，但强正则也降低成绩。原文明确这不是主实验默认设置，因此不能把它写成所有 TD-MPC2 结果都使用的保守规划模块。</p>
+<p>作者避免把有限规模实验拟合成普遍缩放定律，这一点应保留。大模型曲线仍上升，并不意味着未来按同一比例持续增长。</p>
+<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<p>TD-MPC2 的主要价值是把多种稳定训练选择组织成能扩展的连续控制系统。新意更多体现在组件配合、统一规则和多任务实证，而不是单独一个从未出现过的数学目标。</p>
+<p>它仍会面对模型误差和离线分布外动作。潜状态不重建观测节约了学习负担，但也可能丢失当前任务不需要、未来新任务却需要的信息。任务回报错误时，世界模型再准确也可能规划出错误目标。</p>
+<p>本文进一步分析：终端价值降低短视，却引入价值误差；增加规划候选提高搜索力度，也可能更积极利用模型漏洞。应同时测量预测校准和闭环成绩，而不是认为规划更多必然更好。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>原有问题</th>
+<th>作者的改动</th>
+<th>为什么可能有效</th>
+<th>实验证据</th>
+<th>代价与局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>大模型控制训练不稳</td>
+<td>SimNorm、离散回归与价值集成</td>
+<td>控制表示和目标尺度</td>
+<td>消融、梯度与任务结果</td>
+<td>无普遍收敛保证</td>
+</tr>
+<tr>
+<td>多任务动作维度不同</td>
+<td>任务嵌入与动作屏蔽</td>
+<td>共享表示并保留任务区别</td>
+<td>多任务学习</td>
+<td>依赖任务标识</td>
+</tr>
+<tr>
+<td>短规划看不远</td>
+<td>终端价值与策略先验</td>
+<td>补足长远估计并改善候选</td>
+<td>控制结果与消融</td>
+<td>价值与模型误差</td>
+</tr>
+</tbody></table></div>
+<h2 id="七自构小例子与前置概念">七、自构小例子与前置概念</h2>
+<p>以下是自构例子，未运行。机器人要先把障碍移开，再拿后面的物体。短期规划里“绕开障碍直接伸手”看起来更接近目标，却会碰撞；移开障碍短期没有抓取奖励，但可能到达一个高价值状态。</p>
+<p>终端价值可以给后者补分。然而如果价值网络错误地把碰撞附近状态估得很高，规划也会被误导。潜空间规划与价值学习是互补关系，同时也是两个需要分别检查的误差源。</p>
+<p>阅读范围：核对原文方法、主实验和实现、微调、正则附录，并以当前官方策略代码辅助澄清符号；未锁定历史实验提交或独立复现，不能把当前代码新增功能倒推为原论文结果。</p>
+<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<p><strong>问题1：为什么世界模型不重建图像也能用于控制？</strong></p>
+<p>答案：控制需要预测与动作选择有关的后果，而非所有视觉细节。潜一致性、奖励和价值监督可以保留这部分信息；但若新任务依赖被丢弃的细节，就可能需要重新学习表示。</p>
+<p><strong>问题2：为什么补零动作必须同时从熵和规划中屏蔽？</strong></p>
+<p>答案：不存在的动作维不会改变环境，却可能给策略制造虚假的高熵空间，或让模型评估不合理输入。只在最后执行时删掉它们，训练目标仍会受污染。</p>
+<p><strong>问题3：一个模型会八十个任务，是否说明它不用数据就能做第八十一个？</strong></p>
+<p>答案：不说明。多任务模型有这些任务的训练经验和嵌入；论文的新任务结果使用在线微调并初始化新嵌入。要证明零样本能力，需要留出任务且不更新模型，用明确的任务描述直接执行。</p>
+</div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
     </main>
     <div id="site-footer"></div>
-    <textarea id="md-source" class="hidden" readonly># 070｜TD-MPC2：可扩展的连续控制世界模型
+    <textarea id="md-source" hidden readonly># 070｜TD-MPC2：可扩展的连续控制世界模型
 
 [系列首页](README.md) · [上一篇](069-eureka.md) · [下一篇](071-mimicgen.md)
 
@@ -120,7 +337,7 @@ L_p=-\mathbb E\big[\widetilde Q(z,a)+\beta\mathcal H(p(\cdot\mid z))\big],
 \quad a\sim p.
 $$
 
-$\widetilde Q$ 表示按统计量缩放的价值，$\beta>0$ 控制熵项。更新只作用于策略参数。原文式 4 的“最大化”与熵负号存在阅读歧义；[官方代码的策略更新](https://raw.githubusercontent.com/nicklashansen/tdmpc2/main/tdmpc2/tdmpc2.py)采用对价值和熵之和取负的损失。该链接是持续维护版本，不能据此假定其所有细节与论文历史实验完全相同。
+$\widetilde Q$ 表示按统计量缩放的价值，$\beta&gt;0$ 控制熵项。更新只作用于策略参数。原文式 4 的“最大化”与熵负号存在阅读歧义；[官方代码的策略更新](https://raw.githubusercontent.com/nicklashansen/tdmpc2/main/tdmpc2/tdmpc2.py)采用对价值和熵之和取负的损失。该链接是持续维护版本，不能据此假定其所有细节与论文历史实验完全相同。
 
 多个 $Q$ 头用于缓解目标估计偏差。计算 TD 目标时随机抽取两个目标价值头取较小值，而不是所有头都取最小。集成不提供确定的误差上界，不能把它当成物理安全证明。
 
@@ -232,9 +449,9 @@ TD-MPC2 的主要价值是把多种稳定训练选择组织成能扩展的连续
 答案：不说明。多任务模型有这些任务的训练经验和嵌入；论文的新任务结果使用在线微调并初始化新嵌入。要证明零样本能力，需要留出任务且不更新模型，用明确的任务描述直接执行。
 
 </textarea>
-    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="js/catalog.js"></script>
     <script src="../js/site-chrome.js"></script>
