@@ -20,12 +20,14 @@ The site is built with HTML, CSS, and JavaScript and hosted on GitHub Pages. Its
 | [Robot learning](https://wq-win.github.io/robot-learn/) | 100 | Demonstrations, interaction, motion primitives, and vision-language-action models |
 | [Classic robotics](https://wq-win.github.io/robot-classic/) | 100 | Geometry, estimation, planning, control, and SLAM |
 
-Each series also includes a timeline and closing overview. Notes distinguish the paper's claims, evidence from the original source, and explanatory derivations.
+Each series begins with a Day 0 reading guide, followed by a timeline and closing overview. Notes distinguish the paper's claims, evidence from the original source, and explanatory derivations.
 
 - Search across series and browse by research era
 - Read Markdown-based articles with formulas, diagrams, and previous/next navigation
 - Explore the [concept map](https://wq-win.github.io/map.html), [glossary](https://wq-win.github.io/glossary.html), and related papers
-- Use light/dark themes and responsive layouts
+- Read with section-aware navigation and symbols, bilingual first-occurrence notes, and accessible mobile term dialogs
+- Search the shared 104-concept glossary and 70 scoped symbol entries
+- Use light/dark themes and responsive layouts; choose Static, Floating Light, Aurora or Stardust with strength, speed and pause in the appearance menu
 
 ### Interactive demos
 
@@ -108,6 +110,10 @@ git diff --check
 ```
 
 These dependency-free tests exercise game logic and controllers in a simulated DOM. They do not replace real-browser checks for layout, touch gestures, image loading, or accessibility. See the [Paodekuai checklist](tools/paodekuai-qa.md) and [Doudizhu checklist](tools/doudizhu-qa.md).
+
+### Reading-layer checks
+
+The 360 paper pages and four Day 0 guides include static text and local KaTeX math, so the article remains readable without JavaScript. Shared scripts add the reading tools. See the [reading build and QA guide](tools/reading-qa.md) for source-preservation checks, regeneration commands and the original LSTM formula caveat.
 
 ### GitHub Pages
 
