@@ -1,72 +1,127 @@
-# MyLog - Personal Blog
+# MyLog
 
-A personal blog website inspired by Lilian Weng's blog, built with HTML, CSS, JavaScript, and Tailwind CSS.
+[![中文](https://img.shields.io/badge/中文-阅读中文版-64748b?style=for-the-badge)](README.zh-CN.md)
+[![English](https://img.shields.io/badge/English-Current-2563eb?style=for-the-badge)](README.md)
 
-## Features
+Paper-reading notes, interactive algorithm demos, and browser games by **wq-win**.
 
-- Clean and minimalist design with left sidebar layout
-- Responsive design that works on mobile, tablet, and desktop
-- Article cards with hover effects
-- Category filtering
-- Search functionality
-- Individual article pages with related articles
-- Smooth animations using AOS (Animate On Scroll)
+[Visit the site](https://wq-win.github.io/) · [Demos & games](https://wq-win.github.io/game/) · [RSS](https://wq-win.github.io/rss.xml) · [Report an issue](https://github.com/wq-win/wq-win.github.io/issues)
 
-## Project Structure
+The site is built with HTML, CSS, and JavaScript and hosted on GitHub Pages. Its articles and game interfaces are primarily in Chinese; the buttons above switch the README language.
 
+## Explore
+
+### Paper-reading series
+
+| Series | Papers | Focus |
+| --- | ---: | --- |
+| [Reinforcement learning](https://wq-win.github.io/rl/) | 60 | Value estimation, policies, world models, and language-model RL |
+| [Large language models](https://wq-win.github.io/llm/) | 100 | Representations, pretraining, retrieval, alignment, and reasoning |
+| [Robot learning](https://wq-win.github.io/robot-learn/) | 100 | Demonstrations, interaction, motion primitives, and vision-language-action models |
+| [Classic robotics](https://wq-win.github.io/robot-classic/) | 100 | Geometry, estimation, planning, control, and SLAM |
+
+Each series also includes a timeline and closing overview. Notes distinguish the paper's claims, evidence from the original source, and explanatory derivations.
+
+- Search across series and browse by research era
+- Read Markdown-based articles with formulas, diagrams, and previous/next navigation
+- Explore the [concept map](https://wq-win.github.io/map.html), [glossary](https://wq-win.github.io/glossary.html), and related papers
+- Use light/dark themes and responsive layouts
+
+### Interactive demos
+
+The [demo hub](https://wq-win.github.io/game/) includes 17 algorithm demos:
+
+- Reinforcement learning: Q-learning, value iteration, REINFORCE, and SARSA vs. Q-learning
+- Language models: attention, positional encoding, Softmax temperature, and BPE
+- Classic robotics: A*, RRT, Kalman filtering, potential fields, PID, and ICP
+- Robot learning: DMP, DAgger, and domain randomization
+
+### Browser games
+
+- [Paodekuai / 跑得快](https://wq-win.github.io/game/paodekuai.html): play against two computer opponents with 16 cards each. Includes tap/drag selection, cycling legal-move hints, automatic passes when no response is possible, and a public-information card counter. The counter subtracts your hand and played cards without revealing either opponent's hand.
+- [Doudizhu endgames / 斗地主残局](https://wq-win.github.io/game/doudizhu.html): 11 one-on-one, face-up puzzles with strategic hints, restart confirmation, saved completion progress, and explicit replay/next-level controls. Hints select a move without playing it; a search-limit fallback is labeled as a legal suggestion rather than a guaranteed win.
+- [Spider Solitaire](https://wq-win.github.io/game/spider.html), [Sudoku](https://wq-win.github.io/game/sudoku.html), and [Jianghu Slay](https://wq-win.github.io/game/jianghu-slay.html)
+
+Paodekuai and Doudizhu share blue-and-gold table styling, original character portraits, and illustrated court cards. See the [asset notes](game/assets/paodekuai/README.md) for their provenance.
+
+## Run locally
+
+Requirements: Git and Python 3. Node.js is only needed for the game regression tests.
+
+```sh
+git clone https://github.com/wq-win/wq-win.github.io.git
+cd wq-win.github.io
+python3 -m http.server 8000 --bind 127.0.0.1
 ```
-personal-blog/
-├── index.html              # Main page with article listings
-├── test.html               # Test page for verifying functionality
-├── css/
-│   └── style.css           # Custom CSS styles
-├── js/
-│   ├── main.js             # Main JavaScript functionality
-│   └── article.js          # Article page specific functionality
-└── article-pages/          # Individual article pages
-    ├── understanding-transformers.html
-    ├── introduction-to-reinforcement-learning.html
-    ├── bert-pre-training.html
-    ├── image-classification-with-cnns.html
-    ├── python-for-data-science.html
-    ├── generative-adversarial-networks.html
-    ├── nlp-with-transformers.html
-    ├── object-detection-with-yolo.html
-    ├── deep-learning-for-time-series.html
-    └── web-scraping-with-python.html
+
+Open <http://localhost:8000/> in a browser. Serve the repository root over HTTP so root-relative assets and the fetched search index work correctly. No package installation or build step is needed to preview the committed site. Some article-rendering libraries load from CDNs and require internet access.
+
+## Project structure
+
+```text
+wq-win.github.io/
+├── index.html                 # Site homepage
+├── README.md                  # English guide
+├── README.zh-CN.md             # Chinese guide
+├── rl/                        # Reinforcement-learning series
+├── llm/                       # Language-model series
+├── robot-learn/               # Robot-learning series
+├── robot-classic/             # Classic-robotics series
+│   └── (each series has HTML pages, posts/, and js/catalog.js)
+├── game/                      # Games and grouped algorithm demos
+│   └── assets/paodekuai/       # Shared card-table artwork
+├── css/                       # Site and game styles
+├── fonts/                     # Local icon fonts
+├── js/                        # Site scripts, renderers, and game engines
+├── data/search-index.json     # Generated cross-series search index
+├── scripts/                   # Paper-series generation scripts
+├── tools/                     # Site-data builder and regression tests
+├── map.html                   # Cross-series concept map
+├── glossary.html              # Terminology glossary
+├── rss.xml                    # RSS feed
+└── sitemap.xml                # Sitemap
 ```
 
-## How to Use
+## Maintain the site
 
-1. Clone the repository
-2. Open `index.html` in a web browser
-3. Browse articles, use search, or filter by category
-4. Click "Read more" to view individual articles
+### Articles and navigation
 
-## Customization
+1. Keep Markdown sources in the relevant series' `posts/` directory.
+2. Update the corresponding HTML page and `js/catalog.js` in that series. Article pages embed their Markdown, so changing a `.md` source alone does not update the published article.
+3. For bulk generation, review `scripts/build-rl.py` and `scripts/build-paper-series.py` first. They currently use author-specific local source paths, which must be adapted before running them elsewhere.
+4. After updating pages and catalogs, regenerate the search index, related-paper data, sitemap, RSS, and robots file:
 
-### Adding New Articles
+```sh
+python3 tools/build-site-data.py
+```
 
-1. Create a new HTML file in the `article-pages` directory using the slug format (e.g., `new-article.html`)
-2. Copy the content from `simple-article.html` as a template
-3. Add the new article data to the `articles` array in `js/main.js` with the correct slug
+Site identity and navigation are configured in `js/site-config.js`. Shared appearance lives in `css/style.css`; individual HTML pages also define Tailwind settings. Card-game styles and controllers have their own files under `css/` and `js/`.
 
-### Modifying Styles
+### Game checks
 
-- Customize Tailwind CSS colors and fonts in the `tailwind.config` object in `index.html` and article pages
-- Add custom styles in `css/style.css`
+Run from the repository root with Node.js:
 
-### Changing Layout
+```sh
+node tools/paodekuai-ui-test.js
+node tools/doudizhu-ui-test.js
+git diff --check
+```
 
-- Modify the grid layout in `index.html` by changing the `grid-cols` class in the articles container
-- Adjust the left sidebar width by changing the `md:w-1/4` class in the main content sections
+These dependency-free tests exercise game logic and controllers in a simulated DOM. They do not replace real-browser checks for layout, touch gestures, image loading, or accessibility. See the [Paodekuai checklist](tools/paodekuai-qa.md) and [Doudizhu checklist](tools/doudizhu-qa.md).
 
-## Dependencies
+### GitHub Pages
 
-- Tailwind CSS v3
-- Font Awesome
-- AOS (Animate On Scroll)
+The committed files form a static site and can be served directly from the repository root. If you fork the project, update site URLs in `js/site-config.js` and `tools/build-site-data.py`, regenerate site data, and configure GitHub Pages for your own repository. Root-relative asset paths assume the site is hosted at the domain root.
+
+## Dependencies and credits
+
+- HTML, CSS, and vanilla JavaScript
+- Tailwind CSS v3 and Font Awesome for styling and icons
+- AOS for scroll animations
+- Marked, KaTeX, and Mermaid for article rendering
+- Original blog design inspiration: Lilian Weng's blog
+- Card-table artwork: [creation and reuse notes](game/assets/paodekuai/README.md)
 
 ## License
 
-MIT
+MIT, as declared in the original README. A standalone `LICENSE` file is not currently included in this repository. Third-party dependencies retain their own licenses.
