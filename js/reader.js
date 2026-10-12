@@ -47,7 +47,7 @@
     }
 
     function countRead(posts, series) {
-        return posts.filter((post) => post.kind !== 'overview' && post.kind !== 'epilogue' && isRead(series, post.slug)).length;
+        return posts.filter((post) => post.day > 0 && post.kind !== 'overview' && post.kind !== 'epilogue' && !/epilogue|reading-guide/.test(post.slug) && isRead(series, post.slug)).length;
     }
 
     function slugifyHeading(text, used) {
@@ -203,7 +203,7 @@
 
     function renderHubProgress(posts, series) {
         if (!posts || !series) return;
-        const papers = posts.filter((post) => (post.kind || 'paper') === 'paper');
+        const papers = posts.filter((post) => post.day > 0 && (post.kind || 'paper') === 'paper' && !/timeline|epilogue|reading-guide/.test(post.slug));
         if (!papers.length) return;
         const read = countRead(papers, series);
         let host = document.getElementById('reading-progress');
@@ -231,8 +231,12 @@
         const slug = (options && options.slug) || currentSlug();
         const body = document.getElementById('article-body');
         if (body) {
-            renderToc(body);
-            wrapGlossary(body, root);
+            if (global.ReadingGuide) {
+                global.ReadingGuide.mount({ container: body, root, series, slug });
+            } else {
+                renderToc(body);
+                wrapGlossary(body, root);
+            }
             renderRelated(root, series, slug);
             if (series && slug && slug !== 'index') {
                 markOpened(series, slug);
