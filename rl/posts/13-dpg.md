@@ -4,21 +4,13 @@
 
 **原论文与版本**：Silver 等，*Deterministic Policy Gradient Algorithms*，2014。[原文](https://proceedings.mlr.press/v32/silver14.pdf)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：高维连续动作的策略更新
+[策略梯度定理](08-policy-gradient-theorem.md)把随机策略更新写成价值加权的概率导数。连续动作维度增加时，对动作分布的采样估计可能昂贵；DPG直接研究确定性动作映射的梯度。
 
-**旧方法卡点**：离散枚举不可行，随机策略梯度可能需要大量动作样本
+## 一、问题设定：连续动作无法枚举，能否沿价值的动作导数改进
 
-**作者主张**：以 Critic 对动作的导数连接确定性 Actor 的参数导数
-
-**论文证据**：§5 在连续 bandit 与控制任务上验证其作用
-
-**一句话**：在确定性策略、连续动作、单智能体 Actor–Critic中，作者通过“以 Critic 对动作的导数连接确定性 Actor 的参数导数”应对“高维连续动作的策略更新”这一问题；证据边界或代价是：Critic 梯度错误可直接误导 Actor，off-policy 实现与理想定理有差别。
-
-## 二、研究背景与问题定义
-
-本篇将“高维连续动作的策略更新”放在确定性策略、连续动作、单智能体 Actor–Critic的边界内研究。离散枚举不可行，随机策略梯度可能需要大量动作样本。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+一个确定性Actor在每个状态只输出一个动作，但仍需要知道把这个动作稍微向左或向右改会怎样影响长期回报。如果Critic能提供动作方向的局部导数，Actor就可以再用自身的Jacobian把它变成参数方向；难点在于这个导数及访问分布是否可信。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -28,18 +20,35 @@
 | 奖励或学习信号 | 环境累计收益 |
 | 终止／边界 | 任务终止或折扣继续过程 |
 
-## 三、方法：到底改了什么
+## 二、把价值对动作的导数接到Actor参数
 
-DPG 首先是一条策略梯度定理，然后才是相应算法。Actor 负责输出动作，Critic 给出动作改变的方向；探索由行为策略完成，不需要目标策略本身随机。它只对学到的 Q 求导，不要求真实物理环境可微。
+随机策略梯度需要对动作分布求期望，动作维度很大时估计成本会增长。DPG考虑确定性映射 $a=\mu_\theta(s)$：先看动作微小变化怎样影响Q，再看参数怎样改变动作，以链式法则得到策略更新方向。
 
-### 关键公式与符号
+但这不只是把任意Q网络接在Actor后面求导。定理中的Q是当前目标策略的真实价值，状态按该策略的访问分布加权；推导已把长期状态变化组织进这个分布。用行为策略采样可实现探索，但把 $\rho^\mu$ 换成 $\rho^\beta$ 涉及另一个离策略目标或近似，不能静默保留原定理结论。
+
+确定性策略也不意味着数据没有随机性。Actor可以确定，采样行为可以加噪声；Critic靠这些动作周围的数据学习局部斜率。如果它在未见动作处制造虚假的上坡，Actor就会沿错误梯度利用这个漏洞。
+
+### 明确链式梯度中的价值与访问权重
 
 $$\nabla J=\mathbb E_{s\sim\rho^\mu}[\nabla_\theta\mu_\theta(s)\nabla_aQ^\mu(s,a)|_{a=\mu_\theta(s)}].$$
 ρ 是策略访问分布。用行为分布替代它涉及 off-policy 目标或近似，不能默认为同一个真梯度。
 
-### 输入 → 处理 → 输出：教学伪代码
+这里沿用[原文§2.1与Theorem 1](https://proceedings.mlr.press/v32/silver14.pdf#page=2)的约定：$\rho^\mu$ 是折扣访问权重，不一定归一化成概率分布。若改用 $d^\mu=(1-\gamma)\rho^\mu$，右边相应需要 $1/(1-\gamma)$ 因子。动作梯度给出“动作向哪边改”，Actor的Jacobian再把它变为参数方向；把两者相乘不需要对真实转移求导，但不能省略当前策略价值与访问权重的条件。
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+### 动作维度与参数维度怎样连接
+
+若动作m维、参数d维，Actor的Jacobian为m×d，动作价值梯度为m维；采用列梯度约定时用 $J_\mu^\top\nabla_aQ$ 得到d维参数方向。文中连乘式的转置随向量约定变化，不能把动作梯度直接当参数梯度。
+
+### 让正确和错误Critic分别指挥一次更新
+
+以下是可手算的教学构造，不是论文实验。
+
+一状态任务真Q为 $Q(a)=-(a-2)^2$，Actor输出 $a=\theta$。在θ=0时，$\partial Q/\partial a=4$，一次步长0.1的梯度上升得到θ=0.4，Q从−4变成−2.56。
+
+若学到的Critic却是 $\hat Q(a)=-(a+2)^2$，同样代码把θ推到−0.4，真实Q变为−5.76。环境可不可微并非这里的障碍，Critic导数是否可信才是。
+
+## 三、用探索数据学习Critic并保留动作梯度
+
 
 ```text
 初始化确定性 Actor μ 和 Critic Q
@@ -57,15 +66,7 @@ $$\nabla J=\mathbb E_{s\sim\rho^\mu}[\nabla_\theta\mu_\theta(s)\nabla_aQ^\mu(s,a
 
 **实现要点**：Critic 梯度错误可直接误导 Actor，off-policy 实现与理想定理有差别。
 
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | 最大化确定性策略回报，以Q的动作导数计算Actor梯度 |
-| 机制改变 | 以 Critic 对动作的导数连接确定性 Actor 的参数导数 |
-| 评价改善的指标 | 回报与随采样增长的学习速度 |
-
-## 四、实验如何验证方法
+## 四、分开读取高维bandit与连续控制结果
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
@@ -74,32 +75,43 @@ $$\nabla J=\mathbb E_{s\sim\rho^\mu}[\nabla_\theta\mu_\theta(s)\nabla_aQ^\mu(s,a
 | 对比基线 | 随机 Actor–Critic 等；文中 SAC 缩写不是 2018 Soft AC |
 | 训练预算与资源 | bandit 动作维度 10、25、50；其余完整预算本文未核实 |
 | 指标及其含义 | 回报与随采样增长的学习速度 |
-| 随机性与不确定性 | 全部种子／误差定义本文未核实 |
+| 随机性与不确定性 | 连续bandit平均5次；控制任务30次；误差定义未全部复核 |
 | 实际验证的假设 | 避免动作积分是否改善连续动作优化 |
 
-**实验解读（本文分析）**：Critic 梯度错误可直接误导 Actor，off-policy 实现与理想定理有差别。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+**实验解读（本文分析）**：连续bandit[图1](#rl-13-figure-1)比较10、25、50维动作，选取参数扫描中表现最好的配置并平均5次运行，每批2m步再更新Actor。其横轴是环境步，评估使用均值动作而不惩罚探索噪声。这个受控实验支持高维动作梯度的效率动机，不能直接证明所有动力学任务都更优；控制任务另有30次运行。
 
-## 五、结果：证据到底有多强
+<!-- figure-ref-v6:start:rl-13-figure-1 -->
+<figure class="reading-evidence-figure" id="rl-13-figure-1"><a href="/rl/assets/reference-v6/13-figure-1.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/13-figure-1.png" width="1479" height="402" alt="三列将连续动作维数从10增到25和50，横纵轴都用对数尺度；红色COPDAC-B在高维时较快压低成本。这是bandit构造中梯度估计的比较，不是所有连续控制任务的统一性能结论。" loading="lazy"></a><figcaption>原论文图形摘引｜Silver等，2014，图1，PDF第7页。<a href="https://proceedings.mlr.press/v32/silver14.pdf#page=7" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。</figcaption></figure>
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| §3—4 定理 | 确定性策略梯度表达 | 提供链式更新依据 | 不保证近似 Critic |
-| 图1 | 10/25/50 维 bandit 比较 | 直接检验动作维度影响 | 不涵盖所有复杂动力学 |
-| §5 控制任务 | 确定与随机策略方法比较 | 支持原文任务中的可行性 | 不证明确定策略普遍占优 |
+三列将连续动作维数从10增到25和50，横纵轴都用对数尺度；红色COPDAC-B在高维时较快压低成本。这是bandit构造中梯度估计的比较，不是所有连续控制任务的统一性能结论。
+<!-- figure-ref-v6:end:rl-13-figure-1 -->
 
-**结论边界**：§5 在连续 bandit 与控制任务上验证其作用。Critic 梯度错误可直接误导 Actor，off-policy 实现与理想定理有差别。
+### 控制图中的SAC并非后来的Soft Actor-Critic
 
-## 六、贡献、代价与局限
+<!-- inline-evidence-v2:start -->
 
-**作者贡献**包括确定性梯度理论和算法。**本文分析**：Actor 会寻找 Q 的局部高点，也会利用 Q 的错误高点；没有足够探索时，导数只是模型外推。后来的 DDPG、TD3 主要处理这一结构在深度网络中的稳定性问题。
+<!-- figure-ref-v6:start:anchor-rl-13-figure-2 -->
+<span id="rl-13-figure-2"></span>
+<!-- figure-ref-v6:end:anchor-rl-13-figure-2 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/13-dpg-figure-2.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/13-dpg-figure-2.png" width="1458" height="396" alt="确定性COPDAC-Q与随机Actor-Critic在Mountain Car、Pendulum和Puddle World的回报" loading="lazy"></a><figcaption>原论文图形摘引；Silver等，2014，Figure 2, PDF第7页；仅图形区域。<a href="https://proceedings.mlr.press/v32/silver14.pdf#page=7" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
 
-## 七、帮助建立理解
+这张图是连续控制的图2，不是前面讨论动作维数的bandit图1。三个面板横轴为时间步（刻度乘 $10^4$），纵轴为每回合总奖励（刻度乘 $10^3$），越高越好；不同任务纵轴范围不同。红线COPDAC-Q与蓝线OffPAC-TD的比较更接近“同为离策略、改变确定/随机Actor”，绿线SAC还同时改变了采样方式。曲线评价的是均值策略，不能把训练噪声造成的即时损失直接读入这些测试分数。
 
-### 教学例子
 
-以下是教学推演，不是原论文实验。
+<!-- inline-evidence-v2:end -->
 
-令 Q(a)=−(a−2)²，Actor 当前 a=0，则 ∂Q/∂a=4，会推动 a 增大。如果学错成 −(a+2)²，同样合法的反向传播会把动作推向错误方向。梯度可算与梯度可信是两件事。
+
+确定性梯度定理给出通过动作导数更新Actor的依据，实验则检验这一接口在高维动作中是否有优势。[图1](#rl-13-figure-1)分别比较10、25、50维连续bandit，用随机与确定性Actor-Critic测试维度效应；这里图例中的SAC是该文的stochastic actor-critic，不是2018 Soft Actor-Critic。[图2](#rl-13-figure-2)的连续控制比较与[图3](#rl-13-figure-3)的章鱼臂任务扩大了范围，但不能证明所有环境均适合确定性策略。 [查看原文](https://proceedings.mlr.press/v32/silver14.pdf)。
+
+<!-- figure-ref-v6:start:rl-13-figure-3 -->
+<figure class="reading-evidence-figure" id="rl-13-figure-3"><a href="/rl/assets/reference-v6/13-figure-3.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/13-figure-3.png" width="552" height="429" alt="上图看每回合回报，下图看到达目标的步数；灰线为10次运行，红线汇总其趋势。两种指标方向相反但结论相容，不能只展示回报而隐藏到达时间的离散性。" loading="lazy"></a><figcaption>原论文图形摘引｜Silver等，2014，图3，PDF第8页。<a href="https://proceedings.mlr.press/v32/silver14.pdf#page=8" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。</figcaption></figure>
+
+上图看每回合回报，下图看到达目标的步数；灰线为10次运行，红线汇总其趋势。两种指标方向相反但结论相容，不能只展示回报而隐藏到达时间的离散性。
+<!-- figure-ref-v6:end:rl-13-figure-3 -->
+
+## 五、检查局部斜率与访问分布的误差
+
+Actor会利用Critic的真实局部高点，也会利用错误高点；探索不足时，动作导数只是数据外推。行为访问分布替代目标分布的条件与神经Critic误差都需单独检查，不能因链式求导可执行就认为获得了理想定理中的真梯度。
 
 ### 五个前置概念
 
@@ -109,23 +121,35 @@ $$\nabla J=\mathbb E_{s\sim\rho^\mu}[\nabla_\theta\mu_\theta(s)\nabla_aQ^\mu(s,a
 4. **行为策略**：负责实际探索的数据生成器。
 5. **访问分布**：训练状态的概率权重。
 
-### 三个值得继续追问的问题
+## 六、继续追问：探索覆盖与离策略近似
 
-1. 确定性策略怎样保证探索？
-2. 动作有硬边界时梯度如何处理？
-3. 为什么不需要对真实环境求导？
+<details>
+<summary>1. 确定性策略怎样保证探索？</summary>
 
-## 方法与证据总结
+确定性目标策略本身没有采样熵，训练时可使用带动作噪声的行为策略、参数噪声或独立探索控制器收集数据。梯度公式并不保证这些行为访问到有价值的状态动作，离策略更新仍依赖覆盖和 Critic 精度。应记录噪声分布、边界处理及训练/评估差异；在多峰任务中，只靠小幅局部噪声可能长期停留在同一行为区域。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| 高维连续动作的策略更新 | 以 Critic 对动作的导数连接确定性 Actor 的参数导数 | 避开连续动作枚举，把改进方向交给可微Critic | §5 在连续 bandit 与控制任务上验证其作用 | Critic 梯度错误可直接误导 Actor，off-policy 实现与理想定理有差别 |
+</details>
 
-## 资料与阅读范围
+<details>
+<summary>2. 动作有硬边界时梯度如何处理？</summary>
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+常见做法是用 tanh 等可微映射把输出放到动作区间，再按链式法则求导；饱和区的导数会很小。直接在环境前硬裁剪会造成越界区梯度为零或与实际执行动作不一致，应明确训练时 Critic 看到的是哪个动作。边界最优解还涉及约束最优化的单边或投影条件，不能不加说明地套用无约束内点驻点分析。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+</details>
+
+<details>
+<summary>3. 为什么不需要对真实环境求导？</summary>
+
+策略梯度定理把环境未来影响汇入 $Q^\mu(s,a)$，更新使用 $\nabla_\theta\mu(s)\nabla_a Q^\mu(s,a)$，因此无需显式求真实转移函数的导数。实践中用可微 Critic 近似动作梯度，而其训练目标来自交互样本。免于环境求导不等于免于环境信息或模型误差：Critic 的梯度偏差会直接传给 Actor。
+
+</details>
+
+## 七、把确定性梯度接入深度回放系统
+
+- **直接方法承接**：[DDPG](17-ddpg.md)。高维深网训练还会面对相关样本和追逐目标，DDPG把确定性梯度与经验回放、目标副本组合。
+- **理论回看**：[策略梯度定理](08-policy-gradient-theorem.md)。使用近似Critic和不同状态权重时，仍要重新核查梯度成立的条件。
+
+- [原论文与图表入口](https://proceedings.mlr.press/v32/silver14.pdf)。§3—4定理与离策略解释；§5.1—5.3实验设置。
 
 ## 自测两题
 
