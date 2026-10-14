@@ -42,16 +42,12 @@
                 <span class="text-gray-500">DQN：让 Q-learning 从像素中学习，先要稳住自举目标</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="ad456e5965add5f31d5291f54beba7d6e78dd99b5376d28eac782d726a2d28f5"><h1>第 16 天｜DQN：让 Q-learning 从像素中学习，先要稳住自举目标</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="61b8da7f8958000ddc3ee7c817c91879a10c0e406d39d7c5c39311bf7c40ba71"><h1>第 16 天｜DQN：让 Q-learning 从像素中学习，先要稳住自举目标</h1>
 <p><a href="index.html">系列首页</a> · <a href="15-gae.html">上一篇</a> · <a href="17-ddpg.html">下一篇</a></p>
 <p><strong>原论文与版本</strong>：Mnih 等，<em>Human-level control through deep reinforcement learning</em>，2015。<a href="https://www.nature.com/articles/nature14236">原文</a>；<a href="https://web.stanford.edu/class/psych209/Readings/MnihEtAlHassibis15NatureControlDeepRL.pdf">可读 PDF</a>。</p>
 <p>以前篇 2013 版为背景，本节以 2015 版为准。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p><strong>研究问题</strong>：高维图像输入下的动作价值学习</p>
-<p><strong>旧方法卡点</strong>：表格无法存储图像，连续样本相关且目标随网络一起漂移</p>
-<p><strong>作者主张</strong>：结合卷积 Q 网络、经验回放与周期冻结的目标网络</p>
-<p><strong>论文证据</strong>：2015 论文49款 Atari 中43款超过当时对比方法，29款超过75%人类归一化表现</p>
-<p><strong>一句话</strong>：在在线采样、off-policy、无模型、离散动作中，作者通过“结合卷积 Q 网络、经验回放与周期冻结的目标网络”应对“高维图像输入下的动作价值学习”这一问题；证据边界或代价是：每个游戏单独训练，结果不等于通用模型或所有任务超人。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="04-q-learning.html">Q-learning</a>的表格证明依赖逐坐标更新，不能直接覆盖共享参数的视觉网络。DQN继承Bellman最优目标，面对的是相关画面、不断变化的数据和网络生成的自举标签；它与前一篇<a href="15-gae.html">GAE</a>属于不同路线，后者处理优势估计而不是Q网络稳定化。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <ol>
 <li><strong>卷积网络</strong>：从图像提取可共享的局部特征。</li>
@@ -60,8 +56,8 @@
 <li><strong>奖励裁剪</strong>：限制训练奖励尺度。</li>
 <li><strong>帧堆叠</strong>：用短历史提供运动信息。</li>
 </ol>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
-<p>本篇将“高维图像输入下的动作价值学习”放在在线采样、off-policy、无模型、离散动作的边界内研究。表格无法存储图像，连续样本相关且目标随网络一起漂移。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<h2 id="一问题设定把q表换成神经网络后怎样稳住自举学习">一、问题设定：把Q表换成神经网络后，怎样稳住自举学习</h2>
+<p>输入从可枚举状态变成像素后，一次梯度更新会同时改变许多状态动作值，下一步训练目标还依赖这些值。历史经验能否重复利用、目标能否暂时不动，成为从价值更新走到可用视觉控制系统的关键问题。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -90,13 +86,20 @@
 <td>游戏终止及训练协议中的边界需核对</td>
 </tr>
 </tbody></table></div>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
-<p>网络输出每个动作的 Q，贪心和 ε 探索决定实际行动，没有独立 Actor。Replay 把相关连续片段变成较混合的小批量；目标网络暂时固定评价标准，避免在线网络每次更新就同时改写自己的标签。两者缓解不稳定，不是收敛定理。</p>
-<h3 id="关键公式与符号">关键公式与符号</h3>
+<h2 id="二分别缓和样本相关性与目标追逐">二、分别缓和样本相关性与目标追逐</h2>
+<p>将Q表换成卷积网络并不只是增加表达能力。现在一次梯度更新会同时改变许多状态的价值，而TD目标又依赖这个函数；数据由当前行为产生，彼此相关，分布也持续变化。函数逼近、自举与离策略数据的相互作用，才是需要稳定化的核心。</p>
+<p>回放和目标网络处理不同环节。Replay重新安排历史经验的采样顺序，增加重用并缓解相邻帧相关性；目标网络把bootstrap端暂时固定，让在线网络在一段时间内追逐相对稳定的目标。目标仍然是估计值，固定它不会自动变成正确标签。</p>
+<p>反向传播只穿过 <span class="reading-math" data-tex="Q_\theta(s,a)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>Q</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">Q_\theta(s,a)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span></span></span></span></span>。若让梯度穿过目标，便从半梯度TD变成另一个残差优化问题。原版的帧堆叠、奖励裁剪与动作重复也塑造了实际MDP及尺度，不能把网络结构之外的配方全省略。</p>
+<h3 id="用冻结副本构造停止梯度的bellman标签">用冻结副本构造停止梯度的Bellman标签</h3>
 <p><span class="reading-math" data-tex="y=r+\gamma(1-d)\max_aQ_{\bar\theta}(s',a),\quad L=E(Q_\theta(s,a)-\operatorname{sg}(y))^2."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>y</mi><mo>=</mo><mi>r</mi><mo>+</mo><mi>γ</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>d</mi><mo stretchy="false">)</mo><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>a</mi></munder><msub><mi>Q</mi><mover accent="true"><mi>θ</mi><mo>ˉ</mo></mover></msub><mo stretchy="false">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="1em"/><mi>L</mi><mo>=</mo><mi>E</mi><mo stretchy="false">(</mo><msub><mi>Q</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>−</mo><mi mathvariant="normal">sg</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo><msup><mo stretchy="false">)</mo><mn>2</mn></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">y=r+\gamma(1-d)\max_aQ_{\bar\theta}(s&#x27;,a),\quad L=E(Q_\theta(s,a)-\operatorname{sg}(y))^2.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.5019em;vertical-align:-0.7em;"></span><span class="mord mathnormal">d</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.4306em;"><span style="top:-2.4em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">max</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.4629em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord mtight">ˉ</span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2371em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm" style="margin-right:0.01389em;">sg</span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span>
 θ 是被训练网络，barθ 是冻结目标；d 只代表相应任务语义下的终止。梯度裁剪／稳健损失等细节按原版核对，平方式是核心教学形式。</p>
-<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
-<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<h3 id="回放与目标网络分别冻结了什么">回放与目标网络分别冻结了什么</h3>
+<p>回放保存的是已经发生的转移，并不冻结当前的训练标签；同一条旧转移在目标网络复制后仍会得到新标签。目标网络冻结的是标签所用的估值参数，二者作用在数据流的不同位置。</p>
+<h3 id="比较固定46与同步漂移的64">比较固定4.6与同步漂移的6.4</h3>
+<p>以下是可手算的教学构造，不是论文实验。</p>
+<p>冻结目标网络给后继动作值(2,4)，奖励1、γ=0.9，则y=4.6。在线网络当前预测2，第一次更新后预测3；只要目标网络没复制，第二次仍追4.6。</p>
+<p>若目标来自同步变化的在线网络，它可能在第二次变为(3,6)，目标变6.4，误差并没有按“固定监督标签”的直觉缩小。目标网络缓和这个追逐，但下一次复制时仍可能发生跳变。</p>
+<h2 id="三抽取回放并只对在线q反向传播">三、抽取回放并只对在线Q反向传播</h2>
 <pre><code class="language-text">初始化在线 Qθ、目标 Qbarθ←Qθ、replay D
 每个环境步：
   a ← ε-greedy(Qθ,叠帧观测)
@@ -109,28 +112,7 @@
 输出：argmax_a Qθ(s,a)
 </code></pre>
 <p><strong>实现要点</strong>：每个游戏单独训练，结果不等于通用模型或所有任务超人。</p>
-<h3 id="三种优化要分开">三种“优化”要分开</h3>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>层次</th>
-<th>这里具体是什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>数学目标／训练损失</td>
-<td>拟合冻结Bellman目标；贪心Q策略以任务回报为最终目标</td>
-</tr>
-<tr>
-<td>机制改变</td>
-<td>结合卷积 Q 网络、经验回放与周期冻结的目标网络</td>
-</tr>
-<tr>
-<td>评价改善的指标</td>
-<td>原始分数、人类归一化成绩</td>
-</tr>
-</tbody></table></div>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<h2 id="四读人类归一化游戏表现与组件消融">四、读人类归一化游戏表现与组件消融</h2>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -160,84 +142,71 @@
 </tr>
 <tr>
 <td>随机性与不确定性</td>
-<td>全部游戏独立训练种子与区间本文未逐项核实</td>
+<td><a href="#rl-16-figure-3">图3</a>误差条为30评估回合标准差；全部独立训练种子未逐项复核</td>
 </tr>
 <tr>
 <td>实际验证的假设</td>
 <td>统一架构能否跨多种任务被分别训练成功</td>
 </tr>
 </tbody></table></div>
-<p><strong>实验解读（本文分析）</strong>：每个游戏单独训练，结果不等于通用模型或所有任务超人。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>证据定位</th>
-<th>比较什么／观察到什么</th>
-<th>支持什么</th>
-<th>不能证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>图1</td>
-<td>输入与卷积架构</td>
-<td>解释表示方式</td>
-<td>不证明跨游戏共享能力</td>
-</tr>
-<tr>
-<td>图2</td>
-<td>分数与预测价值随训练变化</td>
-<td>训练进展</td>
-<td>Q尺度不等于原始分数</td>
-</tr>
-<tr>
-<td>图3／扩展表2</td>
-<td>各游戏成绩与基线</td>
-<td>49任务范围内的结果</td>
-<td>不是每个游戏都超人</td>
-</tr>
-<tr>
-<td>扩展表3、4</td>
-<td>回放、目标及网络相关对照</td>
-<td>检验关键组件</td>
-<td>不排除交互效应</td>
-</tr>
-</tbody></table></div>
-<p><strong>结论边界</strong>：2015 论文49款 Atari 中43款超过当时对比方法，29款超过75%人类归一化表现。每个游戏单独训练，结果不等于通用模型或所有任务超人。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p><strong>作者实验</strong>显示组合方案能从视觉学习多种游戏。<strong>本文分析</strong>：动作最大化仍会放大估值噪声；奖励裁剪会改写奖励大小关系。游戏失败重置便宜，不代表真实机器人也能接受同样探索成本。</p>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<h3 id="教学例子">教学例子</h3>
-<p>以下是教学推演，不是原论文实验。</p>
-<p>连续十条经验都来自同一个房间，网络容易只适应局部。Replay 混入过去其他房间的经验；目标网络则让这些样本短期内用较固定的评分标准学习。若目标本身高估，固定它只延缓变化，不会神奇变正确。</p>
-<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
-<ol>
-<li>为什么只打乱样本还不足以稳定训练？</li>
-<li>人类归一化的平均数为何容易受极高分游戏影响？</li>
-<li>动作连续后 max Q 怎样计算？</li>
-</ol>
-<h2 id="方法与证据总结">方法与证据总结</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据／理论证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>高维图像输入下的动作价值学习</td>
-<td>结合卷积 Q 网络、经验回放与周期冻结的目标网络</td>
-<td>混合回放减少相关性，目标副本减缓自举标签漂移</td>
-<td>2015 论文49款 Atari 中43款超过当时对比方法，29款超过75%人类归一化表现</td>
-<td>每个游戏单独训练，结果不等于通用模型或所有任务超人</td>
-</tr>
-</tbody></table></div>
-<h2 id="资料与阅读范围">资料与阅读范围</h2>
-<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
-<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<p><strong>实验解读（本文分析）</strong>：<a href="#rl-16-figure-3">图3</a>人类归一化为(智能体−随机)/(人类−随机)，不是智能体分数直接除人类分数。误差条来自30个评估回合的标准差，不能误读成30次独立训练的不确定性。<a href="#rl-16-figure-2">图2</a>预测Q使用裁剪奖励尺度，不能与原始游戏分数直接对齐；扩展表3、4才用于检查回放、目标与网络组件。</p>
+<!-- figure-ref-v6:start:rl-16-figure-3 -->
+<figure class="reading-evidence-figure" id="rl-16-figure-3"><a href="/rl/assets/reference-v6/16-figure-3.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/16-figure-3.png" width="1134" height="1389" alt="每行是一款游戏，蓝色DQN与灰色线性基线在同一行比较。100%是人类基准，横轴上方两款游戏带断轴，不能按柱长直接比较跨游戏的绝对分数。" loading="lazy"></a><figcaption>原论文图形摘引｜Mnih等，2015，图3，PDF第3页。<a href="https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf#page=3" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。</figcaption></figure>
+
+<p>每行是一款游戏，蓝色DQN与灰色线性基线在同一行比较。100%是人类基准，横轴上方两款游戏带断轴，不能按柱长直接比较跨游戏的绝对分数。</p>
+<!-- figure-ref-v6:end:rl-16-figure-3 -->
+
+<h3 id="区分评估回合误差条与独立训练波动">区分评估回合误差条与独立训练波动</h3>
+<!-- inline-evidence-v2:start -->
+
+<!-- figure-ref-v6:start:anchor-rl-16-figure-2 -->
+<p><span id="rl-16-figure-2"></span></p>
+<!-- figure-ref-v6:end:anchor-rl-16-figure-2 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/16-dqn-figure-2.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/16-dqn-figure-2.png" width="987" height="708" alt="DQN在Space Invaders和Seaquest上的评估分数与预测Q值随训练变化" loading="lazy"></a><figcaption>原论文图形摘引；Mnih等，2015，Figure 2, PDF第2页；仅图形区域。<a href="https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf#page=2" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>按列读：左列Space Invaders，右列Seaquest；按行读：上排是实际评估的每回合平均分，下排是在保留状态集上计算的平均Q。横轴标为training epochs，不能直接当回合数或百万环境步。下排更平滑并不证明策略表现也同样稳定：Q使用裁剪奖励的累计尺度，上排仍会波动，且两排都没有提供“去掉目标网络”的对照。</p>
+<!-- inline-evidence-v2:end -->
+
+
+<p><a href="#rl-16-figure-1">图1</a>交代像素堆叠到离散Q输出的网络；<a href="#rl-16-figure-2">图2</a>把游戏实际分数与保留状态上的预测价值分开画，提醒Q尺度不是原始游戏分数。<a href="#rl-16-figure-3">图3</a>按随机和人类基线归一化逐游戏比较，49个独立训练任务中有强结果也有失败。回放、目标网络及相关网络选择的扩展表对照用于支撑稳定化解释，不能把架构图或平均成绩当作所有模块独立有效的证据。 <a href="https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf">查看原文</a>。</p>
+<!-- figure-ref-v6:start:rl-16-figure-1 -->
+<figure class="reading-evidence-figure" id="rl-16-figure-1"><a href="/rl/assets/reference-v6/16-figure-1.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/16-figure-1.png" width="1146" height="672" alt="像素输入经卷积和全连接层后，同时输出各离散动作的Q值，控制器再选择动作。图示的是信息流；实际层数、滤波器和训练配置仍以Methods为准。" loading="lazy"></a><figcaption>原论文图形摘引｜Mnih等，2015，图1，PDF第2页。<a href="https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf#page=2" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。</figcaption></figure>
+
+<p>像素输入经卷积和全连接层后，同时输出各离散动作的Q值，控制器再选择动作。图示的是信息流；实际层数、滤波器和训练配置仍以Methods为准。</p>
+<!-- figure-ref-v6:end:rl-16-figure-1 -->
+
+<h2 id="五保持目标稳定仍不等于目标正确">五、保持目标稳定仍不等于目标正确</h2>
+<p>2015论文在49款Atari中有43款超过当时对比方法、29款超过75%人类归一化表现，但每个游戏单独训练，并非一个通用模型。目标最大化仍会放大估值噪声；奖励裁剪改变奖励大小关系，而游戏中廉价的失败重置不代表机器人也能承担相同探索成本。</p>
+<h2 id="六继续追问回放分布终止与目标复制">六、继续追问：回放分布、终止与目标复制</h2>
+<details>
+<summary>1. 为什么只打乱样本还不足以稳定训练？</summary>
+
+<p>回放主要降低相邻样本相关性并复用数据，却没有消除自举目标也随当前网络变化的问题；同一网络同时决定预测与目标会形成强反馈。目标网络通过延迟复制减慢目标移动，仍不能保证函数逼近下收敛，也不能消除 max 高估。应分别对照回放、目标网络及两者组合，并报告交互预算与梯度更新次数，而非把所有稳定收益归给打乱。</p>
+</details>
+
+<details>
+<summary>2. 人类归一化的平均数为何容易受极高分游戏影响？</summary>
+
+<p>人类归一化通常以人类与随机策略分数差为尺度，某些游戏能得到非常高的倍数；算术平均会被这些长尾值主导。中位数能描述典型游戏，但也会隐藏极端失败。宜同时报告逐游戏分数、均值、中位数或稳健汇总及跨游戏不确定性，说明奖励协议和分母；“均值超过人类”不意味着多数游戏超过人类。</p>
+</details>
+
+<details>
+<summary>3. 动作连续后 max Q 怎样计算？</summary>
+
+<p>有限离散动作可枚举 <span class="reading-math" data-tex="\max_a Q(s,a)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>a</mi></msub><mi>Q</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\max_a Q(s,a)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mop">max</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span></span></span></span></span>，连续动作则需要内部优化器、候选采样或显式 Actor 近似 argmax。内部优化增加计算，并可能追逐 Critic 的尖锐错误峰；简单网格又会随维度爆炸。DDPG/TD3 等把动作搜索交给可微 Actor，但引入新的优化与估值偏差，不能把 DQN 输出层换成连续数就完成推广。</p>
+</details>
+
+<h2 id="七继续修正目标偏差和回放分配">七、继续修正目标偏差和回放分配</h2>
+<ul>
+<li><p><strong>直接目标修正</strong>：<a href="18-double-dqn.html">Double DQN</a>。目标网络仍在同一估计上挑最大并打分，下一步可把这两个角色分开以缓解高估。</p>
+</li>
+<li><p><strong>回放模块组合</strong>：<a href="19-per.html">优先回放</a>。稳定缓存不说明每条经验应被读同样多次，后者重新分配更新预算并处理抽样偏差。</p>
+</li>
+<li><p><a href="https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf">原论文与图表入口</a>。正文更新、<a href="#rl-16-figure-1">图1</a>、<a href="#rl-16-figure-2">图2</a>、<a href="#rl-16-figure-3">图3</a>及图注、扩展实验说明。</p>
+</li>
+<li><p>教学阅读：<a href="https://spinningup.openai.com/en/latest/algorithms/ddpg.html">Deep Deterministic Policy Gradient</a> · <a href="https://spinningup.openai.com/en/latest/spinningup/rl_intro2.html">Kinds of RL Algorithms</a>。仅借用本节的解释顺序与接口视角；具体算法、版本和实验以本篇原论文为准。</p>
+</li>
+</ul>
 <h2 id="自测两题">自测两题</h2>
 <p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
 <p><strong>问题 1</strong>：经验回放和目标网络分别解决什么问题？</p>
@@ -258,21 +227,13 @@
 
 以前篇 2013 版为背景，本节以 2015 版为准。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：高维图像输入下的动作价值学习
+[Q-learning](04-q-learning.md)的表格证明依赖逐坐标更新，不能直接覆盖共享参数的视觉网络。DQN继承Bellman最优目标，面对的是相关画面、不断变化的数据和网络生成的自举标签；它与前一篇[GAE](15-gae.md)属于不同路线，后者处理优势估计而不是Q网络稳定化。
 
-**旧方法卡点**：表格无法存储图像，连续样本相关且目标随网络一起漂移
+## 一、问题设定：把Q表换成神经网络后，怎样稳住自举学习
 
-**作者主张**：结合卷积 Q 网络、经验回放与周期冻结的目标网络
-
-**论文证据**：2015 论文49款 Atari 中43款超过当时对比方法，29款超过75%人类归一化表现
-
-**一句话**：在在线采样、off-policy、无模型、离散动作中，作者通过“结合卷积 Q 网络、经验回放与周期冻结的目标网络”应对“高维图像输入下的动作价值学习”这一问题；证据边界或代价是：每个游戏单独训练，结果不等于通用模型或所有任务超人。
-
-## 二、研究背景与问题定义
-
-本篇将“高维图像输入下的动作价值学习”放在在线采样、off-policy、无模型、离散动作的边界内研究。表格无法存储图像，连续样本相关且目标随网络一起漂移。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+输入从可枚举状态变成像素后，一次梯度更新会同时改变许多状态动作值，下一步训练目标还依赖这些值。历史经验能否重复利用、目标能否暂时不动，成为从价值更新走到可用视觉控制系统的关键问题。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -282,18 +243,33 @@
 | 奖励或学习信号 | 训练奖励裁剪；评价用游戏分数 |
 | 终止／边界 | 游戏终止及训练协议中的边界需核对 |
 
-## 三、方法：到底改了什么
+## 二、分别缓和样本相关性与目标追逐
 
-网络输出每个动作的 Q，贪心和 ε 探索决定实际行动，没有独立 Actor。Replay 把相关连续片段变成较混合的小批量；目标网络暂时固定评价标准，避免在线网络每次更新就同时改写自己的标签。两者缓解不稳定，不是收敛定理。
+将Q表换成卷积网络并不只是增加表达能力。现在一次梯度更新会同时改变许多状态的价值，而TD目标又依赖这个函数；数据由当前行为产生，彼此相关，分布也持续变化。函数逼近、自举与离策略数据的相互作用，才是需要稳定化的核心。
 
-### 关键公式与符号
+回放和目标网络处理不同环节。Replay重新安排历史经验的采样顺序，增加重用并缓解相邻帧相关性；目标网络把bootstrap端暂时固定，让在线网络在一段时间内追逐相对稳定的目标。目标仍然是估计值，固定它不会自动变成正确标签。
+
+反向传播只穿过 $Q_\theta(s,a)$。若让梯度穿过目标，便从半梯度TD变成另一个残差优化问题。原版的帧堆叠、奖励裁剪与动作重复也塑造了实际MDP及尺度，不能把网络结构之外的配方全省略。
+
+### 用冻结副本构造停止梯度的Bellman标签
 
 $$y=r+\gamma(1-d)\max_aQ_{\bar\theta}(s',a),\quad L=E(Q_\theta(s,a)-\operatorname{sg}(y))^2.$$
 θ 是被训练网络，barθ 是冻结目标；d 只代表相应任务语义下的终止。梯度裁剪／稳健损失等细节按原版核对，平方式是核心教学形式。
 
-### 输入 → 处理 → 输出：教学伪代码
+### 回放与目标网络分别冻结了什么
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+回放保存的是已经发生的转移，并不冻结当前的训练标签；同一条旧转移在目标网络复制后仍会得到新标签。目标网络冻结的是标签所用的估值参数，二者作用在数据流的不同位置。
+
+### 比较固定4.6与同步漂移的6.4
+
+以下是可手算的教学构造，不是论文实验。
+
+冻结目标网络给后继动作值(2,4)，奖励1、γ=0.9，则y=4.6。在线网络当前预测2，第一次更新后预测3；只要目标网络没复制，第二次仍追4.6。
+
+若目标来自同步变化的在线网络，它可能在第二次变为(3,6)，目标变6.4，误差并没有按“固定监督标签”的直觉缩小。目标网络缓和这个追逐，但下一次复制时仍可能发生跳变。
+
+## 三、抽取回放并只对在线Q反向传播
+
 
 ```text
 初始化在线 Qθ、目标 Qbarθ←Qθ、replay D
@@ -310,15 +286,7 @@ $$y=r+\gamma(1-d)\max_aQ_{\bar\theta}(s',a),\quad L=E(Q_\theta(s,a)-\operatornam
 
 **实现要点**：每个游戏单独训练，结果不等于通用模型或所有任务超人。
 
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | 拟合冻结Bellman目标；贪心Q策略以任务回报为最终目标 |
-| 机制改变 | 结合卷积 Q 网络、经验回放与周期冻结的目标网络 |
-| 评价改善的指标 | 原始分数、人类归一化成绩 |
-
-## 四、实验如何验证方法
+## 四、读人类归一化游戏表现与组件消融
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
@@ -327,33 +295,43 @@ $$y=r+\gamma(1-d)\max_aQ_{\bar\theta}(s',a),\quad L=E(Q_\theta(s,a)-\operatornam
 | 对比基线 | 当时学习方法与人类／随机基准 |
 | 训练预算与资源 | 精确 frame 与 agent step 换算本文未核实，不能混写 |
 | 指标及其含义 | 原始分数、人类归一化成绩 |
-| 随机性与不确定性 | 全部游戏独立训练种子与区间本文未逐项核实 |
+| 随机性与不确定性 | [图3](#rl-16-figure-3)误差条为30评估回合标准差；全部独立训练种子未逐项复核 |
 | 实际验证的假设 | 统一架构能否跨多种任务被分别训练成功 |
 
-**实验解读（本文分析）**：每个游戏单独训练，结果不等于通用模型或所有任务超人。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+**实验解读（本文分析）**：[图3](#rl-16-figure-3)人类归一化为(智能体−随机)/(人类−随机)，不是智能体分数直接除人类分数。误差条来自30个评估回合的标准差，不能误读成30次独立训练的不确定性。[图2](#rl-16-figure-2)预测Q使用裁剪奖励尺度，不能与原始游戏分数直接对齐；扩展表3、4才用于检查回放、目标与网络组件。
 
-## 五、结果：证据到底有多强
+&lt;!-- figure-ref-v6:start:rl-16-figure-3 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-16-figure-3&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/16-figure-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/16-figure-3.png&quot; width=&quot;1134&quot; height=&quot;1389&quot; alt=&quot;每行是一款游戏，蓝色DQN与灰色线性基线在同一行比较。100%是人类基准，横轴上方两款游戏带断轴，不能按柱长直接比较跨游戏的绝对分数。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜Mnih等，2015，图3，PDF第3页。&lt;a href=&quot;https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf#page=3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt; · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。&lt;/figcaption&gt;&lt;/figure&gt;
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 图1 | 输入与卷积架构 | 解释表示方式 | 不证明跨游戏共享能力 |
-| 图2 | 分数与预测价值随训练变化 | 训练进展 | Q尺度不等于原始分数 |
-| 图3／扩展表2 | 各游戏成绩与基线 | 49任务范围内的结果 | 不是每个游戏都超人 |
-| 扩展表3、4 | 回放、目标及网络相关对照 | 检验关键组件 | 不排除交互效应 |
+每行是一款游戏，蓝色DQN与灰色线性基线在同一行比较。100%是人类基准，横轴上方两款游戏带断轴，不能按柱长直接比较跨游戏的绝对分数。
+&lt;!-- figure-ref-v6:end:rl-16-figure-3 --&gt;
 
-**结论边界**：2015 论文49款 Atari 中43款超过当时对比方法，29款超过75%人类归一化表现。每个游戏单独训练，结果不等于通用模型或所有任务超人。
+### 区分评估回合误差条与独立训练波动
 
-## 六、贡献、代价与局限
+&lt;!-- inline-evidence-v2:start --&gt;
 
-**作者实验**显示组合方案能从视觉学习多种游戏。**本文分析**：动作最大化仍会放大估值噪声；奖励裁剪会改写奖励大小关系。游戏失败重置便宜，不代表真实机器人也能接受同样探索成本。
+&lt;!-- figure-ref-v6:start:anchor-rl-16-figure-2 --&gt;
+&lt;span id=&quot;rl-16-figure-2&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:anchor-rl-16-figure-2 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/papers/16-dqn-figure-2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/16-dqn-figure-2.png&quot; width=&quot;987&quot; height=&quot;708&quot; alt=&quot;DQN在Space Invaders和Seaquest上的评估分数与预测Q值随训练变化&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引；Mnih等，2015，Figure 2, PDF第2页；仅图形区域。&lt;a href=&quot;https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf#page=2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-## 七、帮助建立理解
+按列读：左列Space Invaders，右列Seaquest；按行读：上排是实际评估的每回合平均分，下排是在保留状态集上计算的平均Q。横轴标为training epochs，不能直接当回合数或百万环境步。下排更平滑并不证明策略表现也同样稳定：Q使用裁剪奖励的累计尺度，上排仍会波动，且两排都没有提供“去掉目标网络”的对照。
 
-### 教学例子
 
-以下是教学推演，不是原论文实验。
+&lt;!-- inline-evidence-v2:end --&gt;
 
-连续十条经验都来自同一个房间，网络容易只适应局部。Replay 混入过去其他房间的经验；目标网络则让这些样本短期内用较固定的评分标准学习。若目标本身高估，固定它只延缓变化，不会神奇变正确。
+
+[图1](#rl-16-figure-1)交代像素堆叠到离散Q输出的网络；[图2](#rl-16-figure-2)把游戏实际分数与保留状态上的预测价值分开画，提醒Q尺度不是原始游戏分数。[图3](#rl-16-figure-3)按随机和人类基线归一化逐游戏比较，49个独立训练任务中有强结果也有失败。回放、目标网络及相关网络选择的扩展表对照用于支撑稳定化解释，不能把架构图或平均成绩当作所有模块独立有效的证据。 [查看原文](https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf)。
+
+&lt;!-- figure-ref-v6:start:rl-16-figure-1 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-16-figure-1&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/16-figure-1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/16-figure-1.png&quot; width=&quot;1146&quot; height=&quot;672&quot; alt=&quot;像素输入经卷积和全连接层后，同时输出各离散动作的Q值，控制器再选择动作。图示的是信息流；实际层数、滤波器和训练配置仍以Methods为准。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜Mnih等，2015，图1，PDF第2页。&lt;a href=&quot;https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf#page=2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt; · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。&lt;/figcaption&gt;&lt;/figure&gt;
+
+像素输入经卷积和全连接层后，同时输出各离散动作的Q值，控制器再选择动作。图示的是信息流；实际层数、滤波器和训练配置仍以Methods为准。
+&lt;!-- figure-ref-v6:end:rl-16-figure-1 --&gt;
+
+## 五、保持目标稳定仍不等于目标正确
+
+2015论文在49款Atari中有43款超过当时对比方法、29款超过75%人类归一化表现，但每个游戏单独训练，并非一个通用模型。目标最大化仍会放大估值噪声；奖励裁剪改变奖励大小关系，而游戏中廉价的失败重置不代表机器人也能承担相同探索成本。
 
 ### 五个前置概念
 
@@ -363,23 +341,37 @@ $$y=r+\gamma(1-d)\max_aQ_{\bar\theta}(s',a),\quad L=E(Q_\theta(s,a)-\operatornam
 4. **奖励裁剪**：限制训练奖励尺度。
 5. **帧堆叠**：用短历史提供运动信息。
 
-### 三个值得继续追问的问题
+## 六、继续追问：回放分布、终止与目标复制
 
-1. 为什么只打乱样本还不足以稳定训练？
-2. 人类归一化的平均数为何容易受极高分游戏影响？
-3. 动作连续后 max Q 怎样计算？
+&lt;details&gt;
+&lt;summary&gt;1. 为什么只打乱样本还不足以稳定训练？&lt;/summary&gt;
 
-## 方法与证据总结
+回放主要降低相邻样本相关性并复用数据，却没有消除自举目标也随当前网络变化的问题；同一网络同时决定预测与目标会形成强反馈。目标网络通过延迟复制减慢目标移动，仍不能保证函数逼近下收敛，也不能消除 max 高估。应分别对照回放、目标网络及两者组合，并报告交互预算与梯度更新次数，而非把所有稳定收益归给打乱。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| 高维图像输入下的动作价值学习 | 结合卷积 Q 网络、经验回放与周期冻结的目标网络 | 混合回放减少相关性，目标副本减缓自举标签漂移 | 2015 论文49款 Atari 中43款超过当时对比方法，29款超过75%人类归一化表现 | 每个游戏单独训练，结果不等于通用模型或所有任务超人 |
+&lt;/details&gt;
 
-## 资料与阅读范围
+&lt;details&gt;
+&lt;summary&gt;2. 人类归一化的平均数为何容易受极高分游戏影响？&lt;/summary&gt;
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+人类归一化通常以人类与随机策略分数差为尺度，某些游戏能得到非常高的倍数；算术平均会被这些长尾值主导。中位数能描述典型游戏，但也会隐藏极端失败。宜同时报告逐游戏分数、均值、中位数或稳健汇总及跨游戏不确定性，说明奖励协议和分母；“均值超过人类”不意味着多数游戏超过人类。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;3. 动作连续后 max Q 怎样计算？&lt;/summary&gt;
+
+有限离散动作可枚举 $\max_a Q(s,a)$，连续动作则需要内部优化器、候选采样或显式 Actor 近似 argmax。内部优化增加计算，并可能追逐 Critic 的尖锐错误峰；简单网格又会随维度爆炸。DDPG/TD3 等把动作搜索交给可微 Actor，但引入新的优化与估值偏差，不能把 DQN 输出层换成连续数就完成推广。
+
+&lt;/details&gt;
+
+## 七、继续修正目标偏差和回放分配
+
+- **直接目标修正**：[Double DQN](18-double-dqn.md)。目标网络仍在同一估计上挑最大并打分，下一步可把这两个角色分开以缓解高估。
+- **回放模块组合**：[优先回放](19-per.md)。稳定缓存不说明每条经验应被读同样多次，后者重新分配更新预算并处理抽样偏差。
+
+- [原论文与图表入口](https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf)。正文更新、[图1](#rl-16-figure-1)、[图2](#rl-16-figure-2)、[图3](#rl-16-figure-3)及图注、扩展实验说明。
+
+- 教学阅读：[Deep Deterministic Policy Gradient](https://spinningup.openai.com/en/latest/algorithms/ddpg.html) · [Kinds of RL Algorithms](https://spinningup.openai.com/en/latest/spinningup/rl_intro2.html)。仅借用本节的解释顺序与接口视角；具体算法、版本和实验以本篇原论文为准。
 
 ## 自测两题
 

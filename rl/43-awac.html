@@ -42,15 +42,11 @@
                 <span class="text-gray-500">AWAC：先用旧数据起步，再顺利接入在线学习</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="b655bc50150f1981039599adeab4bf3f2ad7d9d72a8877142dc20279e5aa7448"><h1>第 43 天｜AWAC：先用旧数据起步，再顺利接入在线学习</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="d446f61c66a5f8b7468c2887b27a5e20909cc2ac0eccc769526026d93563d5c3"><h1>第 43 天｜AWAC：先用旧数据起步，再顺利接入在线学习</h1>
 <p><a href="index.html">系列首页</a> · <a href="42-cql.html">上一篇</a> · <a href="44-decision-transformer.html">下一篇</a></p>
 <p><strong>原论文与版本</strong>：<em>AWAC: Accelerating Online Reinforcement Learning with Offline Datasets</em>，2020。<a href="https://arxiv.org/abs/2006.09359">原论文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p><strong>研究问题</strong>：离线预训练到在线微调的衔接</p>
-<p><strong>旧方法卡点</strong>：强约束离线方法可能难适应新数据，普通SAC离线起点又不稳</p>
-<p><strong>作者主张</strong>：用优势加权的行为回归更新Actor，以off-policy Critic持续改进</p>
-<p><strong>论文证据</strong>：控制与真实机器人实验展示利用先验数据加速微调</p>
-<p><strong>一句话</strong>：在离线初始化加在线微调，Actor–Critic中，作者通过“用优势加权的行为回归更新Actor，以off-policy Critic持续改进”应对“离线预训练到在线微调的衔接”这一问题；证据边界或代价是：Critic仍可能评价未知动作出错，奖励与示范条件影响公平性。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="30-sac.html">第30天 SAC</a>的离策略Critic能持续利用回放，但直接从离线数据起步仍可能查询不可靠的新动作。<a href="42-cql.html">第42天 CQL</a>选择在价值端保持保守，另一项尚未解决的任务是：上线后，怎样既保留旧数据的帮助，又适应不断进入回放的新经验？AWAC在Actor端采用优势加权回归，是离线到在线的并行方案，不是给CQL直接追加一个阶段。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <ol>
 <li><strong>在线微调</strong>：预训练后继续真实交互学习。</li>
@@ -59,8 +55,9 @@
 <li><strong>温度λ</strong>：控制权重集中程度。</li>
 <li><strong>初期退化</strong>：从离线转在线后表现短暂下降。</li>
 </ol>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
-<p>本篇将“离线预训练到在线微调的衔接”放在离线初始化加在线微调，Actor–Critic的边界内研究。强约束离线方法可能难适应新数据，普通SAC离线起点又不稳。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<h2 id="一问题设定离线起步怎样平滑接入在线学习">一、问题设定：离线起步怎样平滑接入在线学习</h2>
+<p>任务分成两个数据权限不同的阶段：起初只能读已有轨迹，随后可以继续与环境或机器人交互。评价目标因此不只有最后的回报，还包括离线起点是否可靠、刚上线是否掉分，以及新增真实交互多久才产生改善。</p>
+<p>强行为约束能保护离线阶段，却可能拖慢在线适应；完全放开策略又可能马上利用Critic误差。AWAC要让Actor继续从数据动作学习，同时用优势改变每个动作的模仿强度，使旧数据与新数据能够进入同一个训练接口。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -89,13 +86,20 @@
 <td>按任务边界</td>
 </tr>
 </tbody></table></div>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
-<p>Actor主要模仿数据动作，但好于状态平均前景的动作权重更大；这样避免显式拟合一个随在线数据不断变化的行为策略模型。Critic用TD自举，Actor仍从replay回归，不等同于IQL“不查询分布外动作”的价值训练。</p>
-<h3 id="关键公式与符号">关键公式与符号</h3>
+<h2 id="二把kl约束的策略改进投影成加权回归">二、把KL约束的策略改进投影成加权回归</h2>
+<h3 id="从kl驻点推到指数优势权重">从KL驻点推到指数优势权重</h3>
 <p><span class="reading-math" data-tex="\max_\theta E_{(s,a)\sim D}[\exp(A(s,a)/\lambda)\log\pi_\theta(a|s)]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>θ</mi></munder><msub><mi>E</mi><mrow><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>∼</mo><mi>D</mi></mrow></msub><mo stretchy="false">[</mo><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>A</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mi>λ</mi><mo stretchy="false">)</mo><mi>log</mi><mo>⁡</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">∣</mi><mi>s</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\max_\theta E_{(s,a)\sim D}[\exp(A(s,a)/\lambda)\log\pi_\theta(a|s)].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.5021em;vertical-align:-0.7521em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.4306em;"><span style="top:-2.3479em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">max</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7521em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.5198em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight">s</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">a</span><span class="mclose mtight">)</span><span class="mrel mtight">∼</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">D</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3552em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mop">exp</span><span class="mopen">(</span><span class="mord mathnormal">A</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mord">/</span><span class="mord mathnormal">λ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mclose">)]</span><span class="mord">.</span></span></span></span></span></span>
 A=Q−V，λ控制权重集中程度；实际大权重常需数值处理。论文从分布约束推导回归形式。</p>
-<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
-<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。<code>stop_gradient</code> 表示停止向目标量传播梯度。</p>
+<p><strong>指数权重为何出现</strong>：固定状态，最大化期望优势并扣除 <span class="reading-math" data-tex="\lambda\,KL(\pi\|\beta)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi><mtext> </mtext><mi>K</mi><mi>L</mi><mo stretchy="false">(</mo><mi>π</mi><mi mathvariant="normal">∥</mi><mi>β</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\lambda\,KL(\pi\|\beta)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">λ</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="mord mathnormal">L</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mord">∥</span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mclose">)</span></span></span></span></span>，再加概率和为1的约束；对每个动作概率求驻点，得到 <span class="reading-math" data-tex="\log(\pi/\beta)=A/\lambda-\log Z(s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>log</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>π</mi><mi mathvariant="normal">/</mi><mi>β</mi><mo stretchy="false">)</mo><mo>=</mo><mi>A</mi><mi mathvariant="normal">/</mi><mi>λ</mi><mo>−</mo><mi>log</mi><mo>⁡</mo><mi>Z</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\log(\pi/\beta)=A/\lambda-\log Z(s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">A</span><span class="mord">/</span><span class="mord mathnormal">λ</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span>，所以最优分布正比于行为概率乘指数优势。投影时就把这些比值当成模仿权重。要注意 <span class="reading-math" data-tex="Z(s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Z</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">Z(s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span> 是各状态自己的归一化常数，上面的实用回归式省略了它；这保持同状态动作间的相对权重，却会改变不同状态的相对训练权重，不能说两种目标无条件完全相同。见<a href="https://arxiv.org/html/2006.09359v6#S4">原文策略改进推导及附录A的归一化讨论</a>。</p>
+<p>写成 <span class="reading-math" data-tex="\pi^*(a|s)\propto\beta(a|s)\exp(A(s,a)/\lambda)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>π</mi><mo>∗</mo></msup><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">∣</mi><mi>s</mi><mo stretchy="false">)</mo><mo>∝</mo><mi>β</mi><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">∣</mi><mi>s</mi><mo stretchy="false">)</mo><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>A</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mi>λ</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\pi^*(a|s)\propto\beta(a|s)\exp(A(s,a)/\lambda)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6887em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∝</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">exp</span><span class="mopen">(</span><span class="mord mathnormal">A</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mord">/</span><span class="mord mathnormal">λ</span><span class="mclose">)</span></span></span></span></span> 后，行为分布通过数据采样进入加权回归，不需再拟合一个上线后不断过时的β网络。</p>
+<h3 id="指数优势权重的比值更直接说明选择性">指数优势权重的比值更直接说明选择性</h3>
+<p>同状态两个数据动作优势分别为 <span class="reading-math" data-tex="A_1,A_2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>A</mi><mn>1</mn></msub><mo separator="true">,</mo><msub><mi>A</mi><mn>2</mn></msub></mrow><annotation encoding="application/x-tex">A_1,A_2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，未裁剪权重之比为 <span class="reading-math" data-tex="\exp((A_1-A_2)/\lambda)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><mo stretchy="false">(</mo><msub><mi>A</mi><mn>1</mn></msub><mo>−</mo><msub><mi>A</mi><mn>2</mn></msub><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mi>λ</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\exp((A_1-A_2)/\lambda)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">exp</span><span class="mopen">((</span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">/</span><span class="mord mathnormal">λ</span><span class="mclose">)</span></span></span></span></span>。共同减去同一状态基线不改这个比值，却影响不同状态样本的整体尺度；有限批次归一化还需按实现核对。</p>
+<h3 id="两条数据动作怎样获得不同模仿强度">两条数据动作怎样获得不同模仿强度</h3>
+<p>以下是可手算的教学构造，不是论文实验。</p>
+<p>某状态数据动作A、B各一条，估计优势为0和2，λ=1。加权似然权重为1与e²≈7.39，归一化后约(0.119,0.881)，于是策略更偏B而非各一半。</p>
+<p>如果B的高优势来自Critic误差，同一指数机制也会放大错误。把λ增到2，B权重比例降为e≈2.72，改进更温和，却也更难利用真正好的罕见动作。</p>
+<h2 id="三混合旧新回放并持续更新actor与critic">三、混合旧新回放并持续更新Actor与Critic</h2>
+<p><code>stop_gradient</code> 表示停止向目标量传播梯度。</p>
 <pre><code class="language-text">用先验数据初始化replay
 先进行若干离线更新
 循环离线／在线阶段：
@@ -106,29 +110,7 @@ A=Q−V，λ控制权重集中程度；实际大权重常需数值处理。论�
   在线阶段用Actor交互并加入新数据
 输出：可继续在线改善的策略
 </code></pre>
-<p><strong>实现要点</strong>：Critic仍可能评价未知动作出错，奖励与示范条件影响公平性。</p>
-<h3 id="三种优化要分开">三种“优化”要分开</h3>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>层次</th>
-<th>这里具体是什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>数学目标／训练损失</td>
-<td>Critic学习TD目标；Actor最大化指数优势加权数据似然</td>
-</tr>
-<tr>
-<td>机制改变</td>
-<td>用优势加权的行为回归更新Actor，以off-policy Critic持续改进</td>
-</tr>
-<tr>
-<td>评价改善的指标</td>
-<td>回报、操作成功率、微调初期退化</td>
-</tr>
-</tbody></table></div>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<h2 id="四沿图3的上线边界读初期退化与后续进步">四、沿图3的上线边界读初期退化与后续进步</h2>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -165,71 +147,63 @@ A=Q−V，λ控制权重集中程度；实际大权重常需数值处理。论�
 <td>先验数据能否转化为快速在线进步</td>
 </tr>
 </tbody></table></div>
-<p><strong>实验解读（本文分析）</strong>：Critic仍可能评价未知动作出错，奖励与示范条件影响公平性。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>证据定位</th>
-<th>比较什么／观察到什么</th>
-<th>支持什么</th>
-<th>不能证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>图2</td>
-<td>离线到在线问题流程</td>
-<td>说明数据条件</td>
-<td>不表示完全离线</td>
-</tr>
-<tr>
-<td>图3</td>
-<td>HalfCheetah微调与早期下降</td>
-<td>展示衔接困难</td>
-<td>不能只比最终点</td>
-</tr>
-<tr>
-<td>机器人实验部分（具体图表编号本文未核实）</td>
-<td>有限在线交互后的任务效果</td>
-<td>支持具体机器人场景</td>
-<td>不证明无需奖励或人工准备</td>
-</tr>
-</tbody></table></div>
-<p><strong>结论边界</strong>：控制与真实机器人实验展示利用先验数据加速微调。Critic仍可能评价未知动作出错，奖励与示范条件影响公平性。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p><strong>作者贡献</strong>是兼顾旧数据利用与在线适应的Actor更新。<strong>本文分析</strong>：优势由近似Critic估计，权重可能强化错误；不同旧数据质量造成的优势要与算法本身区分。</p>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<h3 id="教学例子">教学例子</h3>
-<p>以下是教学推演，不是原论文实验。</p>
-<p>同状态两数据动作优势为0与2，λ=1，权重1与e²≈7.39。第二动作被更强模仿，但第一动作仍有权重；若2是错误Q导致，错误也被指数放大。</p>
-<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
-<ol>
-<li>Q误差如何经指数权重放大？</li>
-<li>旧数据和新数据比例如何影响适应？</li>
-<li>与IQL的Critic目标为什么不同？</li>
-</ol>
-<h2 id="方法与证据总结">方法与证据总结</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据／理论证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>离线预训练到在线微调的衔接</td>
-<td>用优势加权的行为回归更新Actor，以off-policy Critic持续改进</td>
-<td>更好数据动作得到更高模仿权重，同时便于加入在线数据</td>
-<td>控制与真实机器人实验展示利用先验数据加速微调</td>
-<td>Critic仍可能评价未知动作出错，奖励与示范条件影响公平性</td>
-</tr>
-</tbody></table></div>
-<h2 id="资料与阅读范围">资料与阅读范围</h2>
-<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
-<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h3 id="图3上线退化与行为模型失配各看哪个面板">图3：上线退化与行为模型失配各看哪个面板</h3>
+<!-- inline-evidence-v2:start -->
+
+<!-- figure-ref-v6:start:rl-43-figure-3 -->
+<p><span id="rl-43-figure-3"></span></p>
+<p class="figure-source-links">原引用定位：<a href="https://arxiv.org/html/2006.09359#S3.F3" target="_blank" rel="noopener noreferrer">原文</a>。</p>
+<!-- figure-ref-v6:end:rl-43-figure-3 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/43-awac-figure-3.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/43-awac-figure-3.png" width="1800" height="1874" alt="AWAC在HalfCheetah上离线初始化、在线微调与行为密度模型诊断" loading="lazy"></a><figcaption>原论文图形摘引；Nair等，2020，Figure 3；原HTML图形；面板1–3为平均回报，面板4为行为数据对数似然；保留对应图例。<a href="https://arxiv.org/html/2006.09359v6#S3.F3" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+
+<p>前三个面板的横轴是在线环境步数，纵轴是平均回报，分别比较利用旧数据、Actor–Critic和显式策略约束的方法。第二面板箭头标出的上线初期下跌，说明高预训练分不保证平滑衔接。第四面板改画行为模型对离线/在线数据的对数似然，虚线分界前后对应离线训练与在线阶段；似然下降支持“行为模型追不上新分布”的诊断，不是策略回报又下降了同样数值。</p>
+<!-- inline-evidence-v2:end -->
+
+
+<h3 id="真实机器人还要计入先验数据奖励与重置">真实机器人还要计入先验数据、奖励与重置</h3>
+<p><a href="#rl-43-figure-2">图2</a>画清先用历史数据、再在线微调的两阶段权限。真实机器人还依赖奖励、先验数据与环境重置，评价应同时报告离线数据来源、预训练计算和新增真实交互，而不是只数在线分钟。</p>
+<!-- figure-ref-v6:start:rl-43-figure-2 -->
+<p><span id="rl-43-figure-2"></span></p>
+<figure class="reading-evidence-figure"><a href="/rl/assets/reference-v6/43-awac-figure-2-full.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/43-awac-figure-2-full.png" width="1649" height="377" alt="原论文Figure 2：左半是既有数据上的离线学习，右半加入新交互做在线微调。沿数据进入缓存的箭头区分两个阶段，不把在线改善全算作离线学习收益。" loading="lazy"></a><figcaption>完整原图摘引｜Nair等，2020，Figure 2；2006.09359v6，HTML S1.F2。<a href="https://arxiv.org/html/2006.09359v6#S1.F2" target="_blank" rel="noopener noreferrer">核对原文与图号</a>。原版权保留。原引用定位：<a href="https://arxiv.org/html/2006.09359#S1.F2" target="_blank" rel="noopener noreferrer">原文</a>。</figcaption></figure>
+
+<p>读图提示：左半是既有数据上的离线学习，右半加入新交互做在线微调。沿数据进入缓存的箭头区分两个阶段，不把在线改善全算作离线学习收益。</p>
+<!-- figure-ref-v6:end:rl-43-figure-2 -->
+
+<h2 id="五actor贴近数据critic仍可能查询陌生动作">五、Actor贴近数据，Critic仍可能查询陌生动作</h2>
+<p>Critic仍会查询当前策略的后继动作，并非IQL式全程仅评价数据动作。指数优势会放大估值误差，λ过小可让极少数样本支配更新；在线数据加入后，隐含行为约束也随之改变。因此旧数据、奖励与新交互带来的收益，应和Actor更新本身分开。</p>
+<h2 id="六三个值得继续追问的问题与参考答案">六、三个值得继续追问的问题与参考答案</h2>
+<details>
+<summary>1. Q误差如何经指数权重放大？</summary>
+
+<p>权重约为 <span class="reading-math" data-tex="\exp(\hat A/\lambda)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><mover accent="true"><mi>A</mi><mo>^</mo></mover><mi mathvariant="normal">/</mi><mi>λ</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\exp(\hat A/\lambda)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mop">exp</span><span class="mopen">(</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">A</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1111em;"><span class="mord">^</span></span></span></span></span></span></span><span class="mord">/</span><span class="mord mathnormal">λ</span><span class="mclose">)</span></span></span></span></span>，优势误差 <span class="reading-math" data-tex="\epsilon"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϵ</mi></mrow><annotation encoding="application/x-tex">\epsilon</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">ϵ</span></span></span></span></span> 会把权重乘上 <span class="reading-math" data-tex="e^{\epsilon/\lambda}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>e</mi><mrow><mi>ϵ</mi><mi mathvariant="normal">/</mi><mi>λ</mi></mrow></msup></mrow><annotation encoding="application/x-tex">e^{\epsilon/\lambda}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.888em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.888em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">ϵ</span><span class="mord mtight">/</span><span class="mord mathnormal mtight">λ</span></span></span></span></span></span></span></span></span></span></span></span></span>；温度越小，误差放大越明显，少数错误高值样本可能主导拟合。应报告权重分布、有效样本量、裁剪或归一化规则，并检验Q误差与动作覆盖。裁剪改善稳定性，但改变理想优化目标，不能继续称为精确指数更新。</p>
+</details>
+
+<details>
+<summary>2. 旧数据和新数据比例如何影响适应？</summary>
+
+<p>旧数据保留已有技能和覆盖，过多时可能拖慢向新分布适应；新数据改善当前策略区域的评价，但早期质量差或覆盖窄时可能造成遗忘。比例还与采样方式、更新次数及奖励分布相互作用。应固定总梯度预算对比混合比例，分别测旧任务保持、新任务进展和初期性能下跌，不只看最终检查点。</p>
+</details>
+
+<details>
+<summary>3. 与IQL的Critic目标为什么不同？</summary>
+
+<p>AWAC 通常仍以当前策略在下一状态的动作构造离策略Q目标，因而可能查询数据支持外的动作；其主要约束在优势加权的Actor回归。IQL 先对数据动作Q做上分位 expectile 聚合得到V，再用 <span class="reading-math" data-tex="r+\gamma V(s_{next})"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi><mo>+</mo><mi>γ</mi><mi>V</mi><mo stretchy="false">(</mo><msub><mi>s</mi><mrow><mi>n</mi><mi>e</mi><mi>x</mi><mi>t</mi></mrow></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">r+\gamma V(s_{next})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">γV</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight">x</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span> 更新Q，避免在该评价目标中查询新动作。两者Actor形式相近并不意味着Critic相同；IQL部署策略仍可能外推。</p>
+</details>
+
+<h2 id="七沿未解决的问题继续读">七、沿未解决的问题继续读</h2>
+<ul>
+<li><p><a href="46-iql.html">IQL</a>：能否保留优势加权的策略提取，却不让Actor提出的未知动作进入Q目标？IQL正是在价值学习端另建expectile与V回归，Actor相似不代表整套算法相同。（后作延续策略提取接口）</p>
+</li>
+<li><p><a href="57-worldsample.html">WorldSample</a>：机器人仍要付出真实试错成本时，新增经验能否部分来自模型？WorldSample筛选和调度合成转移，是后续数据来源问题的对照，不是AWAC的直接继承。（教学与应用问题对照）</p>
+</li>
+</ul>
+<h3 id="原文核对与路线出处">原文核对与路线出处</h3>
+<ul>
+<li><a href="https://arxiv.org/html/2006.09359">原论文与图表入口</a>。优势加权更新与离线/在线设定；<a href="#rl-43-figure-3">图3</a>衔接分析。</li>
+<li><strong>历史背景</strong>：<a href="30-sac.html">SAC</a>。共享off-policy价值学习背景，Actor改为优势加权数据回归。</li>
+<li><strong>后作承接本篇</strong>：<a href="46-iql.html">IQL</a>。后作也可使用优势加权策略提取，但Critic与V训练另有改变。</li>
+</ul>
 <h2 id="自测两题">自测两题</h2>
 <p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
 <p><strong>问题 1</strong>：为什么对行为克隆样本按优势加权？</p>
@@ -248,21 +222,15 @@ A=Q−V，λ控制权重集中程度；实际大权重常需数值处理。论�
 
 **原论文与版本**：*AWAC: Accelerating Online Reinforcement Learning with Offline Datasets*，2020。[原论文](https://arxiv.org/abs/2006.09359)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：离线预训练到在线微调的衔接
+[第30天 SAC](30-sac.md)的离策略Critic能持续利用回放，但直接从离线数据起步仍可能查询不可靠的新动作。[第42天 CQL](42-cql.md)选择在价值端保持保守，另一项尚未解决的任务是：上线后，怎样既保留旧数据的帮助，又适应不断进入回放的新经验？AWAC在Actor端采用优势加权回归，是离线到在线的并行方案，不是给CQL直接追加一个阶段。
 
-**旧方法卡点**：强约束离线方法可能难适应新数据，普通SAC离线起点又不稳
+## 一、问题设定：离线起步怎样平滑接入在线学习
 
-**作者主张**：用优势加权的行为回归更新Actor，以off-policy Critic持续改进
+任务分成两个数据权限不同的阶段：起初只能读已有轨迹，随后可以继续与环境或机器人交互。评价目标因此不只有最后的回报，还包括离线起点是否可靠、刚上线是否掉分，以及新增真实交互多久才产生改善。
 
-**论文证据**：控制与真实机器人实验展示利用先验数据加速微调
-
-**一句话**：在离线初始化加在线微调，Actor–Critic中，作者通过“用优势加权的行为回归更新Actor，以off-policy Critic持续改进”应对“离线预训练到在线微调的衔接”这一问题；证据边界或代价是：Critic仍可能评价未知动作出错，奖励与示范条件影响公平性。
-
-## 二、研究背景与问题定义
-
-本篇将“离线预训练到在线微调的衔接”放在离线初始化加在线微调，Actor–Critic的边界内研究。强约束离线方法可能难适应新数据，普通SAC离线起点又不稳。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+强行为约束能保护离线阶段，却可能拖慢在线适应；完全放开策略又可能马上利用Critic误差。AWAC要让Actor继续从数据动作学习，同时用优势改变每个动作的模仿强度，使旧数据与新数据能够进入同一个训练接口。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -272,18 +240,32 @@ A=Q−V，λ控制权重集中程度；实际大权重常需数值处理。论�
 | 奖励或学习信号 | 任务奖励，旧新数据都需一致 |
 | 终止／边界 | 按任务边界 |
 
-## 三、方法：到底改了什么
+## 二、把KL约束的策略改进投影成加权回归
 
-Actor主要模仿数据动作，但好于状态平均前景的动作权重更大；这样避免显式拟合一个随在线数据不断变化的行为策略模型。Critic用TD自举，Actor仍从replay回归，不等同于IQL“不查询分布外动作”的价值训练。
-
-### 关键公式与符号
+### 从KL驻点推到指数优势权重
 
 $$\max_\theta E_{(s,a)\sim D}[\exp(A(s,a)/\lambda)\log\pi_\theta(a|s)].$$
 A=Q−V，λ控制权重集中程度；实际大权重常需数值处理。论文从分布约束推导回归形式。
 
-### 输入 → 处理 → 输出：教学伪代码
+**指数权重为何出现**：固定状态，最大化期望优势并扣除 $\lambda\,KL(\pi\|\beta)$，再加概率和为1的约束；对每个动作概率求驻点，得到 $\log(\pi/\beta)=A/\lambda-\log Z(s)$，所以最优分布正比于行为概率乘指数优势。投影时就把这些比值当成模仿权重。要注意 $Z(s)$ 是各状态自己的归一化常数，上面的实用回归式省略了它；这保持同状态动作间的相对权重，却会改变不同状态的相对训练权重，不能说两种目标无条件完全相同。见[原文策略改进推导及附录A的归一化讨论](https://arxiv.org/html/2006.09359v6#S4)。
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。`stop_gradient` 表示停止向目标量传播梯度。
+写成 $\pi^*(a|s)\propto\beta(a|s)\exp(A(s,a)/\lambda)$ 后，行为分布通过数据采样进入加权回归，不需再拟合一个上线后不断过时的β网络。
+
+### 指数优势权重的比值更直接说明选择性
+
+同状态两个数据动作优势分别为 $A_1,A_2$，未裁剪权重之比为 $\exp((A_1-A_2)/\lambda)$。共同减去同一状态基线不改这个比值，却影响不同状态样本的整体尺度；有限批次归一化还需按实现核对。
+
+### 两条数据动作怎样获得不同模仿强度
+
+以下是可手算的教学构造，不是论文实验。
+
+某状态数据动作A、B各一条，估计优势为0和2，λ=1。加权似然权重为1与e²≈7.39，归一化后约(0.119,0.881)，于是策略更偏B而非各一半。
+
+如果B的高优势来自Critic误差，同一指数机制也会放大错误。把λ增到2，B权重比例降为e≈2.72，改进更温和，却也更难利用真正好的罕见动作。
+
+## 三、混合旧新回放并持续更新Actor与Critic
+
+`stop_gradient` 表示停止向目标量传播梯度。
 
 ```text
 用先验数据初始化replay
@@ -297,17 +279,7 @@ A=Q−V，λ控制权重集中程度；实际大权重常需数值处理。论�
 输出：可继续在线改善的策略
 ```
 
-**实现要点**：Critic仍可能评价未知动作出错，奖励与示范条件影响公平性。
-
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | Critic学习TD目标；Actor最大化指数优势加权数据似然 |
-| 机制改变 | 用优势加权的行为回归更新Actor，以off-policy Critic持续改进 |
-| 评价改善的指标 | 回报、操作成功率、微调初期退化 |
-
-## 四、实验如何验证方法
+## 四、沿图3的上线边界读初期退化与后续进步
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
@@ -319,29 +291,38 @@ A=Q−V，λ控制权重集中程度；实际大权重常需数值处理。论�
 | 随机性与不确定性 | 完整重复次数与预算本文未核实 |
 | 实际验证的假设 | 先验数据能否转化为快速在线进步 |
 
-**实验解读（本文分析）**：Critic仍可能评价未知动作出错，奖励与示范条件影响公平性。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+### 图3：上线退化与行为模型失配各看哪个面板
 
-## 五、结果：证据到底有多强
+&lt;!-- inline-evidence-v2:start --&gt;
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 图2 | 离线到在线问题流程 | 说明数据条件 | 不表示完全离线 |
-| 图3 | HalfCheetah微调与早期下降 | 展示衔接困难 | 不能只比最终点 |
-| 机器人实验部分（具体图表编号本文未核实） | 有限在线交互后的任务效果 | 支持具体机器人场景 | 不证明无需奖励或人工准备 |
+&lt;!-- figure-ref-v6:start:rl-43-figure-3 --&gt;
+&lt;span id=&quot;rl-43-figure-3&quot;&gt;&lt;/span&gt;
 
-**结论边界**：控制与真实机器人实验展示利用先验数据加速微调。Critic仍可能评价未知动作出错，奖励与示范条件影响公平性。
+&lt;p class=&quot;figure-source-links&quot;&gt;原引用定位：&lt;a href=&quot;https://arxiv.org/html/2006.09359#S3.F3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文&lt;/a&gt;。&lt;/p&gt;
+&lt;!-- figure-ref-v6:end:rl-43-figure-3 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/papers/43-awac-figure-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/43-awac-figure-3.png&quot; width=&quot;1800&quot; height=&quot;1874&quot; alt=&quot;AWAC在HalfCheetah上离线初始化、在线微调与行为密度模型诊断&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引；Nair等，2020，Figure 3；原HTML图形；面板1–3为平均回报，面板4为行为数据对数似然；保留对应图例。&lt;a href=&quot;https://arxiv.org/html/2006.09359v6#S3.F3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-## 六、贡献、代价与局限
 
-**作者贡献**是兼顾旧数据利用与在线适应的Actor更新。**本文分析**：优势由近似Critic估计，权重可能强化错误；不同旧数据质量造成的优势要与算法本身区分。
+前三个面板的横轴是在线环境步数，纵轴是平均回报，分别比较利用旧数据、Actor–Critic和显式策略约束的方法。第二面板箭头标出的上线初期下跌，说明高预训练分不保证平滑衔接。第四面板改画行为模型对离线/在线数据的对数似然，虚线分界前后对应离线训练与在线阶段；似然下降支持“行为模型追不上新分布”的诊断，不是策略回报又下降了同样数值。
 
-## 七、帮助建立理解
+&lt;!-- inline-evidence-v2:end --&gt;
 
-### 教学例子
 
-以下是教学推演，不是原论文实验。
+### 真实机器人还要计入先验数据、奖励与重置
 
-同状态两数据动作优势为0与2，λ=1，权重1与e²≈7.39。第二动作被更强模仿，但第一动作仍有权重；若2是错误Q导致，错误也被指数放大。
+[图2](#rl-43-figure-2)画清先用历史数据、再在线微调的两阶段权限。真实机器人还依赖奖励、先验数据与环境重置，评价应同时报告离线数据来源、预训练计算和新增真实交互，而不是只数在线分钟。
+
+&lt;!-- figure-ref-v6:start:rl-43-figure-2 --&gt;
+&lt;span id=&quot;rl-43-figure-2&quot;&gt;&lt;/span&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/43-awac-figure-2-full.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/43-awac-figure-2-full.png&quot; width=&quot;1649&quot; height=&quot;377&quot; alt=&quot;原论文Figure 2：左半是既有数据上的离线学习，右半加入新交互做在线微调。沿数据进入缓存的箭头区分两个阶段，不把在线改善全算作离线学习收益。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;完整原图摘引｜Nair等，2020，Figure 2；2006.09359v6，HTML S1.F2。&lt;a href=&quot;https://arxiv.org/html/2006.09359v6#S1.F2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文与图号&lt;/a&gt;。原版权保留。原引用定位：&lt;a href=&quot;https://arxiv.org/html/2006.09359#S1.F2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图提示：左半是既有数据上的离线学习，右半加入新交互做在线微调。沿数据进入缓存的箭头区分两个阶段，不把在线改善全算作离线学习收益。
+&lt;!-- figure-ref-v6:end:rl-43-figure-2 --&gt;
+
+## 五、Actor贴近数据，Critic仍可能查询陌生动作
+
+Critic仍会查询当前策略的后继动作，并非IQL式全程仅评价数据动作。指数优势会放大估值误差，λ过小可让极少数样本支配更新；在线数据加入后，隐含行为约束也随之改变。因此旧数据、奖励与新交互带来的收益，应和Actor更新本身分开。
 
 ### 五个前置概念
 
@@ -351,23 +332,40 @@ A=Q−V，λ控制权重集中程度；实际大权重常需数值处理。论�
 4. **温度λ**：控制权重集中程度。
 5. **初期退化**：从离线转在线后表现短暂下降。
 
-### 三个值得继续追问的问题
+## 六、三个值得继续追问的问题与参考答案
 
-1. Q误差如何经指数权重放大？
-2. 旧数据和新数据比例如何影响适应？
-3. 与IQL的Critic目标为什么不同？
+&lt;details&gt;
+&lt;summary&gt;1. Q误差如何经指数权重放大？&lt;/summary&gt;
 
-## 方法与证据总结
+权重约为 $\exp(\hat A/\lambda)$，优势误差 $\epsilon$ 会把权重乘上 $e^{\epsilon/\lambda}$；温度越小，误差放大越明显，少数错误高值样本可能主导拟合。应报告权重分布、有效样本量、裁剪或归一化规则，并检验Q误差与动作覆盖。裁剪改善稳定性，但改变理想优化目标，不能继续称为精确指数更新。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| 离线预训练到在线微调的衔接 | 用优势加权的行为回归更新Actor，以off-policy Critic持续改进 | 更好数据动作得到更高模仿权重，同时便于加入在线数据 | 控制与真实机器人实验展示利用先验数据加速微调 | Critic仍可能评价未知动作出错，奖励与示范条件影响公平性 |
+&lt;/details&gt;
 
-## 资料与阅读范围
+&lt;details&gt;
+&lt;summary&gt;2. 旧数据和新数据比例如何影响适应？&lt;/summary&gt;
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+旧数据保留已有技能和覆盖，过多时可能拖慢向新分布适应；新数据改善当前策略区域的评价，但早期质量差或覆盖窄时可能造成遗忘。比例还与采样方式、更新次数及奖励分布相互作用。应固定总梯度预算对比混合比例，分别测旧任务保持、新任务进展和初期性能下跌，不只看最终检查点。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;3. 与IQL的Critic目标为什么不同？&lt;/summary&gt;
+
+AWAC 通常仍以当前策略在下一状态的动作构造离策略Q目标，因而可能查询数据支持外的动作；其主要约束在优势加权的Actor回归。IQL 先对数据动作Q做上分位 expectile 聚合得到V，再用 $r+\gamma V(s_{next})$ 更新Q，避免在该评价目标中查询新动作。两者Actor形式相近并不意味着Critic相同；IQL部署策略仍可能外推。
+
+&lt;/details&gt;
+
+## 七、沿未解决的问题继续读
+
+- [IQL](46-iql.md)：能否保留优势加权的策略提取，却不让Actor提出的未知动作进入Q目标？IQL正是在价值学习端另建expectile与V回归，Actor相似不代表整套算法相同。（后作延续策略提取接口）
+
+- [WorldSample](57-worldsample.md)：机器人仍要付出真实试错成本时，新增经验能否部分来自模型？WorldSample筛选和调度合成转移，是后续数据来源问题的对照，不是AWAC的直接继承。（教学与应用问题对照）
+
+### 原文核对与路线出处
+
+- [原论文与图表入口](https://arxiv.org/html/2006.09359)。优势加权更新与离线/在线设定；[图3](#rl-43-figure-3)衔接分析。
+- **历史背景**：[SAC](30-sac.md)。共享off-policy价值学习背景，Actor改为优势加权数据回归。
+- **后作承接本篇**：[IQL](46-iql.md)。后作也可使用优势加权策略提取，但Critic与V训练另有改变。
 
 ## 自测两题
 

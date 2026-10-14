@@ -42,15 +42,11 @@
                 <span class="text-gray-500">SAC：随机性进入目标，而不仅是探索噪声</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="707d08fe12ce162e62345644bb87b52ffafa751160cc351f174a607c20fe3268"><h1>第 30 天｜SAC：随机性进入目标，而不仅是探索噪声</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="385ce102f30be7ef5aa1896616b02cf9f6e2e3fc3629cfd12aa000bededeaf13"><h1>第 30 天｜SAC：随机性进入目标，而不仅是探索噪声</h1>
 <p><a href="index.html">系列首页</a> · <a href="29-rainbow.html">上一篇</a> · <a href="31-td3.html">下一篇</a></p>
 <p><strong>原论文与版本</strong>：Haarnoja 等，<em>Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor</em>，2018。<a href="https://arxiv.org/html/1801.01290v2">正文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p><strong>研究问题</strong>：连续控制的探索与样本效率</p>
-<p><strong>旧方法卡点</strong>：确定性动作可能过早收缩，on-policy数据复用不足</p>
-<p><strong>作者主张</strong>：联合最大化回报与策略熵，使用 off-policy Actor–Critic</p>
-<p><strong>论文证据</strong>：§5 连续控制实验与温度／目标更新分析支持可用性</p>
-<p><strong>一句话</strong>：在off-policy、无模型、最大熵随机 Actor–Critic中，作者通过“联合最大化回报与策略熵，使用 off-policy Actor–Critic”应对“连续控制的探索与样本效率”这一问题；证据边界或代价是：熵系数改变任务折中，原始版本不自动调温度。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="17-ddpg.html">DDPG</a>通过带噪行为采数据，但其目标仍追求确定性动作的高Q。SAC沿平行的离策略Actor–Critic路线，把策略熵写进未来回报，因此连价值目标也必须改变。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <ol>
 <li><strong>最大熵目标</strong>：奖励之外还偏好多样行为。</li>
@@ -59,8 +55,8 @@
 <li><strong>重参数化</strong>：把随机动作写成可微函数与独立噪声。</li>
 <li><strong>雅可比修正</strong>：变量变换后修正概率密度。</li>
 </ol>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
-<p>本篇将“连续控制的探索与样本效率”放在off-policy、无模型、最大熵随机 Actor–Critic的边界内研究。确定性动作可能过早收缩，on-policy数据复用不足。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<h2 id="一问题设定随机性怎样成为要优化的收益而非临时探索噪声">一、问题设定：随机性怎样成为要优化的收益而非临时探索噪声</h2>
+<p>如果训练只奖励Q，外加噪声只是采样手段，最终优化仍可能压成单一动作。SAC让保留多种选择本身具有目标价值。于是Actor、Q和V必须使用同一熵约定，有界连续动作的log概率也必须按真实输出分布计算。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -89,14 +85,25 @@
 <td>终止截断按任务处理</td>
 </tr>
 </tbody></table></div>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
-<p>本篇固定原始 2018 论文版本：有独立 V 网络和目标 V，并使用双 Q；不能把后来省去 V、自动调 α 的版本冒充原文。随机 Actor 同时寻找高价值与足够多样的动作。Critic 评价的也是包含未来熵的 soft 回报。</p>
-<h3 id="关键公式与符号">关键公式与符号</h3>
+<h2 id="二从最大熵目标得到soft价值与策略改进">二、从最大熵目标得到soft价值与策略改进</h2>
+<p>SAC首先改变优化目标：在未来回报中计入策略熵，而不是只在执行动作上额外加探索噪声。soft价值因此同时评价奖励与保留多种行动的收益；Actor与Critic必须使用相同的熵约定，否则学习的不是同一个目标。</p>
+<p>对固定Q，优化 <span class="reading-math" data-tex="\mathbb E_\pi[Q-\alpha\log\pi]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="double-struck">E</mi><mi>π</mi></msub><mo stretchy="false">[</mo><mi>Q</mi><mo>−</mo><mi>α</mi><mi>log</mi><mo>⁡</mo><mi>π</mi><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">\mathbb E_\pi[Q-\alpha\log\pi]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord mathnormal">Q</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mclose">]</span></span></span></span></span> 的理想策略满足 <span class="reading-math" data-tex="\pi^*(a|s)\propto\exp(Q(s,a)/\alpha)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>π</mi><mo>∗</mo></msup><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">∣</mi><mi>s</mi><mo stretchy="false">)</mo><mo>∝</mo><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>Q</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mi>α</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\pi^*(a|s)\propto\exp(Q(s,a)/\alpha)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6887em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∝</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">exp</span><span class="mopen">(</span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mclose">)</span></span></span></span></span>。把Actor投向这个Boltzmann分布，相当于最小化KL；配分函数不依赖Actor参数，可从梯度中去掉。连续动作时用重参数化采样，通过动作路径对Q求导，减少似然比估计的方差。</p>
+<p>本篇固定2018 v2：独立V与目标V、双Q取min、固定温度/奖励尺度。后来无独立V和自动温度的实现不能倒写为此版。tanh压缩动作后还要修正log概率的雅可比；漏掉它会同时扭曲熵与Actor损失。</p>
+<h3 id="让v目标与actor损失使用同一有界动作密度">让V目标与Actor损失使用同一有界动作密度</h3>
 <p><span class="reading-math" data-tex="V(s)\approx E_{a\sim\pi}[\min_iQ_i(s,a)-\alpha\log\pi(a|s)],\quad y_Q=r+\gamma(1-d)V_{\bar\psi}(s')."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>V</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>≈</mo><msub><mi>E</mi><mrow><mi>a</mi><mo>∼</mo><mi>π</mi></mrow></msub><mo stretchy="false">[</mo><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mi>i</mi></munder><msub><mi>Q</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>−</mo><mi>α</mi><mi>log</mi><mo>⁡</mo><mi>π</mi><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">∣</mi><mi>s</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mo separator="true">,</mo><mspace width="1em"/><msub><mi>y</mi><mi>Q</mi></msub><mo>=</mo><mi>r</mi><mo>+</mo><mi>γ</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>d</mi><mo stretchy="false">)</mo><msub><mi>V</mi><mover accent="true"><mi>ψ</mi><mo>ˉ</mo></mover></msub><mo stretchy="false">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">V(s)\approx E_{a\sim\pi}[\min_iQ_i(s,a)-\alpha\log\pi(a|s)],\quad y_Q=r+\gamma(1-d)V_{\bar\psi}(s&#x27;).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.4777em;vertical-align:-0.7277em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mrel mtight">∼</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3723em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7277em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mclose">)]</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">Q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1751em;vertical-align:-0.3732em;"></span><span class="mord mathnormal">d</span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.4629em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">ψ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1389em;"><span class="mord mtight">ˉ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3732em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span>
 <span class="reading-math" data-tex="L_\pi=E[\alpha\log\pi_\theta(a|s)-\min_iQ_i(s,a)]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mi>π</mi></msub><mo>=</mo><mi>E</mi><mo stretchy="false">[</mo><mi>α</mi><mi>log</mi><mo>⁡</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">∣</mi><mi>s</mi><mo stretchy="false">)</mo><mo>−</mo><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mi>i</mi></munder><msub><mi>Q</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_\pi=E[\alpha\log\pi_\theta(a|s)-\min_iQ_i(s,a)].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mopen">[</span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.4777em;vertical-align:-0.7277em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3723em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7277em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)]</span><span class="mord">.</span></span></span></span></span></span>
 重参数化 a=fθ(ε,s) 让动作路径可微；tanh 压缩后 log 概率必须包含雅可比修正。</p>
-<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
-<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。<code>stop_gradient</code> 表示停止向目标量传播梯度。</p>
+<p>雅可比修正不是一个额外奖励项。令未压缩动作 <span class="reading-math" data-tex="u=\mu_\theta(s)+\sigma_\theta(s)\odot\epsilon,\ \epsilon\sim\mathcal N(0,I)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>u</mi><mo>=</mo><msub><mi>μ</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>+</mo><msub><mi>σ</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>⊙</mo><mi>ϵ</mi><mo separator="true">,</mo><mtext> </mtext><mi>ϵ</mi><mo>∼</mo><mi mathvariant="script">N</mi><mo stretchy="false">(</mo><mn>0</mn><mo separator="true">,</mo><mi>I</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">u=\mu_\theta(s)+\sigma_\theta(s)\odot\epsilon,\ \epsilon\sim\mathcal N(0,I)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">u</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊙</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ϵ</span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">ϵ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∼</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathcal" style="margin-right:0.14736em;">N</span><span class="mopen">(</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="mclose">)</span></span></span></span></span>，<span class="reading-math" data-tex="a=\tanh u"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi><mo>=</mo><mi>tanh</mi><mo>⁡</mo><mi>u</mi></mrow><annotation encoding="application/x-tex">a=\tanh u</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mop">tanh</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">u</span></span></span></span></span>；<a href="https://arxiv.org/html/1801.01290v2#A3">原文附录C，式(20)—(21)</a>由概率质量不变得到</p>
+<p><span class="reading-math" data-tex="\log\pi_\theta(a\mid s)=\log p_\theta(u\mid s)-\sum_i\log(1-\tanh^2u_i)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>log</mi><mo>⁡</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>a</mi><mo>∣</mo><mi>s</mi><mo stretchy="false">)</mo><mo>=</mo><mi>log</mi><mo>⁡</mo><msub><mi>p</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>u</mi><mo>∣</mo><mi>s</mi><mo stretchy="false">)</mo><mo>−</mo><munder><mo>∑</mo><mi>i</mi></munder><mi>log</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><msup><mrow><mi>tanh</mi><mo>⁡</mo></mrow><mn>2</mn></msup><msub><mi>u</mi><mi>i</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\log\pi_\theta(a\mid s)=\log p_\theta(u\mid s)-\sum_i\log(1-\tanh^2u_i).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">u</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.3277em;vertical-align:-1.2777em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1484em;vertical-align:-0.25em;"></span><span class="mop"><span class="mop">tanh</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8984em;"><span style="top:-3.1473em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>每个维度被压缩的比例为 <span class="reading-math" data-tex="1-\tanh^2u_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mo>−</mo><msup><mrow><mi>tanh</mi><mo>⁡</mo></mrow><mn>2</mn></msup><msub><mi>u</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">1-\tanh^2u_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0484em;vertical-align:-0.15em;"></span><span class="mop"><span class="mop">tanh</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8984em;"><span style="top:-3.1473em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，故密度要除以这些比例的乘积，取log后成为减号。Actor损失和V目标里的log概率都应使用同一个有界动作密度；不能采样压缩后的动作，却仍把未压缩高斯的log概率当作策略熵。</p>
+<h3 id="动作压缩为何在边界附近改变密度更大">动作压缩为何在边界附近改变密度更大</h3>
+<p>tanh的导数在 <span class="reading-math" data-tex="|u|"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∣</mi><mi>u</mi><mi mathvariant="normal">∣</mi></mrow><annotation encoding="application/x-tex">|u|</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">∣</span><span class="mord mathnormal">u</span><span class="mord">∣</span></span></span></span></span> 很大时接近零：一段较宽的未压缩区间被挤到狭窄动作区间，因此密度要升高。log雅可比修正描述这项坐标变化，不是额外奖励或鼓励动作碰边。</p>
+<h3 id="看奖励尺度怎样改变两动作概率">看奖励尺度怎样改变两动作概率</h3>
+<p>以下是可手算的教学构造，不是论文实验。</p>
+<p>两动作Q=(2,0)，α=1，理想概率为<span class="reading-math" data-tex="(e^2/(e^2+1),1/(e^2+1))\approx(0.881,0.119)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><msup><mi>e</mi><mn>2</mn></msup><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><msup><mi>e</mi><mn>2</mn></msup><mo>+</mo><mn>1</mn><mo stretchy="false">)</mo><mo separator="true">,</mo><mn>1</mn><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><msup><mi>e</mi><mn>2</mn></msup><mo>+</mo><mn>1</mn><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo>≈</mo><mo stretchy="false">(</mo><mn>0.881</mn><mo separator="true">,</mo><mn>0.119</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(e^2/(e^2+1),1/(e^2+1))\approx(0.881,0.119)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord">/</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1/</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose">))</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.881</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.119</span><span class="mclose">)</span></span></span></span></span>。α降至0.5则约(0.982,0.018)，更集中。</p>
+<p>若把奖励和Q都放大2倍却保持α不变，概率也变得更集中。这说明奖励尺度与温度共同决定折中；“最大熵”不意味着越随机越好。</p>
+<h2 id="三重参数化采样并修正tanh后的密度">三、重参数化采样并修正tanh后的密度</h2>
+<p><code>stop_gradient</code> 表示停止向目标量传播梯度。</p>
 <pre><code class="language-text">初始化随机Actor、两个Q、V与目标V、replay
 循环：
   从 Actor 采样动作与环境交互
@@ -111,28 +118,7 @@
 注：此版固定 α／奖励尺度，不含后来自动温度目标
 </code></pre>
 <p><strong>实现要点</strong>：熵系数改变任务折中，原始版本不自动调温度。</p>
-<h3 id="三种优化要分开">三种“优化”要分开</h3>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>层次</th>
-<th>这里具体是什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>数学目标／训练损失</td>
-<td>最大化奖励加熵的soft回报；原版分别训练Q、V和随机Actor</td>
-</tr>
-<tr>
-<td>机制改变</td>
-<td>联合最大化回报与策略熵，使用 off-policy Actor–Critic</td>
-</tr>
-<tr>
-<td>评价改善的指标</td>
-<td>回报与样本效率</td>
-</tr>
-</tbody></table></div>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<h2 id="四读均值策略测试与奖励尺度敏感性">四、读均值策略测试与奖励尺度敏感性</h2>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -169,71 +155,67 @@
 <td>最大熵 off-policy 是否改善效率和稳健性</td>
 </tr>
 </tbody></table></div>
-<p><strong>实验解读（本文分析）</strong>：熵系数改变任务折中，原始版本不自动调温度。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>证据定位</th>
-<th>比较什么／观察到什么</th>
-<th>支持什么</th>
-<th>不能证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>图1</td>
-<td>六任务学习曲线</td>
-<td>支持所测任务性能</td>
-<td>不建立永久算法排名</td>
-</tr>
-<tr>
-<td>图2</td>
-<td>随机性与相关版本比较</td>
-<td>检验策略形式影响</td>
-<td>不证明随机性越大越好</td>
-</tr>
-<tr>
-<td>图3</td>
-<td>奖励尺度／目标更新敏感性</td>
-<td>显示超参数作用</td>
-<td>不是无需调参的证据</td>
-</tr>
-</tbody></table></div>
-<p><strong>结论边界</strong>：§5 连续控制实验与温度／目标更新分析支持可用性。熵系数改变任务折中，原始版本不自动调温度。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p><strong>作者贡献</strong>是最大熵框架的实用 off-policy 实现。<strong>本文分析</strong>：高熵会降低精确动作任务中的即时收益；reward scale 改变与 α 的相对权重。比较确定评价动作与随机采样策略时，必须明确评估使用哪一个。</p>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<h3 id="教学例子">教学例子</h3>
-<p>以下是教学推演，不是原论文实验。</p>
-<p>两个动作Q为5与4.9，确定贪心只留前者；适当熵奖励允许两者保留概率，给后续探索留空间。如果第二动作灾难性地差，熵系数过大也会产生代价。</p>
-<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
-<ol>
-<li>奖励整体乘10但 α 不变会怎样？</li>
-<li>为什么评估用均值动作可能改变结论？</li>
-<li>原始 SAC 与自动温度版有哪些训练对象不同？</li>
-</ol>
-<h2 id="方法与证据总结">方法与证据总结</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据／理论证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>连续控制的探索与样本效率</td>
-<td>联合最大化回报与策略熵，使用 off-policy Actor–Critic</td>
-<td>回放提高复用率，熵项减少过早锁定单一动作</td>
-<td>§5 连续控制实验与温度／目标更新分析支持可用性</td>
-<td>熵系数改变任务折中，原始版本不自动调温度</td>
-</tr>
-</tbody></table></div>
-<h2 id="资料与阅读范围">资料与阅读范围</h2>
-<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
-<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<p><strong>实验解读（本文分析）</strong>：§5<a href="#rl-30-figure-1">图1</a>使用5种子，每1000环境步评估一次，阴影为最小—最大范围而非95%置信区间。SAC评价用均值动作，与训练随机策略不同；原文SQL评价保留随机性。<a href="#rl-30-figure-3">图3</a>奖励尺度敏感性说明原版仍需调参，不能引用后来的自动调温度解释此版稳定性。</p>
+<h3 id="阴影是五次运行的最小最大范围">阴影是五次运行的最小最大范围</h3>
+<!-- inline-evidence-v2:start -->
+
+<!-- figure-ref-v6:start:rl-30-figure-1 -->
+<p><span id="rl-30-figure-1"></span></p>
+<p class="figure-source-links">原引用定位：<a href="https://arxiv.org/html/1801.01290#S4.F1" target="_blank" rel="noopener noreferrer">原文</a>。</p>
+<!-- figure-ref-v6:end:rl-30-figure-1 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/30-sac-figure-1.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/30-sac-figure-1.png" width="1800" height="900" alt="SAC与多种控制算法在六项MuJoCo任务中的回报学习曲线" loading="lazy"></a><figcaption>原论文图形摘引；Haarnoja等，2018，Figure 1；原HTML图形。<a href="https://arxiv.org/html/1801.01290v2#S4.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+
+<!-- inline-evidence-v2:end -->
+
+
+<p><a href="#rl-30-figure-1">图1</a>按六个连续控制任务画训练进展：横轴为百万环境步、纵轴为平均回报。Hopper只画到约100万步，而Humanoid画到约1000万步，不能把同样靠右的位置当作相同预算；<a href="#rl-30-figure-2">图2</a>特别比较Humanoid中的随机与确定性变体，支持随机策略可改善所测配置的跨种子稳定性。<a href="#rl-30-figure-3">图3</a>把评估动作选择、奖励尺度和目标平滑分开：均值动作评估改变实际执行策略，奖励尺度又改变熵与回报的相对权重。故这些敏感性曲线恰好说明原版不是无需调参，也不能据此替后续自动温度版背书。 <a href="https://arxiv.org/html/1801.01290">查看原文</a>。</p>
+<!-- figure-ref-v6:start:rl-30-figure-3 -->
+<p><span id="rl-30-figure-3"></span></p>
+<figure class="reading-evidence-figure"><a href="/rl/assets/reference-v6/30-sac-figure-3-full.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/30-sac-figure-3-full.png" width="1800" height="440" alt="原论文Figure 3：三列依次为(a)评估动作选择、(b)奖励尺度、(c)目标平滑系数。横轴均为环境步；只在同一列内比较控制变量，不能把奖励尺度实验解释为自动调温度。" loading="lazy"></a><figcaption>完整原图摘引｜Haarnoja等，2018，Figure 3；1801.01290v2，HTML S5.F3。<a href="https://arxiv.org/html/1801.01290v2#S5.F3" target="_blank" rel="noopener noreferrer">核对原文与图号</a>。原版权保留。原引用定位：<a href="https://arxiv.org/html/1801.01290#S5.F3" target="_blank" rel="noopener noreferrer">原文</a>。</figcaption></figure>
+
+<p>读图提示：三列依次为(a)评估动作选择、(b)奖励尺度、(c)目标平滑系数。横轴均为环境步；只在同一列内比较控制变量，不能把奖励尺度实验解释为自动调温度。</p>
+<!-- figure-ref-v6:end:rl-30-figure-3 -->
+
+<!-- figure-ref-v6:start:rl-30-figure-2 -->
+<p><span id="rl-30-figure-2"></span></p>
+<figure class="reading-evidence-figure"><a href="/rl/assets/reference-v6/30-sac-figure-2-full.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/30-sac-figure-2-full.png" width="1800" height="1350" alt="原论文Figure 2：Humanoid中的随机与确定性策略：浅线保留各次运行，粗线呈现总体趋势；应比较跨种子分散程度，不能把某一条红线的最高点当作稳定收益。" loading="lazy"></a><figcaption>完整原图摘引｜Haarnoja等，2018，Figure 2；1801.01290v2，HTML S5.F2。<a href="https://arxiv.org/html/1801.01290v2#S5.F2" target="_blank" rel="noopener noreferrer">核对原文与图号</a>。原版权保留。原引用定位：<a href="https://arxiv.org/html/1801.01290#S5.F2" target="_blank" rel="noopener noreferrer">原文</a>。</figcaption></figure>
+
+<p>读图提示：Humanoid中的随机与确定性策略：浅线保留各次运行，粗线呈现总体趋势；应比较跨种子分散程度，不能把某一条红线的最高点当作稳定收益。</p>
+<!-- figure-ref-v6:end:rl-30-figure-2 -->
+
+<h2 id="五分清熵温度奖励尺度与版本改动">五、分清熵温度、奖励尺度与版本改动</h2>
+<p>高熵可能牺牲精确动作任务的即时收益；reward scale与α的相对尺度决定折中，2018 v2并不自动调温度。测试使用均值动作还是随机采样，会改变被评价的策略，比较时必须统一口径。</p>
+<h2 id="六继续追问动作密度温度与评价策略">六、继续追问：动作密度、温度与评价策略</h2>
+<details>
+<summary>1. 奖励整体乘10但 α 不变会怎样？</summary>
+
+<p>目标为回报加 <span class="reading-math" data-tex="\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span> 倍熵时，奖励乘10而 <span class="reading-math" data-tex="\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span> 不变，相当于相对原奖励把熵权重降到十分之一，最优折中一般更趋利用。若希望保持同一理想目标的相对权重，应同步放大 <span class="reading-math" data-tex="\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span>；但优化器步长、Q尺度和近似误差仍会改变训练动态。原版的奖励尺度调节因此不只是数值归一化。</p>
+</details>
+
+<details>
+<summary>2. 为什么评估用均值动作可能改变结论？</summary>
+
+<p>训练优化随机策略的熵正则目标，评估却可改用均值动作，二者是不同执行策略。对于经过 tanh 的高斯，tanh 均值参数通常也不等于动作分布的精确均值；多峰价值或边界饱和时，确定性动作可能更好或更差。比较必须统一是否采样、温度和测试次数，并分别报告随机执行和指定确定性执行。</p>
+</details>
+
+<details>
+<summary>3. 原始 SAC 与自动温度版有哪些训练对象不同？</summary>
+
+<p>2018早期 SAC 具有显式状态价值 V 网络和固定熵温度/奖励尺度设置；常用后续版本直接以目标 Q 和下一动作的 log-prob 构造目标，省去独立 V，并把温度作为满足目标熵约束的可学习变量。网络数量、目标更新、温度损失和超参数都不同。引用或复现时必须标明版本，不能把后续代码当原论文算法逐行对应。</p>
+</details>
+
+<h2 id="七比较同期双q与后续技能学习组合">七、比较同期双Q与后续技能学习组合</h2>
+<ul>
+<li><p><strong>同期平行与模块联系</strong>：<a href="31-td3.html">TD3</a>。两者都使用双Q最小目标管理估值误差，但确定性延迟更新与最大熵目标不同。</p>
+</li>
+<li><p><strong>目标模块组合</strong>：<a href="33-diayn.html">DIAYN</a>。无任务奖励的技能学习可把可区分性奖励与最大熵控制组合，仍需检查技能的下游用途。</p>
+</li>
+<li><p><a href="https://arxiv.org/html/1801.01290">原论文与图表入口</a>。soft策略改进；重参数化式11—13；双Q说明；§5<a href="#rl-30-figure-1">图1</a>、<a href="#rl-30-figure-2">图2</a>、<a href="#rl-30-figure-3">图3</a>。</p>
+</li>
+<li><p>教学阅读：<a href="https://lilianweng.github.io/posts/2018-04-08-policy-gradient/">Policy Gradient Algorithms</a>。仅借用本节的解释顺序与接口视角；具体算法、版本和实验以本篇原论文为准。</p>
+</li>
+</ul>
 <h2 id="自测两题">自测两题</h2>
 <p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
 <p><strong>问题 1</strong>：SAC 与“确定性策略加探索噪声”有什么本质区别？</p>
@@ -254,21 +236,13 @@
 
 **原论文与版本**：Haarnoja 等，*Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor*，2018。[正文](https://arxiv.org/html/1801.01290v2)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：连续控制的探索与样本效率
+[DDPG](17-ddpg.md)通过带噪行为采数据，但其目标仍追求确定性动作的高Q。SAC沿平行的离策略Actor–Critic路线，把策略熵写进未来回报，因此连价值目标也必须改变。
 
-**旧方法卡点**：确定性动作可能过早收缩，on-policy数据复用不足
+## 一、问题设定：随机性怎样成为要优化的收益而非临时探索噪声
 
-**作者主张**：联合最大化回报与策略熵，使用 off-policy Actor–Critic
-
-**论文证据**：§5 连续控制实验与温度／目标更新分析支持可用性
-
-**一句话**：在off-policy、无模型、最大熵随机 Actor–Critic中，作者通过“联合最大化回报与策略熵，使用 off-policy Actor–Critic”应对“连续控制的探索与样本效率”这一问题；证据边界或代价是：熵系数改变任务折中，原始版本不自动调温度。
-
-## 二、研究背景与问题定义
-
-本篇将“连续控制的探索与样本效率”放在off-policy、无模型、最大熵随机 Actor–Critic的边界内研究。确定性动作可能过早收缩，on-policy数据复用不足。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+如果训练只奖励Q，外加噪声只是采样手段，最终优化仍可能压成单一动作。SAC让保留多种选择本身具有目标价值。于是Actor、Q和V必须使用同一熵约定，有界连续动作的log概率也必须按真实输出分布计算。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -278,19 +252,41 @@
 | 奖励或学习信号 | 环境奖励加熵的训练目标 |
 | 终止／边界 | 终止截断按任务处理 |
 
-## 三、方法：到底改了什么
+## 二、从最大熵目标得到soft价值与策略改进
 
-本篇固定原始 2018 论文版本：有独立 V 网络和目标 V，并使用双 Q；不能把后来省去 V、自动调 α 的版本冒充原文。随机 Actor 同时寻找高价值与足够多样的动作。Critic 评价的也是包含未来熵的 soft 回报。
+SAC首先改变优化目标：在未来回报中计入策略熵，而不是只在执行动作上额外加探索噪声。soft价值因此同时评价奖励与保留多种行动的收益；Actor与Critic必须使用相同的熵约定，否则学习的不是同一个目标。
 
-### 关键公式与符号
+对固定Q，优化 $\mathbb E_\pi[Q-\alpha\log\pi]$ 的理想策略满足 $\pi^*(a|s)\propto\exp(Q(s,a)/\alpha)$。把Actor投向这个Boltzmann分布，相当于最小化KL；配分函数不依赖Actor参数，可从梯度中去掉。连续动作时用重参数化采样，通过动作路径对Q求导，减少似然比估计的方差。
+
+本篇固定2018 v2：独立V与目标V、双Q取min、固定温度/奖励尺度。后来无独立V和自动温度的实现不能倒写为此版。tanh压缩动作后还要修正log概率的雅可比；漏掉它会同时扭曲熵与Actor损失。
+
+### 让V目标与Actor损失使用同一有界动作密度
 
 $$V(s)\approx E_{a\sim\pi}[\min_iQ_i(s,a)-\alpha\log\pi(a|s)],\quad y_Q=r+\gamma(1-d)V_{\bar\psi}(s').$$
 $$L_\pi=E[\alpha\log\pi_\theta(a|s)-\min_iQ_i(s,a)].$$
 重参数化 a=fθ(ε,s) 让动作路径可微；tanh 压缩后 log 概率必须包含雅可比修正。
 
-### 输入 → 处理 → 输出：教学伪代码
+雅可比修正不是一个额外奖励项。令未压缩动作 $u=\mu_\theta(s)+\sigma_\theta(s)\odot\epsilon,\ \epsilon\sim\mathcal N(0,I)$，$a=\tanh u$；[原文附录C，式(20)—(21)](https://arxiv.org/html/1801.01290v2#A3)由概率质量不变得到
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。`stop_gradient` 表示停止向目标量传播梯度。
+$$\log\pi_\theta(a\mid s)=\log p_\theta(u\mid s)-\sum_i\log(1-\tanh^2u_i).$$
+
+每个维度被压缩的比例为 $1-\tanh^2u_i$，故密度要除以这些比例的乘积，取log后成为减号。Actor损失和V目标里的log概率都应使用同一个有界动作密度；不能采样压缩后的动作，却仍把未压缩高斯的log概率当作策略熵。
+
+### 动作压缩为何在边界附近改变密度更大
+
+tanh的导数在 $|u|$ 很大时接近零：一段较宽的未压缩区间被挤到狭窄动作区间，因此密度要升高。log雅可比修正描述这项坐标变化，不是额外奖励或鼓励动作碰边。
+
+### 看奖励尺度怎样改变两动作概率
+
+以下是可手算的教学构造，不是论文实验。
+
+两动作Q=(2,0)，α=1，理想概率为$(e^2/(e^2+1),1/(e^2+1))\approx(0.881,0.119)$。α降至0.5则约(0.982,0.018)，更集中。
+
+若把奖励和Q都放大2倍却保持α不变，概率也变得更集中。这说明奖励尺度与温度共同决定折中；“最大熵”不意味着越随机越好。
+
+## 三、重参数化采样并修正tanh后的密度
+
+`stop_gradient` 表示停止向目标量传播梯度。
 
 ```text
 初始化随机Actor、两个Q、V与目标V、replay
@@ -309,15 +305,7 @@ $$L_\pi=E[\alpha\log\pi_\theta(a|s)-\min_iQ_i(s,a)].$$
 
 **实现要点**：熵系数改变任务折中，原始版本不自动调温度。
 
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | 最大化奖励加熵的soft回报；原版分别训练Q、V和随机Actor |
-| 机制改变 | 联合最大化回报与策略熵，使用 off-policy Actor–Critic |
-| 评价改善的指标 | 回报与样本效率 |
-
-## 四、实验如何验证方法
+## 四、读均值策略测试与奖励尺度敏感性
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
@@ -329,29 +317,44 @@ $$L_\pi=E[\alpha\log\pi_\theta(a|s)-\min_iQ_i(s,a)].$$
 | 随机性与不确定性 | 5种子；部分图阴影是最小—最大，不是95%CI |
 | 实际验证的假设 | 最大熵 off-policy 是否改善效率和稳健性 |
 
-**实验解读（本文分析）**：熵系数改变任务折中，原始版本不自动调温度。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+**实验解读（本文分析）**：§5[图1](#rl-30-figure-1)使用5种子，每1000环境步评估一次，阴影为最小—最大范围而非95%置信区间。SAC评价用均值动作，与训练随机策略不同；原文SQL评价保留随机性。[图3](#rl-30-figure-3)奖励尺度敏感性说明原版仍需调参，不能引用后来的自动调温度解释此版稳定性。
 
-## 五、结果：证据到底有多强
+### 阴影是五次运行的最小最大范围
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 图1 | 六任务学习曲线 | 支持所测任务性能 | 不建立永久算法排名 |
-| 图2 | 随机性与相关版本比较 | 检验策略形式影响 | 不证明随机性越大越好 |
-| 图3 | 奖励尺度／目标更新敏感性 | 显示超参数作用 | 不是无需调参的证据 |
+&lt;!-- inline-evidence-v2:start --&gt;
 
-**结论边界**：§5 连续控制实验与温度／目标更新分析支持可用性。熵系数改变任务折中，原始版本不自动调温度。
+&lt;!-- figure-ref-v6:start:rl-30-figure-1 --&gt;
+&lt;span id=&quot;rl-30-figure-1&quot;&gt;&lt;/span&gt;
 
-## 六、贡献、代价与局限
+&lt;p class=&quot;figure-source-links&quot;&gt;原引用定位：&lt;a href=&quot;https://arxiv.org/html/1801.01290#S4.F1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文&lt;/a&gt;。&lt;/p&gt;
+&lt;!-- figure-ref-v6:end:rl-30-figure-1 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/papers/30-sac-figure-1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/30-sac-figure-1.png&quot; width=&quot;1800&quot; height=&quot;900&quot; alt=&quot;SAC与多种控制算法在六项MuJoCo任务中的回报学习曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引；Haarnoja等，2018，Figure 1；原HTML图形。&lt;a href=&quot;https://arxiv.org/html/1801.01290v2#S4.F1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-**作者贡献**是最大熵框架的实用 off-policy 实现。**本文分析**：高熵会降低精确动作任务中的即时收益；reward scale 改变与 α 的相对权重。比较确定评价动作与随机采样策略时，必须明确评估使用哪一个。
 
-## 七、帮助建立理解
+&lt;!-- inline-evidence-v2:end --&gt;
 
-### 教学例子
 
-以下是教学推演，不是原论文实验。
+[图1](#rl-30-figure-1)按六个连续控制任务画训练进展：横轴为百万环境步、纵轴为平均回报。Hopper只画到约100万步，而Humanoid画到约1000万步，不能把同样靠右的位置当作相同预算；[图2](#rl-30-figure-2)特别比较Humanoid中的随机与确定性变体，支持随机策略可改善所测配置的跨种子稳定性。[图3](#rl-30-figure-3)把评估动作选择、奖励尺度和目标平滑分开：均值动作评估改变实际执行策略，奖励尺度又改变熵与回报的相对权重。故这些敏感性曲线恰好说明原版不是无需调参，也不能据此替后续自动温度版背书。 [查看原文](https://arxiv.org/html/1801.01290)。
 
-两个动作Q为5与4.9，确定贪心只留前者；适当熵奖励允许两者保留概率，给后续探索留空间。如果第二动作灾难性地差，熵系数过大也会产生代价。
+&lt;!-- figure-ref-v6:start:rl-30-figure-3 --&gt;
+&lt;span id=&quot;rl-30-figure-3&quot;&gt;&lt;/span&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/30-sac-figure-3-full.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/30-sac-figure-3-full.png&quot; width=&quot;1800&quot; height=&quot;440&quot; alt=&quot;原论文Figure 3：三列依次为(a)评估动作选择、(b)奖励尺度、(c)目标平滑系数。横轴均为环境步；只在同一列内比较控制变量，不能把奖励尺度实验解释为自动调温度。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;完整原图摘引｜Haarnoja等，2018，Figure 3；1801.01290v2，HTML S5.F3。&lt;a href=&quot;https://arxiv.org/html/1801.01290v2#S5.F3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文与图号&lt;/a&gt;。原版权保留。原引用定位：&lt;a href=&quot;https://arxiv.org/html/1801.01290#S5.F3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图提示：三列依次为(a)评估动作选择、(b)奖励尺度、(c)目标平滑系数。横轴均为环境步；只在同一列内比较控制变量，不能把奖励尺度实验解释为自动调温度。
+&lt;!-- figure-ref-v6:end:rl-30-figure-3 --&gt;
+
+&lt;!-- figure-ref-v6:start:rl-30-figure-2 --&gt;
+&lt;span id=&quot;rl-30-figure-2&quot;&gt;&lt;/span&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/30-sac-figure-2-full.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/30-sac-figure-2-full.png&quot; width=&quot;1800&quot; height=&quot;1350&quot; alt=&quot;原论文Figure 2：Humanoid中的随机与确定性策略：浅线保留各次运行，粗线呈现总体趋势；应比较跨种子分散程度，不能把某一条红线的最高点当作稳定收益。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;完整原图摘引｜Haarnoja等，2018，Figure 2；1801.01290v2，HTML S5.F2。&lt;a href=&quot;https://arxiv.org/html/1801.01290v2#S5.F2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文与图号&lt;/a&gt;。原版权保留。原引用定位：&lt;a href=&quot;https://arxiv.org/html/1801.01290#S5.F2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图提示：Humanoid中的随机与确定性策略：浅线保留各次运行，粗线呈现总体趋势；应比较跨种子分散程度，不能把某一条红线的最高点当作稳定收益。
+&lt;!-- figure-ref-v6:end:rl-30-figure-2 --&gt;
+
+## 五、分清熵温度、奖励尺度与版本改动
+
+高熵可能牺牲精确动作任务的即时收益；reward scale与α的相对尺度决定折中，2018 v2并不自动调温度。测试使用均值动作还是随机采样，会改变被评价的策略，比较时必须统一口径。
 
 ### 五个前置概念
 
@@ -361,23 +364,37 @@ $$L_\pi=E[\alpha\log\pi_\theta(a|s)-\min_iQ_i(s,a)].$$
 4. **重参数化**：把随机动作写成可微函数与独立噪声。
 5. **雅可比修正**：变量变换后修正概率密度。
 
-### 三个值得继续追问的问题
+## 六、继续追问：动作密度、温度与评价策略
 
-1. 奖励整体乘10但 α 不变会怎样？
-2. 为什么评估用均值动作可能改变结论？
-3. 原始 SAC 与自动温度版有哪些训练对象不同？
+&lt;details&gt;
+&lt;summary&gt;1. 奖励整体乘10但 α 不变会怎样？&lt;/summary&gt;
 
-## 方法与证据总结
+目标为回报加 $\alpha$ 倍熵时，奖励乘10而 $\alpha$ 不变，相当于相对原奖励把熵权重降到十分之一，最优折中一般更趋利用。若希望保持同一理想目标的相对权重，应同步放大 $\alpha$；但优化器步长、Q尺度和近似误差仍会改变训练动态。原版的奖励尺度调节因此不只是数值归一化。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| 连续控制的探索与样本效率 | 联合最大化回报与策略熵，使用 off-policy Actor–Critic | 回放提高复用率，熵项减少过早锁定单一动作 | §5 连续控制实验与温度／目标更新分析支持可用性 | 熵系数改变任务折中，原始版本不自动调温度 |
+&lt;/details&gt;
 
-## 资料与阅读范围
+&lt;details&gt;
+&lt;summary&gt;2. 为什么评估用均值动作可能改变结论？&lt;/summary&gt;
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+训练优化随机策略的熵正则目标，评估却可改用均值动作，二者是不同执行策略。对于经过 tanh 的高斯，tanh 均值参数通常也不等于动作分布的精确均值；多峰价值或边界饱和时，确定性动作可能更好或更差。比较必须统一是否采样、温度和测试次数，并分别报告随机执行和指定确定性执行。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;3. 原始 SAC 与自动温度版有哪些训练对象不同？&lt;/summary&gt;
+
+2018早期 SAC 具有显式状态价值 V 网络和固定熵温度/奖励尺度设置；常用后续版本直接以目标 Q 和下一动作的 log-prob 构造目标，省去独立 V，并把温度作为满足目标熵约束的可学习变量。网络数量、目标更新、温度损失和超参数都不同。引用或复现时必须标明版本，不能把后续代码当原论文算法逐行对应。
+
+&lt;/details&gt;
+
+## 七、比较同期双Q与后续技能学习组合
+
+- **同期平行与模块联系**：[TD3](31-td3.md)。两者都使用双Q最小目标管理估值误差，但确定性延迟更新与最大熵目标不同。
+- **目标模块组合**：[DIAYN](33-diayn.md)。无任务奖励的技能学习可把可区分性奖励与最大熵控制组合，仍需检查技能的下游用途。
+
+- [原论文与图表入口](https://arxiv.org/html/1801.01290)。soft策略改进；重参数化式11—13；双Q说明；§5[图1](#rl-30-figure-1)、[图2](#rl-30-figure-2)、[图3](#rl-30-figure-3)。
+
+- 教学阅读：[Policy Gradient Algorithms](https://lilianweng.github.io/posts/2018-04-08-policy-gradient/)。仅借用本节的解释顺序与接口视角；具体算法、版本和实验以本篇原论文为准。
 
 ## 自测两题
 

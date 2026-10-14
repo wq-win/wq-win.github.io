@@ -42,15 +42,11 @@
                 <span class="text-gray-500">HER：失败轨迹也能成为另一个目标的成功经验</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="cd5e2e24be667551cf4f5f1eaf178f5178b73d867e44eea94437b10866097702"><h1>第 26 天｜HER：失败轨迹也能成为另一个目标的成功经验</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="f32c8c7f53690b5caefb83a7bed8ec086743261e2835f7fbd762d5e80097aecc"><h1>第 26 天｜HER：失败轨迹也能成为另一个目标的成功经验</h1>
 <p><a href="index.html">系列首页</a> · <a href="25-maddpg.html">上一篇</a> · <a href="27-ppo.html">下一篇</a></p>
 <p><strong>原论文与版本</strong>：<em>Hindsight Experience Replay</em>，2017。<a href="https://arxiv.org/abs/1707.01495">原论文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p><strong>研究问题</strong>：目标条件任务中的稀疏成功信号</p>
-<p><strong>旧方法卡点</strong>：随机探索很少完成指定目标，绝大多数轨迹奖励相同</p>
-<p><strong>作者主张</strong>：将已达到的结果重标为目标，重算奖励并复用轨迹</p>
-<p><strong>论文证据</strong>：机器人推、滑、抓取等实验支持稀疏奖励学习</p>
-<p><strong>一句话</strong>：在目标条件、off-policy、机器人控制中，作者通过“将已达到的结果重标为目标，重算奖励并复用轨迹”应对“目标条件任务中的稀疏成功信号”这一问题；证据边界或代价是：必须能合法重算目标奖励，随机环境重标可能引入偏差。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="17-ddpg.html">DDPG</a>能复用旧转移，<a href="19-per.html">PER</a>能重新分配重读次数，但稀疏目标任务中反复读失败奖励仍可能缺少信号。HER改变的是经验按哪个目标解释：同一转移若在另一目标下成功，就重新计算对应奖励并训练目标条件策略。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <ol>
 <li><strong>目标条件策略</strong>：动作还依赖期望目标。</li>
@@ -59,8 +55,8 @@
 <li><strong>稀疏奖励</strong>：大多数转移没有区分性反馈。</li>
 <li><strong>Off-policy复用</strong>：学习目标可不同于采样时行为。</li>
 </ol>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
-<p>本篇将“目标条件任务中的稀疏成功信号”放在目标条件、off-policy、机器人控制的边界内研究。随机探索很少完成指定目标，绝大多数轨迹奖励相同。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<h2 id="一问题设定没到原目标的轨迹能否支持另一个真实训练问题">一、问题设定：没到原目标的轨迹，能否支持另一个真实训练问题</h2>
+<p>机械臂没把物体推到指定位置，却确实推到了另一个位置。只要目标不改变物理转移，这次经历就能回答“怎样到达那个已达到的位置”。HER的价值来自真实转移的新任务解释，而不是把失败事实改成原任务成功。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -89,13 +85,23 @@
 <td>终止逻辑若依赖目标也需同步重算</td>
 </tr>
 </tbody></table></div>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
-<p>HER没有把失败说成原任务成功，而是把同一物理转移用于另一个目标条件的训练。底层可用DDPG等off-policy算法。未来状态采样策略很关键：挑选轨迹后面实际到达的目标，增加有信息的回报。它依赖目标变化不改变原物理转移有效性。</p>
-<h3 id="关键公式与符号">关键公式与符号</h3>
+<h2 id="二保持物理转移并一致重标目标相关量">二、保持物理转移并一致重标目标相关量</h2>
+<p>目标条件价值写成Q(s,a,g)。如果目标g只改变奖励与成功判定，不改变物理转移，那么同一条(s,a,s′)也能用于别的g′。HER据此重标目标并重新计算奖励，让“没有到达原目标”变成“确实到达另一个目标”的有效训练事实。</p>
+<p>重标的不只是一个成功标签。Actor和Critic的目标输入、奖励函数，以及任务定义中受目标影响的终止逻辑都要一致。future策略从本回合之后达到的状态取目标，形成与当前能力接近的练习分布；太多重标经验也可能挤掉真正任务分布。</p>
+<p>这里还有因果条件：若g会改变环境动力学，原转移不再适用；若随机结果被事后挑选作为目标，条件化可能带来选择偏差。HER在确定性机器人任务上的好结果，不能直接推出所有随机目标MDP中的无偏性。</p>
+<h3 id="让新目标进入奖励终止和全部网络输入">让新目标进入奖励、终止和全部网络输入</h3>
 <p><span class="reading-math" data-tex="g'\leftarrow achieved(s_k),\quad r'=r(s,a,s',g'),\quad Q(s,a,g')\gets TD\ update."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>g</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>←</mo><mi>a</mi><mi>c</mi><mi>h</mi><mi>i</mi><mi>e</mi><mi>v</mi><mi>e</mi><mi>d</mi><mo stretchy="false">(</mo><msub><mi>s</mi><mi>k</mi></msub><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="1em"/><msup><mi>r</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>=</mo><mi>r</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo separator="true">,</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo separator="true">,</mo><msup><mi>g</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="1em"/><mi>Q</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo separator="true">,</mo><msup><mi>g</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo><mo>←</mo><mi>T</mi><mi>D</mi><mtext> </mtext><mi>u</mi><mi>p</mi><mi>d</mi><mi>a</mi><mi>t</mi><mi>e</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">g&#x27;\leftarrow achieved(s_k),\quad r&#x27;=r(s,a,s&#x27;,g&#x27;),\quad Q(s,a,g&#x27;)\gets TD\ update.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9963em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0519em;vertical-align:-0.25em;"></span><span class="mord mathnormal">a</span><span class="mord mathnormal">c</span><span class="mord mathnormal">hi</span><span class="mord mathnormal">e</span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mord mathnormal">e</span><span class="mord mathnormal">d</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0519em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="mspace"> </span><span class="mord mathnormal">u</span><span class="mord mathnormal">p</span><span class="mord mathnormal">d</span><span class="mord mathnormal">a</span><span class="mord mathnormal">t</span><span class="mord mathnormal">e</span><span class="mord">.</span></span></span></span></span></span>
 只替换g不替换r会产生错误数据；策略与Critic输入都应包含g。</p>
-<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
-<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<p>以文中的目标条件DDPG为例，重标后一次完整目标应写成</p>
+<p><span class="reading-math" data-tex="y_{g'}=r'+\gamma(1-d')Q_{\bar\phi}\!\left(s',\mu_{\bar\theta}(s',g'),g'\right),\qquad L_Q=\left(Q_\phi(s,a,g')-\operatorname{sg}(y_{g'})\right)^2."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>y</mi><msup><mi>g</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup></msub><mo>=</mo><msup><mi>r</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>+</mo><mi>γ</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><msup><mi>d</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo><msub><mi>Q</mi><mover accent="true"><mi>ϕ</mi><mo>ˉ</mo></mover></msub><mtext> ⁣</mtext><mrow><mo fence="true">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo separator="true">,</mo><msub><mi>μ</mi><mover accent="true"><mi>θ</mi><mo>ˉ</mo></mover></msub><mo stretchy="false">(</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo separator="true">,</mo><msup><mi>g</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo><mo separator="true">,</mo><msup><mi>g</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo fence="true">)</mo></mrow><mo separator="true">,</mo><mspace width="2em"/><msub><mi>L</mi><mi>Q</mi></msub><mo>=</mo><msup><mrow><mo fence="true">(</mo><msub><mi>Q</mi><mi>ϕ</mi></msub><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo separator="true">,</mo><msup><mi>g</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo><mo>−</mo><mi mathvariant="normal">sg</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>y</mi><msup><mi>g</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup></msub><mo stretchy="false">)</mo><mo fence="true">)</mo></mrow><mn>2</mn></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">y_{g&#x27;}=r&#x27;+\gamma(1-d&#x27;)Q_{\bar\phi}\!\left(s&#x27;,\mu_{\bar\theta}(s&#x27;,g&#x27;),g&#x27;\right),\qquad L_Q=\left(Q_\phi(s,a,g&#x27;)-\operatorname{sg}(y_{g&#x27;})\right)^2.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.328em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6828em;"><span style="top:-2.786em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8852em;vertical-align:-0.0833em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1751em;vertical-align:-0.3732em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.4629em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight">ϕ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord mtight">ˉ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3732em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:-0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">μ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.4629em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8312em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord mtight">ˉ</span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2371em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;">)</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">Q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.292em;vertical-align:-0.2861em;"></span><span class="minner"><span class="minner"><span class="mopen delimcenter" style="top:0em;">(</span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">ϕ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mop"><span class="mord mathrm" style="margin-right:0.01389em;">sg</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.328em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6828em;"><span style="top:-2.786em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mclose delimcenter" style="top:0em;">)</span></span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:1.0059em;"><span style="top:-3.2548em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="g'"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>g</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup></mrow><annotation encoding="application/x-tex">g&#x27;</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9463em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7519em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span></span></span></span></span> 同时进入当前Q、后继Actor和后继Q；<span class="reading-math" data-tex="r'"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>r</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup></mrow><annotation encoding="application/x-tex">r&#x27;</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7519em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7519em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span></span></span></span></span> 与依任务而定的 <span class="reading-math" data-tex="d'"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>d</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup></mrow><annotation encoding="application/x-tex">d&#x27;</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7519em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7519em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span></span></span></span></span> 也须对应新目标。上横线是慢更新目标网络，sg表示停止梯度。由<a href="https://arxiv.org/pdf/1707.01495#page=3">HER Algorithm 1</a>的重标接口接到底层TD更新，就能看出只改输入目标、漏改任何一个目标相关量为何会产生互相矛盾的训练信号。</p>
+<h3 id="重标改变条件任务而不改变转移事实">重标改变条件任务而不改变转移事实</h3>
+<p>在合法重标条件下，同一 <span class="reading-math" data-tex="(s,a,s')"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo separator="true">,</mo><msup><mi>s</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(s,a,s&#x27;)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0019em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7519em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span> 被配上不同g，形成不同条件输入。它们不是新的独立物理试验，统计不确定性不能把每个重标目标都当新增环境样本。</p>
+<h3 id="检验只改目标却保留旧奖励的矛盾">检验只改目标却保留旧奖励的矛盾</h3>
+<p>以下是可手算的教学构造，不是论文实验。</p>
+<p>原目标g=5，转移位置2→3，奖励定义为达到目标得0，否则−1。原经验奖励−1；取g′=3后，同一转移奖励变0。若只把输入目标改成3却保留−1，便教模型“达到3也失败”，数据自相矛盾。</p>
+<p>重标仍不能证明智能体会到达5。它只是先学会从2到3的目标条件行为，再靠覆盖与泛化帮助其他目标。</p>
+<h2 id="三从回合未来状态选目标并重算td标签">三、从回合未来状态选目标并重算TD标签</h2>
 <pre><code class="language-text">输入：目标条件Actor／Critic与目标奖励函数
 每回合按目标g收集完整轨迹
 对每个真实转移：
@@ -109,28 +115,7 @@
 评价时使用原始指定目标
 </code></pre>
 <p><strong>实现要点</strong>：必须能合法重算目标奖励，随机环境重标可能引入偏差。</p>
-<h3 id="三种优化要分开">三种“优化”要分开</h3>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>层次</th>
-<th>这里具体是什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>数学目标／训练损失</td>
-<td>底层目标条件TD损失；重算目标与奖励后训练</td>
-</tr>
-<tr>
-<td>机制改变</td>
-<td>将已达到的结果重标为目标，重算奖励并复用轨迹</td>
-</tr>
-<tr>
-<td>评价改善的指标</td>
-<td>原指定目标成功率</td>
-</tr>
-</tbody></table></div>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<h2 id="四一起读成功率重标数量与真实试验规模">四、一起读成功率、重标数量与真实试验规模</h2>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -160,78 +145,75 @@
 </tr>
 <tr>
 <td>随机性与不确定性</td>
-<td>完整种子／区间与预算本文未逐项核实</td>
+<td><a href="#rl-26-figure-3">图3</a>为5种子均值±1标准差；真机5次试验，不能推成可靠性保证</td>
 </tr>
 <tr>
 <td>实际验证的假设</td>
 <td>重用失败是否提高稀疏目标学习</td>
 </tr>
 </tbody></table></div>
-<p><strong>实验解读（本文分析）</strong>：必须能合法重算目标奖励，随机环境重标可能引入偏差。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>证据定位</th>
-<th>比较什么／观察到什么</th>
-<th>支持什么</th>
-<th>不能证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>算法1</td>
-<td>收集与重标流程</td>
-<td>明确新增数据来自哪里</td>
-<td>不是新真实经验</td>
-</tr>
-<tr>
-<td>机器人结果部分（具体图表编号本文未核实）</td>
-<td>有无HER的成功曲线</td>
-<td>支持稀疏任务收益</td>
-<td>不证明任意奖励可重标</td>
-</tr>
-<tr>
-<td>重标策略消融（具体图表编号本文未核实）</td>
-<td>future等目标选择</td>
-<td>支持目标采样影响效果</td>
-<td>不说明未来采样在所有环境无偏</td>
-</tr>
-</tbody></table></div>
-<p><strong>结论边界</strong>：机器人推、滑、抓取等实验支持稀疏奖励学习。必须能合法重算目标奖励，随机环境重标可能引入偏差。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p><strong>作者贡献</strong>是目标重标经验机制。<strong>本文分析</strong>：在高度随机动力学中，以未来结果选择目标会把偶然性当成可控性；不可逆任务也可能不适合。评价必须回到原任务，不能用重标后成功率证明能力。</p>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<h3 id="教学例子">教学例子</h3>
-<p>以下是教学推演，不是原论文实验。</p>
-<p>原目标把物体推到x=10，最后只到x=4。原任务仍失败；重标g&#39;=4后，可以学习“从这些状态采取这些动作能到4”。多种局部到达技能可能帮助未来组合，但没有凭空得到到10的成功示范。</p>
-<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
-<ol>
-<li>目标改变会改变终止或动力学时怎么办？</li>
-<li>为什么随机环境中的重标会带来选择偏差？</li>
-<li>原目标成功率与重标成功率为何必须分开？</li>
-</ol>
-<h2 id="方法与证据总结">方法与证据总结</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据／理论证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>目标条件任务中的稀疏成功信号</td>
-<td>将已达到的结果重标为目标，重算奖励并复用轨迹</td>
-<td>将原任务失败转化为另一个目标的有信息样本</td>
-<td>机器人推、滑、抓取等实验支持稀疏奖励学习</td>
-<td>必须能合法重算目标奖励，随机环境重标可能引入偏差</td>
-</tr>
-</tbody></table></div>
-<h2 id="资料与阅读范围">资料与阅读范围</h2>
-<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
-<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<p><strong>实验解读（本文分析）</strong>：<a href="#rl-26-figure-3">图3</a>平均5种子，阴影为1个标准差；每epoch为800回合、每回合50步。<a href="#rl-26-figure-6">图6</a>同时给最佳epoch和全训练平均成功率，future的4或8个额外目标表现较好，更多不总更好。真机仅5次试验的5/5是小样本演示，不能写成已证明100%可靠。</p>
+<!-- figure-ref-v6:start:rl-26-figure-6 -->
+<figure class="reading-evidence-figure" id="rl-26-figure-6"><a href="/rl/assets/reference-v6/26-figure-6.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/26-figure-6.png" width="990" height="708" alt="上排是训练中最高成功率，下排是整个训练期平均成功率；横轴是每条转移附加的目标数。future在不少设置更好，但k增大并非严格单调改善，不能只看峰值行。" loading="lazy"></a><figcaption>原论文图形摘引｜Andrychowicz等，2017，图6，PDF第9页。<a href="https://arxiv.org/pdf/1707.01495v3#page=9" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。</figcaption></figure>
+
+<p>上排是训练中最高成功率，下排是整个训练期平均成功率；横轴是每条转移附加的目标数。future在不少设置更好，但k增大并非严格单调改善，不能只看峰值行。</p>
+<!-- figure-ref-v6:end:rl-26-figure-6 -->
+
+<h3 id="比较最佳epoch与全程平均成功率">比较最佳epoch与全程平均成功率</h3>
+<!-- inline-evidence-v2:start -->
+
+<!-- figure-ref-v6:start:anchor-rl-26-figure-3 -->
+<p><span id="rl-26-figure-3"></span></p>
+<!-- figure-ref-v6:end:anchor-rl-26-figure-3 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/26-her-figure-3.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/26-her-figure-3.png" width="1032" height="384" alt="HER多目标任务在pushing、sliding和pick-and-place中的成功率学习曲线" loading="lazy"></a><figcaption>原论文图形摘引；Andrychowicz等，2017，Figure 3, PDF第7页；仅图形区域。<a href="https://arxiv.org/pdf/1707.01495#page=7" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>横轴为训练epoch，图注明确每个epoch对应800个、各50步的回合；纵轴是预先指定目标的成功率，越高越好。蓝线是DDPG+HER，红线是§4.5中改进重标设置的版本，绿线是计数探索对照，虚线为DDPG。红蓝差异属于HER内部采样配置，不能全算成“有HER对无HER”的收益；也不能用训练重标后天然成功的比例代替这个测试成功率。</p>
+<!-- inline-evidence-v2:end -->
+
+
+<p><a href="#rl-26-figure-3">图3</a>给出多目标机器人任务学习曲线，成功按物体与目标终点距离判定；<a href="#rl-26-figure-4">图4</a>才是§4.3的单目标实验，不能把两者混写。<a href="#rl-26-figure-6">图6</a>上排取训练期最高成功率、下排取训练期平均成功率，对比future等重标策略时应看同一排，并保留额外目标个数。原始奖励和终止能够合法重算是这些经验可复用的前提，真机<a href="#rl-26-figure-7">图7</a>演示不构成任意目标或随机环境都无偏的证明。 <a href="https://arxiv.org/pdf/1707.01495">查看原文</a>。</p>
+<!-- figure-ref-v6:start:rl-26-figure-7 -->
+<figure class="reading-evidence-figure" id="rl-26-figure-7"><a href="/rl/assets/reference-v6/26-figure-7.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/26-figure-7.png" width="1413" height="204" alt="四帧显示策略在真实机械臂上的抓放过程，是部署演示而非成功率曲线；它本身没有提供重复试验次数、置信区间或跨物体泛化证据。" loading="lazy"></a><figcaption>原论文图形摘引｜Andrychowicz等，2017，图7，PDF第10页。<a href="https://arxiv.org/pdf/1707.01495v3#page=10" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。</figcaption></figure>
+
+<p>四帧显示策略在真实机械臂上的抓放过程，是部署演示而非成功率曲线；它本身没有提供重复试验次数、置信区间或跨物体泛化证据。</p>
+<!-- figure-ref-v6:end:rl-26-figure-7 -->
+
+<!-- figure-ref-v6:start:rl-26-figure-4 -->
+<figure class="reading-evidence-figure" id="rl-26-figure-4"><a href="/rl/assets/reference-v6/26-figure-4.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/26-figure-4.png" width="990" height="396" alt="三列仍是推、滑和抓放，但每个任务只有一个关心的目标。蓝色HER与绿色计数探索、红色DDPG在相同epoch轴上比较；滑动任务并未因此接近完全成功。" loading="lazy"></a><figcaption>原论文图形摘引｜Andrychowicz等，2017，图4，PDF第8页。<a href="https://arxiv.org/pdf/1707.01495v3#page=8" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。</figcaption></figure>
+
+<p>三列仍是推、滑和抓放，但每个任务只有一个关心的目标。蓝色HER与绿色计数探索、红色DDPG在相同epoch轴上比较；滑动任务并未因此接近完全成功。</p>
+<!-- figure-ref-v6:end:rl-26-figure-4 -->
+
+<h2 id="五重标成功不能替代原任务覆盖">五、重标成功不能替代原任务覆盖</h2>
+<p>future重标在随机动力学中可能把偶然达到的结果当成可控目标，不可逆任务也可能不适合这种复用。评估必须回到原目标分布，不能用重标后的成功率证明原任务能力。</p>
+<h3 id="继续追问动力学随机性与目标比例">继续追问：动力学、随机性与目标比例</h3>
+<details>
+<summary>1. 目标改变会改变终止或动力学时怎么办？</summary>
+
+<p>HER 要求记录转移在新目标下仍合法，且可重新计算奖励与终止。如果目标只改奖励，可以从原状态和动作重算；若目标改变动力学或约束，原转移一般不能直接重标。若目标改变终止，必须处理本应提前结束的轨迹、吸收状态和自举掩码，不能把原目标下的未来状态当成新目标下合法续集。</p>
+</details>
+
+<details>
+<summary>2. 为什么随机环境中的重标会带来选择偏差？</summary>
+
+<p>用实际到达的未来状态作目标，会把“碰巧发生了某个随机结果”作为选样条件；给定重标目标后，转移噪声分布不再等于真实环境在预先指定该目标时的分布。算法可能高估难以控制的偶然成功。确定性动力学弱化了这类选择偏差，但不解决所有覆盖问题；随机任务需显式校正或使用独立于结果的目标采样来验证。</p>
+</details>
+
+<details>
+<summary>3. 原目标成功率与重标成功率为何必须分开？</summary>
+
+<p>重标目标是依据已经发生的结果选择的，成功比例可以因选择规则而很高，却不表示策略能完成事先指定的任务。训练日志应记录重标池的目标分布与原始目标数据，最终以独立抽取、事先固定的目标评价成功率。否则把“我做到了什么”改写成“我本来想做什么”会让指标机械上升，而没有真实控制改进。</p>
+</details>
+
+<h2 id="六把重标语义与回放频率分别设计">六、把重标语义与回放频率分别设计</h2>
+<ul>
+<li><p><strong>回放模块组合</strong>：<a href="19-per.html">PER</a>。重标定义经验含义，优先级决定它被读多少次；组合时先保证标签一致，再讨论非均匀抽样偏差。</p>
+</li>
+<li><p><strong>目标条件学习器</strong>：<a href="17-ddpg.html">DDPG</a>。HER把新经验交给离策略更新器，并没有替代Critic目标、慢网络和连续动作优化。</p>
+</li>
+<li><p><a href="https://arxiv.org/pdf/1707.01495">原论文与图表入口</a>。Algorithm 1；§4.2多目标<a href="#rl-26-figure-3">图3</a>、§4.3单目标<a href="#rl-26-figure-4">图4</a>；§4.5<a href="#rl-26-figure-6">图6</a>；§4.6真机试验。</p>
+</li>
+</ul>
 <h2 id="自测两题">自测两题</h2>
 <p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
 <p><strong>问题 1</strong>：一次失败如何变成有用经验？</p>
@@ -250,21 +232,13 @@
 
 **原论文与版本**：*Hindsight Experience Replay*，2017。[原论文](https://arxiv.org/abs/1707.01495)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：目标条件任务中的稀疏成功信号
+[DDPG](17-ddpg.md)能复用旧转移，[PER](19-per.md)能重新分配重读次数，但稀疏目标任务中反复读失败奖励仍可能缺少信号。HER改变的是经验按哪个目标解释：同一转移若在另一目标下成功，就重新计算对应奖励并训练目标条件策略。
 
-**旧方法卡点**：随机探索很少完成指定目标，绝大多数轨迹奖励相同
+## 一、问题设定：没到原目标的轨迹，能否支持另一个真实训练问题
 
-**作者主张**：将已达到的结果重标为目标，重算奖励并复用轨迹
-
-**论文证据**：机器人推、滑、抓取等实验支持稀疏奖励学习
-
-**一句话**：在目标条件、off-policy、机器人控制中，作者通过“将已达到的结果重标为目标，重算奖励并复用轨迹”应对“目标条件任务中的稀疏成功信号”这一问题；证据边界或代价是：必须能合法重算目标奖励，随机环境重标可能引入偏差。
-
-## 二、研究背景与问题定义
-
-本篇将“目标条件任务中的稀疏成功信号”放在目标条件、off-policy、机器人控制的边界内研究。随机探索很少完成指定目标，绝大多数轨迹奖励相同。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+机械臂没把物体推到指定位置，却确实推到了另一个位置。只要目标不改变物理转移，这次经历就能回答“怎样到达那个已达到的位置”。HER的价值来自真实转移的新任务解释，而不是把失败事实改成原任务成功。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -274,18 +248,39 @@
 | 奖励或学习信号 | 根据实际到达位置与目标重算稀疏奖励 |
 | 终止／边界 | 终止逻辑若依赖目标也需同步重算 |
 
-## 三、方法：到底改了什么
+## 二、保持物理转移并一致重标目标相关量
 
-HER没有把失败说成原任务成功，而是把同一物理转移用于另一个目标条件的训练。底层可用DDPG等off-policy算法。未来状态采样策略很关键：挑选轨迹后面实际到达的目标，增加有信息的回报。它依赖目标变化不改变原物理转移有效性。
+目标条件价值写成Q(s,a,g)。如果目标g只改变奖励与成功判定，不改变物理转移，那么同一条(s,a,s′)也能用于别的g′。HER据此重标目标并重新计算奖励，让“没有到达原目标”变成“确实到达另一个目标”的有效训练事实。
 
-### 关键公式与符号
+重标的不只是一个成功标签。Actor和Critic的目标输入、奖励函数，以及任务定义中受目标影响的终止逻辑都要一致。future策略从本回合之后达到的状态取目标，形成与当前能力接近的练习分布；太多重标经验也可能挤掉真正任务分布。
+
+这里还有因果条件：若g会改变环境动力学，原转移不再适用；若随机结果被事后挑选作为目标，条件化可能带来选择偏差。HER在确定性机器人任务上的好结果，不能直接推出所有随机目标MDP中的无偏性。
+
+### 让新目标进入奖励、终止和全部网络输入
 
 $$g'\leftarrow achieved(s_k),\quad r'=r(s,a,s',g'),\quad Q(s,a,g')\gets TD\ update.$$
 只替换g不替换r会产生错误数据；策略与Critic输入都应包含g。
 
-### 输入 → 处理 → 输出：教学伪代码
+以文中的目标条件DDPG为例，重标后一次完整目标应写成
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+$$y_{g'}=r'+\gamma(1-d')Q_{\bar\phi}\!\left(s',\mu_{\bar\theta}(s',g'),g'\right),\qquad L_Q=\left(Q_\phi(s,a,g')-\operatorname{sg}(y_{g'})\right)^2.$$
+
+$g'$ 同时进入当前Q、后继Actor和后继Q；$r'$ 与依任务而定的 $d'$ 也须对应新目标。上横线是慢更新目标网络，sg表示停止梯度。由[HER Algorithm 1](https://arxiv.org/pdf/1707.01495#page=3)的重标接口接到底层TD更新，就能看出只改输入目标、漏改任何一个目标相关量为何会产生互相矛盾的训练信号。
+
+### 重标改变条件任务而不改变转移事实
+
+在合法重标条件下，同一 $(s,a,s')$ 被配上不同g，形成不同条件输入。它们不是新的独立物理试验，统计不确定性不能把每个重标目标都当新增环境样本。
+
+### 检验只改目标却保留旧奖励的矛盾
+
+以下是可手算的教学构造，不是论文实验。
+
+原目标g=5，转移位置2→3，奖励定义为达到目标得0，否则−1。原经验奖励−1；取g′=3后，同一转移奖励变0。若只把输入目标改成3却保留−1，便教模型“达到3也失败”，数据自相矛盾。
+
+重标仍不能证明智能体会到达5。它只是先学会从2到3的目标条件行为，再靠覆盖与泛化帮助其他目标。
+
+## 三、从回合未来状态选目标并重算TD标签
+
 
 ```text
 输入：目标条件Actor／Critic与目标奖励函数
@@ -303,15 +298,7 @@ $$g'\leftarrow achieved(s_k),\quad r'=r(s,a,s',g'),\quad Q(s,a,g')\gets TD\ upda
 
 **实现要点**：必须能合法重算目标奖励，随机环境重标可能引入偏差。
 
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | 底层目标条件TD损失；重算目标与奖励后训练 |
-| 机制改变 | 将已达到的结果重标为目标，重算奖励并复用轨迹 |
-| 评价改善的指标 | 原指定目标成功率 |
-
-## 四、实验如何验证方法
+## 四、一起读成功率、重标数量与真实试验规模
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
@@ -320,32 +307,49 @@ $$g'\leftarrow achieved(s_k),\quad r'=r(s,a,s',g'),\quad Q(s,a,g')\gets TD\ upda
 | 对比基线 | DDPG无HER、稀疏／稠密奖励与重标策略 |
 | 训练预算与资源 | 重标增加训练样本但不增加真实环境步数 |
 | 指标及其含义 | 原指定目标成功率 |
-| 随机性与不确定性 | 完整种子／区间与预算本文未逐项核实 |
+| 随机性与不确定性 | [图3](#rl-26-figure-3)为5种子均值±1标准差；真机5次试验，不能推成可靠性保证 |
 | 实际验证的假设 | 重用失败是否提高稀疏目标学习 |
 
-**实验解读（本文分析）**：必须能合法重算目标奖励，随机环境重标可能引入偏差。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+**实验解读（本文分析）**：[图3](#rl-26-figure-3)平均5种子，阴影为1个标准差；每epoch为800回合、每回合50步。[图6](#rl-26-figure-6)同时给最佳epoch和全训练平均成功率，future的4或8个额外目标表现较好，更多不总更好。真机仅5次试验的5/5是小样本演示，不能写成已证明100%可靠。
 
-## 五、结果：证据到底有多强
+&lt;!-- figure-ref-v6:start:rl-26-figure-6 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-26-figure-6&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/26-figure-6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/26-figure-6.png&quot; width=&quot;990&quot; height=&quot;708&quot; alt=&quot;上排是训练中最高成功率，下排是整个训练期平均成功率；横轴是每条转移附加的目标数。future在不少设置更好，但k增大并非严格单调改善，不能只看峰值行。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜Andrychowicz等，2017，图6，PDF第9页。&lt;a href=&quot;https://arxiv.org/pdf/1707.01495v3#page=9&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt; · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。&lt;/figcaption&gt;&lt;/figure&gt;
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 算法1 | 收集与重标流程 | 明确新增数据来自哪里 | 不是新真实经验 |
-| 机器人结果部分（具体图表编号本文未核实） | 有无HER的成功曲线 | 支持稀疏任务收益 | 不证明任意奖励可重标 |
-| 重标策略消融（具体图表编号本文未核实） | future等目标选择 | 支持目标采样影响效果 | 不说明未来采样在所有环境无偏 |
+上排是训练中最高成功率，下排是整个训练期平均成功率；横轴是每条转移附加的目标数。future在不少设置更好，但k增大并非严格单调改善，不能只看峰值行。
+&lt;!-- figure-ref-v6:end:rl-26-figure-6 --&gt;
 
-**结论边界**：机器人推、滑、抓取等实验支持稀疏奖励学习。必须能合法重算目标奖励，随机环境重标可能引入偏差。
+### 比较最佳epoch与全程平均成功率
 
-## 六、贡献、代价与局限
+&lt;!-- inline-evidence-v2:start --&gt;
 
-**作者贡献**是目标重标经验机制。**本文分析**：在高度随机动力学中，以未来结果选择目标会把偶然性当成可控性；不可逆任务也可能不适合。评价必须回到原任务，不能用重标后成功率证明能力。
+&lt;!-- figure-ref-v6:start:anchor-rl-26-figure-3 --&gt;
+&lt;span id=&quot;rl-26-figure-3&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:anchor-rl-26-figure-3 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/papers/26-her-figure-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/26-her-figure-3.png&quot; width=&quot;1032&quot; height=&quot;384&quot; alt=&quot;HER多目标任务在pushing、sliding和pick-and-place中的成功率学习曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引；Andrychowicz等，2017，Figure 3, PDF第7页；仅图形区域。&lt;a href=&quot;https://arxiv.org/pdf/1707.01495#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-## 七、帮助建立理解
+横轴为训练epoch，图注明确每个epoch对应800个、各50步的回合；纵轴是预先指定目标的成功率，越高越好。蓝线是DDPG+HER，红线是§4.5中改进重标设置的版本，绿线是计数探索对照，虚线为DDPG。红蓝差异属于HER内部采样配置，不能全算成“有HER对无HER”的收益；也不能用训练重标后天然成功的比例代替这个测试成功率。
 
-### 教学例子
 
-以下是教学推演，不是原论文实验。
+&lt;!-- inline-evidence-v2:end --&gt;
 
-原目标把物体推到x=10，最后只到x=4。原任务仍失败；重标g'=4后，可以学习“从这些状态采取这些动作能到4”。多种局部到达技能可能帮助未来组合，但没有凭空得到到10的成功示范。
+
+[图3](#rl-26-figure-3)给出多目标机器人任务学习曲线，成功按物体与目标终点距离判定；[图4](#rl-26-figure-4)才是§4.3的单目标实验，不能把两者混写。[图6](#rl-26-figure-6)上排取训练期最高成功率、下排取训练期平均成功率，对比future等重标策略时应看同一排，并保留额外目标个数。原始奖励和终止能够合法重算是这些经验可复用的前提，真机[图7](#rl-26-figure-7)演示不构成任意目标或随机环境都无偏的证明。 [查看原文](https://arxiv.org/pdf/1707.01495)。
+
+&lt;!-- figure-ref-v6:start:rl-26-figure-7 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-26-figure-7&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/26-figure-7.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/26-figure-7.png&quot; width=&quot;1413&quot; height=&quot;204&quot; alt=&quot;四帧显示策略在真实机械臂上的抓放过程，是部署演示而非成功率曲线；它本身没有提供重复试验次数、置信区间或跨物体泛化证据。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜Andrychowicz等，2017，图7，PDF第10页。&lt;a href=&quot;https://arxiv.org/pdf/1707.01495v3#page=10&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt; · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。&lt;/figcaption&gt;&lt;/figure&gt;
+
+四帧显示策略在真实机械臂上的抓放过程，是部署演示而非成功率曲线；它本身没有提供重复试验次数、置信区间或跨物体泛化证据。
+&lt;!-- figure-ref-v6:end:rl-26-figure-7 --&gt;
+
+&lt;!-- figure-ref-v6:start:rl-26-figure-4 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-26-figure-4&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/26-figure-4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/26-figure-4.png&quot; width=&quot;990&quot; height=&quot;396&quot; alt=&quot;三列仍是推、滑和抓放，但每个任务只有一个关心的目标。蓝色HER与绿色计数探索、红色DDPG在相同epoch轴上比较；滑动任务并未因此接近完全成功。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜Andrychowicz等，2017，图4，PDF第8页。&lt;a href=&quot;https://arxiv.org/pdf/1707.01495v3#page=8&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt; · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。&lt;/figcaption&gt;&lt;/figure&gt;
+
+三列仍是推、滑和抓放，但每个任务只有一个关心的目标。蓝色HER与绿色计数探索、红色DDPG在相同epoch轴上比较；滑动任务并未因此接近完全成功。
+&lt;!-- figure-ref-v6:end:rl-26-figure-4 --&gt;
+
+## 五、重标成功不能替代原任务覆盖
+
+future重标在随机动力学中可能把偶然达到的结果当成可控目标，不可逆任务也可能不适合这种复用。评估必须回到原目标分布，不能用重标后的成功率证明原任务能力。
 
 ### 五个前置概念
 
@@ -355,23 +359,35 @@ $$g'\leftarrow achieved(s_k),\quad r'=r(s,a,s',g'),\quad Q(s,a,g')\gets TD\ upda
 4. **稀疏奖励**：大多数转移没有区分性反馈。
 5. **Off-policy复用**：学习目标可不同于采样时行为。
 
-### 三个值得继续追问的问题
+### 继续追问：动力学、随机性与目标比例
 
-1. 目标改变会改变终止或动力学时怎么办？
-2. 为什么随机环境中的重标会带来选择偏差？
-3. 原目标成功率与重标成功率为何必须分开？
+&lt;details&gt;
+&lt;summary&gt;1. 目标改变会改变终止或动力学时怎么办？&lt;/summary&gt;
 
-## 方法与证据总结
+HER 要求记录转移在新目标下仍合法，且可重新计算奖励与终止。如果目标只改奖励，可以从原状态和动作重算；若目标改变动力学或约束，原转移一般不能直接重标。若目标改变终止，必须处理本应提前结束的轨迹、吸收状态和自举掩码，不能把原目标下的未来状态当成新目标下合法续集。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| 目标条件任务中的稀疏成功信号 | 将已达到的结果重标为目标，重算奖励并复用轨迹 | 将原任务失败转化为另一个目标的有信息样本 | 机器人推、滑、抓取等实验支持稀疏奖励学习 | 必须能合法重算目标奖励，随机环境重标可能引入偏差 |
+&lt;/details&gt;
 
-## 资料与阅读范围
+&lt;details&gt;
+&lt;summary&gt;2. 为什么随机环境中的重标会带来选择偏差？&lt;/summary&gt;
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+用实际到达的未来状态作目标，会把“碰巧发生了某个随机结果”作为选样条件；给定重标目标后，转移噪声分布不再等于真实环境在预先指定该目标时的分布。算法可能高估难以控制的偶然成功。确定性动力学弱化了这类选择偏差，但不解决所有覆盖问题；随机任务需显式校正或使用独立于结果的目标采样来验证。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;3. 原目标成功率与重标成功率为何必须分开？&lt;/summary&gt;
+
+重标目标是依据已经发生的结果选择的，成功比例可以因选择规则而很高，却不表示策略能完成事先指定的任务。训练日志应记录重标池的目标分布与原始目标数据，最终以独立抽取、事先固定的目标评价成功率。否则把“我做到了什么”改写成“我本来想做什么”会让指标机械上升，而没有真实控制改进。
+
+&lt;/details&gt;
+
+## 六、把重标语义与回放频率分别设计
+
+- **回放模块组合**：[PER](19-per.md)。重标定义经验含义，优先级决定它被读多少次；组合时先保证标签一致，再讨论非均匀抽样偏差。
+- **目标条件学习器**：[DDPG](17-ddpg.md)。HER把新经验交给离策略更新器，并没有替代Critic目标、慢网络和连续动作优化。
+
+- [原论文与图表入口](https://arxiv.org/pdf/1707.01495)。Algorithm 1；§4.2多目标[图3](#rl-26-figure-3)、§4.3单目标[图4](#rl-26-figure-4)；§4.5[图6](#rl-26-figure-6)；§4.6真机试验。
 
 ## 自测两题
 

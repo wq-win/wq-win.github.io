@@ -42,15 +42,11 @@
                 <span class="text-gray-500">TTPO：没有标准答案，测试时还能怎样更新模型</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="6e039fc80450387886d6fc207102525487af71b42bc17090e4b6ecea96c7dbf6"><h1>第 59 天｜TTPO：没有标准答案，测试时还能怎样更新模型</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="f2140b5e1dfb3dffdbc17ce9bb2701c8560f186cb8edbb0af8088c16fe233448"><h1>第 59 天｜TTPO：没有标准答案，测试时还能怎样更新模型</h1>
 <p><a href="index.html">系列首页</a> · <a href="58-factor.html">上一篇</a> · <a href="60-draco.html">下一篇</a></p>
 <p><strong>原论文与版本</strong>：Wang 等，<em>TTPO: Test-Time Policy Optimization</em>，2026-08-27。<a href="https://arxiv.org/html/2608.27448v1">正文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p><strong>研究问题</strong>：无标签测试时推理适应</p>
-<p><strong>旧方法卡点</strong>：多数票自奖励会把错误共识强化，正负样本token价值不同</p>
-<p><strong>作者主张</strong>：以多数票伪答案为条件构造教师蒸馏，并对负回答进行token选择的RL抑制</p>
-<p><strong>论文证据</strong>：原文小模型与数学基准报告测试时适应收益</p>
-<p><strong>一句话</strong>：在无标签训练／测试时参数优化中，作者通过“以多数票伪答案为条件构造教师蒸馏，并对负回答进行token选择的RL抑制”应对“无标签测试时推理适应”这一问题；证据边界或代价是：多数票可能错，峰值检查点选择与全部适应成本必须说明。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="52-grpo.html">第52天 GRPO</a>利用同题奖励比较回答，<a href="53-r1.html">第53天 R1</a>把可验证反馈用于训练阶段的推理增强。测试时若没有真答案，能否只靠当前模型生成的信息继续更新？TTPO把组相对负向更新与答案条件自蒸馏组合起来，新增的是测试题参数适应权限。它和上一篇<a href="58-factor.html">FACTOR</a>都细分token信号，但没有直接算法继承关系。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <ol>
 <li><strong>测试时训练</strong>：部署／评测题上继续修改参数。</li>
@@ -59,8 +55,9 @@
 <li><strong>自蒸馏</strong>：模型在不同条件下相互提供目标。</li>
 <li><strong>检查点选择</strong>：决定最终报告哪个训练时刻。</li>
 </ol>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
-<p>本篇将“无标签测试时推理适应”放在无标签训练／测试时参数优化的边界内研究。多数票自奖励会把错误共识强化，正负样本token价值不同。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<h2 id="一问题设定无真答案的测试题能提供什么更新信号">一、问题设定：无真答案的测试题能提供什么更新信号</h2>
+<p>测试题可见，标准答案不可用于训练；模型仍能生成多个候选并抽取多数答案。多数票可以提供伪标签，却也会把共同错误当成共识，因此简单把所有一致回答一律强化存在风险。</p>
+<p>TTPO分别处理多数一致的正组和不一致的负组，并选择不同token更新。除了检查分支是否互补，本篇还必须问最终用哪个检查点、全部生成与教师计算花了多少；训练无标签并不自动使整个评价流程无标签。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -89,12 +86,20 @@
 <td>生成上限；适应结束检查点需独立规定</td>
 </tr>
 </tbody></table></div>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
-<p>每题先采较多回答形成伪答案，正分支利用答案条件教师与学生的分布差做蒸馏；负分支用组相对信号重点抑制某些置信错误token。方法不是只做多数投票的推理，还修改参数；教师与学生可来自同一模型但拥有不同条件信息。</p>
-<h3 id="关键公式与符号">关键公式与符号</h3>
-<p>教学总式 <span class="reading-math" data-tex="L=L_{positive\ distill}+\lambda L_{negative\ RL}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi><mo>=</mo><msub><mi>L</mi><mrow><mi>p</mi><mi>o</mi><mi>s</mi><mi>i</mi><mi>t</mi><mi>i</mi><mi>v</mi><mi>e</mi><mtext> </mtext><mi>d</mi><mi>i</mi><mi>s</mi><mi>t</mi><mi>i</mi><mi>l</mi><mi>l</mi></mrow></msub><mo>+</mo><mi>λ</mi><msub><mi>L</mi><mrow><mi>n</mi><mi>e</mi><mi>g</mi><mi>a</mi><mi>t</mi><mi>i</mi><mi>v</mi><mi>e</mi><mtext> </mtext><mi>R</mi><mi>L</mi></mrow></msub></mrow><annotation encoding="application/x-tex">L=L_{positive\ distill}+\lambda L_{negative\ RL}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="mord mathnormal mtight">os</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight">t</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span><span class="mord mathnormal mtight">e</span><span class="mspace mtight"><span class="mtight"> </span></span><span class="mord mathnormal mtight">d</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight">s</span><span class="mord mathnormal mtight">t</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">ll</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord mathnormal">λ</span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight">t</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span><span class="mord mathnormal mtight">e</span><span class="mspace mtight"><span class="mtight"> </span></span><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span><span class="mord mathnormal mtight">L</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>。正分支权重含归一化熵与教师差异，负分支按学生置信相关分数筛token。原文例λ=0.1，不能把所有token统一广播当完整TTPO。</p>
-<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
-<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<h2 id="二拆开答案条件蒸馏与负样本token抑制">二、拆开答案条件蒸馏与负样本token抑制</h2>
+<p>它非对称地处理两组回答：与多数答案一致者接受答案条件教师的前向KL蒸馏；不一致者接受负优势策略梯度。教师同样依赖当前模型，但额外看到伪答案并启用规定的思考设置，这是一种训练时特权上下文。</p>
+<p>掩码分数为 <span class="reading-math" data-tex="s_t=-\log\pi(y_t|x,y_{&lt;t})(1-\widehat H_t)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mi>t</mi></msub><mo>=</mo><mo>−</mo><mi>log</mi><mo>⁡</mo><mi>π</mi><mo stretchy="false">(</mo><msub><mi>y</mi><mi>t</mi></msub><mi mathvariant="normal">∣</mi><mi>x</mi><mo separator="true">,</mo><msub><mi>y</mi><mrow><mo>&lt;</mo><mi>t</mi></mrow></msub><mo stretchy="false">)</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><msub><mover accent="true"><mi>H</mi><mo stretchy="true">^</mo></mover><mi>t</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">s_t=-\log\pi(y_t|x,y_{&lt;t})(1-\widehat H_t)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1733em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9233em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span><span class="svg-align" style="width:calc(100% - 0.1111em);margin-left:0.1111em;top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.24em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.24em" viewBox="0 0 1062 239" preserveAspectRatio="none"><path d="M529 0h5l519 115c5 1 9 5 9 10 0 1-1 2-1 3l-4 22
+c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，保留分数上半部分；这偏向“当前分布熵低、实际采到的token却低概率”的异常位置，不是简单挑最高概率token。</p>
+<h3 id="正分支soft-or与负分支掩码">正分支Soft-OR与负分支掩码</h3>
+<p>教学总式 <span class="reading-math" data-tex="L=L_{positive\ distill}+\lambda L_{negative\ RL}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi><mo>=</mo><msub><mi>L</mi><mrow><mi>p</mi><mi>o</mi><mi>s</mi><mi>i</mi><mi>t</mi><mi>i</mi><mi>v</mi><mi>e</mi><mtext> </mtext><mi>d</mi><mi>i</mi><mi>s</mi><mi>t</mi><mi>i</mi><mi>l</mi><mi>l</mi></mrow></msub><mo>+</mo><mi>λ</mi><msub><mi>L</mi><mrow><mi>n</mi><mi>e</mi><mi>g</mi><mi>a</mi><mi>t</mi><mi>i</mi><mi>v</mi><mi>e</mi><mtext> </mtext><mi>R</mi><mi>L</mi></mrow></msub></mrow><annotation encoding="application/x-tex">L=L_{positive\ distill}+\lambda L_{negative\ RL}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="mord mathnormal mtight">os</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight">t</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span><span class="mord mathnormal mtight">e</span><span class="mspace mtight"><span class="mtight"> </span></span><span class="mord mathnormal mtight">d</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight">s</span><span class="mord mathnormal mtight">t</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">ll</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord mathnormal">λ</span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight">t</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span><span class="mord mathnormal mtight">e</span><span class="mspace mtight"><span class="mtight"> </span></span><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span><span class="mord mathnormal mtight">L</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>。原文例λ=0.1，不能把所有token统一广播当完整TTPO。</p>
+<p><strong>把两条损失真正拆开</strong>：在正组，一条回答的损失是 <span class="reading-math" data-tex="L_+=T^{-1}\sum_t w_t\,KL(q_t\|p_t)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>L</mi><mo>+</mo></msub><mo>=</mo><msup><mi>T</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><msub><mo>∑</mo><mi>t</mi></msub><msub><mi>w</mi><mi>t</mi></msub><mtext> </mtext><mi>K</mi><mi>L</mi><mo stretchy="false">(</mo><msub><mi>q</mi><mi>t</mi></msub><mi mathvariant="normal">∥</mi><msub><mi>p</mi><mi>t</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">L_+=T^{-1}\sum_t w_t\,KL(q_t\|p_t)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8917em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2583em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1138em;vertical-align:-0.2997em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1308em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2997em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="mord mathnormal">L</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∥</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，其中 <span class="reading-math" data-tex="q_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>q</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">q_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是看到伪答案的停止梯度教师分布，<span class="reading-math" data-tex="p_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">p_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是学生分布。<span class="reading-math" data-tex="w_t=\hat H_t+\hat\Delta_t-\hat H_t\hat\Delta_t=1-(1-\hat H_t)(1-\hat\Delta_t)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>w</mi><mi>t</mi></msub><mo>=</mo><msub><mover accent="true"><mi>H</mi><mo>^</mo></mover><mi>t</mi></msub><mo>+</mo><msub><mover accent="true"><mi mathvariant="normal">Δ</mi><mo>^</mo></mover><mi>t</mi></msub><mo>−</mo><msub><mover accent="true"><mi>H</mi><mo>^</mo></mover><mi>t</mi></msub><msub><mover accent="true"><mi mathvariant="normal">Δ</mi><mo>^</mo></mover><mi>t</mi></msub><mo>=</mo><mn>1</mn><mo>−</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><msub><mover accent="true"><mi>H</mi><mo>^</mo></mover><mi>t</mi></msub><mo stretchy="false">)</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><msub><mover accent="true"><mi mathvariant="normal">Δ</mi><mo>^</mo></mover><mi>t</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">w_t=\hat H_t+\hat\Delta_t-\hat H_t\hat\Delta_t=1-(1-\hat H_t)(1-\hat\Delta_t)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0968em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0968em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord">Δ</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0968em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord">Δ</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord">Δ</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，所以两种归一化信号任一个大就提高权重。负组是 <span class="reading-math" data-tex="L_-=-A\,T^{-1}\sum_t m_t\log p_t(y_t)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>L</mi><mo>−</mo></msub><mo>=</mo><mo>−</mo><mi>A</mi><mtext> </mtext><msup><mi>T</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><msub><mo>∑</mo><mi>t</mi></msub><msub><mi>m</mi><mi>t</mi></msub><mi>log</mi><mo>⁡</mo><msub><mi>p</mi><mi>t</mi></msub><mo stretchy="false">(</mo><msub><mi>y</mi><mi>t</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">L_-=-A\,T^{-1}\sum_t m_t\log p_t(y_t)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8917em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2583em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">−</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1138em;vertical-align:-0.2997em;"></span><span class="mord">−</span><span class="mord mathnormal">A</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1308em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2997em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>；<span class="reading-math" data-tex="A&lt;0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi><mo>&lt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">A&lt;0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7224em;vertical-align:-0.0391em;"></span><span class="mord mathnormal">A</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&lt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span> 时，最小化损失会降低所选token的概率，<span class="reading-math" data-tex="m_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>m</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">m_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 由前文异常分数筛选。<span class="reading-math" data-tex="T"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>T</mi></mrow><annotation encoding="application/x-tex">T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">T</span></span></span></span></span> 是有效回答长度，两组各自平均后再以 <span class="reading-math" data-tex="\lambda"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi></mrow><annotation encoding="application/x-tex">\lambda</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">λ</span></span></span></span></span> 合并；该式没有额外PPO比率裁剪。对应<a href="https://arxiv.org/html/2608.27448v1#S3.SS3">§3.3—3.5式3—8</a>。</p>
+<h3 id="把伪标签数量与独立正确证据分开">把伪标签数量与独立正确证据分开</h3>
+<p>同一当前模型的64个回答可以彼此相关。多数投票得到更大的组内支持，不等于取得64个独立正确标签；更新再偏向多数会反馈改变下一批的答案分布。</p>
+<h3 id="错误多数与低概率token的筛选">错误多数与低概率token的筛选</h3>
+<p>以下是可手算的教学构造，不是论文实验。</p>
+<p>同题生成6条答案，4条为A、2条为B，则多数伪标签为A，即使真实答案恰为B。负分支仍会惩罚两条B，这个反例保留了方法无法消除的自确认风险。</p>
+<p>在一条负样本内，token甲的实际概率0.01、归一熵0.1，分数约4.605×0.9=4.14；token乙概率0.8、归一熵0.1，分数约0.223×0.9=0.20。两者同样低熵，甲更可能被选中。低熵是整个分布集中，低概率是已采token落在分布尾部，两者可以同时成立。</p>
+<h2 id="三生成64个候选选训练子集并更新lora">三、生成64个候选、选训练子集并更新LoRA</h2>
 <pre><code class="language-text">对无标签题从当前策略采K=64条回答
 抽取答案并确定多数伪答案
 划分与伪答案一致／不一致的回答
@@ -105,29 +110,7 @@
 合并损失更新LoRA参数
 按预先定义规则选检查点后评估
 </code></pre>
-<p><strong>实现要点</strong>：多数票可能错，峰值检查点选择与全部适应成本必须说明。</p>
-<h3 id="三种优化要分开">三种“优化”要分开</h3>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>层次</th>
-<th>这里具体是什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>数学目标／训练损失</td>
-<td>正样本token加权蒸馏加负样本token选择RL</td>
-</tr>
-<tr>
-<td>机制改变</td>
-<td>以多数票伪答案为条件构造教师蒸馏，并对负回答进行token选择的RL抑制</td>
-</tr>
-<tr>
-<td>评价改善的指标</td>
-<td>Avg@12平均表现，不是pass@12</td>
-</tr>
-</tbody></table></div>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<h2 id="四读正负分支消融同时审查测试时选点权限">四、读正负分支消融，同时审查测试时选点权限</h2>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -164,77 +147,70 @@
 <td>伪教师和正负token分工是否促进无标签适应</td>
 </tr>
 </tbody></table></div>
-<p><strong>实验解读（本文分析）</strong>：多数票可能错，峰值检查点选择与全部适应成本必须说明。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>证据定位</th>
-<th>比较什么／观察到什么</th>
-<th>支持什么</th>
-<th>不能证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>表1</td>
-<td>OpenThoughts场景</td>
-<td>无标签训练的相应结果</td>
-<td>不能与直接测试时适应混写</td>
-</tr>
-<tr>
-<td>表2</td>
-<td>测试时适应比较</td>
-<td>1.7B平均38.0→45.2</td>
-<td>不是固定权重独立测试</td>
-</tr>
-<tr>
-<td>表3／相关消融</td>
-<td>token权重与正负策略</td>
-<td>检验模块组合</td>
-<td>不保证多数伪标签正确</td>
-</tr>
-<tr>
-<td>长期训练／上界分析（具体图表编号本文未核实）</td>
-<td>更长训练与真标签参照</td>
-<td>显示适应边界</td>
-<td>不能证明无限自我改进</td>
-</tr>
-</tbody></table></div>
-<p>38.0→45.2绝对提升7.2个百分点，相对约18.9%。<strong>证据疑点</strong>：§4.1描述保存并报告峰值检查点。即使训练不使用答案，若借评测分数挑峰值，模型选择也不再无标签；需补充如何部署时选模型以及预先固定检查点结果。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p><strong>作者方法</strong>依赖伪标签和自蒸馏的互补。<strong>本文分析</strong>：错误多数可能把正确少数当负例；全部64次生成、教师重评分、LoRA更新都属于测试成本。题目在训练中出现但不使用标签，仍与普通未适应泛化评估不同。</p>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<h3 id="教学例子">教学例子</h3>
-<p>以下是教学推演，不是原论文实验。</p>
-<p>64条回答中40条答B、24条答A，而真答案是A。多数标签把A归负。token选择可能减少误伤，但没有独立真值就无法从机制上保证纠正错误共识。</p>
-<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
-<ol>
-<li>如何在完全无标签部署中选择停止时刻？</li>
-<li>错误多数率怎样影响训练收益？</li>
-<li>同样总生成token预算的纯推理基线表现如何？</li>
-</ol>
-<h2 id="方法与证据总结">方法与证据总结</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据／理论证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>无标签测试时推理适应</td>
-<td>以多数票伪答案为条件构造教师蒸馏，并对负回答进行token选择的RL抑制</td>
-<td>把伪答案教师的纠正信号与负样本抑制分工</td>
-<td>原文小模型与数学基准报告测试时适应收益</td>
-<td>多数票可能错，峰值检查点选择与全部适应成本必须说明</td>
-</tr>
-</tbody></table></div>
-<h2 id="资料与阅读范围">资料与阅读范围</h2>
-<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
-<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h3 id="图3先辨正负更新组合和教师信息">图3：先辨正负更新组合和教师信息</h3>
+<!-- inline-evidence-v2:start -->
+
+<!-- figure-ref-v6:start:rl-59-figure-3 -->
+<p><span id="rl-59-figure-3"></span></p>
+<!-- figure-ref-v6:end:rl-59-figure-3 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/59-ttpo-figure-3.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/59-ttpo-figure-3.png" width="1600" height="351" alt="TTPO的正负样本更新策略消融与AIME26平均准确率" loading="lazy"></a><figcaption>原论文图形摘引；Wang等，2026，Figure 3；原HTML图形。<a href="https://arxiv.org/html/2608.27448v1#S4.F3" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+
+<p>图3纵轴是AIME26的Avg@12准确率，横轴每根柱表示一对正组 <span class="reading-math" data-tex="\mathcal P"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="script">P</mi></mrow><annotation encoding="application/x-tex">\mathcal P</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathcal" style="margin-right:0.08222em;">P</span></span></span></span></span>/负组 <span class="reading-math" data-tex="\mathcal N"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="script">N</mi></mrow><annotation encoding="application/x-tex">\mathcal N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathcal" style="margin-right:0.14736em;">N</span></span></span></span></span> 的更新组合；柱内绿色为前向KL、粉色为GRPO式负更新、白色为不更新。灰水平虚线为基座，标出的短虚线是无答案特权上下文的教师变体。48.9对应这张Qwen3-1.7B消融的正FKL/负RL组合，不是主结果中跨测试集平均45.2；应先读组合，再比较是否用了相同教师信息。</p>
+<!-- inline-evidence-v2:end -->
+
+<p>表1的OpenThoughts训练与表2的直接测试时适应是两种数据权限，不能合写成固定权重的独立泛化。后者38.0→45.2增加7.2个百分点、相对约18.9%。<a href="#rl-59-figure-5">图5</a>比较伪标签、真标签参照与熵；<a href="#rl-59-figure-6">图6</a>把平均采样与多数投票准确率分开。</p>
+<!-- figure-ref-v6:start:rl-59-figure-5 -->
+<p><span id="rl-59-figure-5"></span></p>
+<figure class="reading-evidence-figure"><a href="/rl/assets/reference-v6/59-ttpo-figure-5-full.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/59-ttpo-figure-5-full.png" width="1800" height="640" alt="原论文Figure 5：左侧比较伪标签与真标签参照，右侧比较训练熵。右侧括号内给TTRL步数，不能把双重刻度当成所有方法相同的更新预算。" loading="lazy"></a><figcaption>完整原图摘引｜Wang等，2026，Figure 5；2608.27448v1，HTML S4.F5。<a href="https://arxiv.org/html/2608.27448v1#S4.F5" target="_blank" rel="noopener noreferrer">核对原文与图号</a>。<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>；图形仅缩放／重新排版，沿用原许可。原引用定位：<a href="https://arxiv.org/html/2608.27448v1#S4.F5" target="_blank" rel="noopener noreferrer">原文</a>。</figcaption></figure>
+
+<p>读图提示：左侧比较伪标签与真标签参照，右侧比较训练熵。右侧括号内给TTRL步数，不能把双重刻度当成所有方法相同的更新预算。</p>
+<!-- figure-ref-v6:end:rl-59-figure-5 -->
+
+<!-- figure-ref-v6:start:rl-59-figure-6 -->
+<p><span id="rl-59-figure-6"></span></p>
+<figure class="reading-evidence-figure"><a href="/rl/assets/reference-v6/59-ttpo-figure-6-full.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/59-ttpo-figure-6-full.png" width="1800" height="1295" alt="原论文Figure 6：红色虚线为Maj@12，蓝色实线为Avg@12，灰虚线为基座Maj@12。多数投票改善与单次采样平均改善分别报告，不把两种推理预算混成一个准确率。" loading="lazy"></a><figcaption>完整原图摘引｜Wang等，2026，Figure 6；2608.27448v1，HTML S4.F6。<a href="https://arxiv.org/html/2608.27448v1#S4.F6" target="_blank" rel="noopener noreferrer">核对原文与图号</a>。<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>；图形仅缩放／重新排版，沿用原许可。原引用定位：<a href="https://arxiv.org/html/2608.27448v1#S4.F6" target="_blank" rel="noopener noreferrer">原文</a>。</figcaption></figure>
+
+<p>读图提示：红色虚线为Maj@12，蓝色实线为Avg@12，灰虚线为基座Maj@12。多数投票改善与单次采样平均改善分别报告，不把两种推理预算混成一个准确率。</p>
+<!-- figure-ref-v6:end:rl-59-figure-6 -->
+
+<h3 id="训练子集全部生成与峰值检查点">训练子集、全部生成与峰值检查点</h3>
+<p>原文每题生成64条，再选较少回答训练并限制反传token；“只训练8条”不等于只生成8条，组优势也使用全部采样回答。成本还包括教师重评分与LoRA更新。主比较采用Avg@12，并在训练中按评测选峰值检查点；因此虽然参数更新不使用真答案，模型选择仍用到了评测标签。</p>
+<h2 id="五错误多数与峰值选点留下的部署问题">五、错误多数与峰值选点留下的部署问题</h2>
+<p>多数答案可能错，非对称蒸馏不会把伪标签变成真值。</p>
+<p>完全无标签部署还需要独立的停止规则，以及预先固定检查点的成绩。</p>
+<h2 id="六三个值得继续追问的问题与参考答案">六、三个值得继续追问的问题与参考答案</h2>
+<details>
+<summary>1. 如何在完全无标签部署中选择停止时刻？</summary>
+
+<p>可预先固定更新步数或生成预算，用只依赖无标签可观察量的规则监测KL、熵塌缩、答案一致性和目标停滞，并在独立开发任务上确定阈值后冻结。多数一致性仍可能对应共同错误，因此不是可靠正确率代理。若论文用真实评测分数选峰值，部署无标签停机尚未被解决；应同时报告预定检查点结果，不能用测试答案暗中选点。</p>
+</details>
+
+<details>
+<summary>2. 错误多数率怎样影响训练收益？</summary>
+
+<p>错误多数会把错误答案当正组，并惩罚部分真实正确的少数回答，形成自我强化。影响不仅看错误多数率，还看错误组的margin、奖励强度、token筛选与初始正确覆盖。应利用仅用于审计的真标签按伪标签正确/错误分层测梯度与后续表现，做受控标签噪声实验；审计标签不能进入宣称无标签的训练或选点流程。</p>
+</details>
+
+<details>
+<summary>3. 同样总生成token预算的纯推理基线表现如何？</summary>
+
+<p>应把适应训练生成、teacher/评分调用和最终测试生成全部计入，给固定权重基座相同总token，比较多采样投票、best-of-N及其他预先指定解码。还需报告一次性适应成本如何摊到后续问题，单题与批量场景不同。若原文未完整给出这一预算匹配，无法断言TTPO优于纯推理；目前应把它列为关键未闭合对照。</p>
+</details>
+
+<h2 id="七沿未解决的问题继续读">七、沿未解决的问题继续读</h2>
+<ul>
+<li><p><a href="60-draco.html">DRACO</a>：没有可靠训练标签时，是否必须由模型多数票自我提供监督？DRACO改用外部judge动态准则，并采用不同检查点协议，是后续平行反馈路线。（后续平行路线）</p>
+</li>
+<li><p><a href="61-epilogue.html">系列收尾</a>：在同样总token与教师调用预算下，参数适应是否优于固定权重多采样？收尾篇继续比较信息权限和成本账本，这项预算匹配仍是待验证问题。（教学收束）</p>
+</li>
+</ul>
+<h3 id="原文核对与路线出处">原文核对与路线出处</h3>
+<ul>
+<li><a href="https://arxiv.org/html/2608.27448v1">原论文与图表入口</a>。§3算法与式3—8的非对称目标、token评分；§4及附录测试时预算和峰值检查点协议。</li>
+<li><strong>模块组合</strong>：<a href="52-grpo.html">GRPO</a>。组相对奖励用于负分支，正分支由自蒸馏承担，不是原目标的原样复用。</li>
+<li><strong>教学对应</strong>：<a href="53-r1.html">R1</a>。都研究推理增强，但R1主要讨论训练阶段流程，TTPO额外允许测试题参数适应。</li>
+</ul>
 <h2 id="自测两题">自测两题</h2>
 <p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
 <p><strong>问题 1</strong>：没有真实答案，TTPO 从哪里获得训练信号？</p>
@@ -253,21 +229,15 @@
 
 **原论文与版本**：Wang 等，*TTPO: Test-Time Policy Optimization*，2026-08-27。[正文](https://arxiv.org/html/2608.27448v1)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：无标签测试时推理适应
+[第52天 GRPO](52-grpo.md)利用同题奖励比较回答，[第53天 R1](53-r1.md)把可验证反馈用于训练阶段的推理增强。测试时若没有真答案，能否只靠当前模型生成的信息继续更新？TTPO把组相对负向更新与答案条件自蒸馏组合起来，新增的是测试题参数适应权限。它和上一篇[FACTOR](58-factor.md)都细分token信号，但没有直接算法继承关系。
 
-**旧方法卡点**：多数票自奖励会把错误共识强化，正负样本token价值不同
+## 一、问题设定：无真答案的测试题能提供什么更新信号
 
-**作者主张**：以多数票伪答案为条件构造教师蒸馏，并对负回答进行token选择的RL抑制
+测试题可见，标准答案不可用于训练；模型仍能生成多个候选并抽取多数答案。多数票可以提供伪标签，却也会把共同错误当成共识，因此简单把所有一致回答一律强化存在风险。
 
-**论文证据**：原文小模型与数学基准报告测试时适应收益
-
-**一句话**：在无标签训练／测试时参数优化中，作者通过“以多数票伪答案为条件构造教师蒸馏，并对负回答进行token选择的RL抑制”应对“无标签测试时推理适应”这一问题；证据边界或代价是：多数票可能错，峰值检查点选择与全部适应成本必须说明。
-
-## 二、研究背景与问题定义
-
-本篇将“无标签测试时推理适应”放在无标签训练／测试时参数优化的边界内研究。多数票自奖励会把错误共识强化，正负样本token价值不同。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+TTPO分别处理多数一致的正组和不一致的负组，并选择不同token更新。除了检查分支是否互补，本篇还必须问最终用哪个检查点、全部生成与教师计算花了多少；训练无标签并不自动使整个评价流程无标签。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -277,17 +247,31 @@
 | 奖励或学习信号 | 多数答案的一致性伪奖励，无真实答案参与更新 |
 | 终止／边界 | 生成上限；适应结束检查点需独立规定 |
 
-## 三、方法：到底改了什么
+## 二、拆开答案条件蒸馏与负样本token抑制
 
-每题先采较多回答形成伪答案，正分支利用答案条件教师与学生的分布差做蒸馏；负分支用组相对信号重点抑制某些置信错误token。方法不是只做多数投票的推理，还修改参数；教师与学生可来自同一模型但拥有不同条件信息。
+它非对称地处理两组回答：与多数答案一致者接受答案条件教师的前向KL蒸馏；不一致者接受负优势策略梯度。教师同样依赖当前模型，但额外看到伪答案并启用规定的思考设置，这是一种训练时特权上下文。
 
-### 关键公式与符号
+掩码分数为 $s_t=-\log\pi(y_t|x,y_{&lt;t})(1-\widehat H_t)$，保留分数上半部分；这偏向“当前分布熵低、实际采到的token却低概率”的异常位置，不是简单挑最高概率token。
 
-教学总式 $L=L_{positive\ distill}+\lambda L_{negative\ RL}$。正分支权重含归一化熵与教师差异，负分支按学生置信相关分数筛token。原文例λ=0.1，不能把所有token统一广播当完整TTPO。
+### 正分支Soft-OR与负分支掩码
 
-### 输入 → 处理 → 输出：教学伪代码
+教学总式 $L=L_{positive\ distill}+\lambda L_{negative\ RL}$。原文例λ=0.1，不能把所有token统一广播当完整TTPO。
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+**把两条损失真正拆开**：在正组，一条回答的损失是 $L_+=T^{-1}\sum_t w_t\,KL(q_t\|p_t)$，其中 $q_t$ 是看到伪答案的停止梯度教师分布，$p_t$ 是学生分布。$w_t=\hat H_t+\hat\Delta_t-\hat H_t\hat\Delta_t=1-(1-\hat H_t)(1-\hat\Delta_t)$，所以两种归一化信号任一个大就提高权重。负组是 $L_-=-A\,T^{-1}\sum_t m_t\log p_t(y_t)$；$A&lt;0$ 时，最小化损失会降低所选token的概率，$m_t$ 由前文异常分数筛选。$T$ 是有效回答长度，两组各自平均后再以 $\lambda$ 合并；该式没有额外PPO比率裁剪。对应[§3.3—3.5式3—8](https://arxiv.org/html/2608.27448v1#S3.SS3)。
+
+### 把伪标签数量与独立正确证据分开
+
+同一当前模型的64个回答可以彼此相关。多数投票得到更大的组内支持，不等于取得64个独立正确标签；更新再偏向多数会反馈改变下一批的答案分布。
+
+### 错误多数与低概率token的筛选
+
+以下是可手算的教学构造，不是论文实验。
+
+同题生成6条答案，4条为A、2条为B，则多数伪标签为A，即使真实答案恰为B。负分支仍会惩罚两条B，这个反例保留了方法无法消除的自确认风险。
+
+在一条负样本内，token甲的实际概率0.01、归一熵0.1，分数约4.605×0.9=4.14；token乙概率0.8、归一熵0.1，分数约0.223×0.9=0.20。两者同样低熵，甲更可能被选中。低熵是整个分布集中，低概率是已采token落在分布尾部，两者可以同时成立。
+
+## 三、生成64个候选、选训练子集并更新LoRA
 
 ```text
 对无标签题从当前策略采K=64条回答
@@ -301,17 +285,7 @@
 按预先定义规则选检查点后评估
 ```
 
-**实现要点**：多数票可能错，峰值检查点选择与全部适应成本必须说明。
-
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | 正样本token加权蒸馏加负样本token选择RL |
-| 机制改变 | 以多数票伪答案为条件构造教师蒸馏，并对负回答进行token选择的RL抑制 |
-| 评价改善的指标 | Avg@12平均表现，不是pass@12 |
-
-## 四、实验如何验证方法
+## 四、读正负分支消融，同时审查测试时选点权限
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
@@ -323,30 +297,47 @@
 | 随机性与不确定性 | 重复生成与训练种子区分；原文报告峰值检查点 |
 | 实际验证的假设 | 伪教师和正负token分工是否促进无标签适应 |
 
-**实验解读（本文分析）**：多数票可能错，峰值检查点选择与全部适应成本必须说明。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+### 图3：先辨正负更新组合和教师信息
 
-## 五、结果：证据到底有多强
+&lt;!-- inline-evidence-v2:start --&gt;
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 表1 | OpenThoughts场景 | 无标签训练的相应结果 | 不能与直接测试时适应混写 |
-| 表2 | 测试时适应比较 | 1.7B平均38.0→45.2 | 不是固定权重独立测试 |
-| 表3／相关消融 | token权重与正负策略 | 检验模块组合 | 不保证多数伪标签正确 |
-| 长期训练／上界分析（具体图表编号本文未核实） | 更长训练与真标签参照 | 显示适应边界 | 不能证明无限自我改进 |
+&lt;!-- figure-ref-v6:start:rl-59-figure-3 --&gt;
+&lt;span id=&quot;rl-59-figure-3&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rl-59-figure-3 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/papers/59-ttpo-figure-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/59-ttpo-figure-3.png&quot; width=&quot;1600&quot; height=&quot;351&quot; alt=&quot;TTPO的正负样本更新策略消融与AIME26平均准确率&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引；Wang等，2026，Figure 3；原HTML图形。&lt;a href=&quot;https://arxiv.org/html/2608.27448v1#S4.F3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-38.0→45.2绝对提升7.2个百分点，相对约18.9%。**证据疑点**：§4.1描述保存并报告峰值检查点。即使训练不使用答案，若借评测分数挑峰值，模型选择也不再无标签；需补充如何部署时选模型以及预先固定检查点结果。
 
-## 六、贡献、代价与局限
+图3纵轴是AIME26的Avg@12准确率，横轴每根柱表示一对正组 $\mathcal P$/负组 $\mathcal N$ 的更新组合；柱内绿色为前向KL、粉色为GRPO式负更新、白色为不更新。灰水平虚线为基座，标出的短虚线是无答案特权上下文的教师变体。48.9对应这张Qwen3-1.7B消融的正FKL/负RL组合，不是主结果中跨测试集平均45.2；应先读组合，再比较是否用了相同教师信息。
 
-**作者方法**依赖伪标签和自蒸馏的互补。**本文分析**：错误多数可能把正确少数当负例；全部64次生成、教师重评分、LoRA更新都属于测试成本。题目在训练中出现但不使用标签，仍与普通未适应泛化评估不同。
+&lt;!-- inline-evidence-v2:end --&gt;
 
-## 七、帮助建立理解
+表1的OpenThoughts训练与表2的直接测试时适应是两种数据权限，不能合写成固定权重的独立泛化。后者38.0→45.2增加7.2个百分点、相对约18.9%。[图5](#rl-59-figure-5)比较伪标签、真标签参照与熵；[图6](#rl-59-figure-6)把平均采样与多数投票准确率分开。
 
-### 教学例子
+&lt;!-- figure-ref-v6:start:rl-59-figure-5 --&gt;
+&lt;span id=&quot;rl-59-figure-5&quot;&gt;&lt;/span&gt;
 
-以下是教学推演，不是原论文实验。
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/59-ttpo-figure-5-full.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/59-ttpo-figure-5-full.png&quot; width=&quot;1800&quot; height=&quot;640&quot; alt=&quot;原论文Figure 5：左侧比较伪标签与真标签参照，右侧比较训练熵。右侧括号内给TTRL步数，不能把双重刻度当成所有方法相同的更新预算。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;完整原图摘引｜Wang等，2026，Figure 5；2608.27448v1，HTML S4.F5。&lt;a href=&quot;https://arxiv.org/html/2608.27448v1#S4.F5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文与图号&lt;/a&gt;。&lt;a href=&quot;https://creativecommons.org/licenses/by/4.0/&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;CC BY 4.0&lt;/a&gt;；图形仅缩放／重新排版，沿用原许可。原引用定位：&lt;a href=&quot;https://arxiv.org/html/2608.27448v1#S4.F5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
 
-64条回答中40条答B、24条答A，而真答案是A。多数标签把A归负。token选择可能减少误伤，但没有独立真值就无法从机制上保证纠正错误共识。
+读图提示：左侧比较伪标签与真标签参照，右侧比较训练熵。右侧括号内给TTRL步数，不能把双重刻度当成所有方法相同的更新预算。
+&lt;!-- figure-ref-v6:end:rl-59-figure-5 --&gt;
+
+&lt;!-- figure-ref-v6:start:rl-59-figure-6 --&gt;
+&lt;span id=&quot;rl-59-figure-6&quot;&gt;&lt;/span&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/59-ttpo-figure-6-full.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/59-ttpo-figure-6-full.png&quot; width=&quot;1800&quot; height=&quot;1295&quot; alt=&quot;原论文Figure 6：红色虚线为Maj@12，蓝色实线为Avg@12，灰虚线为基座Maj@12。多数投票改善与单次采样平均改善分别报告，不把两种推理预算混成一个准确率。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;完整原图摘引｜Wang等，2026，Figure 6；2608.27448v1，HTML S4.F6。&lt;a href=&quot;https://arxiv.org/html/2608.27448v1#S4.F6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文与图号&lt;/a&gt;。&lt;a href=&quot;https://creativecommons.org/licenses/by/4.0/&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;CC BY 4.0&lt;/a&gt;；图形仅缩放／重新排版，沿用原许可。原引用定位：&lt;a href=&quot;https://arxiv.org/html/2608.27448v1#S4.F6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图提示：红色虚线为Maj@12，蓝色实线为Avg@12，灰虚线为基座Maj@12。多数投票改善与单次采样平均改善分别报告，不把两种推理预算混成一个准确率。
+&lt;!-- figure-ref-v6:end:rl-59-figure-6 --&gt;
+
+### 训练子集、全部生成与峰值检查点
+
+原文每题生成64条，再选较少回答训练并限制反传token；“只训练8条”不等于只生成8条，组优势也使用全部采样回答。成本还包括教师重评分与LoRA更新。主比较采用Avg@12，并在训练中按评测选峰值检查点；因此虽然参数更新不使用真答案，模型选择仍用到了评测标签。
+
+## 五、错误多数与峰值选点留下的部署问题
+
+多数答案可能错，非对称蒸馏不会把伪标签变成真值。
+
+完全无标签部署还需要独立的停止规则，以及预先固定检查点的成绩。
 
 ### 五个前置概念
 
@@ -356,23 +347,40 @@
 4. **自蒸馏**：模型在不同条件下相互提供目标。
 5. **检查点选择**：决定最终报告哪个训练时刻。
 
-### 三个值得继续追问的问题
+## 六、三个值得继续追问的问题与参考答案
 
-1. 如何在完全无标签部署中选择停止时刻？
-2. 错误多数率怎样影响训练收益？
-3. 同样总生成token预算的纯推理基线表现如何？
+&lt;details&gt;
+&lt;summary&gt;1. 如何在完全无标签部署中选择停止时刻？&lt;/summary&gt;
 
-## 方法与证据总结
+可预先固定更新步数或生成预算，用只依赖无标签可观察量的规则监测KL、熵塌缩、答案一致性和目标停滞，并在独立开发任务上确定阈值后冻结。多数一致性仍可能对应共同错误，因此不是可靠正确率代理。若论文用真实评测分数选峰值，部署无标签停机尚未被解决；应同时报告预定检查点结果，不能用测试答案暗中选点。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| 无标签测试时推理适应 | 以多数票伪答案为条件构造教师蒸馏，并对负回答进行token选择的RL抑制 | 把伪答案教师的纠正信号与负样本抑制分工 | 原文小模型与数学基准报告测试时适应收益 | 多数票可能错，峰值检查点选择与全部适应成本必须说明 |
+&lt;/details&gt;
 
-## 资料与阅读范围
+&lt;details&gt;
+&lt;summary&gt;2. 错误多数率怎样影响训练收益？&lt;/summary&gt;
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+错误多数会把错误答案当正组，并惩罚部分真实正确的少数回答，形成自我强化。影响不仅看错误多数率，还看错误组的margin、奖励强度、token筛选与初始正确覆盖。应利用仅用于审计的真标签按伪标签正确/错误分层测梯度与后续表现，做受控标签噪声实验；审计标签不能进入宣称无标签的训练或选点流程。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;3. 同样总生成token预算的纯推理基线表现如何？&lt;/summary&gt;
+
+应把适应训练生成、teacher/评分调用和最终测试生成全部计入，给固定权重基座相同总token，比较多采样投票、best-of-N及其他预先指定解码。还需报告一次性适应成本如何摊到后续问题，单题与批量场景不同。若原文未完整给出这一预算匹配，无法断言TTPO优于纯推理；目前应把它列为关键未闭合对照。
+
+&lt;/details&gt;
+
+## 七、沿未解决的问题继续读
+
+- [DRACO](60-draco.md)：没有可靠训练标签时，是否必须由模型多数票自我提供监督？DRACO改用外部judge动态准则，并采用不同检查点协议，是后续平行反馈路线。（后续平行路线）
+
+- [系列收尾](61-系列收尾.md)：在同样总token与教师调用预算下，参数适应是否优于固定权重多采样？收尾篇继续比较信息权限和成本账本，这项预算匹配仍是待验证问题。（教学收束）
+
+### 原文核对与路线出处
+
+- [原论文与图表入口](https://arxiv.org/html/2608.27448v1)。§3算法与式3—8的非对称目标、token评分；§4及附录测试时预算和峰值检查点协议。
+- **模块组合**：[GRPO](52-grpo.md)。组相对奖励用于负分支，正分支由自蒸馏承担，不是原目标的原样复用。
+- **教学对应**：[R1](53-r1.md)。都研究推理增强，但R1主要讨论训练阶段流程，TTPO额外允许测试题参数适应。
 
 ## 自测两题
 

@@ -42,15 +42,11 @@
                 <span class="text-gray-500">DRACO：没有成功验证器时，如何把评分准则分配到步骤</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="3da5b44618c2523cfc88ee8abb4dd2d48f9f510bf86f9846dc89fbb5bef49e6d"><h1>第 60 天｜DRACO：没有成功验证器时，如何把评分准则分配到步骤</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="f3a363290d7fb9c6f908425a7445ac80134eee07701e437f6d063a702ee7f49b"><h1>第 60 天｜DRACO：没有成功验证器时，如何把评分准则分配到步骤</h1>
 <p><a href="index.html">系列首页</a> · <a href="59-ttpo.html">上一篇</a> · <a href="61-epilogue.html">系列收尾</a></p>
 <p><strong>原论文与版本</strong>：Gandhi 等，<em>DRACO: Fine-Grained Credit Assignment with Dynamic Rubrics for Long-Horizon Agent Training</em>，2026-09-03。<a href="https://arxiv.org/html/2609.04094v1">正文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p><strong>研究问题</strong>：多轮工具任务缺少可靠终局成功标签</p>
-<p><strong>旧方法卡点</strong>：整轨迹评分粗糙，固定rubric难覆盖不断变化的行为</p>
-<p><strong>作者主张</strong>：动态生成并合并评分准则，用judge引用的步骤重分配组优势</p>
-<p><strong>论文证据</strong>：AppWorld与τ-bench主表及消融报告相应收益</p>
-<p><strong>一句话</strong>：在outcome-blind多轮Agent GRPO中，作者通过“动态生成并合并评分准则，用judge引用的步骤重分配组优势”应对“多轮工具任务缺少可靠终局成功标签”这一问题；证据边界或代价是：judge仍是额外监督，保符号分配不等于步骤因果价值。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="52-grpo.html">第52天 GRPO</a>需要可比较的组奖励；长工具任务若没有训练时成功检查器，奖励从哪里来？DRACO先用动态准则judge产生反馈，再重分步骤信用。<a href="58-factor.html">第58天 FACTOR</a>以续跑价值做细粒度归因，是平行对照而非本篇的直接前身。<a href="59-ttpo.html">第59天 TTPO</a>同样面对标签不足，但多数伪答案与外部judge是不同监督来源。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <ol>
 <li><strong>Rubric</strong>：可逐项检查的评价准则。</li>
@@ -59,8 +55,9 @@
 <li><strong>保符号重分配</strong>：只改信用大小，不翻转原有符号。</li>
 <li><strong>Pass^k</strong>：多次执行全部成功的一致性指标。</li>
 </ol>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
-<p>本篇将“多轮工具任务缺少可靠终局成功标签”放在outcome-blind多轮Agent GRPO的边界内研究。整轨迹评分粗糙，固定rubric难覆盖不断变化的行为。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<h2 id="一问题设定没有成功验证器怎样给工具步骤分信用">一、问题设定：没有成功验证器怎样给工具步骤分信用</h2>
+<p>任务指令、轨迹和工具反馈可见，真实成功检查器只用于独立评价，不能进入训练。固定的一套准则可能很快饱和，整轨迹分数又无法告诉策略哪些工具步骤应承担更多更新。</p>
+<p>DRACO的研究问题由此分两层：怎样动态形成仍有区分度的评分准则，以及怎样把得到的组优势分给步骤。judge是额外训练监督；保留总信用和符号则只是分配约束，都不能直接替代真实成功或因果归因。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -89,15 +86,23 @@
 <td>AppWorld最多50轮、τ-bench100轮</td>
 </tr>
 </tbody></table></div>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
-<p>judge先从任务和轨迹提出准则，合并去重并过滤无区分条目，再评价每条轨迹、引用相关步骤。轨迹分数转为组优势后，正优势偏重被判好的步骤，负优势偏重被判差的步骤。长度归一化保持原轨迹token总系数。没有训练新的归因模块，不意味着没有judge成本。</p>
-<h3 id="关键公式与符号">关键公式与符号</h3>
-<p><span class="reading-math" data-tex="R=(p-f)/(p+f),\quad q_j=p_j/(p_j+f_j)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>R</mi><mo>=</mo><mo stretchy="false">(</mo><mi>p</mi><mo>−</mo><mi>f</mi><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mi>p</mi><mo>+</mo><mi>f</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="1em"/><msub><mi>q</mi><mi>j</mi></msub><mo>=</mo><msub><mi>p</mi><mi>j</mi></msub><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><msub><mi>p</mi><mi>j</mi></msub><mo>+</mo><msub><mi>f</mi><mi>j</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">R=(p-f)/(p+f),\quad q_j=p_j/(p_j+f_j).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mclose">)</span><span class="mord">/</span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span>
-q_j是准则通过率，不是RL的Q。令胜者 <span class="reading-math" data-tex="w_j=q_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>w</mi><mi>j</mi></msub><mo>=</mo><msub><mi>q</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">w_j=q_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>、负优势 <span class="reading-math" data-tex="w_j=1-q_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>w</mi><mi>j</mi></msub><mo>=</mo><mn>1</mn><mo>−</mo><msub><mi>q</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">w_j=1-q_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，
-<span class="reading-math" data-tex="a_j=A\frac{Nw_j}{n_j\sum_kw_k},\quad\sum_jn_ja_j=AN."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>a</mi><mi>j</mi></msub><mo>=</mo><mi>A</mi><mfrac><mrow><mi>N</mi><msub><mi>w</mi><mi>j</mi></msub></mrow><mrow><msub><mi>n</mi><mi>j</mi></msub><munder><mo>∑</mo><mi>k</mi></munder><msub><mi>w</mi><mi>k</mi></msub></mrow></mfrac><mo separator="true">,</mo><mspace width="1em"/><munder><mo>∑</mo><mi>j</mi></munder><msub><mi>n</mi><mi>j</mi></msub><msub><mi>a</mi><mi>j</mi></msub><mo>=</mo><mi>A</mi><mi>N</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">a_j=A\frac{Nw_j}{n_j\sum_kw_k},\quad\sum_jn_ja_j=AN.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.7741em;vertical-align:-1.4138em;"></span><span class="mord mathnormal">A</span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3603em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1864em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2997em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.9857em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="mord">.</span></span></span></span></span></span>
-无适用准则、未引用步骤或零分母必须按附录退化规则处理。</p>
-<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
-<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<h2 id="二先由动态准则评分再按步骤质量分配总信用">二、先由动态准则评分，再按步骤质量分配总信用</h2>
+<p>DRACO先改奖励来源，再改奖励落点。冻结judge根据任务指令和同组轨迹提出准则，合并去重，仅保留至少被某条轨迹违反的条目；逐轨迹给pass/fail/not applicable，并引用相关步骤。训练无需真成功检查器，但仍依赖judge的额外监督，不能称为无监督或零成本。</p>
+<h3 id="先定义整轨迹计数再定义被引用步骤的质量">先定义整轨迹计数，再定义被引用步骤的质量</h3>
+<p><span class="reading-math" data-tex="p,f"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo separator="true">,</mo><mi>f</mi></mrow><annotation encoding="application/x-tex">p,f</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span></span></span></span></span> 分别是整条轨迹适用准则中pass与fail的数量，not applicable不进入分母；<span class="reading-math" data-tex="p_j,f_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mi>j</mi></msub><mo separator="true">,</mo><msub><mi>f</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">p_j,f_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 则只统计引用第 <span class="reading-math" data-tex="j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span></span></span></span></span> 步的准则判断。轨迹净通过率与局部通过率为</p>
+<p><span class="reading-math" data-tex="R=(p-f)/(p+f),\quad q_j=p_j/(p_j+f_j)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>R</mi><mo>=</mo><mo stretchy="false">(</mo><mi>p</mi><mo>−</mo><mi>f</mi><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mi>p</mi><mo>+</mo><mi>f</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="1em"/><msub><mi>q</mi><mi>j</mi></msub><mo>=</mo><msub><mi>p</mi><mi>j</mi></msub><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><msub><mi>p</mi><mi>j</mi></msub><mo>+</mo><msub><mi>f</mi><mi>j</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">R=(p-f)/(p+f),\quad q_j=p_j/(p_j+f_j).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mclose">)</span><span class="mord">/</span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>无适用准则时令R=0；未被引用的步骤继承已引用步骤的平均质量。对同任务组奖励归一化后得到轨迹优势 <span class="reading-math" data-tex="A"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span>，其正负表示组内相对好坏，不等同于真实任务成功与失败。<span class="reading-math" data-tex="q_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>q</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">q_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是judge通过率，不是Bellman动作价值。</p>
+<p>令 <span class="reading-math" data-tex="n_j&gt;0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>n</mi><mi>j</mi></msub><mo>&gt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">n_j&gt;0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8252em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span> 为第 <span class="reading-math" data-tex="j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span></span></span></span></span> 步的有效token数，<span class="reading-math" data-tex="N=\sum_jn_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi><mo>=</mo><msub><mo>∑</mo><mi>j</mi></msub><msub><mi>n</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">N=\sum_jn_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1858em;vertical-align:-0.4358em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>；不属于可训练步骤的gap token不计入N。正优势轨迹用 <span class="reading-math" data-tex="w_j=q_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>w</mi><mi>j</mi></msub><mo>=</mo><msub><mi>q</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">w_j=q_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，负优势轨迹用 <span class="reading-math" data-tex="w_j=1-q_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>w</mi><mi>j</mi></msub><mo>=</mo><mn>1</mn><mo>−</mo><msub><mi>q</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">w_j=1-q_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，使较应承担当前更新的步骤取得较大份额。先将总信用 <span class="reading-math" data-tex="AN"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi><mi>N</mi></mrow><annotation encoding="application/x-tex">AN</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span></span> 按 <span class="reading-math" data-tex="\rho_j=w_j/\sum_kw_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ρ</mi><mi>j</mi></msub><mo>=</mo><msub><mi>w</mi><mi>j</mi></msub><mi mathvariant="normal">/</mi><msub><mo>∑</mo><mi>k</mi></msub><msub><mi>w</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">\rho_j=w_j/\sum_kw_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">ρ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0497em;vertical-align:-0.2997em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1864em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2997em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 分给步骤，再除以该步长度，得到每token系数</p>
+<p><span class="reading-math" data-tex="a_j=A\frac{Nw_j}{n_j\sum_kw_k},\quad\sum_jn_ja_j=AN."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>a</mi><mi>j</mi></msub><mo>=</mo><mi>A</mi><mfrac><mrow><mi>N</mi><msub><mi>w</mi><mi>j</mi></msub></mrow><mrow><msub><mi>n</mi><mi>j</mi></msub><munder><mo>∑</mo><mi>k</mi></munder><msub><mi>w</mi><mi>k</mi></msub></mrow></mfrac><mo separator="true">,</mo><mspace width="1em"/><munder><mo>∑</mo><mi>j</mi></munder><msub><mi>n</mi><mi>j</mi></msub><msub><mi>a</mi><mi>j</mi></msub><mo>=</mo><mi>A</mi><mi>N</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">a_j=A\frac{Nw_j}{n_j\sum_kw_k},\quad\sum_jn_ja_j=AN.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.7741em;vertical-align:-1.4138em;"></span><span class="mord mathnormal">A</span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3603em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1864em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2997em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.9857em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这里守恒来自份额相加为1，而不是价值或judge一定正确。等步骤权重只保证各步总量相等，短步骤分给每个token的系数会更大；非负权重也使负优势轨迹中的好步骤只能少受罚，不能转成正奖励。该标量记账不保证参数梯度或反事实因果正确。见<a href="https://arxiv.org/html/2609.04094v1#A5.SS9">附录E.7—E.9</a>。</p>
+<h3 id="静态准则饱和与零分母是两种不同退化">静态准则饱和与零分母是两种不同退化</h3>
+<p>所有引用判断相同时，步骤质量失去区分，等权分配仍让每token系数随 <span class="reading-math" data-tex="1/n_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><msub><mi>n</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">1/n_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord">1/</span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 变化；只有权重和为零或整条轨迹没有引用时，才回退统一优势 <span class="reading-math" data-tex="A"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span>。因此“静态准则饱和”不能一概写成“每token已与普通GRPO完全相同”。</p>
+<h3 id="两步长度下的正负信用与回退">两步长度下的正负信用与回退</h3>
+<p>以下是可手算的教学构造，不是论文实验。</p>
+<p>一条正优势A=1的轨迹有两个步骤，长度2与6，质量0.75与0.25。N=8，权重和1，故每token系数分别为3与1/3；总系数2×3+6×(1/3)=8，等于原统一系数的8。</p>
+<p>若A=−1，权重变为0.25与0.75，每token系数均为−1，此处长度恰抵消质量差。所有系数仍非正，不会把好步骤转成奖励。若正优势轨迹所有q均为0，则权重和为0，必须回退统一A，不能直接应用归一化公式。</p>
+<h2 id="三合并准则引用步骤并处理所有退化分母">三、合并准则、引用步骤并处理所有退化分母</h2>
+<p>两步长的例子区分了步骤总量与token系数；实现还须明确未引用步骤、gap token和零分母各走哪条规则。</p>
 <pre><code class="language-text">同任务采G条多轮轨迹
 judge从指令与轨迹提出rubrics，合并去重
 过滤规定的无区分准则，逐条评价并引用步骤
@@ -109,29 +114,8 @@ judge从指令与轨迹提出rubrics，合并去重
 仅在规定的可训练动作token广播a_j，做GRPO更新
 独立评估使用真实任务检查器
 </code></pre>
-<p><strong>实现要点</strong>：judge仍是额外监督，保符号分配不等于步骤因果价值。</p>
-<h3 id="三种优化要分开">三种“优化”要分开</h3>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>层次</th>
-<th>这里具体是什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>数学目标／训练损失</td>
-<td>动态rubric奖励产生的组优势，经长度守恒步骤分配后做GRPO</td>
-</tr>
-<tr>
-<td>机制改变</td>
-<td>动态生成并合并评分准则，用judge引用的步骤重分配组优势</td>
-</tr>
-<tr>
-<td>评价改善的指标</td>
-<td>TGC、SGC、SR；pass^k是多次都成功</td>
-</tr>
-</tbody></table></div>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<h2 id="四读任务表现评价成本图并分清重复评估口径">四、读任务表现—评价成本图，并分清重复评估口径</h2>
+<p>守恒公式可以直接验算，任务收益则要放在同一split、基座和评价预算下读，不能把美元横轴当完整训练成本。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -157,94 +141,73 @@ judge从指令与轨迹提出rubrics，合并去重
 </tr>
 <tr>
 <td>指标及其含义</td>
-<td>TGC、SGC、SR；pass^k是多次都成功</td>
+<td>TGC、SGC、SR与重复执行可靠性</td>
 </tr>
 <tr>
 <td>随机性与不确定性</td>
-<td>最后3个epoch检查点平均，每检查点3评估运行，不等于3训练种子</td>
+<td>最后3个检查点平均，每检查点3评估运行，不等于3训练种子</td>
 </tr>
 <tr>
 <td>实际验证的假设</td>
 <td>动态准则与步骤分配能否在无真训练标签下改善Agent</td>
 </tr>
 </tbody></table></div>
-<p><strong>实验解读（本文分析）</strong>：judge仍是额外监督，保符号分配不等于步骤因果价值。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>证据定位</th>
-<th>比较什么／观察到什么</th>
-<th>支持什么</th>
-<th>不能证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>图1／§3</td>
-<td>动态评分和信用分配</td>
-<td>解释监督来源</td>
-<td>不代表无监督</td>
-</tr>
-<tr>
-<td>表2主结果</td>
-<td>同基座与outcome reward</td>
-<td>27B普通集TGC69.4→85.3，结果奖励80.0</td>
-<td>不同split不能拼接</td>
-</tr>
-<tr>
-<td>表2消融</td>
-<td>去动态／去信用</td>
-<td>多数相关指标支持组合</td>
-<td>部分指标非单调提高</td>
-</tr>
-<tr>
-<td>评价协议§4.1</td>
-<td>末3检查点与3次运行</td>
-<td>明确避免峰值选点的协议</td>
-<td>不等于独立训练重复</td>
-</tr>
-<tr>
-<td>成本／稳健性分析（具体图表编号本文未核实）</td>
-<td>judge与训练资源</td>
-<td>提供系统代价视角</td>
-<td>不能认为外部judge免费</td>
-</tr>
-</tbody></table></div>
-<p>普通AppWorld的TGC绝对提升：相对基座15.9个百分点，相对结果奖励基线5.3个百分点。τ-bench的常规judge与self-judge是不同设置，不能拿各自最好数字拼成一个系统。表2中的pass^k是k次都成功的一致性，不是至少一次成功的pass@k。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p><strong>作者设定</strong>是训练不可访问真成功信号，评估可以访问，两者不冲突。<strong>本文分析</strong>：动态rubric可能引入漂移与风格偏见；所有步骤权重非负，所以负优势轨迹中被judge认为好的步骤只会少受罚，不会自动变成正向奖励。步骤引用也不是反事实因果证明。</p>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<h3 id="教学例子">教学例子</h3>
-<p>以下是教学推演，不是原论文实验。</p>
-<p>失败轨迹A=−1，两步各10token，q=(0.9,0.1)，w=(0.1,0.9)，总长20。优势a=(−0.2,−1.8)，token总和10×−0.2+10×−1.8=−20=AN。第一步仍负，只是被罚得较轻。</p>
-<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
-<ol>
-<li>judge偏好与真实成功偏离时如何诊断？</li>
-<li>负轨迹中的真正好步骤是否需要允许正优势？</li>
-<li>计入judge调用后与真奖励训练的成本差多少？</li>
-</ol>
-<h2 id="方法与证据总结">方法与证据总结</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据／理论证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>多轮工具任务缺少可靠终局成功标签</td>
-<td>动态生成并合并评分准则，用judge引用的步骤重分配组优势</td>
-<td>细化好坏步骤的更新强度，减轻整轨迹一律奖惩</td>
-<td>AppWorld与τ-bench主表及消融报告相应收益</td>
-<td>judge仍是额外监督，保符号分配不等于步骤因果价值</td>
-</tr>
-</tbody></table></div>
-<h2 id="资料与阅读范围">资料与阅读范围</h2>
-<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
-<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h3 id="图2任务表现与一次完整评价的美元成本">图2：任务表现与一次完整评价的美元成本</h3>
+<!-- inline-evidence-v2:start -->
+
+<!-- figure-ref-v6:start:rl-60-figure-2 -->
+<p><span id="rl-60-figure-2"></span></p>
+<!-- figure-ref-v6:end:rl-60-figure-2 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/60-draco-figure-2.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/60-draco-figure-2.png" width="1600" height="684" alt="DRACO及消融在AppWorld和τ-bench的任务效果与一次评估美元成本" loading="lazy"></a><figcaption>原论文图形摘引；Gandhi等，2026，Figure 2；原HTML图形。<a href="https://arxiv.org/html/2609.04094v1#S4.F2" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<!-- figure-ref-v6:start:rl-60-source-license -->
+
+<p>图像许可：上述作者原图按 <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> 提供；此处只截取对应图形区域并适配显示尺寸，数据与图形内容未重绘。<a href="https://arxiv.org/abs/2609.04094v1">核对原版许可</a>。</p>
+<!-- figure-ref-v6:end:rl-60-source-license -->
+
+
+<p>图2三面板分别是AppWorld普通集、挑战集和τ-bench banking；前两图纵轴为TGC，后一图为成功率。灰点是基座，蓝/紫/绿点分别移除两组件、动态准则或步骤信用，红点是完整DRACO。应在同一面板寻找左上方的成本—表现折中；τ-bench成本还含用户模拟器和评审调用，不能把三张横轴的美元数简单当成同数量任务的推理单价。图中各点使用单次成功口径。</p>
+<!-- inline-evidence-v2:end -->
+
+
+<p>表2按同基座和split比较主结果与消融，部分指标并不单调。主结果取最后三个检查点，每个检查点重复评估三次；这是评估重复，不是三次独立训练，也不同于TTPO的峰值检查点选择。训练不用真实成功检查器，独立评估可以使用，权限并不冲突。重复可靠性指标pass^k要求k次都成功，与pass@k的至少一次成功不同。图2横轴是一次完整split的评估成本，不是完整训练成本。<a href="https://arxiv.org/html/2609.04094v1#S4">核对原文评价协议</a>。</p>
+<h2 id="五judge偏差同号分配与训练成本尚未闭合">五、judge偏差、同号分配与训练成本尚未闭合</h2>
+<p>普通AppWorld的TGC相对基座提高15.9个百分点，相对结果奖励基线提高5.3个百分点。τ-bench常规judge与self-judge是不同配置，不能拼取各自最好值。动态rubric可能漂移或偏爱风格，步骤引用也不是因果证据；全流程成本还需计入judge的准则生成、去重与评分。</p>
+<h2 id="六三个值得继续追问的问题与参考答案">六、三个值得继续追问的问题与参考答案</h2>
+<details>
+<summary>1. judge偏好与真实成功偏离时如何诊断？</summary>
+
+<p>把judge分数与独立任务成功、工具状态检查和人工审计并列，按任务/准则画校准与误判分布；用固定保留rubric给不同训练阶段重评分，避免动态规则变化掩盖漂移。再检查长输出、迎合措辞和无效步骤是否被奖励。分数上升而成功率不升说明代理可能偏离；更强judge或self-judge对照也必须固定其他条件与成本。</p>
+</details>
+
+<details>
+<summary>2. 负轨迹中的真正好步骤是否需要允许正优势？</summary>
+
+<p>从细粒度归因角度，失败轨迹里确实可能含有值得保留的好步骤；但是否给正优势取决于目标和反事实基线，不能仅凭局部文本看起来好就翻转符号。原配方的步骤分配受轨迹信用设计约束，允许异号会改变守恒与优化性质。可构造“局部正确、后续失败”任务，用可靠反事实评估比较同号分配与异号改进，原结果不能替代这项消融。</p>
+</details>
+
+<details>
+<summary>3. 计入judge调用后与真奖励训练的成本差多少？</summary>
+
+<p>需分别比较训练judge的准则生成/去重/评分调用、策略生成与更新、真实环境或结果验证成本，以及部署评估成本。论文性能-评价成本图并不直接等于完整训练成本；外部judge与self-judge也不是同一价格与监督质量。只有固定成功目标、模型与总预算并获得全流程日志，才能给净差值；现有条件不足时应列明缺项而不把judge视为免费。</p>
+</details>
+
+<h2 id="七沿未解决的问题继续读">七、沿未解决的问题继续读</h2>
+<ul>
+<li><p><a href="61-epilogue.html">系列收尾</a>：更细的奖励究竟来自更可靠归因，还是更多judge信息与计算？收尾篇以监督、权限和成本账本总结这一未闭合问题，不宣称已有新的直接后继算法。（教学收束）</p>
+</li>
+<li><p><a href="58-factor.html">FACTOR</a>：如果能取得独立续跑价值，步骤引用是否与它一致？回看FACTOR的校准与扰动诊断，可设计平行比较；标量守恒的两套公式不提供相同因果保证。（早期平行路线回看）</p>
+</li>
+<li><p><a href="59-ttpo.html">TTPO</a>：不同额外监督与检查点选择怎样影响收益可信度？TTPO的伪标签和峰值协议提供邻近问题对照，不能把两套最终分数拼成同一训练系统。（教学对照）</p>
+</li>
+</ul>
+<h3 id="原文核对与路线出处">原文核对与路线出处</h3>
+<ul>
+<li><a href="https://arxiv.org/html/2609.04094v1">原论文与图表入口</a>。§3动态准则与步骤分配、§4评价协议；附录E.7–E.9等步骤总量、1/n_j token分配及零分母/全无引用回退。</li>
+<li><strong>模块组合</strong>：<a href="52-grpo.html">GRPO</a>。动态rubric产生组奖励，再替换其统一token优势。</li>
+<li><strong>并行路线</strong>：<a href="58-factor.html">FACTOR</a>。都约束标量总量，但一个用judge步骤引用，一个用续跑TD与动作均值归约。</li>
+<li><strong>教学对应</strong>：<a href="59-ttpo.html">TTPO</a>。都借助额外评估信号，然而监督、训练权限和检查点选择协议不同。</li>
+</ul>
 <h2 id="自测两题">自测两题</h2>
 <p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
 <p><strong>问题 1</strong>：没有训练时成功验证器，DRACO 如何奖励多步骤任务？</p>
@@ -263,21 +226,15 @@ judge从指令与轨迹提出rubrics，合并去重
 
 **原论文与版本**：Gandhi 等，*DRACO: Fine-Grained Credit Assignment with Dynamic Rubrics for Long-Horizon Agent Training*，2026-09-03。[正文](https://arxiv.org/html/2609.04094v1)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：多轮工具任务缺少可靠终局成功标签
+[第52天 GRPO](52-grpo.md)需要可比较的组奖励；长工具任务若没有训练时成功检查器，奖励从哪里来？DRACO先用动态准则judge产生反馈，再重分步骤信用。[第58天 FACTOR](58-factor.md)以续跑价值做细粒度归因，是平行对照而非本篇的直接前身。[第59天 TTPO](59-ttpo.md)同样面对标签不足，但多数伪答案与外部judge是不同监督来源。
 
-**旧方法卡点**：整轨迹评分粗糙，固定rubric难覆盖不断变化的行为
+## 一、问题设定：没有成功验证器怎样给工具步骤分信用
 
-**作者主张**：动态生成并合并评分准则，用judge引用的步骤重分配组优势
+任务指令、轨迹和工具反馈可见，真实成功检查器只用于独立评价，不能进入训练。固定的一套准则可能很快饱和，整轨迹分数又无法告诉策略哪些工具步骤应承担更多更新。
 
-**论文证据**：AppWorld与τ-bench主表及消融报告相应收益
-
-**一句话**：在outcome-blind多轮Agent GRPO中，作者通过“动态生成并合并评分准则，用judge引用的步骤重分配组优势”应对“多轮工具任务缺少可靠终局成功标签”这一问题；证据边界或代价是：judge仍是额外监督，保符号分配不等于步骤因果价值。
-
-## 二、研究背景与问题定义
-
-本篇将“多轮工具任务缺少可靠终局成功标签”放在outcome-blind多轮Agent GRPO的边界内研究。整轨迹评分粗糙，固定rubric难覆盖不断变化的行为。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+DRACO的研究问题由此分两层：怎样动态形成仍有区分度的评分准则，以及怎样把得到的组优势分给步骤。judge是额外训练监督；保留总信用和符号则只是分配约束，都不能直接替代真实成功或因果归因。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -287,20 +244,39 @@ judge从指令与轨迹提出rubrics，合并去重
 | 奖励或学习信号 | 动态rubric通过／失败汇总，训练不读取真成功检查器 |
 | 终止／边界 | AppWorld最多50轮、τ-bench100轮 |
 
-## 三、方法：到底改了什么
+## 二、先由动态准则评分，再按步骤质量分配总信用
 
-judge先从任务和轨迹提出准则，合并去重并过滤无区分条目，再评价每条轨迹、引用相关步骤。轨迹分数转为组优势后，正优势偏重被判好的步骤，负优势偏重被判差的步骤。长度归一化保持原轨迹token总系数。没有训练新的归因模块，不意味着没有judge成本。
+DRACO先改奖励来源，再改奖励落点。冻结judge根据任务指令和同组轨迹提出准则，合并去重，仅保留至少被某条轨迹违反的条目；逐轨迹给pass/fail/not applicable，并引用相关步骤。训练无需真成功检查器，但仍依赖judge的额外监督，不能称为无监督或零成本。
 
-### 关键公式与符号
+### 先定义整轨迹计数，再定义被引用步骤的质量
+
+$p,f$ 分别是整条轨迹适用准则中pass与fail的数量，not applicable不进入分母；$p_j,f_j$ 则只统计引用第 $j$ 步的准则判断。轨迹净通过率与局部通过率为
 
 $$R=(p-f)/(p+f),\quad q_j=p_j/(p_j+f_j).$$
-q_j是准则通过率，不是RL的Q。令胜者 $w_j=q_j$、负优势 $w_j=1-q_j$，
+
+无适用准则时令R=0；未被引用的步骤继承已引用步骤的平均质量。对同任务组奖励归一化后得到轨迹优势 $A$，其正负表示组内相对好坏，不等同于真实任务成功与失败。$q_j$ 是judge通过率，不是Bellman动作价值。
+
+令 $n_j&gt;0$ 为第 $j$ 步的有效token数，$N=\sum_jn_j$；不属于可训练步骤的gap token不计入N。正优势轨迹用 $w_j=q_j$，负优势轨迹用 $w_j=1-q_j$，使较应承担当前更新的步骤取得较大份额。先将总信用 $AN$ 按 $\rho_j=w_j/\sum_kw_k$ 分给步骤，再除以该步长度，得到每token系数
+
 $$a_j=A\frac{Nw_j}{n_j\sum_kw_k},\quad\sum_jn_ja_j=AN.$$
-无适用准则、未引用步骤或零分母必须按附录退化规则处理。
 
-### 输入 → 处理 → 输出：教学伪代码
+这里守恒来自份额相加为1，而不是价值或judge一定正确。等步骤权重只保证各步总量相等，短步骤分给每个token的系数会更大；非负权重也使负优势轨迹中的好步骤只能少受罚，不能转成正奖励。该标量记账不保证参数梯度或反事实因果正确。见[附录E.7—E.9](https://arxiv.org/html/2609.04094v1#A5.SS9)。
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+### 静态准则饱和与零分母是两种不同退化
+
+所有引用判断相同时，步骤质量失去区分，等权分配仍让每token系数随 $1/n_j$ 变化；只有权重和为零或整条轨迹没有引用时，才回退统一优势 $A$。因此“静态准则饱和”不能一概写成“每token已与普通GRPO完全相同”。
+
+### 两步长度下的正负信用与回退
+
+以下是可手算的教学构造，不是论文实验。
+
+一条正优势A=1的轨迹有两个步骤，长度2与6，质量0.75与0.25。N=8，权重和1，故每token系数分别为3与1/3；总系数2×3+6×(1/3)=8，等于原统一系数的8。
+
+若A=−1，权重变为0.25与0.75，每token系数均为−1，此处长度恰抵消质量差。所有系数仍非正，不会把好步骤转成奖励。若正优势轨迹所有q均为0，则权重和为0，必须回退统一A，不能直接应用归一化公式。
+
+## 三、合并准则、引用步骤并处理所有退化分母
+
+两步长的例子区分了步骤总量与token系数；实现还须明确未引用步骤、gap token和零分母各走哪条规则。
 
 ```text
 同任务采G条多轮轨迹
@@ -315,17 +291,9 @@ judge从指令与轨迹提出rubrics，合并去重
 独立评估使用真实任务检查器
 ```
 
-**实现要点**：judge仍是额外监督，保符号分配不等于步骤因果价值。
+## 四、读任务表现—评价成本图，并分清重复评估口径
 
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | 动态rubric奖励产生的组优势，经长度守恒步骤分配后做GRPO |
-| 机制改变 | 动态生成并合并评分准则，用judge引用的步骤重分配组优势 |
-| 评价改善的指标 | TGC、SGC、SR；pass^k是多次都成功 |
-
-## 四、实验如何验证方法
+守恒公式可以直接验算，任务收益则要放在同一split、基座和评价预算下读，不能把美元横轴当完整训练成本。
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
@@ -333,35 +301,36 @@ judge从指令与轨迹提出rubrics，合并去重
 | 数据来源与规模 | 在线工具轨迹、冻结judge评价 |
 | 对比基线 | 基座、相同预算真结果奖励、静态rubric／无信用消融 |
 | 训练预算与资源 | Qwen3.6-27B100步/20epochs；32B75步；8H100、LoRA；judge成本另计 |
-| 指标及其含义 | TGC、SGC、SR；pass^k是多次都成功 |
-| 随机性与不确定性 | 最后3个epoch检查点平均，每检查点3评估运行，不等于3训练种子 |
+| 指标及其含义 | TGC、SGC、SR与重复执行可靠性 |
+| 随机性与不确定性 | 最后3个检查点平均，每检查点3评估运行，不等于3训练种子 |
 | 实际验证的假设 | 动态准则与步骤分配能否在无真训练标签下改善Agent |
 
-**实验解读（本文分析）**：judge仍是额外监督，保符号分配不等于步骤因果价值。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+### 图2：任务表现与一次完整评价的美元成本
 
-## 五、结果：证据到底有多强
+&lt;!-- inline-evidence-v2:start --&gt;
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 图1／§3 | 动态评分和信用分配 | 解释监督来源 | 不代表无监督 |
-| 表2主结果 | 同基座与outcome reward | 27B普通集TGC69.4→85.3，结果奖励80.0 | 不同split不能拼接 |
-| 表2消融 | 去动态／去信用 | 多数相关指标支持组合 | 部分指标非单调提高 |
-| 评价协议§4.1 | 末3检查点与3次运行 | 明确避免峰值选点的协议 | 不等于独立训练重复 |
-| 成本／稳健性分析（具体图表编号本文未核实） | judge与训练资源 | 提供系统代价视角 | 不能认为外部judge免费 |
+&lt;!-- figure-ref-v6:start:rl-60-figure-2 --&gt;
+&lt;span id=&quot;rl-60-figure-2&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rl-60-figure-2 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/papers/60-draco-figure-2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/60-draco-figure-2.png&quot; width=&quot;1600&quot; height=&quot;684&quot; alt=&quot;DRACO及消融在AppWorld和τ-bench的任务效果与一次评估美元成本&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引；Gandhi等，2026，Figure 2；原HTML图形。&lt;a href=&quot;https://arxiv.org/html/2609.04094v1#S4.F2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-普通AppWorld的TGC绝对提升：相对基座15.9个百分点，相对结果奖励基线5.3个百分点。τ-bench的常规judge与self-judge是不同设置，不能拿各自最好数字拼成一个系统。表2中的pass^k是k次都成功的一致性，不是至少一次成功的pass@k。
+&lt;!-- figure-ref-v6:start:rl-60-source-license --&gt;
 
-## 六、贡献、代价与局限
+图像许可：上述作者原图按 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 提供；此处只截取对应图形区域并适配显示尺寸，数据与图形内容未重绘。[核对原版许可](https://arxiv.org/abs/2609.04094v1)。
 
-**作者设定**是训练不可访问真成功信号，评估可以访问，两者不冲突。**本文分析**：动态rubric可能引入漂移与风格偏见；所有步骤权重非负，所以负优势轨迹中被judge认为好的步骤只会少受罚，不会自动变成正向奖励。步骤引用也不是反事实因果证明。
+&lt;!-- figure-ref-v6:end:rl-60-source-license --&gt;
 
-## 七、帮助建立理解
 
-### 教学例子
+图2三面板分别是AppWorld普通集、挑战集和τ-bench banking；前两图纵轴为TGC，后一图为成功率。灰点是基座，蓝/紫/绿点分别移除两组件、动态准则或步骤信用，红点是完整DRACO。应在同一面板寻找左上方的成本—表现折中；τ-bench成本还含用户模拟器和评审调用，不能把三张横轴的美元数简单当成同数量任务的推理单价。图中各点使用单次成功口径。
 
-以下是教学推演，不是原论文实验。
+&lt;!-- inline-evidence-v2:end --&gt;
 
-失败轨迹A=−1，两步各10token，q=(0.9,0.1)，w=(0.1,0.9)，总长20。优势a=(−0.2,−1.8)，token总和10×−0.2+10×−1.8=−20=AN。第一步仍负，只是被罚得较轻。
+
+表2按同基座和split比较主结果与消融，部分指标并不单调。主结果取最后三个检查点，每个检查点重复评估三次；这是评估重复，不是三次独立训练，也不同于TTPO的峰值检查点选择。训练不用真实成功检查器，独立评估可以使用，权限并不冲突。重复可靠性指标pass^k要求k次都成功，与pass@k的至少一次成功不同。图2横轴是一次完整split的评估成本，不是完整训练成本。[核对原文评价协议](https://arxiv.org/html/2609.04094v1#S4)。
+
+## 五、judge偏差、同号分配与训练成本尚未闭合
+
+普通AppWorld的TGC相对基座提高15.9个百分点，相对结果奖励基线提高5.3个百分点。τ-bench常规judge与self-judge是不同配置，不能拼取各自最好值。动态rubric可能漂移或偏爱风格，步骤引用也不是因果证据；全流程成本还需计入judge的准则生成、去重与评分。
 
 ### 五个前置概念
 
@@ -371,23 +340,43 @@ judge从指令与轨迹提出rubrics，合并去重
 4. **保符号重分配**：只改信用大小，不翻转原有符号。
 5. **Pass^k**：多次执行全部成功的一致性指标。
 
-### 三个值得继续追问的问题
+## 六、三个值得继续追问的问题与参考答案
 
-1. judge偏好与真实成功偏离时如何诊断？
-2. 负轨迹中的真正好步骤是否需要允许正优势？
-3. 计入judge调用后与真奖励训练的成本差多少？
+&lt;details&gt;
+&lt;summary&gt;1. judge偏好与真实成功偏离时如何诊断？&lt;/summary&gt;
 
-## 方法与证据总结
+把judge分数与独立任务成功、工具状态检查和人工审计并列，按任务/准则画校准与误判分布；用固定保留rubric给不同训练阶段重评分，避免动态规则变化掩盖漂移。再检查长输出、迎合措辞和无效步骤是否被奖励。分数上升而成功率不升说明代理可能偏离；更强judge或self-judge对照也必须固定其他条件与成本。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| 多轮工具任务缺少可靠终局成功标签 | 动态生成并合并评分准则，用judge引用的步骤重分配组优势 | 细化好坏步骤的更新强度，减轻整轨迹一律奖惩 | AppWorld与τ-bench主表及消融报告相应收益 | judge仍是额外监督，保符号分配不等于步骤因果价值 |
+&lt;/details&gt;
 
-## 资料与阅读范围
+&lt;details&gt;
+&lt;summary&gt;2. 负轨迹中的真正好步骤是否需要允许正优势？&lt;/summary&gt;
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+从细粒度归因角度，失败轨迹里确实可能含有值得保留的好步骤；但是否给正优势取决于目标和反事实基线，不能仅凭局部文本看起来好就翻转符号。原配方的步骤分配受轨迹信用设计约束，允许异号会改变守恒与优化性质。可构造“局部正确、后续失败”任务，用可靠反事实评估比较同号分配与异号改进，原结果不能替代这项消融。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;3. 计入judge调用后与真奖励训练的成本差多少？&lt;/summary&gt;
+
+需分别比较训练judge的准则生成/去重/评分调用、策略生成与更新、真实环境或结果验证成本，以及部署评估成本。论文性能-评价成本图并不直接等于完整训练成本；外部judge与self-judge也不是同一价格与监督质量。只有固定成功目标、模型与总预算并获得全流程日志，才能给净差值；现有条件不足时应列明缺项而不把judge视为免费。
+
+&lt;/details&gt;
+
+## 七、沿未解决的问题继续读
+
+- [系列收尾](61-系列收尾.md)：更细的奖励究竟来自更可靠归因，还是更多judge信息与计算？收尾篇以监督、权限和成本账本总结这一未闭合问题，不宣称已有新的直接后继算法。（教学收束）
+
+- [FACTOR](58-factor.md)：如果能取得独立续跑价值，步骤引用是否与它一致？回看FACTOR的校准与扰动诊断，可设计平行比较；标量守恒的两套公式不提供相同因果保证。（早期平行路线回看）
+
+- [TTPO](59-ttpo.md)：不同额外监督与检查点选择怎样影响收益可信度？TTPO的伪标签和峰值协议提供邻近问题对照，不能把两套最终分数拼成同一训练系统。（教学对照）
+
+### 原文核对与路线出处
+
+- [原论文与图表入口](https://arxiv.org/html/2609.04094v1)。§3动态准则与步骤分配、§4评价协议；附录E.7–E.9等步骤总量、1/n_j token分配及零分母/全无引用回退。
+- **模块组合**：[GRPO](52-grpo.md)。动态rubric产生组奖励，再替换其统一token优势。
+- **并行路线**：[FACTOR](58-factor.md)。都约束标量总量，但一个用judge步骤引用，一个用续跑TD与动作均值归约。
+- **教学对应**：[TTPO](59-ttpo.md)。都借助额外评估信号，然而监督、训练权限和检查点选择协议不同。
 
 ## 自测两题
 
