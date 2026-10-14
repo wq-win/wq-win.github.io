@@ -42,22 +42,21 @@
                 <span class="text-gray-500">FAST-LIO2：直接用点云定位，为什么先要解决地图更新</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="93727b0b9541bbf39c50afb618afbdf9c6117e21bbce77423984a8cbe4a10390"><h1>099｜FAST-LIO2：直接用点云定位，为什么先要解决地图更新</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="0aea22d16060aa3d7f87ff7de672f1684bcdf994b908711498a582e8ae1a3d57"><h1>099｜FAST-LIO2：直接用点云定位，为什么先要解决地图更新</h1>
 <p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="098-orbslam3.html">上一篇</a> · <a href="100-kissicp.html">下一篇</a></p>
 <p><strong>论文</strong>：Wei Xu、Yixi Cai、Dongjiao He、Jiarong Lin、Fu Zhang，<em>FAST-LIO2: Fast Direct LiDAR-inertial Odometry</em>，2021。<a href="https://arxiv.org/html/2107.06829v1">原文 v1</a> · <a href="https://github.com/hku-mars/FAST_LIO">官方系统</a> · <a href="https://github.com/hku-mars/ikd-Tree">官方 ikd-Tree</a>。</p>
-<p><strong>阅读范围</strong>：核对系统、估计、地图维护和实验章节；复杂度推导未逐行复证，未独立运行。以下矩阵推导和诊断实验属于教学解释。</p>
-<h2 id="一分钟理解省下来的算力可以换成更多几何信息">一分钟理解：省下来的算力，可以换成更多几何信息</h2>
-<p>激光雷达每秒产生大量点。为了赶上数据，一种做法是只留下明显边缘和平面特征。但小视场或几何不规整时，严格的特征筛选可能把本来有用的点也扔掉。</p>
-<p>FAST-LIO2 把两个改变连在一起：更高效地维护可查询的局部地图，并在惯性融合中直接使用点与地图的几何关系。没有快速地图更新，更多点会让计算吃不消；只有快速更新却没有有效的估计模型，也不会自动得到正确位置。</p>
-<p>一句话：在激光惯性里程计中，通过直接点云配准与增量地图索引，改善几何信息利用和计算效率，代价是仍需局部表面模型、可靠惯性测量与有界的地图管理。</p>
-<p>“直接”在这里指不经过手工边缘/平面特征分类再配准，不表示无需对应、无需平面拟合、无需下采样或无需滤除无效点。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="002-kalman.html">Kalman滤波</a>提供预测与测量更新的统计框架，FAST-LIO2 直接承接其前作 FAST-LIO 的迭代融合，再用增量索引解决地图扩展成本。它与<a href="097-liosam.html">LIO-SAM</a>是滤波和因子图平滑的平行路线。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>误差状态</strong>用小增量描述估计偏差；<strong>迭代滤波</strong>重线性化非线性测量；<strong>点到面残差</strong>测量沿表面法向的偏离；<strong>空间索引</strong>减少近邻查询工作；<strong>摊还与峰值成本</strong>分别描述长期平均负担和单次最坏延迟。</p>
-<h2 id="问题定义里程计与完整-slam-的边界">问题定义：里程计与完整 SLAM 的边界</h2>
+<h2 id="一问题设定更多原始激光点怎样在实时预算内进入惯性融合">一、问题设定：更多原始激光点怎样在实时预算内进入惯性融合</h2>
+<p>激光雷达每秒产生大量点。为了赶上数据，一种做法是只留下明显边缘和平面特征。但小视场或几何不规整时，严格的特征筛选可能把本来有用的点也扔掉。</p>
+<h3 id="问题定义里程计与完整-slam-的边界">问题定义：里程计与完整 SLAM 的边界</h3>
 <p>输入是带采样时间的点云、IMU 与相关传感器参数。状态包括运动、惯性偏置、重力及外参相关量；输出是位姿估计和地图。它不是强化学习，不优化奖励，也不需要靠交互训练一个策略。</p>
 <p>论文所比较的核心系统是里程计，没有回环检测与全局回环校正。局部地图中使用旧点能够减缓漂移，但这与识别一次远期重访、建立跨时间约束并重整全局轨迹不同。读到“mapping”不应自动补上所有 SLAM 后端能力。</p>
 <p>设地图已有百万个点，每个新扫描只增加其中很小的一部分。若每次都重建整个空间索引，变化很少也要支付一次全量整理成本。这是一个与机器人算法紧密相连的数据结构问题：估计器能承担多少观测，取决于查询和维护地图有多贵。</p>
-<h2 id="方法一惯性预测与几何更新">方法一：惯性预测与几何更新</h2>
+<h2 id="二将迭代测量更新与增量地图索引配合">二、将迭代测量更新与增量地图索引配合</h2>
+<p>FAST-LIO2 把两个改变连在一起：更高效地维护可查询的局部地图，并在惯性融合中直接使用点与地图的几何关系。没有快速地图更新，更多点会让计算吃不消；只有快速更新却没有有效的估计模型，也不会自动得到正确位置。</p>
 <h3 id="先预测再用当前观测纠正">先预测，再用当前观测纠正</h3>
 <p>IMU 提供高频运动预测，并帮助把扫描内不同时间采集的点变换到共同参考时刻。随后，将点映射进地图，寻找邻域、构造局部表面残差，再更新状态。</p>
 <p>以下是点到平面的通用教学表达：</p>
@@ -71,10 +70,19 @@
 <p><span class="reading-math" data-tex="K=(H^TR^{-1}H+P^{-1})^{-1}H^TR^{-1}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>K</mi><mo>=</mo><mo stretchy="false">(</mo><msup><mi>H</mi><mi>T</mi></msup><msup><mi>R</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mi>H</mi><mo>+</mo><msup><mi>P</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><msup><mo stretchy="false">)</mo><mrow><mo>−</mo><mn>1</mn></mrow></msup><msup><mi>H</mi><mi>T</mi></msup><msup><mi>R</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">K=(H^TR^{-1}H+P^{-1})^{-1}H^TR^{-1}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1413em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1413em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p>内部主要求逆转到状态维度。假设状态几十维、残差几千维，这个差别很大；但并不意味着计算与点数无关，因为寻找邻域、构造 <span class="reading-math" data-tex="H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>H</mi></mrow><annotation encoding="application/x-tex">H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span></span></span> 和累加信息仍要处理观测。</p>
 <p>这一快速增益思路来自 FAST-LIO 基础，FAST-LIO2 沿用而不是重新首次提出。它的新增重点在直接配准和增量地图维护。迭代滤波也不是把同一帧数据作为独立新数据反复计数，而是在共同先验下改进非线性线性化。</p>
-<h2 id="方法二地图不应每一帧推倒重建">方法二：地图不应每一帧推倒重建</h2>
+<h3 id="同一批点反复线性化不能反复收取信息">同一批点反复线性化，不能反复收取信息</h3>
+<p>快速增益也可从 MAP 正规方程直接看出。暂用欧氏线性模型 <span class="reading-math" data-tex="z=Hx+v"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>z</mi><mo>=</mo><mi>H</mi><mi>x</mi><mo>+</mo><mi>v</mi></mrow><annotation encoding="application/x-tex">z=Hx+v</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span></span></span></span></span>，预测均值为 <span class="reading-math" data-tex="\mu"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>μ</mi></mrow><annotation encoding="application/x-tex">\mu</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">μ</span></span></span></span></span>，先验协方差 <span class="reading-math" data-tex="P\succ0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi><mo>≻</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">P\succ0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7224em;vertical-align:-0.0391em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≻</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>、观测协方差 <span class="reading-math" data-tex="R\succ0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>R</mi><mo>≻</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">R\succ0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7224em;vertical-align:-0.0391em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≻</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>。目标是</p>
+<p><span class="reading-math" data-tex="E(x)=\tfrac12(x-\mu)^TP^{-1}(x-\mu)+\tfrac12(z-Hx)^TR^{-1}(z-Hx)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>E</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><mstyle displaystyle="false" scriptlevel="0"><mfrac><mn>1</mn><mn>2</mn></mfrac></mstyle><mo stretchy="false">(</mo><mi>x</mi><mo>−</mo><mi>μ</mi><msup><mo stretchy="false">)</mo><mi>T</mi></msup><msup><mi>P</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mo stretchy="false">(</mo><mi>x</mi><mo>−</mo><mi>μ</mi><mo stretchy="false">)</mo><mo>+</mo><mstyle displaystyle="false" scriptlevel="0"><mfrac><mn>1</mn><mn>2</mn></mfrac></mstyle><mo stretchy="false">(</mo><mi>z</mi><mo>−</mo><mi>H</mi><mi>x</mi><msup><mo stretchy="false">)</mo><mi>T</mi></msup><msup><mi>R</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mo stretchy="false">(</mo><mi>z</mi><mo>−</mo><mi>H</mi><mi>x</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">E(x)=\tfrac12(x-\mu)^TP^{-1}(x-\mu)+\tfrac12(z-Hx)^TR^{-1}(z-Hx).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1901em;vertical-align:-0.345em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8451em;"><span style="top:-2.655em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">2</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.394em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.345em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1413em;vertical-align:-0.25em;"></span><span class="mord mathnormal">μ</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">μ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1901em;vertical-align:-0.345em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8451em;"><span style="top:-2.655em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">2</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.394em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.345em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1413em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="mord mathnormal">x</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>求导得到 <span class="reading-math" data-tex="(P^{-1}+H^TR^{-1}H)x=P^{-1}\mu+H^TR^{-1}z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><msup><mi>P</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mo>+</mo><msup><mi>H</mi><mi>T</mi></msup><msup><mi>R</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mi>H</mi><mo stretchy="false">)</mo><mi>x</mi><mo>=</mo><msup><mi>P</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mi>μ</mi><mo>+</mo><msup><mi>H</mi><mi>T</mi></msup><msup><mi>R</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mi>z</mi></mrow><annotation encoding="application/x-tex">(P^{-1}+H^TR^{-1}H)x=P^{-1}\mu+H^TR^{-1}z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0913em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="mclose">)</span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0085em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mord mathnormal">μ</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8413em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span></span></span></span></span>。若每条标量残差独立、方差为 <span class="reading-math" data-tex="\sigma_j^2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>σ</mi><mi>j</mi><mn>2</mn></msubsup></mrow><annotation encoding="application/x-tex">\sigma_j^2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.2089em;vertical-align:-0.3948em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-2.4413em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3948em;"><span></span></span></span></span></span></span></span></span></span></span>，信息矩阵可以逐点累加为 <span class="reading-math" data-tex="P^{-1}+\sum_jH_j^TH_j/\sigma_j^2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>P</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mo>+</mo><msub><mo>∑</mo><mi>j</mi></msub><msubsup><mi>H</mi><mi>j</mi><mi>T</mi></msubsup><msub><mi>H</mi><mi>j</mi></msub><mi mathvariant="normal">/</mi><msubsup><mi>σ</mi><mi>j</mi><mn>2</mn></msubsup></mrow><annotation encoding="application/x-tex">P^{-1}+\sum_jH_j^TH_j/\sigma_j^2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8974em;vertical-align:-0.0833em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.2771em;vertical-align:-0.4358em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-2.4413em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3948em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-2.4413em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3948em;"><span></span></span></span></span></span></span></span></span></span></span>，<span class="reading-math" data-tex="H_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>H</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">H_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是一行观测雅可比。这样避免建立巨大的测量维矩阵，但累加仍随点数增长；独立噪声假设若失效，简单逐点相加也不再等价。</p>
+<p><strong>原创手算。</strong> 标量先验为 <span class="reading-math" data-tex="\mu=0,P=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>μ</mi><mo>=</mo><mn>0</mn><mo separator="true">,</mo><mi>P</mi><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\mu=0,P=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">μ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>，三次独立观测为 <span class="reading-math" data-tex="z=(1,2,3)^T"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>z</mi><mo>=</mo><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>2</mn><mo separator="true">,</mo><mn>3</mn><msup><mo stretchy="false">)</mo><mi>T</mi></msup></mrow><annotation encoding="application/x-tex">z=(1,2,3)^T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0913em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">3</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span></span></span></span></span>、<span class="reading-math" data-tex="H=(1,1,1)^T,R=I_3"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>H</mi><mo>=</mo><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>1</mn><mo separator="true">,</mo><mn>1</mn><msup><mo stretchy="false">)</mo><mi>T</mi></msup><mo separator="true">,</mo><mi>R</mi><mo>=</mo><msub><mi>I</mi><mn>3</mn></msub></mrow><annotation encoding="application/x-tex">H=(1,1,1)^T,R=I_3</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0913em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">3</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，后验均值为 <span class="reading-math" data-tex="6/4=1.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>6</mn><mi mathvariant="normal">/</mi><mn>4</mn><mo>=</mo><mn>1.5</mn></mrow><annotation encoding="application/x-tex">6/4=1.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">6/4</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1.5</span></span></span></span></span>、方差为 <span class="reading-math" data-tex="1/4"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mn>4</mn></mrow><annotation encoding="application/x-tex">1/4</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/4</span></span></span></span></span>。若把这一帧数据错误地当成“第二帧新数据”再融合一遍，就会得到均值 <span class="reading-math" data-tex="12/7\approx1.714"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>12</mn><mi mathvariant="normal">/</mi><mn>7</mn><mo>≈</mo><mn>1.714</mn></mrow><annotation encoding="application/x-tex">12/7\approx1.714</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">12/7</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1.714</span></span></span></span></span>、方差 <span class="reading-math" data-tex="1/7"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mn>7</mn></mrow><annotation encoding="application/x-tex">1/7</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/7</span></span></span></span></span>，凭重复计算虚增信心。正确迭代只是围绕同一个先验与同一组观测重新求解；在线性例中下一轮仍是 1.5。</p>
+<p>真实 FAST-LIO2 还要通过流形上的雅可比，把固定预测先验搬到当前迭代的切空间；这正是<a href="https://arxiv.org/html/2107.06829v1">原文IV-B3式(10)–(15)</a>中额外修正项的作用。<a href="https://arxiv.org/pdf/2107.06829v1#page=15">表 VII</a> 的总速度改善也包括地图维护，不能将本来继承自 FAST-LIO 的这项代数重排独占为 FAST-LIO2 的全部贡献。</p>
+<h3 id="方法二地图不应每一帧推倒重建">方法二：地图不应每一帧推倒重建</h3>
 <p>ikd-Tree 围绕机器人地图的实际操作组织索引：插入新点、删除远离当前局部范围的点、保持采样密度、查询近邻，并在结构失衡时重建适当部分。它把“地图正在变化”视为常态。</p>
 <p>用自构类比理解：一个图书馆每天新增几十本书，不必重新给全馆所有书排序；但如果新书总挤在同一书架，也需要局部重新安排。懒删除类似先标记书已借走，整理时再回收空位；这要求查询时正确跳过标记，不能以节省维护为由返回已失效数据。</p>
 <p>地图采用移动局部范围，删除远端内容以控制资源。它不是无限记忆：区域移出后再次返回，可能无法直接使用所有先前点。保留更多历史也未必单调更准，旧地图本身已经漂移时，重新匹配它还可能形成错误约束。</p>
+<p>这里的“有效”不仅是点存在，还包括时间、量程和局部几何适合参与所设模型。更多观测必须与模型相容，否则只是更快地累积错误。</p>
+<p>地图索引承担高频查询，迭代滤波承担状态与噪声更新。下面分别检查二者，再判断直接点云利用如何改变整体预算。</p>
+<h2 id="三维护局部地图检查原始点到局部平面的残差">三、维护局部地图，检查原始点到局部平面的残差</h2>
 <pre><code class="language-text">输入：点云、逐点时间、IMU、状态先验与局部地图
 积分 IMU，传播状态及不确定性
 依据扫描内运动补偿点云畸变
@@ -88,8 +96,15 @@
 将当前有效点增量插入 ikd-Tree，保持密度与平衡
 输出里程计与更新后的局部地图
 </code></pre>
-<p>这里的“有效”不仅是点存在，还包括时间、量程和局部几何适合参与所设模型。更多观测必须与模型相容，否则只是更快地累积错误。</p>
-<h2 id="实验把估计效果和数据结构效果分开验证">实验：把估计效果和数据结构效果分开验证</h2>
+<h2 id="四分开评估估计模型与数据结构效率">四、分开评估估计模型与数据结构效率</h2>
+<!-- figure-ref-v6:start:rc-99-figure-11-anchor -->
+<p><span id="rc-99-figure-11"></span></p>
+<!-- figure-ref-v6:end:rc-99-figure-11-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/099-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/099-evidence.png" width="799" height="595" alt="Fig. 11：翻滚动作的姿态、位置、角速度和速度曲线共同给出测试运动范围" loading="lazy"></a><figcaption>原论文结果图／表摘引：Wei Xu、Yixi Cai、Dongjiao He、Jiarong Lin、Fu Zhang（2021），Fig. 11，PDF 第 16 页；<a href="https://arxiv.org/pdf/2107.06829v1#page=16" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：翻滚动作的姿态、位置、角速度和速度曲线共同给出测试运动范围。图中峰值是这次机载演示的条件，不是所有激光雷达、点云几何和平台都适用的鲁棒性上界。</p>
+<h3 id="实验把估计效果和数据结构效果分开验证">实验：把估计效果和数据结构效果分开验证</h3>
+<p>这里对应 FAST-LIO2 v1；直接点云仍依赖局部平面残差，数据结构速度应和点数、地图范围、线程及查询任务共同比较。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -132,37 +147,57 @@
 </tbody></table></div>
 <p>重点证据有四项：</p>
 <ol>
-<li><strong>表 III、图 5</strong>：索引更新时间和查询时间共同决定总成本。某结构插入更快，不代表完成全部工作也最快。这是系统比较，不是脱离工作负载的数据结构永久排名。</li>
-<li><strong>表 IV</strong>：直接法在许多序列上更准，但不是全部。nclt_4 中默认版本 RMSE 8.71 米，Feature 版本 8.50 米；几何信息利用方式应按场景判断。</li>
-<li><strong>表 VII、图 8</strong>：特定配置下，Intel 上 FAST-LIO/FAST-LIO2 总时间为 15.83/1.82 毫秒；使用点数为 447/756。地图部分从 13.81 降至 0.13 毫秒，说明不能把全部速度收益归给删除特征提取。</li>
-<li><strong>图 9–11</strong>：激烈运动的机载演示。它支持这些实际轨迹上的可行性，不能将峰值角速度作为任意平台、场景和传感器的统一保证。</li>
+<li><strong><a href="https://arxiv.org/pdf/2107.06829v1#page=12">表 III</a>、<a href="#rc-99-figure-5">图 5</a></strong>：索引更新时间和查询时间共同决定总成本。某结构插入更快，不代表完成全部工作也最快。这是系统比较，不是脱离工作负载的数据结构永久排名。</li>
 </ol>
+<!-- figure-ref-v6:start:rc-99-figure-5 -->
+<figure class="reading-evidence-figure" id="rc-99-figure-5"><a href="/robot-classic/assets/figure-refs-v6/099-fig-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/099-fig-5.png" width="640" height="565" alt="原论文图5：四种空间索引随树大小变化的每点查询和插入耗时" loading="lazy"></a><figcaption>Wei Xu、Yixi Cai、Dongjiao He、Jiarong Lin、Fu Zhang（2021），图 5，PDF 第 12 页；<a href="https://arxiv.org/pdf/2107.06829v1#page=12" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：上下图分别是查询与插入，横轴为对数树规模；尖峰与平均趋势都影响在线处理预算。</p>
+<!-- figure-ref-v6:end:rc-99-figure-5 -->
+<ol start="2">
+<li><strong><a href="https://arxiv.org/pdf/2107.06829v1#page=13">表 IV</a></strong>：直接法在许多序列上更准，但不是全部。nclt_4 中默认版本 RMSE 8.71 米，Feature 版本 8.50 米；几何信息利用方式应按场景判断。</li>
+<li><strong><a href="https://arxiv.org/pdf/2107.06829v1#page=15">表 VII</a>、<a href="#rc-99-figure-8">图 8</a></strong>：特定配置下，Intel 上 FAST-LIO/FAST-LIO2 总时间为 15.83/1.82 毫秒；使用点数为 447/756。地图部分从 13.81 降至 0.13 毫秒，说明不能把全部速度收益归给删除特征提取。</li>
+</ol>
+<!-- figure-ref-v6:start:rc-99-figure-8 -->
+<figure class="reading-evidence-figure" id="rc-99-figure-8"><a href="/robot-classic/assets/figure-refs-v6/099-fig-8.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/099-fig-8.png" width="612" height="400" alt="原论文图8：FAST-LIO与FAST-LIO2每扫描处理耗时及地图点数时间序列" loading="lazy"></a><figcaption>Wei Xu、Yixi Cai、Dongjiao He、Jiarong Lin、Fu Zhang（2021），图 8，PDF 第 15 页；<a href="https://arxiv.org/pdf/2107.06829v1#page=15" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：上图区分处理器与方法并保留平均线，下图给出地图规模增长；时间优势须连同硬件条件解释。</p>
+<!-- figure-ref-v6:end:rc-99-figure-8 -->
+<ol start="4">
+<li><strong><a href="#rc-99-figure-9">图 9–11</a></strong>：激烈运动的机载演示。它支持这些实际轨迹上的可行性，不能将峰值角速度作为任意平台、场景和传感器的统一保证。</li>
+</ol>
+<!-- figure-ref-v6:start:rc-99-figure-9 -->
+<figure class="reading-evidence-figure" id="rc-99-figure-9"><a href="/robot-classic/assets/figure-refs-v6/099-fig-9.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/099-fig-9.png" width="640" height="295" alt="原论文图9：翻转实验的无人机、机载视图、外部视图与姿态示意" loading="lazy"></a><figcaption>Wei Xu、Yixi Cai、Dongjiao He、Jiarong Lin、Fu Zhang（2021），图 9，PDF 第 16 页；<a href="https://arxiv.org/pdf/2107.06829v1#page=16" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：四面板给出急剧旋转的观测条件；模糊的机载画面不能单独证明激光惯性估计的误差大小。</p>
+<!-- figure-ref-v6:end:rc-99-figure-9 -->
+
+<!-- figure-ref-v6:start:rc-99-figure-10 -->
+<figure class="reading-evidence-figure" id="rc-99-figure-10"><a href="/robot-classic/assets/figure-refs-v6/099-fig-10.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/099-fig-10.png" width="640" height="325" alt="原论文图10：翻转实验中FAST-LIO2重建点云与实验室实景并排比较" loading="lazy"></a><figcaption>Wei Xu、Yixi Cai、Dongjiao He、Jiarong Lin、Fu Zhang（2021），图 10，PDF 第 16 页；<a href="https://arxiv.org/pdf/2107.06829v1#page=16" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：左图是重建结果、右图是场景照片；定性结构一致性与位姿时间序列需要一起判断。</p>
+<!-- figure-ref-v6:end:rc-99-figure-10 -->
+
 <p>上述时间属于原表的设备、线程与点数。原文还展示 ARM 偶发超出扫描周期的情况，因此“平均赶得上”与“每次都满足硬实时截止时间”必须区分。</p>
-<h2 id="贡献成本与容易过度解读的地方">贡献、成本与容易过度解读的地方</h2>
+<h3 id="一个自构实验与五个前置概念">一个自构实验与五个前置概念</h3>
+<p><strong>未运行实验</strong>：固定一段点云与 IMU，比较原始索引重建、增量索引，以及不同点数预算。分别记录近邻查询、状态求解、地图更新、总延迟和轨迹误差，再报告中位数、95/99 分位与最大延迟。若只展示平均总时间，就可能漏掉偶发长暂停；若只展示误差，则无法判断改进能否用于控制闭环。</p>
+<h2 id="五保留表面近似下采样与局部地图边界">五、保留表面近似、下采样与局部地图边界</h2>
 <p>作者把索引维护节约的资源用于更充分的几何估计，这是一种算法与系统设计相互支持的改进。只把公式移植到低效地图代码，或只换树但保留所有其他瓶颈，都不必然复制论文结果。</p>
 <p>以下是方法分析。直接点配准仍依赖局部表面近似；大面积动态物体、玻璃反射或几何退化都可能破坏观测关系。在线外参估计也依赖运动激励，不能保证错误初值和错误时间同步都能自动修复。</p>
 <p>滤波中的协方差表达所选模型里的不确定性。如果大量地图点共享历史误差，它们不完全独立；把几千个相关残差都当独立证据，可能让估计看起来过于自信。理解这一点，有助于区分“点很多”和“独立信息很多”。</p>
-<h2 id="一个自构实验与五个前置概念">一个自构实验与五个前置概念</h2>
-<p><strong>未运行实验</strong>：固定一段点云与 IMU，比较原始索引重建、增量索引，以及不同点数预算。分别记录近邻查询、状态求解、地图更新、总延迟和轨迹误差，再报告中位数、95/99 分位与最大延迟。若只展示平均总时间，就可能漏掉偶发长暂停；若只展示误差，则无法判断改进能否用于控制闭环。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>特征筛选损失几何，地图重建阻碍高频估计</td>
-<td>直接点配准和 ikd-Tree，结合已有快速惯性滤波</td>
-<td>节省索引维护成本，让更多有效观测参与状态更新</td>
-<td>表III/IV/VII及图8，含特征消融与时间分解</td>
-<td>仍有退化、模型与同步要求；无回环后端；平均低延迟不是硬实时保证</td>
-</tr>
-</tbody></table></div>
-<h2 id="读懂了吗三问三答">读懂了吗：三问三答</h2>
+<h2 id="六追问点数量很多但法向几乎相同测量更新为什么仍会缺少方向信息">六、追问：点数量很多但法向几乎相同，测量更新为什么仍会缺少方向信息？</h2>
+<details>
+<summary>点数量很多但法向几乎相同，测量更新为什么仍会缺少方向信息？</summary>
+
+<p><strong>参考答案</strong>：对局部点到平面残差，小平移 <span class="reading-math" data-tex="\delta t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>δ</mi><mi>t</mi></mrow><annotation encoding="application/x-tex">\delta t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal">t</span></span></span></span></span> 的变化是 <span class="reading-math" data-tex="n^\top\delta t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>n</mi><mi mathvariant="normal">⊤</mi></msup><mi>δ</mi><mi>t</mi></mrow><annotation encoding="application/x-tex">n^\top\delta t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8491em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal">t</span></span></span></span></span>。若所有法向 <span class="reading-math" data-tex="n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 几乎相同，沿公共切平面的移动让这项接近零，增加相似点主要重复约束同一方向。应检查几何方向和惯性提供的补充信息，而非只数点。<a href="https://gtsam.org/tutorials/intro.html">Dellaert因子图教程</a>中从因子依赖看信息的讲法，在这里落到具体残差雅可比上。</p>
+</details>
+
+<h2 id="七比较纯激光基线与全局图约束">七、比较纯激光基线与全局图约束</h2>
+<ul>
+<li><strong>平行路线</strong>：<a href="100-kissicp.html">KISS-ICP：把简单基线做好，究竟能走多远</a>。在不用IMU的连续扫描条件下检验简化ICP组织。</li>
+<li><strong>平行路线</strong>：<a href="097-liosam.html">LIO-SAM：让激光、惯性、GPS 与回环共同解释运动</a>。因子图系统提供不同历史与全局约束管理，不能只比较速度。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <h3 id="1不提取特征为什么仍要拟合局部平面">1．不提取特征，为什么仍要拟合局部平面？</h3>
 <p><strong>答</strong>：省略的是先给点分类并只保留某些类别的阶段；测量模型仍需要定义点与地图怎样对齐。局部平面提供残差方向，并不与“直接使用点”矛盾。若局部平面无效，相关测量也不应被强行接受。</p>
 <h3 id="2增益求逆变成状态维度后增加点数是否没有成本">2．增益求逆变成状态维度后，增加点数是否没有成本？</h3>
@@ -180,19 +215,15 @@
 
 **论文**：Wei Xu、Yixi Cai、Dongjiao He、Jiarong Lin、Fu Zhang，*FAST-LIO2: Fast Direct LiDAR-inertial Odometry*，2021。[原文 v1](https://arxiv.org/html/2107.06829v1) · [官方系统](https://github.com/hku-mars/FAST_LIO) · [官方 ikd-Tree](https://github.com/hku-mars/ikd-Tree)。
 
-**阅读范围**：核对系统、估计、地图维护和实验章节；复杂度推导未逐行复证，未独立运行。以下矩阵推导和诊断实验属于教学解释。
+### 先接住前作的问题
 
-## 一分钟理解：省下来的算力，可以换成更多几何信息
+[Kalman滤波](002-kalman.md)提供预测与测量更新的统计框架，FAST-LIO2 直接承接其前作 FAST-LIO 的迭代融合，再用增量索引解决地图扩展成本。它与[LIO-SAM](097-liosam.md)是滤波和因子图平滑的平行路线。
+
+## 一、问题设定：更多原始激光点怎样在实时预算内进入惯性融合
 
 激光雷达每秒产生大量点。为了赶上数据，一种做法是只留下明显边缘和平面特征。但小视场或几何不规整时，严格的特征筛选可能把本来有用的点也扔掉。
 
-FAST-LIO2 把两个改变连在一起：更高效地维护可查询的局部地图，并在惯性融合中直接使用点与地图的几何关系。没有快速地图更新，更多点会让计算吃不消；只有快速更新却没有有效的估计模型，也不会自动得到正确位置。
-
-一句话：在激光惯性里程计中，通过直接点云配准与增量地图索引，改善几何信息利用和计算效率，代价是仍需局部表面模型、可靠惯性测量与有界的地图管理。
-
-“直接”在这里指不经过手工边缘/平面特征分类再配准，不表示无需对应、无需平面拟合、无需下采样或无需滤除无效点。
-
-## 问题定义：里程计与完整 SLAM 的边界
+### 问题定义：里程计与完整 SLAM 的边界
 
 输入是带采样时间的点云、IMU 与相关传感器参数。状态包括运动、惯性偏置、重力及外参相关量；输出是位姿估计和地图。它不是强化学习，不优化奖励，也不需要靠交互训练一个策略。
 
@@ -200,7 +231,9 @@ FAST-LIO2 把两个改变连在一起：更高效地维护可查询的局部地�
 
 设地图已有百万个点，每个新扫描只增加其中很小的一部分。若每次都重建整个空间索引，变化很少也要支付一次全量整理成本。这是一个与机器人算法紧密相连的数据结构问题：估计器能承担多少观测，取决于查询和维护地图有多贵。
 
-## 方法一：惯性预测与几何更新
+## 二、将迭代测量更新与增量地图索引配合
+
+FAST-LIO2 把两个改变连在一起：更高效地维护可查询的局部地图，并在惯性融合中直接使用点与地图的几何关系。没有快速地图更新，更多点会让计算吃不消；只有快速更新却没有有效的估计模型，也不会自动得到正确位置。
 
 ### 先预测，再用当前观测纠正
 
@@ -234,13 +267,31 @@ $$
 
 这一快速增益思路来自 FAST-LIO 基础，FAST-LIO2 沿用而不是重新首次提出。它的新增重点在直接配准和增量地图维护。迭代滤波也不是把同一帧数据作为独立新数据反复计数，而是在共同先验下改进非线性线性化。
 
-## 方法二：地图不应每一帧推倒重建
+### 同一批点反复线性化，不能反复收取信息
+
+快速增益也可从 MAP 正规方程直接看出。暂用欧氏线性模型 $z=Hx+v$，预测均值为 $\mu$，先验协方差 $P\succ0$、观测协方差 $R\succ0$。目标是
+
+$$E(x)=\tfrac12(x-\mu)^TP^{-1}(x-\mu)+\tfrac12(z-Hx)^TR^{-1}(z-Hx).$$
+
+求导得到 $(P^{-1}+H^TR^{-1}H)x=P^{-1}\mu+H^TR^{-1}z$。若每条标量残差独立、方差为 $\sigma_j^2$，信息矩阵可以逐点累加为 $P^{-1}+\sum_jH_j^TH_j/\sigma_j^2$，$H_j$ 是一行观测雅可比。这样避免建立巨大的测量维矩阵，但累加仍随点数增长；独立噪声假设若失效，简单逐点相加也不再等价。
+
+**原创手算。** 标量先验为 $\mu=0,P=1$，三次独立观测为 $z=(1,2,3)^T$、$H=(1,1,1)^T,R=I_3$，后验均值为 $6/4=1.5$、方差为 $1/4$。若把这一帧数据错误地当成“第二帧新数据”再融合一遍，就会得到均值 $12/7\approx1.714$、方差 $1/7$，凭重复计算虚增信心。正确迭代只是围绕同一个先验与同一组观测重新求解；在线性例中下一轮仍是 1.5。
+
+真实 FAST-LIO2 还要通过流形上的雅可比，把固定预测先验搬到当前迭代的切空间；这正是[原文IV-B3式(10)–(15)](https://arxiv.org/html/2107.06829v1)中额外修正项的作用。[表 VII](https://arxiv.org/pdf/2107.06829v1#page=15) 的总速度改善也包括地图维护，不能将本来继承自 FAST-LIO 的这项代数重排独占为 FAST-LIO2 的全部贡献。
+
+### 方法二：地图不应每一帧推倒重建
 
 ikd-Tree 围绕机器人地图的实际操作组织索引：插入新点、删除远离当前局部范围的点、保持采样密度、查询近邻，并在结构失衡时重建适当部分。它把“地图正在变化”视为常态。
 
 用自构类比理解：一个图书馆每天新增几十本书，不必重新给全馆所有书排序；但如果新书总挤在同一书架，也需要局部重新安排。懒删除类似先标记书已借走，整理时再回收空位；这要求查询时正确跳过标记，不能以节省维护为由返回已失效数据。
 
 地图采用移动局部范围，删除远端内容以控制资源。它不是无限记忆：区域移出后再次返回，可能无法直接使用所有先前点。保留更多历史也未必单调更准，旧地图本身已经漂移时，重新匹配它还可能形成错误约束。
+
+这里的“有效”不仅是点存在，还包括时间、量程和局部几何适合参与所设模型。更多观测必须与模型相容，否则只是更快地累积错误。
+
+地图索引承担高频查询，迭代滤波承担状态与噪声更新。下面分别检查二者，再判断直接点云利用如何改变整体预算。
+
+## 三、维护局部地图，检查原始点到局部平面的残差
 
 ```text
 输入：点云、逐点时间、IMU、状态先验与局部地图
@@ -257,9 +308,18 @@ ikd-Tree 围绕机器人地图的实际操作组织索引：插入新点、删�
 输出里程计与更新后的局部地图
 ```
 
-这里的“有效”不仅是点存在，还包括时间、量程和局部几何适合参与所设模型。更多观测必须与模型相容，否则只是更快地累积错误。
+## 四、分开评估估计模型与数据结构效率
 
-## 实验：把估计效果和数据结构效果分开验证
+&lt;!-- figure-ref-v6:start:rc-99-figure-11-anchor --&gt;
+&lt;span id=&quot;rc-99-figure-11&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-99-figure-11-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/099-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/099-evidence.png&quot; width=&quot;799&quot; height=&quot;595&quot; alt=&quot;Fig. 11：翻滚动作的姿态、位置、角速度和速度曲线共同给出测试运动范围&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文结果图／表摘引：Wei Xu、Yixi Cai、Dongjiao He、Jiarong Lin、Fu Zhang（2021），Fig. 11，PDF 第 16 页；&lt;a href=&quot;https://arxiv.org/pdf/2107.06829v1#page=16&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：翻滚动作的姿态、位置、角速度和速度曲线共同给出测试运动范围。图中峰值是这次机载演示的条件，不是所有激光雷达、点云几何和平台都适用的鲁棒性上界。
+
+### 实验：把估计效果和数据结构效果分开验证
+
+这里对应 FAST-LIO2 v1；直接点云仍依赖局部平面残差，数据结构速度应和点数、地图范围、线程及查询任务共同比较。
 
 | 检查项 | 原文证据与评价重点 |
 |---|---|
@@ -274,14 +334,44 @@ ikd-Tree 围绕机器人地图的实际操作组织索引：插入新点、删�
 
 重点证据有四项：
 
-1. **表 III、图 5**：索引更新时间和查询时间共同决定总成本。某结构插入更快，不代表完成全部工作也最快。这是系统比较，不是脱离工作负载的数据结构永久排名。
-2. **表 IV**：直接法在许多序列上更准，但不是全部。nclt_4 中默认版本 RMSE 8.71 米，Feature 版本 8.50 米；几何信息利用方式应按场景判断。
-3. **表 VII、图 8**：特定配置下，Intel 上 FAST-LIO/FAST-LIO2 总时间为 15.83/1.82 毫秒；使用点数为 447/756。地图部分从 13.81 降至 0.13 毫秒，说明不能把全部速度收益归给删除特征提取。
-4. **图 9–11**：激烈运动的机载演示。它支持这些实际轨迹上的可行性，不能将峰值角速度作为任意平台、场景和传感器的统一保证。
+1. **[表 III](https://arxiv.org/pdf/2107.06829v1#page=12)、[图 5](#rc-99-figure-5)**：索引更新时间和查询时间共同决定总成本。某结构插入更快，不代表完成全部工作也最快。这是系统比较，不是脱离工作负载的数据结构永久排名。
+
+&lt;!-- figure-ref-v6:start:rc-99-figure-5 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-99-figure-5&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/099-fig-5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/099-fig-5.png&quot; width=&quot;640&quot; height=&quot;565&quot; alt=&quot;原论文图5：四种空间索引随树大小变化的每点查询和插入耗时&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Wei Xu、Yixi Cai、Dongjiao He、Jiarong Lin、Fu Zhang（2021），图 5，PDF 第 12 页；&lt;a href=&quot;https://arxiv.org/pdf/2107.06829v1#page=12&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：上下图分别是查询与插入，横轴为对数树规模；尖峰与平均趋势都影响在线处理预算。
+&lt;!-- figure-ref-v6:end:rc-99-figure-5 --&gt;
+2. **[表 IV](https://arxiv.org/pdf/2107.06829v1#page=13)**：直接法在许多序列上更准，但不是全部。nclt_4 中默认版本 RMSE 8.71 米，Feature 版本 8.50 米；几何信息利用方式应按场景判断。
+3. **[表 VII](https://arxiv.org/pdf/2107.06829v1#page=15)、[图 8](#rc-99-figure-8)**：特定配置下，Intel 上 FAST-LIO/FAST-LIO2 总时间为 15.83/1.82 毫秒；使用点数为 447/756。地图部分从 13.81 降至 0.13 毫秒，说明不能把全部速度收益归给删除特征提取。
+
+&lt;!-- figure-ref-v6:start:rc-99-figure-8 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-99-figure-8&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/099-fig-8.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/099-fig-8.png&quot; width=&quot;612&quot; height=&quot;400&quot; alt=&quot;原论文图8：FAST-LIO与FAST-LIO2每扫描处理耗时及地图点数时间序列&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Wei Xu、Yixi Cai、Dongjiao He、Jiarong Lin、Fu Zhang（2021），图 8，PDF 第 15 页；&lt;a href=&quot;https://arxiv.org/pdf/2107.06829v1#page=15&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：上图区分处理器与方法并保留平均线，下图给出地图规模增长；时间优势须连同硬件条件解释。
+&lt;!-- figure-ref-v6:end:rc-99-figure-8 --&gt;
+4. **[图 9–11](#rc-99-figure-9)**：激烈运动的机载演示。它支持这些实际轨迹上的可行性，不能将峰值角速度作为任意平台、场景和传感器的统一保证。
+
+&lt;!-- figure-ref-v6:start:rc-99-figure-9 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-99-figure-9&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/099-fig-9.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/099-fig-9.png&quot; width=&quot;640&quot; height=&quot;295&quot; alt=&quot;原论文图9：翻转实验的无人机、机载视图、外部视图与姿态示意&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Wei Xu、Yixi Cai、Dongjiao He、Jiarong Lin、Fu Zhang（2021），图 9，PDF 第 16 页；&lt;a href=&quot;https://arxiv.org/pdf/2107.06829v1#page=16&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：四面板给出急剧旋转的观测条件；模糊的机载画面不能单独证明激光惯性估计的误差大小。
+&lt;!-- figure-ref-v6:end:rc-99-figure-9 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-99-figure-10 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-99-figure-10&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/099-fig-10.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/099-fig-10.png&quot; width=&quot;640&quot; height=&quot;325&quot; alt=&quot;原论文图10：翻转实验中FAST-LIO2重建点云与实验室实景并排比较&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Wei Xu、Yixi Cai、Dongjiao He、Jiarong Lin、Fu Zhang（2021），图 10，PDF 第 16 页；&lt;a href=&quot;https://arxiv.org/pdf/2107.06829v1#page=16&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：左图是重建结果、右图是场景照片；定性结构一致性与位姿时间序列需要一起判断。
+&lt;!-- figure-ref-v6:end:rc-99-figure-10 --&gt;
 
 上述时间属于原表的设备、线程与点数。原文还展示 ARM 偶发超出扫描周期的情况，因此“平均赶得上”与“每次都满足硬实时截止时间”必须区分。
 
-## 贡献、成本与容易过度解读的地方
+### 一个自构实验与五个前置概念
+
+**未运行实验**：固定一段点云与 IMU，比较原始索引重建、增量索引，以及不同点数预算。分别记录近邻查询、状态求解、地图更新、总延迟和轨迹误差，再报告中位数、95/99 分位与最大延迟。若只展示平均总时间，就可能漏掉偶发长暂停；若只展示误差，则无法判断改进能否用于控制闭环。
+
+五个前置概念：**误差状态**用小增量描述估计偏差；**迭代滤波**重线性化非线性测量；**点到面残差**测量沿表面法向的偏离；**空间索引**减少近邻查询工作；**摊还与峰值成本**分别描述长期平均负担和单次最坏延迟。
+
+## 五、保留表面近似、下采样与局部地图边界
 
 作者把索引维护节约的资源用于更充分的几何估计，这是一种算法与系统设计相互支持的改进。只把公式移植到低效地图代码，或只换树但保留所有其他瓶颈，都不必然复制论文结果。
 
@@ -289,17 +379,21 @@ ikd-Tree 围绕机器人地图的实际操作组织索引：插入新点、删�
 
 滤波中的协方差表达所选模型里的不确定性。如果大量地图点共享历史误差，它们不完全独立；把几千个相关残差都当独立证据，可能让估计看起来过于自信。理解这一点，有助于区分“点很多”和“独立信息很多”。
 
-## 一个自构实验与五个前置概念
+## 六、追问：点数量很多但法向几乎相同，测量更新为什么仍会缺少方向信息？
 
-**未运行实验**：固定一段点云与 IMU，比较原始索引重建、增量索引，以及不同点数预算。分别记录近邻查询、状态求解、地图更新、总延迟和轨迹误差，再报告中位数、95/99 分位与最大延迟。若只展示平均总时间，就可能漏掉偶发长暂停；若只展示误差，则无法判断改进能否用于控制闭环。
+&lt;details&gt;
+&lt;summary&gt;点数量很多但法向几乎相同，测量更新为什么仍会缺少方向信息？&lt;/summary&gt;
 
-五个前置概念：**误差状态**用小增量描述估计偏差；**迭代滤波**重线性化非线性测量；**点到面残差**测量沿表面法向的偏离；**空间索引**减少近邻查询工作；**摊还与峰值成本**分别描述长期平均负担和单次最坏延迟。
+**参考答案**：对局部点到平面残差，小平移 $\delta t$ 的变化是 $n^\top\delta t$。若所有法向 $n$ 几乎相同，沿公共切平面的移动让这项接近零，增加相似点主要重复约束同一方向。应检查几何方向和惯性提供的补充信息，而非只数点。[Dellaert因子图教程](https://gtsam.org/tutorials/intro.html)中从因子依赖看信息的讲法，在这里落到具体残差雅可比上。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 特征筛选损失几何，地图重建阻碍高频估计 | 直接点配准和 ikd-Tree，结合已有快速惯性滤波 | 节省索引维护成本，让更多有效观测参与状态更新 | 表III/IV/VII及图8，含特征消融与时间分解 | 仍有退化、模型与同步要求；无回环后端；平均低延迟不是硬实时保证 |
+&lt;/details&gt;
 
-## 读懂了吗：三问三答
+## 七、比较纯激光基线与全局图约束
+
+- **平行路线**：[KISS-ICP：把简单基线做好，究竟能走多远](100-kissicp.md)。在不用IMU的连续扫描条件下检验简化ICP组织。
+- **平行路线**：[LIO-SAM：让激光、惯性、GPS 与回环共同解释运动](097-liosam.md)。因子图系统提供不同历史与全局约束管理，不能只比较速度。
+
+## 八、自测与参考答案
 
 ### 1．不提取特征，为什么仍要拟合局部平面？
 
