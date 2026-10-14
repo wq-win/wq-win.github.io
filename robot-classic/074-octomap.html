@@ -42,23 +42,24 @@
                 <span class="text-gray-500">OctoMap：同时记住障碍、自由空间与尚未看见的地方</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="b152f487c5ccde348d82c4601c8dc7e098e4ca465890936903bf738aa7ef416d"><h1>074｜OctoMap：同时记住障碍、自由空间与尚未看见的地方</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="0d5eed55abeccddf9464d768a60fae6cff2ae9859cc5db632eadf66a82a5be77"><h1>074｜OctoMap：同时记住障碍、自由空间与尚未看见的地方</h1>
 <p><a href="index.html">系列首页</a> · <a href="00-timeline.html">时间线总览</a></p>
 <p>论文：Armin Hornung、Kai M. Wurm、Maren Bennewitz、Cyrill Stachniss、Wolfram Burgard，<em>OctoMap: An Efficient Probabilistic 3D Mapping Framework Based on Octrees</em>，Autonomous Robots 2013。<a href="https://doi.org/10.1007/s10514-012-9321-0">正式论文</a>；<a href="https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf">作者预印本的大学课程镜像</a>；<a href="https://octomap.github.io/">官方项目</a>。阅读覆盖预印本的方法、实现与实验，不把软件后续接口视为原文配置；未独立复现地图实验。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>点云告诉我们“传感器在这里看到了表面”，却不直接告诉我们“这里已经确认没有障碍”还是“这里从未观察”。对机器人来说，二者差别很大：前者可以规划通行，后者可能藏着桌腿。</p>
-<p>OctoMap 用八叉树保存三维体素及其占据证据：射线终点增加障碍证据，沿途增加自由空间证据，未观察部分保留未知。相邻且状态一致的空间可以合并，减少内存，并按不同尺度查询。</p>
-<p>一句话总结：在有位姿估计的三维测距建图中，通过概率占据更新和八叉树压缩，获得可更新、多分辨率的空间地图；代价是离散误差、位姿依赖和概率信息与压缩率的取舍。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="025-occupancy.html">占据栅格</a>会融合概率，三维固定网格却容易耗尽内存。OctoMap将概率更新与八叉树组合；<a href="067-ompl.html">OMPL</a>等下游规划器还必须决定怎样对待未知体积。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>体素</strong>是三维栅格单元；<strong>八叉树</strong>递归把立方体分成八份；<strong>逆传感器模型</strong>由测量决定局部占据证据；<strong>log-odds</strong>把概率比值变成可加形式；<strong>ray casting</strong>枚举传感器与测量终点之间经过的空间。</p>
-<h2 id="问题定义它是地图框架不是完整-slam">问题定义：它是地图框架，不是完整 SLAM</h2>
+<h2 id="一问题设定三维占据证据怎样兼顾未知空间与存储规模">一、问题设定：三维占据证据怎样兼顾未知空间与存储规模</h2>
+<p>点云告诉我们“传感器在这里看到了表面”，却不直接告诉我们“这里已经确认没有障碍”还是“这里从未观察”。对机器人来说，二者差别很大：前者可以规划通行，后者可能藏着桌腿。</p>
+<h3 id="问题定义它是地图框架不是完整-slam">问题定义：它是地图框架，不是完整 SLAM</h3>
 <p>输入是测距数据及传感器在统一坐标系中的位姿，输出是占据地图。论文中的轨迹对齐使用外部扫描匹配、视觉里程计或 RGB-D SLAM。OctoMap 本身并没有解决全部定位与回环问题，不能把好的地图自动归因为它估计了准确机器人轨迹。</p>
 <p>点云偏向表面采样；固定三维网格要为空间包围盒分配大量单元；高度图则对同一平面位置有多个高度层的结构不够一般。OctoMap 用八叉树在需要时细分空间，并显式记录已观测的自由体积。</p>
 <p>这里没有策略、奖励和动作优化。地图可供导航、操作与探索使用，但“在地图中无碰撞”与“真实执行安全”之间还有传感器盲区、定位误差、机器人尺寸和动态障碍等条件。</p>
-<h2 id="方法一八叉树解决存储不替代概率模型">方法一：八叉树解决存储，不替代概率模型</h2>
+<h2 id="二用八叉树组织概率更新区分三种压缩">二、用八叉树组织概率更新，区分三种压缩</h2>
+<h3 id="方法一八叉树解决存储不替代概率模型">方法一：八叉树解决存储，不替代概率模型</h3>
 <p>每个节点表示一个立方体，细分后得到八个子体积。最大深度确定最细分辨率。只为需要记录的区域建立节点，所以未知空间不必按固定网格全部分配。节点在树中的路径已经编码位置，没必要给每个节点重复保存中心坐标与边长。</p>
 <p>查询可以提前停在内部节点，以较粗尺度查看环境。原文采用子节点占据值的最大值传播，作为偏保守的障碍判断：只要细尺度某处有障碍，粗单元就不应被平均稀释成自由。它不是严格计算“八个体素至少一个占据”的联合概率，而是导航用途的聚合策略。</p>
-<h2 id="方法二把测量变成可累积证据">方法二：把测量变成可累积证据</h2>
+<h3 id="方法二把测量变成可累积证据">方法二：把测量变成可累积证据</h3>
 <p>令 <span class="reading-math" data-tex="p_t(n)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mi>t</mi></msub><mo stretchy="false">(</mo><mi>n</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">p_t(n)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">n</span><span class="mclose">)</span></span></span></span></span> 为体素 <span class="reading-math" data-tex="n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 的占据概率，使用对数几率</p>
 <p><span class="reading-math" data-tex="L_t(n)=\log\frac{p_t(n)}{1-p_t(n)}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mi>t</mi></msub><mo stretchy="false">(</mo><mi>n</mi><mo stretchy="false">)</mo><mo>=</mo><mi>log</mi><mo>⁡</mo><mfrac><mrow><msub><mi>p</mi><mi>t</mi></msub><mo stretchy="false">(</mo><mi>n</mi><mo stretchy="false">)</mo></mrow><mrow><mn>1</mn><mo>−</mo><msub><mi>p</mi><mi>t</mi></msub><mo stretchy="false">(</mo><mi>n</mi><mo stretchy="false">)</mo></mrow></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_t(n)=\log\frac{p_t(n)}{1-p_t(n)}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">n</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.363em;vertical-align:-0.936em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.427em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">n</span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">n</span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.936em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p>均匀先验为 <span class="reading-math" data-tex="0.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0.5</mn></mrow><annotation encoding="application/x-tex">0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span> 时，原文更新形式是</p>
@@ -66,6 +67,16 @@
 <p><span class="reading-math" data-tex="l(z_t,n)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>l</mi><mo stretchy="false">(</mo><msub><mi>z</mi><mi>t</mi></msub><mo separator="true">,</mo><mi>n</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">l(z_t,n)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.01968em;">l</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">n</span><span class="mclose">)</span></span></span></span></span> 是逆传感器模型给出的增量。一般非均匀先验还要减去先验对数几率，不能不加说明地照抄简化式。log-odds 让更新变成加法，但并没有消除各测量之间相关性的建模假设。</p>
 <p>为什么要截断？如果一个位置被看作自由数万次，后来放上一把椅子，不应要求再看到数万次障碍才承认变化。截断限制置信累积，让地图可更新。不过它没有显式预测椅子运动，也不是完整动态环境滤波器。</p>
 <p>原文 §5.1 使用占据增量 0.85、自由增量 −0.4，截断范围 −2 到 3.5。这些值针对其激光数据选定，不应作为任意传感器普适常数。终点与沿途证据权重不同，因此不能简单把实现理解为命中次数减去未命中次数。</p>
+<p>扫描内的更新冲突处理很关键。浅角度扫描平面时，某束光的终点体素可能被另一束光的离散射线穿过；若先后反复写自由，会给墙面挖出虚假孔洞。原文优先保留同批次的终点占据更新。这是针对栅格离散的工程修正，不代表忽略所有负证据。</p>
+<h3 id="方法三三种压缩不能混为一谈">方法三：三种“压缩”不能混为一谈</h3>
+<p>第一种是内存实现减少指针和重复坐标的开销。第二种是相同稳定子节点的剪枝，保留所使用的截断概率表示。第三种是把全部概率变成最大似然占据标签，再压缩为文件；它进一步丢失置信信息。</p>
+<p>严格说，clamping 相对于不截断的贝叶斯累积已经丢失接近零和一的信息；“剪枝无损”只能相对于当前保存的表示讨论。最大似然二进制文件很小，不等于完整概率地图在运行内存中也只有同样大小。</p>
+<h3 id="一条射线携带的是一串不同证据">一条射线携带的是一串不同证据</h3>
+<p>激光在2米处击中表面，沿途可见体素提供“未占据”证据，终点体素提供“占据”证据，表面后方仍未知。<strong>教学对数几率例</strong>：先验0.5给 <span class="reading-math" data-tex="L=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">L=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>；一次hit逆模型为0.7，则加 <span class="reading-math" data-tex="\log(0.7/0.3)\approx0.8473"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>log</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>0.7</mn><mi mathvariant="normal">/</mi><mn>0.3</mn><mo stretchy="false">)</mo><mo>≈</mo><mn>0.8473</mn></mrow><annotation encoding="application/x-tex">\log(0.7/0.3)\approx0.8473</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mopen">(</span><span class="mord">0.7/0.3</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.8473</span></span></span></span></span>；随后一次miss为0.4，加−0.4055，总 <span class="reading-math" data-tex="L=0.4418"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi><mo>=</mo><mn>0.4418</mn></mrow><annotation encoding="application/x-tex">L=0.4418</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.4418</span></span></span></span></span>，概率约0.6087。不能将0.7与0.4直接平均成0.55来替代该模型更新。</p>
+<p>八叉树则解决另一问题：八个子体素状态相同可以合并，但若一个孩子未知，不能为了压缩把父节点宣布为全自由。概率饱和和剪枝条件也决定地图适应变化的速度，属于表示—更新之间的折中。<a href="https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf">原稿第3.1–3.2节</a></p>
+<p>本篇直接承接<a href="025-occupancy.html">占据栅格</a>的概率融合，将其与八叉树组合；与<a href="064-kinfu.html">KinectFusion</a>是自由/占据体积与表面距离场的平行表示。<a href="067-ompl.html">OMPL</a>可查询它做避障，但必须先规定未知区域能否穿越。压缩率高不等于薄障碍保留充分。</p>
+<p>八叉树改变存储与查询，概率更新仍依赖射线和位姿。下面先检查占据、空闲、未知怎样进入树，再区分三种压缩损失。</p>
+<h2 id="三逐射线更新并剪枝检查不同尺度查询">三、逐射线更新并剪枝，检查不同尺度查询</h2>
 <pre><code class="language-text">输入：点云、传感器位姿、分辨率、逆传感器模型
 把传感器原点与测量终点转换到地图坐标系
 在一个扫描批次内收集：终点体素集合、射线经过体素集合
@@ -77,11 +88,17 @@
 未来有相反局部证据时重新展开并更新
 输出可按深度查询的地图
 </code></pre>
-<p>扫描内的更新冲突处理很关键。浅角度扫描平面时，某束光的终点体素可能被另一束光的离散射线穿过；若先后反复写自由，会给墙面挖出虚假孔洞。原文优先保留同批次的终点占据更新。这是针对栅格离散的工程修正，不代表忽略所有负证据。</p>
-<h2 id="方法三三种压缩不能混为一谈">方法三：三种“压缩”不能混为一谈</h2>
-<p>第一种是内存实现减少指针和重复坐标的开销。第二种是相同稳定子节点的剪枝，保留所使用的截断概率表示。第三种是把全部概率变成最大似然占据标签，再压缩为文件；它进一步丢失置信信息。</p>
-<p>严格说，clamping 相对于不截断的贝叶斯累积已经丢失接近零和一的信息；“剪枝无损”只能相对于当前保存的表示讨论。最大似然二进制文件很小，不等于完整概率地图在运行内存中也只有同样大小。</p>
-<h2 id="实验设计">实验设计</h2>
+<h2 id="四读内存精度和地图数据的比较">四、读内存、精度和地图数据的比较</h2>
+<!-- figure-ref-v6:start:rc-74-figure-16-anchor -->
+<p><span id="rc-74-figure-16"></span></p>
+<!-- figure-ref-v6:end:rc-74-figure-16-anchor -->
+<!-- figure-ref-v6:start:rc-74-figure-17-anchor -->
+<p><span id="rc-74-figure-17"></span></p>
+<!-- figure-ref-v6:end:rc-74-figure-17-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/074-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/074-evidence.png" width="760" height="828" alt="Figs. 16–17：上图改变地图分辨率，看每个测量点的插入耗时；下图改变查询深度，看地图遍历成本" loading="lazy"></a><figcaption>原论文结果图／表摘引：Armin Hornung、Kai M. Wurm、Maren Bennewitz、Cyrill Stachniss、Wolfram Burgard（2013），Figs. 16–17，PDF 第 14 页；<a href="https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf#page=14" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：上图改变地图分辨率，看每个测量点的插入耗时；下图改变查询深度，看地图遍历成本。它们是不同操作，不能把单点插入耗时当作整次扫描的处理时间。</p>
+<h3 id="实验设计">实验设计</h3>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -119,48 +136,39 @@
 </tr>
 </tbody></table></div>
 <p>准确率的分母包含自由体素，类别比例会影响总分；位姿对齐误差、传感噪声和离散化都会影响一致性。留出扫描比在建图数据上打分更强，但同一环境邻近扫描仍具有相关性，不能称为未见环境泛化。</p>
-<h2 id="结果证据支持哪些结论">结果：证据支持哪些结论</h2>
-<p>**证据 1｜图 10、图 11：更新策略修复离散伪影。**相同浅角度平面扫描，在逐射线冲突更新时出现孔洞，批次内优先占据后恢复更合理表面。这是清楚的机制对照，但不能证明玻璃、镜面、多路径等传感问题都被解决。</p>
-<p>**证据 2｜表 1：留出一致性保持较高。**走廊建图数据一致率 97.27%，留出扫描 96.00%；校园为 97.89% 与 95.80%。它支持该传感器模型在这些数据上的预测一致性，不等于厘米级误差直接减小了同样百分比。</p>
-<p>**证据 3｜表 2：压缩收益取决于空间结构。**校园 10 厘米分辨率的固定网格估计为 5162.90 MB，剪枝八叉树 990.66 MB；最大似然有损文件 13.82 MB。最后一个数是不同信息量、不同存储形式，不能把三者当作同条件内存。走廊 10 厘米时未压缩树 10.87 MB 甚至大于网格 10.01 MB，说明树也有开销。</p>
-<p>**证据 4｜图 16–17、§5.5：速度与查询粒度相关。**原文给出扫描插入及不同深度遍历的计时。它支持按需求使用粗查询的价值，不证明所有高帧率深度相机都能完整实时融合。相关数据来自<a href="https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf">预印本</a>。</p>
-<h2 id="贡献局限与例子">贡献、局限与例子</h2>
+<h3 id="结果证据支持哪些结论">结果：证据支持哪些结论</h3>
+<p><strong>证据 1｜<a href="#rc-74-figure-10">图 10</a>、<a href="#rc-74-figure-11">图 11</a>：更新策略修复离散伪影。</strong>相同浅角度平面扫描，在逐射线冲突更新时出现孔洞，批次内优先占据后恢复更合理表面。这是清楚的机制对照，但不能证明玻璃、镜面、多路径等传感问题都被解决。</p>
+<!-- figure-ref-v6:start:rc-74-figure-10 -->
+<figure class="reading-evidence-figure" id="rc-74-figure-10"><a href="/robot-classic/assets/figure-refs-v6/074-fig-10.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/074-fig-10.png" width="622" height="243" alt="原论文图10：OctoMap射线更新在正常测量与异常回波下的差别" loading="lazy"></a><figcaption>Armin Hornung、Kai M. Wurm、Maren Bennewitz、Cyrill Stachniss、Wolfram Burgard（2013），图 10，PDF 第 10 页；<a href="https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf#page=10" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：红色射线与表面位置共同决定哪些体素应更新为空闲或占据。</p>
+<!-- figure-ref-v6:end:rc-74-figure-10 -->
+
+<!-- figure-ref-v6:start:rc-74-figure-11 -->
+<figure class="reading-evidence-figure" id="rc-74-figure-11"><a href="/robot-classic/assets/figure-refs-v6/074-fig-11.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/074-fig-11.png" width="622" height="222" alt="原论文图11：同一表面在连续表示与不同体素构建中的结构" loading="lazy"></a><figcaption>Armin Hornung、Kai M. Wurm、Maren Bennewitz、Cyrill Stachniss、Wolfram Burgard（2013），图 11，PDF 第 10 页；<a href="https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf#page=10" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：离散分辨率改变边界形状，稠密外观不能直接说明概率校准。</p>
+<!-- figure-ref-v6:end:rc-74-figure-11 -->
+
+<p><strong>证据 2｜<a href="https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf#page=11">表 1</a>：留出一致性保持较高。</strong>走廊建图数据一致率 97.27%，留出扫描 96.00%；校园为 97.89% 与 95.80%。它支持该传感器模型在这些数据上的预测一致性，不等于厘米级误差直接减小了同样百分比。</p>
+<p><strong>证据 3｜<a href="https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf#page=13">表 2</a>：压缩收益取决于空间结构。</strong>校园 10 厘米分辨率的固定网格估计为 5162.90 MB，剪枝八叉树 990.66 MB；最大似然有损文件 13.82 MB。最后一个数是不同信息量、不同存储形式，不能把三者当作同条件内存。走廊 10 厘米时未压缩树 10.87 MB 甚至大于网格 10.01 MB，说明树也有开销。</p>
+<p><strong>证据 4｜<a href="#rc-74-figure-16">图 16–17</a>、§5.5：速度与查询粒度相关。</strong>原文给出扫描插入及不同深度遍历的计时。它支持按需求使用粗查询的价值，不证明所有高帧率深度相机都能完整实时融合。相关数据来自<a href="https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf">预印本</a>。</p>
+<h2 id="五保留位姿依赖概率损失与规划语义">五、保留位姿依赖、概率损失与规划语义</h2>
 <p>OctoMap 的贡献是把概率融合、自由/未知区分、多分辨率和紧凑实现组合成可复用框架。八叉树和占据网格思想各有更早来源；不能把整套方法称为首次发明概率建图。</p>
-<p>**自构例子，未运行。**机器人扫描桌子，桌面后方没有射线经过。桌面是占据，桌前已穿过的射线区域是自由，桌后是未知。如果把所有没点的区域当自由，机械臂就可能伸进尚未观察的杂物。若用粗网格平均桌腿与周围自由体素，占据证据可能被稀释；保守最大聚合避免这类消失，但可能堵住本来可走的窄缝。</p>
+<p><strong>自构例子，未运行。</strong>机器人扫描桌子，桌面后方没有射线经过。桌面是占据，桌前已穿过的射线区域是自由，桌后是未知。如果把所有没点的区域当自由，机械臂就可能伸进尚未观察的杂物。若用粗网格平均桌腿与周围自由体素，占据证据可能被稀释；保守最大聚合避免这类消失，但可能堵住本来可走的窄缝。</p>
 <p>还可以把椅子从一个已稳定占据的位置移走，计算需要多少次自由观测才能改变状态。这个数由截断上界、负增量和占据阈值共同决定，能解释“地图变化反应慢”的原因。若定位漂移导致同一墙面被写到两个位置，单靠调截断参数无法修复坐标不一致。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>点云缺少自由与未知区分</td>
-<td>射线更新三维占据</td>
-<td>为规划提供体积语义</td>
-<td>图 4、表 1</td>
-<td>依赖位姿与传感器模型</td>
-</tr>
-<tr>
-<td>固定网格内存大</td>
-<td>按需八叉树与剪枝</td>
-<td>合并一致区域，省去未知体积</td>
-<td>表 2、图 14</td>
-<td>树节点有额外开销</td>
-</tr>
-<tr>
-<td>置信累积后难适应变化</td>
-<td>截断log-odds</td>
-<td>限制改变状态所需新证据</td>
-<td>§3.2、§5.6</td>
-<td>丢失极端置信信息</td>
-</tr>
-</tbody></table></div>
-<h2 id="自测与答案">自测与答案</h2>
+<h2 id="六追问剪枝后再查询更细分辨率能否恢复压缩前的全部占据概率">六、追问：剪枝后再查询更细分辨率，能否恢复压缩前的全部占据概率？</h2>
+<details>
+<summary>剪枝后再查询更细分辨率，能否恢复压缩前的全部占据概率？</summary>
+
+<p><strong>参考答案</strong>：不能默认恢复。不同压缩方式保留的信息不同，若已丢弃细粒度概率，只能按保留状态展开而非找回原始证据。应先说明使用的是无损结构合并还是带信息损失的压缩，再解释下游碰撞判断。</p>
+</details>
+
+<h2 id="七把未知体积的处理交给具体规划任务">七、把未知体积的处理交给具体规划任务</h2>
+<ul>
+<li><strong>模块组合</strong>：<a href="067-ompl.html">OMPL：怎样让不同运动规划算法使用同一套问题接口</a>。规划器必须明确未知体积和分辨率的处理，八叉树不替它选择风险规则。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <p><strong>1. 一个区域没有点云点，为什么不能直接认为自由？</strong></p>
 <p>它可能在障碍背后或从未进入视野。只有可靠测量射线穿过的空间才能提供自由证据；没有观测应该保留未知。</p>
 <p><strong>2. 十几 MB 的地图文件为何可能需要接近一 GB 的运行内存？</strong></p>
@@ -178,15 +186,15 @@
 
 论文：Armin Hornung、Kai M. Wurm、Maren Bennewitz、Cyrill Stachniss、Wolfram Burgard，*OctoMap: An Efficient Probabilistic 3D Mapping Framework Based on Octrees*，Autonomous Robots 2013。[正式论文](https://doi.org/10.1007/s10514-012-9321-0)；[作者预印本的大学课程镜像](https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf)；[官方项目](https://octomap.github.io/)。阅读覆盖预印本的方法、实现与实验，不把软件后续接口视为原文配置；未独立复现地图实验。
 
-## 一分钟理解
+### 先接住前作的问题
+
+[占据栅格](025-occupancy.md)会融合概率，三维固定网格却容易耗尽内存。OctoMap将概率更新与八叉树组合；[OMPL](067-ompl.md)等下游规划器还必须决定怎样对待未知体积。
+
+## 一、问题设定：三维占据证据怎样兼顾未知空间与存储规模
 
 点云告诉我们“传感器在这里看到了表面”，却不直接告诉我们“这里已经确认没有障碍”还是“这里从未观察”。对机器人来说，二者差别很大：前者可以规划通行，后者可能藏着桌腿。
 
-OctoMap 用八叉树保存三维体素及其占据证据：射线终点增加障碍证据，沿途增加自由空间证据，未观察部分保留未知。相邻且状态一致的空间可以合并，减少内存，并按不同尺度查询。
-
-一句话总结：在有位姿估计的三维测距建图中，通过概率占据更新和八叉树压缩，获得可更新、多分辨率的空间地图；代价是离散误差、位姿依赖和概率信息与压缩率的取舍。
-
-## 问题定义：它是地图框架，不是完整 SLAM
+### 问题定义：它是地图框架，不是完整 SLAM
 
 输入是测距数据及传感器在统一坐标系中的位姿，输出是占据地图。论文中的轨迹对齐使用外部扫描匹配、视觉里程计或 RGB-D SLAM。OctoMap 本身并没有解决全部定位与回环问题，不能把好的地图自动归因为它估计了准确机器人轨迹。
 
@@ -194,13 +202,15 @@ OctoMap 用八叉树保存三维体素及其占据证据：射线终点增加障
 
 这里没有策略、奖励和动作优化。地图可供导航、操作与探索使用，但“在地图中无碰撞”与“真实执行安全”之间还有传感器盲区、定位误差、机器人尺寸和动态障碍等条件。
 
-## 方法一：八叉树解决存储，不替代概率模型
+## 二、用八叉树组织概率更新，区分三种压缩
+
+### 方法一：八叉树解决存储，不替代概率模型
 
 每个节点表示一个立方体，细分后得到八个子体积。最大深度确定最细分辨率。只为需要记录的区域建立节点，所以未知空间不必按固定网格全部分配。节点在树中的路径已经编码位置，没必要给每个节点重复保存中心坐标与边长。
 
 查询可以提前停在内部节点，以较粗尺度查看环境。原文采用子节点占据值的最大值传播，作为偏保守的障碍判断：只要细尺度某处有障碍，粗单元就不应被平均稀释成自由。它不是严格计算“八个体素至少一个占据”的联合概率，而是导航用途的聚合策略。
 
-## 方法二：把测量变成可累积证据
+### 方法二：把测量变成可累积证据
 
 令 $p_t(n)$ 为体素 $n$ 的占据概率，使用对数几率
 
@@ -216,6 +226,26 @@ $l(z_t,n)$ 是逆传感器模型给出的增量。一般非均匀先验还要减
 
 原文 §5.1 使用占据增量 0.85、自由增量 −0.4，截断范围 −2 到 3.5。这些值针对其激光数据选定，不应作为任意传感器普适常数。终点与沿途证据权重不同，因此不能简单把实现理解为命中次数减去未命中次数。
 
+扫描内的更新冲突处理很关键。浅角度扫描平面时，某束光的终点体素可能被另一束光的离散射线穿过；若先后反复写自由，会给墙面挖出虚假孔洞。原文优先保留同批次的终点占据更新。这是针对栅格离散的工程修正，不代表忽略所有负证据。
+
+### 方法三：三种“压缩”不能混为一谈
+
+第一种是内存实现减少指针和重复坐标的开销。第二种是相同稳定子节点的剪枝，保留所使用的截断概率表示。第三种是把全部概率变成最大似然占据标签，再压缩为文件；它进一步丢失置信信息。
+
+严格说，clamping 相对于不截断的贝叶斯累积已经丢失接近零和一的信息；“剪枝无损”只能相对于当前保存的表示讨论。最大似然二进制文件很小，不等于完整概率地图在运行内存中也只有同样大小。
+
+### 一条射线携带的是一串不同证据
+
+激光在2米处击中表面，沿途可见体素提供“未占据”证据，终点体素提供“占据”证据，表面后方仍未知。**教学对数几率例**：先验0.5给 $L=0$；一次hit逆模型为0.7，则加 $\log(0.7/0.3)\approx0.8473$；随后一次miss为0.4，加−0.4055，总 $L=0.4418$，概率约0.6087。不能将0.7与0.4直接平均成0.55来替代该模型更新。
+
+八叉树则解决另一问题：八个子体素状态相同可以合并，但若一个孩子未知，不能为了压缩把父节点宣布为全自由。概率饱和和剪枝条件也决定地图适应变化的速度，属于表示—更新之间的折中。[原稿第3.1–3.2节](https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf)
+
+本篇直接承接[占据栅格](025-occupancy.md)的概率融合，将其与八叉树组合；与[KinectFusion](064-kinfu.md)是自由/占据体积与表面距离场的平行表示。[OMPL](067-ompl.md)可查询它做避障，但必须先规定未知区域能否穿越。压缩率高不等于薄障碍保留充分。
+
+八叉树改变存储与查询，概率更新仍依赖射线和位姿。下面先检查占据、空闲、未知怎样进入树，再区分三种压缩损失。
+
+## 三、逐射线更新并剪枝，检查不同尺度查询
+
 ```text
 输入：点云、传感器位姿、分辨率、逆传感器模型
 把传感器原点与测量终点转换到地图坐标系
@@ -229,15 +259,19 @@ $l(z_t,n)$ 是逆传感器模型给出的增量。一般非均匀先验还要减
 输出可按深度查询的地图
 ```
 
-扫描内的更新冲突处理很关键。浅角度扫描平面时，某束光的终点体素可能被另一束光的离散射线穿过；若先后反复写自由，会给墙面挖出虚假孔洞。原文优先保留同批次的终点占据更新。这是针对栅格离散的工程修正，不代表忽略所有负证据。
+## 四、读内存、精度和地图数据的比较
 
-## 方法三：三种“压缩”不能混为一谈
+&lt;!-- figure-ref-v6:start:rc-74-figure-16-anchor --&gt;
+&lt;span id=&quot;rc-74-figure-16&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-74-figure-16-anchor --&gt;
+&lt;!-- figure-ref-v6:start:rc-74-figure-17-anchor --&gt;
+&lt;span id=&quot;rc-74-figure-17&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-74-figure-17-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/074-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/074-evidence.png&quot; width=&quot;760&quot; height=&quot;828&quot; alt=&quot;Figs. 16–17：上图改变地图分辨率，看每个测量点的插入耗时；下图改变查询深度，看地图遍历成本&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文结果图／表摘引：Armin Hornung、Kai M. Wurm、Maren Bennewitz、Cyrill Stachniss、Wolfram Burgard（2013），Figs. 16–17，PDF 第 14 页；&lt;a href=&quot;https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf#page=14&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-第一种是内存实现减少指针和重复坐标的开销。第二种是相同稳定子节点的剪枝，保留所使用的截断概率表示。第三种是把全部概率变成最大似然占据标签，再压缩为文件；它进一步丢失置信信息。
+读图：上图改变地图分辨率，看每个测量点的插入耗时；下图改变查询深度，看地图遍历成本。它们是不同操作，不能把单点插入耗时当作整次扫描的处理时间。
 
-严格说，clamping 相对于不截断的贝叶斯累积已经丢失接近零和一的信息；“剪枝无损”只能相对于当前保存的表示讨论。最大似然二进制文件很小，不等于完整概率地图在运行内存中也只有同样大小。
-
-## 实验设计
+### 实验设计
 
 | 项目 | 原文设置 |
 |---|---|
@@ -251,17 +285,29 @@ $l(z_t,n)$ 是逆传感器模型给出的增量。一般非均匀先验还要减
 
 准确率的分母包含自由体素，类别比例会影响总分；位姿对齐误差、传感噪声和离散化都会影响一致性。留出扫描比在建图数据上打分更强，但同一环境邻近扫描仍具有相关性，不能称为未见环境泛化。
 
-## 结果：证据支持哪些结论
+### 结果：证据支持哪些结论
 
-**证据 1｜图 10、图 11：更新策略修复离散伪影。**相同浅角度平面扫描，在逐射线冲突更新时出现孔洞，批次内优先占据后恢复更合理表面。这是清楚的机制对照，但不能证明玻璃、镜面、多路径等传感问题都被解决。
+**证据 1｜[图 10](#rc-74-figure-10)、[图 11](#rc-74-figure-11)：更新策略修复离散伪影。**相同浅角度平面扫描，在逐射线冲突更新时出现孔洞，批次内优先占据后恢复更合理表面。这是清楚的机制对照，但不能证明玻璃、镜面、多路径等传感问题都被解决。
 
-**证据 2｜表 1：留出一致性保持较高。**走廊建图数据一致率 97.27%，留出扫描 96.00%；校园为 97.89% 与 95.80%。它支持该传感器模型在这些数据上的预测一致性，不等于厘米级误差直接减小了同样百分比。
+&lt;!-- figure-ref-v6:start:rc-74-figure-10 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-74-figure-10&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/074-fig-10.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/074-fig-10.png&quot; width=&quot;622&quot; height=&quot;243&quot; alt=&quot;原论文图10：OctoMap射线更新在正常测量与异常回波下的差别&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Armin Hornung、Kai M. Wurm、Maren Bennewitz、Cyrill Stachniss、Wolfram Burgard（2013），图 10，PDF 第 10 页；&lt;a href=&quot;https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf#page=10&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-**证据 3｜表 2：压缩收益取决于空间结构。**校园 10 厘米分辨率的固定网格估计为 5162.90 MB，剪枝八叉树 990.66 MB；最大似然有损文件 13.82 MB。最后一个数是不同信息量、不同存储形式，不能把三者当作同条件内存。走廊 10 厘米时未压缩树 10.87 MB 甚至大于网格 10.01 MB，说明树也有开销。
+读图：红色射线与表面位置共同决定哪些体素应更新为空闲或占据。
+&lt;!-- figure-ref-v6:end:rc-74-figure-10 --&gt;
 
-**证据 4｜图 16–17、§5.5：速度与查询粒度相关。**原文给出扫描插入及不同深度遍历的计时。它支持按需求使用粗查询的价值，不证明所有高帧率深度相机都能完整实时融合。相关数据来自[预印本](https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf)。
+&lt;!-- figure-ref-v6:start:rc-74-figure-11 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-74-figure-11&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/074-fig-11.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/074-fig-11.png&quot; width=&quot;622&quot; height=&quot;222&quot; alt=&quot;原论文图11：同一表面在连续表示与不同体素构建中的结构&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Armin Hornung、Kai M. Wurm、Maren Bennewitz、Cyrill Stachniss、Wolfram Burgard（2013），图 11，PDF 第 10 页；&lt;a href=&quot;https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf#page=10&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-## 贡献、局限与例子
+读图：离散分辨率改变边界形状，稠密外观不能直接说明概率校准。
+&lt;!-- figure-ref-v6:end:rc-74-figure-11 --&gt;
+
+**证据 2｜[表 1](https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf#page=11)：留出一致性保持较高。**走廊建图数据一致率 97.27%，留出扫描 96.00%；校园为 97.89% 与 95.80%。它支持该传感器模型在这些数据上的预测一致性，不等于厘米级误差直接减小了同样百分比。
+
+**证据 3｜[表 2](https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf#page=13)：压缩收益取决于空间结构。**校园 10 厘米分辨率的固定网格估计为 5162.90 MB，剪枝八叉树 990.66 MB；最大似然有损文件 13.82 MB。最后一个数是不同信息量、不同存储形式，不能把三者当作同条件内存。走廊 10 厘米时未压缩树 10.87 MB 甚至大于网格 10.01 MB，说明树也有开销。
+
+**证据 4｜[图 16–17](#rc-74-figure-16)、§5.5：速度与查询粒度相关。**原文给出扫描插入及不同深度遍历的计时。它支持按需求使用粗查询的价值，不证明所有高帧率深度相机都能完整实时融合。相关数据来自[预印本](https://courses.cs.washington.edu/courses/cse571/20sp/slides/hornung13auro.pdf)。
+
+## 五、保留位姿依赖、概率损失与规划语义
 
 OctoMap 的贡献是把概率融合、自由/未知区分、多分辨率和紧凑实现组合成可复用框架。八叉树和占据网格思想各有更早来源；不能把整套方法称为首次发明概率建图。
 
@@ -271,13 +317,20 @@ OctoMap 的贡献是把概率融合、自由/未知区分、多分辨率和紧�
 
 五个前置概念：**体素**是三维栅格单元；**八叉树**递归把立方体分成八份；**逆传感器模型**由测量决定局部占据证据；**log-odds**把概率比值变成可加形式；**ray casting**枚举传感器与测量终点之间经过的空间。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 点云缺少自由与未知区分 | 射线更新三维占据 | 为规划提供体积语义 | 图 4、表 1 | 依赖位姿与传感器模型 |
-| 固定网格内存大 | 按需八叉树与剪枝 | 合并一致区域，省去未知体积 | 表 2、图 14 | 树节点有额外开销 |
-| 置信累积后难适应变化 | 截断log-odds | 限制改变状态所需新证据 | §3.2、§5.6 | 丢失极端置信信息 |
+## 六、追问：剪枝后再查询更细分辨率，能否恢复压缩前的全部占据概率？
 
-## 自测与答案
+&lt;details&gt;
+&lt;summary&gt;剪枝后再查询更细分辨率，能否恢复压缩前的全部占据概率？&lt;/summary&gt;
+
+**参考答案**：不能默认恢复。不同压缩方式保留的信息不同，若已丢弃细粒度概率，只能按保留状态展开而非找回原始证据。应先说明使用的是无损结构合并还是带信息损失的压缩，再解释下游碰撞判断。
+
+&lt;/details&gt;
+
+## 七、把未知体积的处理交给具体规划任务
+
+- **模块组合**：[OMPL：怎样让不同运动规划算法使用同一套问题接口](067-ompl.md)。规划器必须明确未知体积和分辨率的处理，八叉树不替它选择风险规则。
+
+## 八、自测与参考答案
 
 **1. 一个区域没有点云点，为什么不能直接认为自由？**
 

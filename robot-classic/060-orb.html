@@ -42,21 +42,20 @@
                 <span class="text-gray-500">ORB：让二进制特征既快又有区分力</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="3f741905aced0537ef6ece1b5b455186eb6d598ea32aa90c98179900baaf1edb"><h1>060｜ORB：让二进制特征既快又有区分力</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="ba7ea99db61698bfaa906d96932e1ca931b4a0b00dc37f5092448d9d8b947129"><h1>060｜ORB：让二进制特征既快又有区分力</h1>
 <p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="059-chomp.html">上一篇：CHOMP</a> · <a href="061-stomp.html">下一篇：STOMP</a></p>
 <p>论文：Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski，<em>ORB: An Efficient Alternative to SIFT or SURF</em>，ICCV 2011，2564–2571。<a href="https://doi.org/10.1109/ICCV.2011.6126544">出版记录</a>；<a href="https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf">IPOL 保存的作者原稿全文</a>。以下依据八页原稿全文；不是对 ORB-SLAM 的解读。另用 <a href="https://docs.opencv.org/4.x/df/d0c/tutorial_py_fast.html">OpenCV 的 FAST 文档</a>区分检测器术语与论文表达，当前库实现不视为 2011 年实验的逐行复现。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>机器人要认出两幅图像中同一块纹理，通常先找关键点，再给每个点生成一个便于比较的描述。SIFT 很有效，但当时的 CPU 和手机对计算量十分敏感。BRIEF 用许多简单的亮度大小比较生成比特串，非常快，却害怕图像旋转。</p>
-<p>ORB 给 FAST 角点增加方向估计，再按方向旋转 BRIEF 的采样模式。更关键的是，作者发现旋转对齐会让许多比特变得重复或几乎总是同一值，于是离线选择高方差、低相关性的比较测试，得到 rBRIEF。</p>
-<p>实验支持特定实现上大幅加速，并在若干匹配任务上保持有竞争力的效果。它不是所有图像变化下都优于 SIFT，也不是一个不需要几何验证就能输出相机位姿的完整 SLAM 系统。</p>
-<p>一句话：在需要快速局部图像匹配的场景，通过方向化角点和经过选择的旋转二进制测试，以较小描述与廉价距离计算保持区分力，代价是有限尺度处理、方向不稳定和强视角变化下的边界。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="048-sift.html">SIFT</a>提供稳健局部描述，但实时机器人还会受计算和存储约束。ORB把方向补偿与统计筛选接入二进制测试。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>关键点检测</strong>寻找可重复的局部位置；<strong>描述子</strong>编码局部外观以便比较；<strong>方向归一化</strong>在局部坐标里补偿旋转；<strong>比特方差与相关性</strong>衡量测试是否有区分力及是否重复；<strong>汉明距离</strong>统计两个比特串的不同位置数。</p>
-<h2 id="背景与任务定义">背景与任务定义</h2>
+<h2 id="一问题设定方向补偿后的二进制描述怎样保持区分力">一、问题设定：方向补偿后的二进制描述怎样保持区分力</h2>
+<p>机器人要认出两幅图像中同一块纹理，通常先找关键点，再给每个点生成一个便于比较的描述。SIFT 很有效，但当时的 CPU 和手机对计算量十分敏感。BRIEF 用许多简单的亮度大小比较生成比特串，非常快，却害怕图像旋转。</p>
+<h3 id="背景与任务定义">背景与任务定义</h3>
 <p>输入是图像，输出是关键点位置、尺度层级、方向和描述子。匹配器再根据距离寻找候选对应，几何模块决定这些对应是否能解释单应、相对位姿或物体姿态。状态、奖励和动作不是这篇的设定。</p>
 <p>检测器回答“在哪里看”，描述子回答“这一小块像什么”。FAST 找角点，BRIEF 编码图块；二者不是同一件事。ORB 的完整组合还涉及图像金字塔、Harris 排序和方向估计，因此比较完整特征系统的时间不能仅比较最后几次比特运算。</p>
 <p>本文含离线统计选择：从 PASCAL 2006 图像提取约 30 万关键点，用于挑选测试对。这里的“学习”不是深度网络或强化学习，也不是在线每帧重新训练。选出的模式固定后，运行阶段只计算方向和比特值。</p>
-<h2 id="方法方向补偿之后还要修复统计性质">方法：方向补偿之后，还要修复统计性质</h2>
+<h2 id="二给fast估方向再筛选高方差低相关测试">二、给FAST估方向，再筛选高方差低相关测试</h2>
 <h3 id="ofast位置排序与方向">oFAST：位置、排序与方向</h3>
 <p>在多个金字塔层检测 FAST 候选，以 Harris 角点响应排序保留目标数量。FAST-9 中的 9 与连续圆周亮暗测试有关，不应把原稿第 3.1 节的括号描述直接实现成半径九像素的新检测器；具体圆周布局需按 FAST 定义或对应实现核对。</p>
 <p>方向来自图块灰度质心。以关键点为原点定义矩</p>
@@ -76,6 +75,16 @@
 <p>方向对齐会让角点外观更一致，从而使一些测试偏向同一个结果。多个测试还可能高度相关：看似 256 位，实际上重复问了很多遍相同问题。</p>
 <p>第 4.3 节从大量候选中先优先考虑均值接近 0.5 的测试，再贪心检查它与已选测试的绝对相关性；超过阈值就跳过，直到保留 256 个。如果数量不够，再放宽相关阈值。其目标不是让每个比特完全独立，也不是求得一个全局最优组合。</p>
 <p>这一步与 PCA 不同：PCA 生成测试响应的线性组合，可能需要计算很多基础测试；这里直接挑选原始比较，保留便宜的运行方式。</p>
+<p>最终的几何检验属于应用流程，ORB 本身没有为任意匹配提供几何正确性保证。</p>
+<h3 id="二进制编码还改变了索引成本">二进制编码还改变了索引成本</h3>
+<p>两串描述的汉明距离为 <span class="reading-math" data-tex="d_H(a,b)=\operatorname{popcount}(a\oplus b)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>d</mi><mi>H</mi></msub><mo stretchy="false">(</mo><mi>a</mi><mo separator="true">,</mo><mi>b</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="normal">popcount</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>a</mi><mo>⊕</mo><mi>b</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">d_H(a,b)=\operatorname{popcount}(a\oplus b)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">b</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">popcount</span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊕</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">b</span><span class="mclose">)</span></span></span></span></span>，即异或后数不同位。第 5 节用 multi-probe LSH 搜索大数据库，选部分比特作为桶键。</p>
+<p>如果测试高度相关，大量描述会拥挤在少数桶里，查询仍须做许多比较。降低相关性不只影响匹配准确率，也让索引桶更均匀。描述子的统计设计和检索系统因此相互影响。</p>
+<h3 id="一个二进制测试的方差只是信息量的第一道门槛">一个二进制测试的方差，只是信息量的第一道门槛</h3>
+<p>二进制测试 <span class="reading-math" data-tex="b\in\{0,1\}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>b</mi><mo>∈</mo><mo stretchy="false">{</mo><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">b\in\{0,1\}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7335em;vertical-align:-0.0391em;"></span><span class="mord mathnormal">b</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">{</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">}</span></span></span></span></span> 若取1概率为 <span class="reading-math" data-tex="p"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi></mrow><annotation encoding="application/x-tex">p</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span></span></span></span></span>，方差为 <span class="reading-math" data-tex="p(1-p)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>p</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">p(1-p)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mclose">)</span></span></span></span></span>。<strong>教学比较</strong>：<span class="reading-math" data-tex="p=0.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">p=0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span>时方差0.25；<span class="reading-math" data-tex="p=0.99"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo>=</mo><mn>0.99</mn></mrow><annotation encoding="application/x-tex">p=0.99</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.99</span></span></span></span></span>时仅0.0099，几乎每块图都输出1，很难区分纹理。即便每位均为0.5，若256位都是同一个比较结果的复制，也只有两种描述子，不能提供256份独立证据。</p>
+<p>原文第4节表明“先转正再做BRIEF”会改变测试均值与相关性，因此rBRIEF还要从候选测试中选高方差、低相关组合。方向补偿和统计筛选不是可任意删去的同一件事。<a href="https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf">原稿第4节</a></p>
+<p><a href="048-sift.html">SIFT</a>是描述机制和计算代价上的平行参照；后作<a href="066-dbow.html">DBoW2</a>与<a href="082-orbslam.html">ORB-SLAM</a>把ORB特征用于地点检索和几何跟踪。原文人工旋转噪声图像的方向恢复实验只隔离局部组件，不能单独证明实际SLAM回环正确或对大视角变化不变。</p>
+<p>方向化测试不再自动保有原BRIEF的比特统计。下面把方差和相关性筛选接进实现，再比较固定长度描述子的速度与匹配信息。</p>
+<h2 id="三构造rbrief并匹配检查有效比特信息">三、构造rBRIEF并匹配，检查有效比特信息</h2>
 <pre><code class="language-text">离线选择测试模式：
     从训练图像提取方向化图块
     枚举候选子窗口比较，记录每个图块上的二进制响应
@@ -93,11 +102,18 @@
     用汉明距离进行暴力或索引搜索，得到候选对应
     由任务几何模型验证候选；输出内点与估计结果
 </code></pre>
-<p>最终的几何检验属于应用流程，ORB 本身没有为任意匹配提供几何正确性保证。</p>
-<h3 id="二进制编码还改变了索引成本">二进制编码还改变了索引成本</h3>
-<p>两串描述的汉明距离为 <span class="reading-math" data-tex="d_H(a,b)=\operatorname{popcount}(a\oplus b)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>d</mi><mi>H</mi></msub><mo stretchy="false">(</mo><mi>a</mi><mo separator="true">,</mo><mi>b</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="normal">popcount</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>a</mi><mo>⊕</mo><mi>b</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">d_H(a,b)=\operatorname{popcount}(a\oplus b)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">b</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">popcount</span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊕</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">b</span><span class="mclose">)</span></span></span></span></span>，即异或后数不同位。第 5 节用 multi-probe LSH 搜索大数据库，选部分比特作为桶键。</p>
-<p>如果测试高度相关，大量描述会拥挤在少数桶里，查询仍须做许多比较。降低相关性不只影响匹配准确率，也让索引桶更均匀。描述子的统计设计和检索系统因此相互影响。</p>
-<h2 id="实验设置与证据范围">实验设置与证据范围</h2>
+<h3 id="一个关于256-位不等于-256-份信息的例子">一个关于“256 位不等于 256 份信息”的例子</h3>
+<p>以下为教学构造。假设八个测试全部比较同一条明暗边界，任意图块的结果只能是 00000000 或 11111111。编码长度八位，实际只回答了一个二选一问题。</p>
+<p>换成四种相对独立结构各问两遍，响应可能更丰富；再挑出稳定且尽量不重复的八个测试，区分不同图块的能力才可能增加。这里“独立”是教学理想化，rBRIEF 只按有限训练样本的相关性近似筛选。</p>
+<p>再看两串 10110000 与 10010100，异或为 00100100，汉明距离为 2。它只表示两次测试不同，不直接对应两像素位移、两度旋转或任何公制几何误差。</p>
+<h2 id="四读速度与匹配实验固定实现和图像条件">四、读速度与匹配实验，固定实现和图像条件</h2>
+<!-- figure-ref-v6:start:rc-60-figure-7-anchor -->
+<p><span id="rc-60-figure-7"></span></p>
+<!-- figure-ref-v6:end:rc-60-figure-7-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/060-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/060-evidence.png" width="727" height="440" alt="Fig. 7：横轴旋转角、纵轴匹配内点比例，比较各描述子在同一旋转试验中的曲线" loading="lazy"></a><figcaption>原论文结果图／表摘引：Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），Fig. 7，PDF 第 5 页；<a href="https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：横轴旋转角、纵轴匹配内点比例，比较各描述子在同一旋转试验中的曲线。某些角度的峰谷暴露方向处理的影响；这不能替代不同真实场景上的泛化评估。</p>
+<h3 id="实验设置与证据范围">实验设置与证据范围</h3>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -139,55 +155,85 @@
 </tr>
 </tbody></table></div>
 <p>有监督类别识别、描述子模式学习、近邻数据库建立、图像匹配评估是不同环节。大库测试对已有数据库图像做变换，很适合检验检索能力，却不能视为“从未见过的物体类别泛化”。</p>
-<h2 id="五组结果怎样读">五组结果怎样读</h2>
-<p><strong>图 2：质心方向在所测噪声下较稳。</strong> 比较角度误差的标准差，支持廉价方向估计可用。不能据此声称低纹理、对称图块或强透视下方向也同样可靠。</p>
-<p><strong>图 3—6：消融解释了 rBRIEF 的必要性。</strong> 简单旋转 BRIEF 后，均值分布与 PCA 谱暴露方差损失、冗余增加；选择测试后改善，内外点距离分布也更易区分。PCA 图是诊断工具，不是在线描述子的计算步骤。</p>
-<p><strong>图 7—9：没有每个场景都第一。</strong> 高斯噪声 10 的人工旋转试验中，ORB 内点比例超过 70%；真实 Magazines 比较中 ORB 为 36.180%，SURF 为 38.305%，SIFT 为 34.010%。Boat 中 ORB 45.8%、SURF 28.6%、SIFT 30.2%。以 Boat 对 SIFT 为例，绝对差 15.6 个百分点，相对提升约 51.7%，两者不能混写。</p>
-<p><strong>图 10、11：速度与检索准确率是联合曲线。</strong> rBRIEF 的桶更均匀，LSH 查询在相应设置下有优势。但 SIFT 库约 160 万条、rBRIEF 约 180 万条，索引结构和参数也不同；图说明系统组合的权衡，而不是隔离所有其他变量后唯一归因于描述子。</p>
+<h3 id="五组结果怎样读">五组结果怎样读</h3>
+<p><strong><a href="#rc-60-figure-2">图 2</a>：质心方向在所测噪声下较稳。</strong> 比较角度误差的标准差，支持廉价方向估计可用。不能据此声称低纹理、对称图块或强透视下方向也同样可靠。</p>
+<!-- figure-ref-v6:start:rc-60-figure-2 -->
+<figure class="reading-evidence-figure" id="rc-60-figure-2"><a href="/robot-classic/assets/figure-refs-v6/060-fig-2.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/060-fig-2.png" width="640" height="299" alt="方向估计误差标准差随图像噪声强度变化" loading="lazy"></a><figcaption>Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 2，PDF 第 3 页；<a href="https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=3" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：蓝色质心法曲线在所测噪声范围内明显低于另两种方向方法；横轴只是这里测试的高斯强度噪声，不包含所有成像变化。</p>
+<!-- figure-ref-v6:end:rc-60-figure-2 -->
+
+<p><strong><a href="#rc-60-figure-3">图 3</a>–<a href="https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=5">图 6</a>：消融解释了 rBRIEF 的必要性。</strong> 简单旋转 BRIEF 后，均值分布与 PCA 谱暴露方差损失、冗余增加；选择测试后改善，内外点距离分布也更易区分。PCA 图是诊断工具，不是在线描述子的计算步骤。</p>
+<!-- figure-ref-v6:start:rc-60-final-source-gap-note -->
+<p><span id="rc-60-figure-6"></span><span id="rc-60-figure-9"></span><p class="figure-reference-note">尚未内嵌：<a href="https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=5" target="_blank" rel="noopener noreferrer">图 6</a>、<a href="https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=5" target="_blank" rel="noopener noreferrer">图 9</a>。方向估计、去相关与匹配性能的定量证据已展示；剩余为学习所得测试对图案和摄影匹配拼图。前者依赖具体训练结果，后者是另一个视觉例证；当前不继续扩展到近完整的学习图案与示例影像集，也不以随机模式冒充学得结果。</p></p>
+<!-- figure-ref-v6:end:rc-60-final-source-gap-note -->
+
+
+
+
+
+<!-- figure-ref-v6:start:rc-60-figure-3 -->
+<figure class="reading-evidence-figure" id="rc-60-figure-3"><a href="/robot-classic/assets/figure-refs-v6/060-fig-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/060-fig-3.png" width="640" height="444" alt="BRIEF及旋转和筛选版本的位响应均值直方图" loading="lazy"></a><figcaption>Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 3，PDF 第 3 页；<a href="https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=3" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：简单旋转后的红柱分布扩展，说明测试位的均值性质发生变化；该分布是选择低偏置测试对的依据之一。</p>
+<!-- figure-ref-v6:end:rc-60-figure-3 -->
+
+<!-- figure-ref-v6:start:rc-60-figure-4 -->
+<figure class="reading-evidence-figure" id="rc-60-figure-4"><a href="/robot-classic/assets/figure-refs-v6/060-fig-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/060-fig-4.png" width="640" height="319" alt="不同BRIEF版本的PCA特征值谱" loading="lazy"></a><figcaption>Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 4，PDF 第 4 页；<a href="https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=4" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：前三组谱的下降形态用于诊断测试位之间的相关性；PCA在这里是分析手段，不是在线计算描述子的步骤。</p>
+<!-- figure-ref-v6:end:rc-60-figure-4 -->
+
+<!-- figure-ref-v6:start:rc-60-figure-5 -->
+<figure class="reading-evidence-figure" id="rc-60-figure-5"><a href="/robot-classic/assets/figure-refs-v6/060-fig-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/060-fig-5.png" width="640" height="384" alt="内点和外点描述子距离分布的对比" loading="lazy"></a><figcaption>Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 5，PDF 第 4 页；<a href="https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=4" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：实线和虚线分别对应匹配与非匹配距离，分布分离程度决定阈值辨识的难易；不能只凭曲线峰值判断所有场景的匹配率。</p>
+<!-- figure-ref-v6:end:rc-60-figure-5 -->
+
+<p><strong><a href="#rc-60-figure-7">图 7–9</a>：没有每个场景都第一。</strong> 高斯噪声 10 的人工旋转试验中，ORB 内点比例超过 70%；真实 Magazines 比较中 ORB 为 36.180%，SURF 为 38.305%，SIFT 为 34.010%。Boat 中 ORB 45.8%、SURF 28.6%、SIFT 30.2%。以 Boat 对 SIFT 为例，绝对差 15.6 个百分点，相对提升约 51.7%，两者不能混写。</p>
+<!-- figure-ref-v6:start:rc-60-figure-8 -->
+<figure class="reading-evidence-figure" id="rc-60-figure-8"><a href="/robot-classic/assets/figure-refs-v6/060-fig-8.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/060-fig-8.png" width="640" height="444" alt="多种噪声设置下匹配内点比例随旋转角变化" loading="lazy"></a><figcaption>Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 8，PDF 第 5 页；<a href="https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=5" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：不同噪声水平形成多条曲线，各方法相对表现随角度和噪声变化；这组人工旋转试验不能代替真实透视变化评测。</p>
+<!-- figure-ref-v6:end:rc-60-figure-8 -->
+
+<!-- figure-ref-v6:start:rc-60-use-note -->
+<p>图6的测试对分布和图9的实景匹配拼图暂未转载，以控制同源图像的累计摘引范围；对应原文链接保留。</p>
+<!-- figure-ref-v6:end:rc-60-use-note -->
+
+<p><strong><a href="#rc-60-figure-10">图 10</a>、11：速度与检索准确率是联合曲线。</strong> rBRIEF 的桶更均匀，LSH 查询在相应设置下有优势。但 SIFT 库约 160 万条、rBRIEF 约 180 万条，索引结构和参数也不同；图说明系统组合的权衡，而不是隔离所有其他变量后唯一归因于描述子。</p>
+<!-- figure-ref-v6:start:rc-60-figure-10 -->
+<figure class="reading-evidence-figure" id="rc-60-figure-10"><a href="/robot-classic/assets/figure-refs-v6/060-fig-10.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/060-fig-10.png" width="640" height="496" alt="两个图像数据集的哈希桶大小分布" loading="lazy"></a><figcaption>Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 10，PDF 第 6 页；<a href="https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=6" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：横轴为桶大小、纵轴为桶数量，三种描述子的分布不同；该差异与候选检索负担有关，但还受索引设置影响。</p>
+<!-- figure-ref-v6:end:rc-60-figure-10 -->
+
+<!-- figure-ref-v6:start:rc-60-figure-11 -->
+<figure class="reading-evidence-figure" id="rc-60-figure-11"><a href="/robot-classic/assets/figure-refs-v6/060-fig-11.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/060-fig-11.png" width="640" height="496" alt="查询成功比例与每特征查询时间的散点权衡" loading="lazy"></a><figcaption>Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 11，PDF 第 6 页；<a href="https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=6" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：每点对应一组系统设置，横轴成功比例与纵轴对数时间共同构成权衡；比较时仍需注意数据库规模和参数并不完全相同。</p>
+<!-- figure-ref-v6:end:rc-60-figure-11 -->
+
 <p><strong>第 6 节：大幅加速必须带实现与工作负载。</strong> 24 张 640×480 图像上的平均每帧时间为 ORB 15.3 ms、SURF 217.3 ms、SIFT 5228.7 ms，约为 14.2 倍和 341.7 倍速度比。它们是当时实现的特征检测与描述计时，不是现代任意实现或整个 SLAM 的恒定倍数。物体应用检出约 61%，要求匹配后还能估计位姿；不能改称所有类别分类准确率。</p>
 <p>手机部分正文约报 7 Hz，分项均值 66.6、72.8、20.9 ms 相加为 160.3 ms，直接倒数约 6.24 Hz。它们不构成精确一致的逐帧预算，适合保留为近似报告而非自行调数字使其吻合。单应拟合的平面跟踪也不是完整三维建图。</p>
-<h2 id="贡献代价与边界">贡献、代价与边界</h2>
-<p>新意在于发现“方向对齐改变了二进制测试统计”并给出廉价补救。简单把两个快速组件拼起来还不足够；关键是让省下来的描述位仍携带不同信息。</p>
+<h2 id="五限制方向不稳尺度处理和强视角变化">五、限制方向不稳、尺度处理和强视角变化</h2>
 <p>方向补偿主要处理平面旋转，金字塔处理部分尺度变化。第 7 节承认尺度不变性尚未充分研究。大视角变化、光照的空间非均匀变化、遮挡和运动模糊都可能超出局部比较的稳定范围。</p>
 <p>离线低相关只在训练分布上成立，不表示真实世界所有纹理都独立。二进制编码压缩了信息，低纹理或重复纹理仍难区分；快匹配也会很快地产生大量错误候选，所以几何验证不能省略。</p>
 <p>对机器人系统而言，特征提取只是部分时间。若后端优化、回环检索或数据传输成为瓶颈，ORB 的局部加速不会按同一倍数传递到整体。与后来 ORB-SLAM 的关系是提供重要视觉组件，而不是已经实现后者的关键帧管理与地图优化。</p>
-<h2 id="一个关于256-位不等于-256-份信息的例子">一个关于“256 位不等于 256 份信息”的例子</h2>
-<p>以下为教学构造。假设八个测试全部比较同一条明暗边界，任意图块的结果只能是 00000000 或 11111111。编码长度八位，实际只回答了一个二选一问题。</p>
-<p>换成四种相对独立结构各问两遍，响应可能更丰富；再挑出稳定且尽量不重复的八个测试，区分不同图块的能力才可能增加。这里“独立”是教学理想化，rBRIEF 只按有限训练样本的相关性近似筛选。</p>
-<p>再看两串 10110000 与 10010100，异或为 00100100，汉明距离为 2。它只表示两次测试不同，不直接对应两像素位移、两度旋转或任何公制几何误差。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>FAST 没有方向、BRIEF 怕旋转</td>
-<td>质心方向与旋转测试模式</td>
-<td>在局部坐标对齐后比较相似结构</td>
-<td>图 2、7</td>
-<td>对称/低纹理时方向不稳</td>
-</tr>
-<tr>
-<td>对齐后测试变得偏置和重复</td>
-<td>高方差、低相关贪心选择</td>
-<td>有限比特容纳更多不同信息</td>
-<td>图 3—6</td>
-<td>有限训练分布，不保证完全独立</td>
-</tr>
-<tr>
-<td>描述与匹配昂贵</td>
-<td>二进制编码、汉明距离、LSH</td>
-<td>廉价比较并减少检索候选</td>
-<td>图 10、11，第 6 节</td>
-<td>整体速度依赖数据库与后端</td>
-</tr>
-</tbody></table></div>
-<h2 id="自测与参考答案">自测与参考答案</h2>
+<h2 id="六追问256位描述子有很多重复测试时增加长度为什么未必增加区分力">六、追问：256位描述子有很多重复测试时，增加长度为什么未必增加区分力？</h2>
+<details>
+<summary>256位描述子有很多重复测试时，增加长度为什么未必增加区分力？</summary>
+
+<p><strong>参考答案</strong>：重复或高度相关的比特会反复表达相近信息，几乎恒定的比特也难区分窗口。正文因此在方向补偿后检查方差与相关性。应固定长度比较测试集合的统计与匹配表现，而不能把位数直接当独立信息量。</p>
+<p>教学参照：<a href="https://docs.opencv.org/4.13.0/d1/d89/tutorial_py_orb.html">ORB (Oriented FAST and Rotated BRIEF)</a>。这里借用其分开方向补偿与描述统计的讲法。</p>
+</details>
+
+<h2 id="七把二进制特征交给检索与slam">七、把二进制特征交给检索与SLAM</h2>
+<ul>
+<li><strong>模块组合</strong>：<a href="066-dbow.html">DBoW：怎样从相似图片中找出真正的重访地点</a>。将二进制局部特征量化成视觉词并检索地点。</li>
+<li><strong>模块组合</strong>：<a href="082-orbslam.html">ORB-SLAM：从持续跟踪走向能够重访和恢复的单目地图</a>。把特征用于跟踪、建图与回环，位姿仍需几何优化。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <h3 id="1一个比特在所有图像里都稳定为-1为什么反而不好">1．一个比特在所有图像里都稳定为 1，为什么反而不好？</h3>
 <p><strong>答：</strong> 它对噪声可能稳定，却不区分不同图块。匹配既需要同一物体跨视图保持一致，也需要不同物体产生差别。均值接近 0.5 提供较高方差，但还要避免与其他比特重复，因此只看稳定性或只看方差都不够。</p>
 <h3 id="2为什么不能直接对-brief-做-pca得到-256-维就结束">2．为什么不能直接对 BRIEF 做 PCA，得到 256 维就结束？</h3>
@@ -205,17 +251,15 @@
 
 论文：Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski，*ORB: An Efficient Alternative to SIFT or SURF*，ICCV 2011，2564–2571。[出版记录](https://doi.org/10.1109/ICCV.2011.6126544)；[IPOL 保存的作者原稿全文](https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf)。以下依据八页原稿全文；不是对 ORB-SLAM 的解读。另用 [OpenCV 的 FAST 文档](https://docs.opencv.org/4.x/df/d0c/tutorial_py_fast.html)区分检测器术语与论文表达，当前库实现不视为 2011 年实验的逐行复现。
 
-## 一分钟理解
+### 先接住前作的问题
+
+[SIFT](048-sift.md)提供稳健局部描述，但实时机器人还会受计算和存储约束。ORB把方向补偿与统计筛选接入二进制测试。
+
+## 一、问题设定：方向补偿后的二进制描述怎样保持区分力
 
 机器人要认出两幅图像中同一块纹理，通常先找关键点，再给每个点生成一个便于比较的描述。SIFT 很有效，但当时的 CPU 和手机对计算量十分敏感。BRIEF 用许多简单的亮度大小比较生成比特串，非常快，却害怕图像旋转。
 
-ORB 给 FAST 角点增加方向估计，再按方向旋转 BRIEF 的采样模式。更关键的是，作者发现旋转对齐会让许多比特变得重复或几乎总是同一值，于是离线选择高方差、低相关性的比较测试，得到 rBRIEF。
-
-实验支持特定实现上大幅加速，并在若干匹配任务上保持有竞争力的效果。它不是所有图像变化下都优于 SIFT，也不是一个不需要几何验证就能输出相机位姿的完整 SLAM 系统。
-
-一句话：在需要快速局部图像匹配的场景，通过方向化角点和经过选择的旋转二进制测试，以较小描述与廉价距离计算保持区分力，代价是有限尺度处理、方向不稳定和强视角变化下的边界。
-
-## 背景与任务定义
+### 背景与任务定义
 
 输入是图像，输出是关键点位置、尺度层级、方向和描述子。匹配器再根据距离寻找候选对应，几何模块决定这些对应是否能解释单应、相对位姿或物体姿态。状态、奖励和动作不是这篇的设定。
 
@@ -223,7 +267,7 @@ ORB 给 FAST 角点增加方向估计，再按方向旋转 BRIEF 的采样模式
 
 本文含离线统计选择：从 PASCAL 2006 图像提取约 30 万关键点，用于挑选测试对。这里的“学习”不是深度网络或强化学习，也不是在线每帧重新训练。选出的模式固定后，运行阶段只计算方向和比特值。
 
-## 方法：方向补偿之后，还要修复统计性质
+## 二、给FAST估方向，再筛选高方差低相关测试
 
 ### oFAST：位置、排序与方向
 
@@ -260,6 +304,26 @@ $$b_i(\theta)=\mathbf1[I(R_\theta x_i)&lt;I(R_\theta y_i)].$$
 
 这一步与 PCA 不同：PCA 生成测试响应的线性组合，可能需要计算很多基础测试；这里直接挑选原始比较，保留便宜的运行方式。
 
+最终的几何检验属于应用流程，ORB 本身没有为任意匹配提供几何正确性保证。
+
+### 二进制编码还改变了索引成本
+
+两串描述的汉明距离为 $d_H(a,b)=\operatorname{popcount}(a\oplus b)$，即异或后数不同位。第 5 节用 multi-probe LSH 搜索大数据库，选部分比特作为桶键。
+
+如果测试高度相关，大量描述会拥挤在少数桶里，查询仍须做许多比较。降低相关性不只影响匹配准确率，也让索引桶更均匀。描述子的统计设计和检索系统因此相互影响。
+
+### 一个二进制测试的方差，只是信息量的第一道门槛
+
+二进制测试 $b\in\{0,1\}$ 若取1概率为 $p$，方差为 $p(1-p)$。**教学比较**：$p=0.5$时方差0.25；$p=0.99$时仅0.0099，几乎每块图都输出1，很难区分纹理。即便每位均为0.5，若256位都是同一个比较结果的复制，也只有两种描述子，不能提供256份独立证据。
+
+原文第4节表明“先转正再做BRIEF”会改变测试均值与相关性，因此rBRIEF还要从候选测试中选高方差、低相关组合。方向补偿和统计筛选不是可任意删去的同一件事。[原稿第4节](https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf)
+
+[SIFT](048-sift.md)是描述机制和计算代价上的平行参照；后作[DBoW2](066-dbow.md)与[ORB-SLAM](082-orbslam.md)把ORB特征用于地点检索和几何跟踪。原文人工旋转噪声图像的方向恢复实验只隔离局部组件，不能单独证明实际SLAM回环正确或对大视角变化不变。
+
+方向化测试不再自动保有原BRIEF的比特统计。下面把方差和相关性筛选接进实现，再比较固定长度描述子的速度与匹配信息。
+
+## 三、构造rBRIEF并匹配，检查有效比特信息
+
 ```text
 离线选择测试模式：
     从训练图像提取方向化图块
@@ -279,15 +343,26 @@ $$b_i(\theta)=\mathbf1[I(R_\theta x_i)&lt;I(R_\theta y_i)].$$
     由任务几何模型验证候选；输出内点与估计结果
 ```
 
-最终的几何检验属于应用流程，ORB 本身没有为任意匹配提供几何正确性保证。
+### 一个关于“256 位不等于 256 份信息”的例子
 
-### 二进制编码还改变了索引成本
+以下为教学构造。假设八个测试全部比较同一条明暗边界，任意图块的结果只能是 00000000 或 11111111。编码长度八位，实际只回答了一个二选一问题。
 
-两串描述的汉明距离为 $d_H(a,b)=\operatorname{popcount}(a\oplus b)$，即异或后数不同位。第 5 节用 multi-probe LSH 搜索大数据库，选部分比特作为桶键。
+换成四种相对独立结构各问两遍，响应可能更丰富；再挑出稳定且尽量不重复的八个测试，区分不同图块的能力才可能增加。这里“独立”是教学理想化，rBRIEF 只按有限训练样本的相关性近似筛选。
 
-如果测试高度相关，大量描述会拥挤在少数桶里，查询仍须做许多比较。降低相关性不只影响匹配准确率，也让索引桶更均匀。描述子的统计设计和检索系统因此相互影响。
+再看两串 10110000 与 10010100，异或为 00100100，汉明距离为 2。它只表示两次测试不同，不直接对应两像素位移、两度旋转或任何公制几何误差。
 
-## 实验设置与证据范围
+五个前置概念：**关键点检测**寻找可重复的局部位置；**描述子**编码局部外观以便比较；**方向归一化**在局部坐标里补偿旋转；**比特方差与相关性**衡量测试是否有区分力及是否重复；**汉明距离**统计两个比特串的不同位置数。
+
+## 四、读速度与匹配实验，固定实现和图像条件
+
+&lt;!-- figure-ref-v6:start:rc-60-figure-7-anchor --&gt;
+&lt;span id=&quot;rc-60-figure-7&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-60-figure-7-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/060-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/060-evidence.png&quot; width=&quot;727&quot; height=&quot;440&quot; alt=&quot;Fig. 7：横轴旋转角、纵轴匹配内点比例，比较各描述子在同一旋转试验中的曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文结果图／表摘引：Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），Fig. 7，PDF 第 5 页；&lt;a href=&quot;https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：横轴旋转角、纵轴匹配内点比例，比较各描述子在同一旋转试验中的曲线。某些角度的峰谷暴露方向处理的影响；这不能替代不同真实场景上的泛化评估。
+
+### 实验设置与证据范围
 
 | 实验 | 数据、预算与问题 |
 |---|---|
@@ -302,23 +377,75 @@ $$b_i(\theta)=\mathbf1[I(R_\theta x_i)&lt;I(R_\theta y_i)].$$
 
 有监督类别识别、描述子模式学习、近邻数据库建立、图像匹配评估是不同环节。大库测试对已有数据库图像做变换，很适合检验检索能力，却不能视为“从未见过的物体类别泛化”。
 
-## 五组结果怎样读
+### 五组结果怎样读
 
-**图 2：质心方向在所测噪声下较稳。** 比较角度误差的标准差，支持廉价方向估计可用。不能据此声称低纹理、对称图块或强透视下方向也同样可靠。
+**[图 2](#rc-60-figure-2)：质心方向在所测噪声下较稳。** 比较角度误差的标准差，支持廉价方向估计可用。不能据此声称低纹理、对称图块或强透视下方向也同样可靠。
 
-**图 3—6：消融解释了 rBRIEF 的必要性。** 简单旋转 BRIEF 后，均值分布与 PCA 谱暴露方差损失、冗余增加；选择测试后改善，内外点距离分布也更易区分。PCA 图是诊断工具，不是在线描述子的计算步骤。
+&lt;!-- figure-ref-v6:start:rc-60-figure-2 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-60-figure-2&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/060-fig-2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/060-fig-2.png&quot; width=&quot;640&quot; height=&quot;299&quot; alt=&quot;方向估计误差标准差随图像噪声强度变化&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 2，PDF 第 3 页；&lt;a href=&quot;https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-**图 7—9：没有每个场景都第一。** 高斯噪声 10 的人工旋转试验中，ORB 内点比例超过 70%；真实 Magazines 比较中 ORB 为 36.180%，SURF 为 38.305%，SIFT 为 34.010%。Boat 中 ORB 45.8%、SURF 28.6%、SIFT 30.2%。以 Boat 对 SIFT 为例，绝对差 15.6 个百分点，相对提升约 51.7%，两者不能混写。
+读图：蓝色质心法曲线在所测噪声范围内明显低于另两种方向方法；横轴只是这里测试的高斯强度噪声，不包含所有成像变化。
+&lt;!-- figure-ref-v6:end:rc-60-figure-2 --&gt;
 
-**图 10、11：速度与检索准确率是联合曲线。** rBRIEF 的桶更均匀，LSH 查询在相应设置下有优势。但 SIFT 库约 160 万条、rBRIEF 约 180 万条，索引结构和参数也不同；图说明系统组合的权衡，而不是隔离所有其他变量后唯一归因于描述子。
+**[图 3](#rc-60-figure-3)–[图 6](https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=5)：消融解释了 rBRIEF 的必要性。** 简单旋转 BRIEF 后，均值分布与 PCA 谱暴露方差损失、冗余增加；选择测试后改善，内外点距离分布也更易区分。PCA 图是诊断工具，不是在线描述子的计算步骤。
+
+&lt;!-- figure-ref-v6:start:rc-60-final-source-gap-note --&gt;
+&lt;span id=&quot;rc-60-figure-6&quot;&gt;&lt;/span&gt;&lt;span id=&quot;rc-60-figure-9&quot;&gt;&lt;/span&gt;&lt;p class=&quot;figure-reference-note&quot;&gt;尚未内嵌：&lt;a href=&quot;https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;图 6&lt;/a&gt;、&lt;a href=&quot;https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;图 9&lt;/a&gt;。方向估计、去相关与匹配性能的定量证据已展示；剩余为学习所得测试对图案和摄影匹配拼图。前者依赖具体训练结果，后者是另一个视觉例证；当前不继续扩展到近完整的学习图案与示例影像集，也不以随机模式冒充学得结果。&lt;/p&gt;
+&lt;!-- figure-ref-v6:end:rc-60-final-source-gap-note --&gt;
+
+
+
+
+
+&lt;!-- figure-ref-v6:start:rc-60-figure-3 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-60-figure-3&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/060-fig-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/060-fig-3.png&quot; width=&quot;640&quot; height=&quot;444&quot; alt=&quot;BRIEF及旋转和筛选版本的位响应均值直方图&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 3，PDF 第 3 页；&lt;a href=&quot;https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：简单旋转后的红柱分布扩展，说明测试位的均值性质发生变化；该分布是选择低偏置测试对的依据之一。
+&lt;!-- figure-ref-v6:end:rc-60-figure-3 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-60-figure-4 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-60-figure-4&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/060-fig-4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/060-fig-4.png&quot; width=&quot;640&quot; height=&quot;319&quot; alt=&quot;不同BRIEF版本的PCA特征值谱&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 4，PDF 第 4 页；&lt;a href=&quot;https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：前三组谱的下降形态用于诊断测试位之间的相关性；PCA在这里是分析手段，不是在线计算描述子的步骤。
+&lt;!-- figure-ref-v6:end:rc-60-figure-4 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-60-figure-5 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-60-figure-5&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/060-fig-5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/060-fig-5.png&quot; width=&quot;640&quot; height=&quot;384&quot; alt=&quot;内点和外点描述子距离分布的对比&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 5，PDF 第 4 页；&lt;a href=&quot;https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：实线和虚线分别对应匹配与非匹配距离，分布分离程度决定阈值辨识的难易；不能只凭曲线峰值判断所有场景的匹配率。
+&lt;!-- figure-ref-v6:end:rc-60-figure-5 --&gt;
+
+**[图 7–9](#rc-60-figure-7)：没有每个场景都第一。** 高斯噪声 10 的人工旋转试验中，ORB 内点比例超过 70%；真实 Magazines 比较中 ORB 为 36.180%，SURF 为 38.305%，SIFT 为 34.010%。Boat 中 ORB 45.8%、SURF 28.6%、SIFT 30.2%。以 Boat 对 SIFT 为例，绝对差 15.6 个百分点，相对提升约 51.7%，两者不能混写。
+
+&lt;!-- figure-ref-v6:start:rc-60-figure-8 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-60-figure-8&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/060-fig-8.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/060-fig-8.png&quot; width=&quot;640&quot; height=&quot;444&quot; alt=&quot;多种噪声设置下匹配内点比例随旋转角变化&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 8，PDF 第 5 页；&lt;a href=&quot;https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：不同噪声水平形成多条曲线，各方法相对表现随角度和噪声变化；这组人工旋转试验不能代替真实透视变化评测。
+&lt;!-- figure-ref-v6:end:rc-60-figure-8 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-60-use-note --&gt;
+图6的测试对分布和图9的实景匹配拼图暂未转载，以控制同源图像的累计摘引范围；对应原文链接保留。
+&lt;!-- figure-ref-v6:end:rc-60-use-note --&gt;
+
+**[图 10](#rc-60-figure-10)、11：速度与检索准确率是联合曲线。** rBRIEF 的桶更均匀，LSH 查询在相应设置下有优势。但 SIFT 库约 160 万条、rBRIEF 约 180 万条，索引结构和参数也不同；图说明系统组合的权衡，而不是隔离所有其他变量后唯一归因于描述子。
+
+&lt;!-- figure-ref-v6:start:rc-60-figure-10 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-60-figure-10&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/060-fig-10.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/060-fig-10.png&quot; width=&quot;640&quot; height=&quot;496&quot; alt=&quot;两个图像数据集的哈希桶大小分布&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 10，PDF 第 6 页；&lt;a href=&quot;https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：横轴为桶大小、纵轴为桶数量，三种描述子的分布不同；该差异与候选检索负担有关，但还受索引设置影响。
+&lt;!-- figure-ref-v6:end:rc-60-figure-10 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-60-figure-11 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-60-figure-11&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/060-fig-11.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/060-fig-11.png&quot; width=&quot;640&quot; height=&quot;496&quot; alt=&quot;查询成功比例与每特征查询时间的散点权衡&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Ethan Rublee、Vincent Rabaud、Kurt Konolige、Gary Bradski（2011），图 11，PDF 第 6 页；&lt;a href=&quot;https://dev.ipol.im/~reyotero/bib/bib_all/2011_Rublee_Rabaud_ORB_alternative_to_sift_surf_willGarag_ICCV.pdf#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：每点对应一组系统设置，横轴成功比例与纵轴对数时间共同构成权衡；比较时仍需注意数据库规模和参数并不完全相同。
+&lt;!-- figure-ref-v6:end:rc-60-figure-11 --&gt;
 
 **第 6 节：大幅加速必须带实现与工作负载。** 24 张 640×480 图像上的平均每帧时间为 ORB 15.3 ms、SURF 217.3 ms、SIFT 5228.7 ms，约为 14.2 倍和 341.7 倍速度比。它们是当时实现的特征检测与描述计时，不是现代任意实现或整个 SLAM 的恒定倍数。物体应用检出约 61%，要求匹配后还能估计位姿；不能改称所有类别分类准确率。
 
 手机部分正文约报 7 Hz，分项均值 66.6、72.8、20.9 ms 相加为 160.3 ms，直接倒数约 6.24 Hz。它们不构成精确一致的逐帧预算，适合保留为近似报告而非自行调数字使其吻合。单应拟合的平面跟踪也不是完整三维建图。
 
-## 贡献、代价与边界
-
-新意在于发现“方向对齐改变了二进制测试统计”并给出廉价补救。简单把两个快速组件拼起来还不足够；关键是让省下来的描述位仍携带不同信息。
+## 五、限制方向不稳、尺度处理和强视角变化
 
 方向补偿主要处理平面旋转，金字塔处理部分尺度变化。第 7 节承认尺度不变性尚未充分研究。大视角变化、光照的空间非均匀变化、遮挡和运动模糊都可能超出局部比较的稳定范围。
 
@@ -326,23 +453,23 @@ $$b_i(\theta)=\mathbf1[I(R_\theta x_i)&lt;I(R_\theta y_i)].$$
 
 对机器人系统而言，特征提取只是部分时间。若后端优化、回环检索或数据传输成为瓶颈，ORB 的局部加速不会按同一倍数传递到整体。与后来 ORB-SLAM 的关系是提供重要视觉组件，而不是已经实现后者的关键帧管理与地图优化。
 
-## 一个关于“256 位不等于 256 份信息”的例子
+## 六、追问：256位描述子有很多重复测试时，增加长度为什么未必增加区分力？
 
-以下为教学构造。假设八个测试全部比较同一条明暗边界，任意图块的结果只能是 00000000 或 11111111。编码长度八位，实际只回答了一个二选一问题。
+&lt;details&gt;
+&lt;summary&gt;256位描述子有很多重复测试时，增加长度为什么未必增加区分力？&lt;/summary&gt;
 
-换成四种相对独立结构各问两遍，响应可能更丰富；再挑出稳定且尽量不重复的八个测试，区分不同图块的能力才可能增加。这里“独立”是教学理想化，rBRIEF 只按有限训练样本的相关性近似筛选。
+**参考答案**：重复或高度相关的比特会反复表达相近信息，几乎恒定的比特也难区分窗口。正文因此在方向补偿后检查方差与相关性。应固定长度比较测试集合的统计与匹配表现，而不能把位数直接当独立信息量。
 
-再看两串 10110000 与 10010100，异或为 00100100，汉明距离为 2。它只表示两次测试不同，不直接对应两像素位移、两度旋转或任何公制几何误差。
+教学参照：[ORB (Oriented FAST and Rotated BRIEF)](https://docs.opencv.org/4.13.0/d1/d89/tutorial_py_orb.html)。这里借用其分开方向补偿与描述统计的讲法。
 
-五个前置概念：**关键点检测**寻找可重复的局部位置；**描述子**编码局部外观以便比较；**方向归一化**在局部坐标里补偿旋转；**比特方差与相关性**衡量测试是否有区分力及是否重复；**汉明距离**统计两个比特串的不同位置数。
+&lt;/details&gt;
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| FAST 没有方向、BRIEF 怕旋转 | 质心方向与旋转测试模式 | 在局部坐标对齐后比较相似结构 | 图 2、7 | 对称/低纹理时方向不稳 |
-| 对齐后测试变得偏置和重复 | 高方差、低相关贪心选择 | 有限比特容纳更多不同信息 | 图 3—6 | 有限训练分布，不保证完全独立 |
-| 描述与匹配昂贵 | 二进制编码、汉明距离、LSH | 廉价比较并减少检索候选 | 图 10、11，第 6 节 | 整体速度依赖数据库与后端 |
+## 七、把二进制特征交给检索与SLAM
 
-## 自测与参考答案
+- **模块组合**：[DBoW：怎样从相似图片中找出真正的重访地点](066-dbow.md)。将二进制局部特征量化成视觉词并检索地点。
+- **模块组合**：[ORB-SLAM：从持续跟踪走向能够重访和恢复的单目地图](082-orbslam.md)。把特征用于跟踪、建图与回环，位姿仍需几何优化。
+
+## 八、自测与参考答案
 
 ### 1．一个比特在所有图像里都稳定为 1，为什么反而不好？
 

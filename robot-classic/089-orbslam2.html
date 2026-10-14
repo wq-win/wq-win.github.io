@@ -42,15 +42,11 @@
                 <span class="text-gray-500">ORB-SLAM2：把单目、双目和深度观测接入同一套 SLAM 后端</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="fbd8ab5cc6d6ba6b04b38f84a598a299b0fdf3411504a61e09981fd5e029ccc5"><h1>089｜ORB-SLAM2：把单目、双目和深度观测接入同一套 SLAM 后端</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="fee5788368e4f07a868fd92a0b54e5357261b9efd5c80658515b795ff02c6431"><h1>089｜ORB-SLAM2：把单目、双目和深度观测接入同一套 SLAM 后端</h1>
 <p><a href="00-timeline.html">返回总览</a> · <a href="088-colmap.html">上一篇：COLMAP</a> · <a href="090-se-sync.html">下一篇：SE-Sync</a></p>
 <p><strong>论文</strong>：Raúl Mur-Artal、Juan D. Tardós，<em>ORB-SLAM2: an Open-Source SLAM System for Monocular, Stereo and RGB-D Cameras</em>，2016 年首次公开，2017 年发表于 T-RO。<a href="https://arxiv.org/html/1610.06475v2">论文 v2</a> · <a href="https://github.com/raulmur/ORB_SLAM2">官方代码</a>。</p>
-<p><strong>阅读范围</strong>：2017 年 6 月 v2 全部方法与实验、表 I–IV；未运行软件。本文不把 ORB-SLAM3 的视觉惯性、鱼眼和多地图能力归入第二代系统。</p>
-<h2 id="一一分钟理解">一、一分钟理解</h2>
-<p>单目 ORB-SLAM 已能跟踪、建图、回环和重定位，但一张单目图像不能直接给出深度和公制尺度。双目或 RGB-D 可以更早得到三维点，却也带来不同的观测形式和噪声。</p>
-<p>ORB-SLAM2 将这些输入统一为单目二维观测或双目三维观测。RGB-D 深度被转换成“虚拟右图坐标”，后端继续使用特征匹配、局部 BA、回环修正和全局 BA。近点和远点分开处理，让系统同时利用近点的平移信息与远点的旋转信息。</p>
-<p>实验支持跨手持相机、无人机和汽车序列的定位能力，但并非所有序列最好。系统输出核心是稀疏地图；论文中的稠密点云是深度反投影显示，明确没有实施深度融合。</p>
-<p>一句话：<strong>在多种视觉传感器的 SLAM 中，通过统一观测与分层优化提升地图复用和公制定位能力，代价是特征可见性、标定依赖及全局优化成本；纯单目模式仍有尺度自由度。</strong></p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="082-orbslam.html">ORB-SLAM</a>已经有回环和恢复，但单目初始化与尺度仍是瓶颈；本篇直接继承其架构，把双目与 RGB-D 深度转为统一观测，并增加异步全局 BA。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <ol>
 <li><strong>视差</strong>：校正双目中左右对应位置的水平差，与深度成反比。</li>
@@ -59,15 +55,22 @@
 <li><strong>重定位</strong>：跟踪中断后，相对已有地图重新估计位姿。</li>
 <li><strong>局部与全局 BA</strong>：调整的状态范围不同，计算频率和代价也不同。</li>
 </ol>
-<h2 id="二问题定义与背景">二、问题定义与背景</h2>
+<h2 id="一问题设定双目和rgb-d怎样接入原有单目slam架构">一、问题设定：双目和RGB-D怎样接入原有单目SLAM架构</h2>
+<p>单目 ORB-SLAM 已能跟踪、建图、回环和重定位，但一张单目图像不能直接给出深度和公制尺度。双目或 RGB-D 可以更早得到三维点，却也带来不同的观测形式和噪声。</p>
+<h3 id="问题定义与背景">问题定义与背景</h3>
 <p>这是在线定位与建图系统，不是强化学习。输入分别可以是单目、校正后的双目或对齐深度图的 RGB-D；输出是相机位姿与地图点。这里“三种输入”是系统支持不同模式，不表示随时把任意三种设备自动混合标定。</p>
 <p>单目模式继承前作的多视图初始化与尺度问题；双目和 RGB-D 以已标定的基线或深度尺度提供公制约束。一旦深度尺度标定偏了，地图也会受影响。因此“尺度可观测”不等于“尺度数值永远准确”。</p>
 <p>长期漂移需要与旧地图重新建立联系。纯 VO 只向前累计局部变化；SLAM 通过回环与地图复用纠正累计误差。反过来，错误地点识别也可能污染地图，所以外观匹配之后必须几何验证。</p>
-<h2 id="三方法统一输入并保留不同信息强度">三、方法：统一输入并保留不同信息强度</h2>
+<h2 id="二统一观测表达区分近点远点的信息">二、统一观测表达，区分近点远点的信息</h2>
+<p>ORB-SLAM2 将这些输入统一为单目二维观测或双目三维观测。RGB-D 深度被转换成“虚拟右图坐标”，后端继续使用特征匹配、局部 BA、回环修正和全局 BA。近点和远点分开处理，让系统同时利用近点的平移信息与远点的旋转信息。</p>
 <h3 id="1-虚拟双目观测">1. 虚拟双目观测</h3>
 <p>双目关键点可写为 <span class="reading-math" data-tex="(u_L,v_L,u_R)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><msub><mi>u</mi><mi>L</mi></msub><mo separator="true">,</mo><msub><mi>v</mi><mi>L</mi></msub><mo separator="true">,</mo><msub><mi>u</mi><mi>R</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(u_L,v_L,u_R)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">L</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">L</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，校正后的左右对应点位于同一扫描线。RGB-D 特征的深度 <span class="reading-math" data-tex="d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi></mrow><annotation encoding="application/x-tex">d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span> 可以转成：</p>
 <p><span class="reading-math" data-tex="u_R=u_L-\frac{f_xb}{d}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>u</mi><mi>R</mi></msub><mo>=</mo><msub><mi>u</mi><mi>L</mi></msub><mo>−</mo><mfrac><mrow><msub><mi>f</mi><mi>x</mi></msub><mi>b</mi></mrow><mi>d</mi></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">u_R=u_L-\frac{f_xb}{d}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">L</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.0574em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3714em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">d</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal">b</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="f_x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>f</mi><mi>x</mi></msub></mrow><annotation encoding="application/x-tex">f_x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 为焦距，<span class="reading-math" data-tex="b"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>b</mi></mrow><annotation encoding="application/x-tex">b</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">b</span></span></span></span></span> 是等效基线。它让同一后端以相同形式处理深度，但虚拟右坐标并非真的拍到一张右图。噪声模型和深度尺度仍需要正确设定；深度无效的特征可保留为单目观测，不能当零深度点使用。</p>
+<p>虚拟双目还暴露一个容易忽视的统计关系。令 <span class="reading-math" data-tex="k=f_xb"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi><mo>=</mo><msub><mi>f</mi><mi>x</mi></msub><mi>b</mi></mrow><annotation encoding="application/x-tex">k=f_xb</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal">b</span></span></span></span></span>、深度为 <span class="reading-math" data-tex="d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi></mrow><annotation encoding="application/x-tex">d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span>，假设左像素误差 <span class="reading-math" data-tex="\epsilon_u"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ϵ</mi><mi>u</mi></msub></mrow><annotation encoding="application/x-tex">\epsilon_u</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">ϵ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">u</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 与深度误差 <span class="reading-math" data-tex="\epsilon_d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ϵ</mi><mi>d</mi></msub></mrow><annotation encoding="application/x-tex">\epsilon_d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">ϵ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">d</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 独立，方差分别为 <span class="reading-math" data-tex="\sigma_u^2,\sigma_d^2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>σ</mi><mi>u</mi><mn>2</mn></msubsup><mo separator="true">,</mo><msubsup><mi>σ</mi><mi>d</mi><mn>2</mn></msubsup></mrow><annotation encoding="application/x-tex">\sigma_u^2,\sigma_d^2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0972em;vertical-align:-0.2831em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-2.453em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">u</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-2.4169em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">d</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2831em;"><span></span></span></span></span></span></span></span></span></span></span>。一阶展开给出 <span class="reading-math" data-tex="\epsilon_{u_R}=\epsilon_u+(k/d^2)\epsilon_d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ϵ</mi><msub><mi>u</mi><mi>R</mi></msub></msub><mo>=</mo><msub><mi>ϵ</mi><mi>u</mi></msub><mo>+</mo><mo stretchy="false">(</mo><mi>k</mi><mi mathvariant="normal">/</mi><msup><mi>d</mi><mn>2</mn></msup><mo stretchy="false">)</mo><msub><mi>ϵ</mi><mi>d</mi></msub></mrow><annotation encoding="application/x-tex">\epsilon_{u_R}=\epsilon_u+(k/d^2)\epsilon_d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6809em;vertical-align:-0.2503em;"></span><span class="mord"><span class="mord mathnormal">ϵ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.3567em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1433em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2503em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">ϵ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">u</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mord">/</span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal">ϵ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">d</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，故左、右虚拟坐标的协方差为</p>
+<p><span class="reading-math" data-tex="\operatorname{Cov}\!\begin{pmatrix}u_L\\u_R\end{pmatrix}=\begin{bmatrix}\sigma_u^2&amp;\sigma_u^2\\\sigma_u^2&amp;\sigma_u^2+(k/d^2)^2\sigma_d^2\end{bmatrix}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Cov</mi><mo>⁡</mo><mtext> ⁣</mtext><mrow><mo fence="true">(</mo><mtable rowspacing="0.16em" columnalign="center" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><msub><mi>u</mi><mi>L</mi></msub></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><msub><mi>u</mi><mi>R</mi></msub></mstyle></mtd></mtr></mtable><mo fence="true">)</mo></mrow><mo>=</mo><mrow><mo fence="true">[</mo><mtable rowspacing="0.16em" columnalign="center center" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><msubsup><mi>σ</mi><mi>u</mi><mn>2</mn></msubsup></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><msubsup><mi>σ</mi><mi>u</mi><mn>2</mn></msubsup></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><msubsup><mi>σ</mi><mi>u</mi><mn>2</mn></msubsup></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><msubsup><mi>σ</mi><mi>u</mi><mn>2</mn></msubsup><mo>+</mo><mo stretchy="false">(</mo><mi>k</mi><mi mathvariant="normal">/</mi><msup><mi>d</mi><mn>2</mn></msup><msup><mo stretchy="false">)</mo><mn>2</mn></msup><msubsup><mi>σ</mi><mi>d</mi><mn>2</mn></msubsup></mrow></mstyle></mtd></mtr></mtable><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\operatorname{Cov}\!\begin{pmatrix}u_L\\u_R\end{pmatrix}=\begin{bmatrix}\sigma_u^2&amp;\sigma_u^2\\\sigma_u^2&amp;\sigma_u^2+(k/d^2)^2\sigma_d^2\end{bmatrix}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em;"></span><span class="mop"><span class="mord mathrm" style="margin-right:0.01389em;">Cov</span></span><span class="mspace" style="margin-right:-0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">(</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">L</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">)</span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">[</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-2.453em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">u</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-2.453em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">u</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em;"></span><span class="arraycolsep" style="width:0.5em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-2.453em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">u</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-2.453em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">u</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mord">/</span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-2.4169em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">d</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2831em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><strong>原创手算。</strong> 取 <span class="reading-math" data-tex="f_x=500"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>f</mi><mi>x</mi></msub><mo>=</mo><mn>500</mn></mrow><annotation encoding="application/x-tex">f_x=500</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">500</span></span></span></span></span> px、<span class="reading-math" data-tex="b=0.1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>b</mi><mo>=</mo><mn>0.1</mn></mrow><annotation encoding="application/x-tex">b=0.1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">b</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.1</span></span></span></span></span> m、<span class="reading-math" data-tex="d=2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo>=</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">d=2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span></span></span></span></span> m、<span class="reading-math" data-tex="\sigma_u=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>σ</mi><mi>u</mi></msub><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\sigma_u=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">u</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span> px、<span class="reading-math" data-tex="\sigma_d=0.04"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>σ</mi><mi>d</mi></msub><mo>=</mo><mn>0.04</mn></mrow><annotation encoding="application/x-tex">\sigma_d=0.04</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">d</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.04</span></span></span></span></span> m，则矩阵为 <span class="reading-math" data-tex="\begin{bmatrix}1&amp;1\\1&amp;1.25\end{bmatrix}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo fence="true">[</mo><mtable rowspacing="0.16em" columnalign="center center" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>1</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>1</mn></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>1</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>1.25</mn></mstyle></mtd></mtr></mtable><mo fence="true">]</mo></mrow><annotation encoding="application/x-tex">\begin{bmatrix}1&amp;1\\1&amp;1.25\end{bmatrix}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">[</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em;"></span><span class="arraycolsep" style="width:0.5em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1.25</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">]</span></span></span></span></span></span></span> px²。视差 <span class="reading-math" data-tex="u_L-u_R"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>u</mi><mi>L</mi></msub><mo>−</mo><msub><mi>u</mi><mi>R</mi></msub></mrow><annotation encoding="application/x-tex">u_L-u_R</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">L</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 的方差是 <span class="reading-math" data-tex="1+1.25-2=0.25"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mo>+</mo><mn>1.25</mn><mo>−</mo><mn>2</mn><mo>=</mo><mn>0.25</mn></mrow><annotation encoding="application/x-tex">1+1.25-2=0.25</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1.25</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.25</span></span></span></span></span> px²，而把两项误认为独立会得到 2.25 px²。这里说明的是由共享左坐标产生的相关性，<strong>不是宣称原始 ORB-SLAM2 实现采用了这张完整协方差矩阵</strong>。</p>
+<p><a href="https://arxiv.org/html/1610.06475v2">原文 III-A–B</a>用虚拟坐标统一几何投影，并采用特征尺度相关的优化权重；“统一表示”本身不证明各种深度传感器具有相同噪声模型。下文 Freiburg2 的深度尺度补偿也属于另一层系统误差：再精细的随机协方差都不能自动纠正整体深度乘了错误比例。</p>
 <h3 id="2-近点与远点">2. 近点与远点</h3>
 <p>论文第 III-A 节采用约四十倍基线的深度阈值。近点的视差较可靠，对尺度和平移有帮助；远点视差小，旋转信息仍有价值，但单帧深度不稳定，需要更多视图支持。</p>
 <p>对双目公式 <span class="reading-math" data-tex="Z=f_xb/\delta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Z</mi><mo>=</mo><msub><mi>f</mi><mi>x</mi></msub><mi>b</mi><mi mathvariant="normal">/</mi><mi>δ</mi></mrow><annotation encoding="application/x-tex">Z=f_xb/\delta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal">b</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span></span></span></span></span> 求导，可以得到教学近似 <span class="reading-math" data-tex="|\Delta Z|\approx Z^2|\Delta\delta|/(f_xb)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∣</mi><mi mathvariant="normal">Δ</mi><mi>Z</mi><mi mathvariant="normal">∣</mi><mo>≈</mo><msup><mi>Z</mi><mn>2</mn></msup><mi mathvariant="normal">∣</mi><mi mathvariant="normal">Δ</mi><mi>δ</mi><mi mathvariant="normal">∣</mi><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><msub><mi>f</mi><mi>x</mi></msub><mi>b</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">|\Delta Z|\approx Z^2|\Delta\delta|/(f_xb)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">∣Δ</span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="mord">∣</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord">∣Δ</span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord">∣/</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal">b</span><span class="mclose">)</span></span></span></span></span>。同样一个像素的视差误差，对远点造成更大的深度误差。这解释为何不能把所有点视为等精度，也说明“四十倍”是工程阈值而非普遍物理常数。</p>
@@ -81,6 +84,8 @@
 <p>双目/深度下尺度可观测，相关回环处理采用刚体变换；单目仍要考虑尺度。不能因为软件名相同，就把两种模式的数学自由度混为一谈。</p>
 <h3 id="5-定位模式与伪代码">5. 定位模式与伪代码</h3>
 <p>定位模式关闭建图和回环线程，主要使用既有地图匹配，必要时重定位；进入未建图区域时还利用相邻帧生成的 VO 点。前者约束相对旧地图的累计漂移，后者仍可能漂移。“零漂移”应理解为持续相对既有地图定位，而非任何时刻绝对误差为零。</p>
+<p>虚拟右坐标统一几何表达，近远点和传感器噪声仍提供不同强度的信息。下面检查观测到BA的接口，再按模式读米制定位结果。</p>
+<h2 id="三运行局部与全局优化检查米制尺度来源">三、运行局部与全局优化，检查米制尺度来源</h2>
 <pre><code class="language-text">输入：单目、双目或 RGB-D 流以及相应标定
 提取 ORB；生成单目观测和真实/虚拟双目观测
 按输入模式初始化地图
@@ -96,7 +101,35 @@
 输出：相机轨迹与稀疏地图
 </code></pre>
 <p>这是教学流程。优化目标、系统机制和实测误差是三层概念；线程多也不是算法自动获得低延迟的证明。</p>
-<h2 id="四实验设计与公平性">四、实验设计与公平性</h2>
+<h3 id="具体例子与前置概念">具体例子与前置概念</h3>
+<p><strong>自构例子，未运行。</strong> 取焦距 500 px、基线 0.1 m。2 m 处视差 25 px，20 m 处仅 2.5 px；0.5 px 误差对应的一阶深度误差约为 0.04 m 与 4 m。远点深度不准仍可对朝向变化提供约束，解释了“不丢掉所有远点，也不把远点当可靠近点”。</p>
+<h2 id="四按传感器模式读跨场景实验">四、按传感器模式读跨场景实验</h2>
+<h3 id="五组关键结果">五组关键结果</h3>
+<p><strong><a href="https://arxiv.org/pdf/1610.06475v2#page=6">表 I</a>，KITTI 01。</strong> 双目系统能处理前作单目失败的高速公路序列；相对平移误差为 1.39%，Stereo LSD-SLAM 为 2.36%。但绝对平移 RMSE 为 10.4 m，对照为 9.0 m。两个指标给出不同排序，不能只挑一项说全面更准。KITTI 00 相对平移 0.70% 也高于对照 0.63%。</p>
+<p><strong><a href="#rc-89-figure-3">图 3</a>、5：深度与尺度。</strong> 近点短暂可见时，双目较早初始化点有帮助；远点辅助旋转。作者用 KITTI 08 对比单目尺度漂移与双目轨迹，但它不是把传感器完全相同后只移除某一个代码模块的消融。</p>
+<!-- figure-ref-v6:start:rc-89-figure-3 -->
+<figure class="reading-evidence-figure" id="rc-89-figure-3"><a href="/robot-classic/assets/figure-refs-v6/089-fig-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/089-fig-3.png" width="640" height="252" alt="原论文图3：KITTI 01中近点和远点的彩色特征跟踪画面" loading="lazy"></a><figcaption>Raúl Mur-Artal、Juan D. Tardós（2016），图 3，PDF 第 6 页；<a href="https://arxiv.org/pdf/1610.06475v2#page=6" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：绿色点以立体基线倍数定义为近点，蓝色点更远；颜色并非跟踪正确与错误的标签。</p>
+<!-- figure-ref-v6:end:rc-89-figure-3 -->
+
+<!-- figure-ref-v6:start:rc-89-figure-5 -->
+<figure class="reading-evidence-figure" id="rc-89-figure-5"><a href="/robot-classic/assets/figure-refs-v6/089-fig-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/089-fig-5.png" width="640" height="291" alt="原论文图5：KITTI 08单目与双目估计轨迹分别对照真值" loading="lazy"></a><figcaption>Raúl Mur-Artal、Juan D. Tardós（2016），图 5，PDF 第 7 页；<a href="https://arxiv.org/pdf/1610.06475v2#page=7" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：黑色为估计轨迹、红色为真值；左右使用不同传感信息，不能解释成只替换了优化器。</p>
+<!-- figure-ref-v6:end:rc-89-figure-5 -->
+
+<p><strong><a href="https://arxiv.org/pdf/1610.06475v2#page=7">表 II</a>：EuRoC 并非全部成功。</strong> V1_02 为 0.020 m，对照 0.074 m；MH_04 为 0.119 m；V2_03 明确失败，原因是严重模糊。因此“厘米级”有具体序列条件，不能把失败行从总体稳健性叙述中删去。对照仅部分序列有数值，“—”不是零误差。</p>
+<p><strong><a href="https://arxiv.org/pdf/1610.06475v2#page=8">表 III</a>：RGB-D 的优势与例外。</strong> fr3/office 为 0.010 m、ElasticFusion 0.017 m；fr3/nst 则为 0.019 m、ElasticFusion 0.016 m。本方法不总领先。fr2/xyz 的 0.004 m 还应连同深度尺度补偿一起理解，不能单凭它证明稀疏 BA 普遍胜过稠密方法。</p>
+<p><strong><a href="https://arxiv.org/pdf/1610.06475v2#page=9">表 IV</a>：实时跟踪不等于全图每帧更新。</strong> EuRoC、KITTI、TUM 示例平均跟踪耗时分别 41.66、49.47、25.58 ms；TUM 示例全局 BA 本身约 1640.96 ms，在后台单次执行。平均跟踪低于相机周期支持实时运行，但误差条与单次记录不构成最坏延迟保证。</p>
+<p>另一个限制是 KITTI 09 的末尾回环没有检测到；不能写成所有存在回环的序列都成功闭环。证据见<a href="https://arxiv.org/html/1610.06475v2">原文第 IV 节</a>。</p>
+<!-- figure-ref-v6:start:rc-89-table-i-anchor -->
+<p><span id="rc-89-table-i"></span></p>
+<!-- figure-ref-v6:end:rc-89-table-i-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/089-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/089-evidence.png" width="772" height="512" alt="Table I：同一序列中同时检查相对平移误差和绝对 RMSE，两种指标可能给出相反排序" loading="lazy"></a><figcaption>原论文结果图／表摘引：Raúl Mur-Artal、Juan D. Tardós（2016），Table I，PDF 第 6 页；<a href="https://arxiv.org/pdf/1610.06475v2#page=6" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：同一序列中同时检查相对平移误差和绝对 RMSE，两种指标可能给出相反排序。KITTI 01 说明双目可完成单目困难场景，但并非每一列都比对照更低。</p>
+<p>第二代系统的双目／RGB-D 地图有公制信息；ORB-SLAM3 的视觉惯性、多地图及鱼眼能力属于后作。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -130,62 +163,26 @@
 </tr>
 <tr>
 <td>时间统计</td>
-<td>表 IV 一般任务为均值±两倍标准差；每条计时序列只有一次的大回环/全局 BA 任务报单次时间</td>
+<td><a href="https://arxiv.org/pdf/1610.06475v2#page=9">表 IV</a> 一般任务为均值±两倍标准差；每条计时序列只有一次的大回环/全局 BA 任务报单次时间</td>
 </tr>
 </tbody></table></div>
 <p>五次同序列运行反映多线程非确定性，不等于五个独立环境。深度补偿与基线配置差异也限制了将全部改善归因于 BA 的强因果结论。</p>
-<h2 id="五五组关键结果">五、五组关键结果</h2>
-<p><strong>表 I，KITTI 01。</strong> 双目系统能处理前作单目失败的高速公路序列；相对平移误差为 1.39%，Stereo LSD-SLAM 为 2.36%。但绝对平移 RMSE 为 10.4 m，对照为 9.0 m。两个指标给出不同排序，不能只挑一项说全面更准。KITTI 00 相对平移 0.70% 也高于对照 0.63%。</p>
-<p><strong>图 3、5：深度与尺度。</strong> 近点短暂可见时，双目较早初始化点有帮助；远点辅助旋转。作者用 KITTI 08 对比单目尺度漂移与双目轨迹，但它不是把传感器完全相同后只移除某一个代码模块的消融。</p>
-<p><strong>表 II：EuRoC 并非全部成功。</strong> V1_02 为 0.020 m，对照 0.074 m；MH_04 为 0.119 m；V2_03 明确失败，原因是严重模糊。因此“厘米级”有具体序列条件，不能把失败行从总体稳健性叙述中删去。对照仅部分序列有数值，“—”不是零误差。</p>
-<p><strong>表 III：RGB-D 的优势与例外。</strong> fr3/office 为 0.010 m、ElasticFusion 0.017 m；fr3/nst 则为 0.019 m、ElasticFusion 0.016 m。本方法不总领先。fr2/xyz 的 0.004 m 还应连同深度尺度补偿一起理解，不能单凭它证明稀疏 BA 普遍胜过稠密方法。</p>
-<p><strong>表 IV：实时跟踪不等于全图每帧更新。</strong> EuRoC、KITTI、TUM 示例平均跟踪耗时分别 41.66、49.47、25.58 ms；TUM 示例全局 BA 本身约 1640.96 ms，在后台单次执行。平均跟踪低于相机周期支持实时运行，但误差条与单次记录不构成最坏延迟保证。</p>
-<p>另一个限制是 KITTI 09 的末尾回环没有检测到；不能写成所有存在回环的序列都成功闭环。证据见<a href="https://arxiv.org/html/1610.06475v2">原文第 IV 节</a>。</p>
-<h2 id="六贡献代价与边界">六、贡献、代价与边界</h2>
+<h2 id="五保留纯单目尺度标定与稀疏地图边界">五、保留纯单目尺度、标定与稀疏地图边界</h2>
 <p>真正贡献是把多传感器视觉模式、地图复用及异步优化组织为可用系统，延续前作统一 ORB 特征的设计。它并不声称发明了双目、BA 或近远点区别，背景明确承认前人。</p>
 <p>作者把更强模糊鲁棒性、全向或多相机、大规模稠密融合列为未来工作。我的分析是，地图复用需要环境和外观足够稳定，动态物体或长期场景变化可能破坏关联；公制深度也不能解决所有低纹理与遮挡。可靠的定位模式仍需检测何时已退化为会漂移的局部 VO。</p>
-<h2 id="七具体例子与前置概念">七、具体例子与前置概念</h2>
-<p><strong>自构例子，未运行。</strong> 取焦距 500 px、基线 0.1 m。2 m 处视差 25 px，20 m 处仅 2.5 px；0.5 px 误差对应的一阶深度误差约为 0.04 m 与 4 m。远点深度不准仍可对朝向变化提供约束，解释了“不丢掉所有远点，也不把远点当可靠近点”。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>输入观测形式不同</td>
-<td>统一单目/双目特征约束</td>
-<td>共享后端与地图管理</td>
-<td>三数据集</td>
-<td>标定和深度尺度仍关键</td>
-</tr>
-<tr>
-<td>远点深度不可靠</td>
-<td>区分近远点并调整关键帧策略</td>
-<td>保留旋转信息并补充近点</td>
-<td>KITTI 01</td>
-<td>高速少纹理仍困难</td>
-</tr>
-<tr>
-<td>全局修正计算长</td>
-<td>后台 BA 与更新传播</td>
-<td>跟踪可继续运行</td>
-<td>表 IV</td>
-<td>并发状态需要一致管理</td>
-</tr>
-<tr>
-<td>已建图区域重复漂移</td>
-<td>地图复用和定位模式</td>
-<td>重新约束到旧地图</td>
-<td>系统演示与回环结果</td>
-<td>未建图区域仍会漂移</td>
-</tr>
-</tbody></table></div>
-<h2 id="八理解检查问题与答案">八、理解检查：问题与答案</h2>
+<h2 id="六追问把rgb-d深度转成虚拟右图坐标后是否意味着其噪声就与真实双目相同">六、追问：把RGB-D深度转成虚拟右图坐标后，是否意味着其噪声就与真实双目相同？</h2>
+<details>
+<summary>把RGB-D深度转成虚拟右图坐标后，是否意味着其噪声就与真实双目相同？</summary>
+
+<p><strong>参考答案</strong>：统一的是观测表达和几何接口，不是传感器的误差生成机制。仍须按深度来源、距离与标定条件设置权重并验证。比较时也应区分双目、RGB-D和纯单目模式，避免把一种输入的尺度能力归给全部模式。</p>
+</details>
+
+<h2 id="七加入惯性和多地图或转向稠密表面">七、加入惯性和多地图，或转向稠密表面</h2>
+<ul>
+<li><strong>直接继承</strong>：<a href="098-orbslam3.html">ORB-SLAM3：跟踪丢了以后，地图还能继续生长吗</a>。增加惯性初始化和Atlas多地图管理。</li>
+<li><strong>平行路线</strong>：<a href="084-elasticfusion.html">ElasticFusion：直接修正稠密地图，而不只修正相机轨迹</a>。用表面融合与形变处理RGB-D稠密地图。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <p><strong>问题 1：RGB-D 的虚拟右坐标是否意味着凭空增加了一个独立测量？</strong></p>
 <p><strong>答案：</strong> 不是。它只是把原深度测量换一种参数表达，信息量来自原始深度。必须同步转换噪声含义，不能当作又获得一台独立相机。</p>
 <p><strong>问题 2：为什么论文平均跟踪约 26 ms，却允许全局 BA 超过一秒？</strong></p>
@@ -203,19 +200,15 @@
 
 **论文**：Raúl Mur-Artal、Juan D. Tardós，*ORB-SLAM2: an Open-Source SLAM System for Monocular, Stereo and RGB-D Cameras*，2016 年首次公开，2017 年发表于 T-RO。[论文 v2](https://arxiv.org/html/1610.06475v2) · [官方代码](https://github.com/raulmur/ORB_SLAM2)。
 
-**阅读范围**：2017 年 6 月 v2 全部方法与实验、表 I–IV；未运行软件。本文不把 ORB-SLAM3 的视觉惯性、鱼眼和多地图能力归入第二代系统。
+### 先接住前作的问题
 
-## 一、一分钟理解
+[ORB-SLAM](082-orbslam.md)已经有回环和恢复，但单目初始化与尺度仍是瓶颈；本篇直接继承其架构，把双目与 RGB-D 深度转为统一观测，并增加异步全局 BA。
+
+## 一、问题设定：双目和RGB-D怎样接入原有单目SLAM架构
 
 单目 ORB-SLAM 已能跟踪、建图、回环和重定位，但一张单目图像不能直接给出深度和公制尺度。双目或 RGB-D 可以更早得到三维点，却也带来不同的观测形式和噪声。
 
-ORB-SLAM2 将这些输入统一为单目二维观测或双目三维观测。RGB-D 深度被转换成“虚拟右图坐标”，后端继续使用特征匹配、局部 BA、回环修正和全局 BA。近点和远点分开处理，让系统同时利用近点的平移信息与远点的旋转信息。
-
-实验支持跨手持相机、无人机和汽车序列的定位能力，但并非所有序列最好。系统输出核心是稀疏地图；论文中的稠密点云是深度反投影显示，明确没有实施深度融合。
-
-一句话：**在多种视觉传感器的 SLAM 中，通过统一观测与分层优化提升地图复用和公制定位能力，代价是特征可见性、标定依赖及全局优化成本；纯单目模式仍有尺度自由度。**
-
-## 二、问题定义与背景
+### 问题定义与背景
 
 这是在线定位与建图系统，不是强化学习。输入分别可以是单目、校正后的双目或对齐深度图的 RGB-D；输出是相机位姿与地图点。这里“三种输入”是系统支持不同模式，不表示随时把任意三种设备自动混合标定。
 
@@ -223,7 +216,9 @@ ORB-SLAM2 将这些输入统一为单目二维观测或双目三维观测。RGB-
 
 长期漂移需要与旧地图重新建立联系。纯 VO 只向前累计局部变化；SLAM 通过回环与地图复用纠正累计误差。反过来，错误地点识别也可能污染地图，所以外观匹配之后必须几何验证。
 
-## 三、方法：统一输入并保留不同信息强度
+## 二、统一观测表达，区分近点远点的信息
+
+ORB-SLAM2 将这些输入统一为单目二维观测或双目三维观测。RGB-D 深度被转换成“虚拟右图坐标”，后端继续使用特征匹配、局部 BA、回环修正和全局 BA。近点和远点分开处理，让系统同时利用近点的平移信息与远点的旋转信息。
 
 ### 1. 虚拟双目观测
 
@@ -232,6 +227,14 @@ ORB-SLAM2 将这些输入统一为单目二维观测或双目三维观测。RGB-
 $$u_R=u_L-\frac{f_xb}{d}.$$
 
 $f_x$ 为焦距，$b$ 是等效基线。它让同一后端以相同形式处理深度，但虚拟右坐标并非真的拍到一张右图。噪声模型和深度尺度仍需要正确设定；深度无效的特征可保留为单目观测，不能当零深度点使用。
+
+虚拟双目还暴露一个容易忽视的统计关系。令 $k=f_xb$、深度为 $d$，假设左像素误差 $\epsilon_u$ 与深度误差 $\epsilon_d$ 独立，方差分别为 $\sigma_u^2,\sigma_d^2$。一阶展开给出 $\epsilon_{u_R}=\epsilon_u+(k/d^2)\epsilon_d$，故左、右虚拟坐标的协方差为
+
+$$\operatorname{Cov}\!\begin{pmatrix}u_L\\u_R\end{pmatrix}=\begin{bmatrix}\sigma_u^2&amp;\sigma_u^2\\\sigma_u^2&amp;\sigma_u^2+(k/d^2)^2\sigma_d^2\end{bmatrix}.$$
+
+**原创手算。** 取 $f_x=500$ px、$b=0.1$ m、$d=2$ m、$\sigma_u=1$ px、$\sigma_d=0.04$ m，则矩阵为 $\begin{bmatrix}1&amp;1\\1&amp;1.25\end{bmatrix}$ px²。视差 $u_L-u_R$ 的方差是 $1+1.25-2=0.25$ px²，而把两项误认为独立会得到 2.25 px²。这里说明的是由共享左坐标产生的相关性，**不是宣称原始 ORB-SLAM2 实现采用了这张完整协方差矩阵**。
+
+[原文 III-A–B](https://arxiv.org/html/1610.06475v2)用虚拟坐标统一几何投影，并采用特征尺度相关的优化权重；“统一表示”本身不证明各种深度传感器具有相同噪声模型。下文 Freiburg2 的深度尺度补偿也属于另一层系统误差：再精细的随机协方差都不能自动纠正整体深度乘了错误比例。
 
 ### 2. 近点与远点
 
@@ -259,6 +262,10 @@ $\pi_m$ 输出二维单目坐标，$\pi_s$ 输出三维双目坐标；$\rho$ 为
 
 定位模式关闭建图和回环线程，主要使用既有地图匹配，必要时重定位；进入未建图区域时还利用相邻帧生成的 VO 点。前者约束相对旧地图的累计漂移，后者仍可能漂移。“零漂移”应理解为持续相对既有地图定位，而非任何时刻绝对误差为零。
 
+虚拟右坐标统一几何表达，近远点和传感器噪声仍提供不同强度的信息。下面检查观测到BA的接口，再按模式读米制定位结果。
+
+## 三、运行局部与全局优化，检查米制尺度来源
+
 ```text
 输入：单目、双目或 RGB-D 流以及相应标定
 提取 ORB；生成单目观测和真实/虚拟双目观测
@@ -277,7 +284,54 @@ $\pi_m$ 输出二维单目坐标，$\pi_s$ 输出三维双目坐标；$\rho$ 为
 
 这是教学流程。优化目标、系统机制和实测误差是三层概念；线程多也不是算法自动获得低延迟的证明。
 
-## 四、实验设计与公平性
+### 具体例子与前置概念
+
+**自构例子，未运行。** 取焦距 500 px、基线 0.1 m。2 m 处视差 25 px，20 m 处仅 2.5 px；0.5 px 误差对应的一阶深度误差约为 0.04 m 与 4 m。远点深度不准仍可对朝向变化提供约束，解释了“不丢掉所有远点，也不把远点当可靠近点”。
+
+### 五个前置概念
+
+1. **视差**：校正双目中左右对应位置的水平差，与深度成反比。
+2. **公制尺度**：重建长度对应实际单位，需要已知基线或深度等信息。
+3. **共视图**：连接观察到共同地图点的关键帧。
+4. **重定位**：跟踪中断后，相对已有地图重新估计位姿。
+5. **局部与全局 BA**：调整的状态范围不同，计算频率和代价也不同。
+
+## 四、按传感器模式读跨场景实验
+
+### 五组关键结果
+
+**[表 I](https://arxiv.org/pdf/1610.06475v2#page=6)，KITTI 01。** 双目系统能处理前作单目失败的高速公路序列；相对平移误差为 1.39%，Stereo LSD-SLAM 为 2.36%。但绝对平移 RMSE 为 10.4 m，对照为 9.0 m。两个指标给出不同排序，不能只挑一项说全面更准。KITTI 00 相对平移 0.70% 也高于对照 0.63%。
+
+**[图 3](#rc-89-figure-3)、5：深度与尺度。** 近点短暂可见时，双目较早初始化点有帮助；远点辅助旋转。作者用 KITTI 08 对比单目尺度漂移与双目轨迹，但它不是把传感器完全相同后只移除某一个代码模块的消融。
+
+&lt;!-- figure-ref-v6:start:rc-89-figure-3 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-89-figure-3&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/089-fig-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/089-fig-3.png&quot; width=&quot;640&quot; height=&quot;252&quot; alt=&quot;原论文图3：KITTI 01中近点和远点的彩色特征跟踪画面&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Raúl Mur-Artal、Juan D. Tardós（2016），图 3，PDF 第 6 页；&lt;a href=&quot;https://arxiv.org/pdf/1610.06475v2#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：绿色点以立体基线倍数定义为近点，蓝色点更远；颜色并非跟踪正确与错误的标签。
+&lt;!-- figure-ref-v6:end:rc-89-figure-3 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-89-figure-5 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-89-figure-5&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/089-fig-5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/089-fig-5.png&quot; width=&quot;640&quot; height=&quot;291&quot; alt=&quot;原论文图5：KITTI 08单目与双目估计轨迹分别对照真值&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Raúl Mur-Artal、Juan D. Tardós（2016），图 5，PDF 第 7 页；&lt;a href=&quot;https://arxiv.org/pdf/1610.06475v2#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：黑色为估计轨迹、红色为真值；左右使用不同传感信息，不能解释成只替换了优化器。
+&lt;!-- figure-ref-v6:end:rc-89-figure-5 --&gt;
+
+**[表 II](https://arxiv.org/pdf/1610.06475v2#page=7)：EuRoC 并非全部成功。** V1_02 为 0.020 m，对照 0.074 m；MH_04 为 0.119 m；V2_03 明确失败，原因是严重模糊。因此“厘米级”有具体序列条件，不能把失败行从总体稳健性叙述中删去。对照仅部分序列有数值，“—”不是零误差。
+
+**[表 III](https://arxiv.org/pdf/1610.06475v2#page=8)：RGB-D 的优势与例外。** fr3/office 为 0.010 m、ElasticFusion 0.017 m；fr3/nst 则为 0.019 m、ElasticFusion 0.016 m。本方法不总领先。fr2/xyz 的 0.004 m 还应连同深度尺度补偿一起理解，不能单凭它证明稀疏 BA 普遍胜过稠密方法。
+
+**[表 IV](https://arxiv.org/pdf/1610.06475v2#page=9)：实时跟踪不等于全图每帧更新。** EuRoC、KITTI、TUM 示例平均跟踪耗时分别 41.66、49.47、25.58 ms；TUM 示例全局 BA 本身约 1640.96 ms，在后台单次执行。平均跟踪低于相机周期支持实时运行，但误差条与单次记录不构成最坏延迟保证。
+
+另一个限制是 KITTI 09 的末尾回环没有检测到；不能写成所有存在回环的序列都成功闭环。证据见[原文第 IV 节](https://arxiv.org/html/1610.06475v2)。
+
+&lt;!-- figure-ref-v6:start:rc-89-table-i-anchor --&gt;
+&lt;span id=&quot;rc-89-table-i&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-89-table-i-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/089-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/089-evidence.png&quot; width=&quot;772&quot; height=&quot;512&quot; alt=&quot;Table I：同一序列中同时检查相对平移误差和绝对 RMSE，两种指标可能给出相反排序&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文结果图／表摘引：Raúl Mur-Artal、Juan D. Tardós（2016），Table I，PDF 第 6 页；&lt;a href=&quot;https://arxiv.org/pdf/1610.06475v2#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：同一序列中同时检查相对平移误差和绝对 RMSE，两种指标可能给出相反排序。KITTI 01 说明双目可完成单目困难场景，但并非每一列都比对照更低。
+
+第二代系统的双目／RGB-D 地图有公制信息；ORB-SLAM3 的视觉惯性、多地图及鱼眼能力属于后作。
 
 | 项目 | 原文报告 |
 |---|---|
@@ -287,48 +341,31 @@ $\pi_m$ 输出二维单目坐标，$\pi_s$ 输出三维双目坐标；$\rho$ 为
 | 对照 | Stereo LSD-SLAM、ElasticFusion、Kintinuous、DVO-SLAM 等，取原作者发表结果，并非全部同机重跑 |
 | 精度指标 | KITTI 同时报相对平移/旋转误差与绝对平移 RMSE；其他表主要报平移 RMSE |
 | 特殊处理 | 作者对 Freiburg2 深度约 4% 尺度偏差做补偿，承认这可能部分解释较好结果 |
-| 时间统计 | 表 IV 一般任务为均值±两倍标准差；每条计时序列只有一次的大回环/全局 BA 任务报单次时间 |
+| 时间统计 | [表 IV](https://arxiv.org/pdf/1610.06475v2#page=9) 一般任务为均值±两倍标准差；每条计时序列只有一次的大回环/全局 BA 任务报单次时间 |
 
 五次同序列运行反映多线程非确定性，不等于五个独立环境。深度补偿与基线配置差异也限制了将全部改善归因于 BA 的强因果结论。
 
-## 五、五组关键结果
-
-**表 I，KITTI 01。** 双目系统能处理前作单目失败的高速公路序列；相对平移误差为 1.39%，Stereo LSD-SLAM 为 2.36%。但绝对平移 RMSE 为 10.4 m，对照为 9.0 m。两个指标给出不同排序，不能只挑一项说全面更准。KITTI 00 相对平移 0.70% 也高于对照 0.63%。
-
-**图 3、5：深度与尺度。** 近点短暂可见时，双目较早初始化点有帮助；远点辅助旋转。作者用 KITTI 08 对比单目尺度漂移与双目轨迹，但它不是把传感器完全相同后只移除某一个代码模块的消融。
-
-**表 II：EuRoC 并非全部成功。** V1_02 为 0.020 m，对照 0.074 m；MH_04 为 0.119 m；V2_03 明确失败，原因是严重模糊。因此“厘米级”有具体序列条件，不能把失败行从总体稳健性叙述中删去。对照仅部分序列有数值，“—”不是零误差。
-
-**表 III：RGB-D 的优势与例外。** fr3/office 为 0.010 m、ElasticFusion 0.017 m；fr3/nst 则为 0.019 m、ElasticFusion 0.016 m。本方法不总领先。fr2/xyz 的 0.004 m 还应连同深度尺度补偿一起理解，不能单凭它证明稀疏 BA 普遍胜过稠密方法。
-
-**表 IV：实时跟踪不等于全图每帧更新。** EuRoC、KITTI、TUM 示例平均跟踪耗时分别 41.66、49.47、25.58 ms；TUM 示例全局 BA 本身约 1640.96 ms，在后台单次执行。平均跟踪低于相机周期支持实时运行，但误差条与单次记录不构成最坏延迟保证。
-
-另一个限制是 KITTI 09 的末尾回环没有检测到；不能写成所有存在回环的序列都成功闭环。证据见[原文第 IV 节](https://arxiv.org/html/1610.06475v2)。
-
-## 六、贡献、代价与边界
+## 五、保留纯单目尺度、标定与稀疏地图边界
 
 真正贡献是把多传感器视觉模式、地图复用及异步优化组织为可用系统，延续前作统一 ORB 特征的设计。它并不声称发明了双目、BA 或近远点区别，背景明确承认前人。
 
 作者把更强模糊鲁棒性、全向或多相机、大规模稠密融合列为未来工作。我的分析是，地图复用需要环境和外观足够稳定，动态物体或长期场景变化可能破坏关联；公制深度也不能解决所有低纹理与遮挡。可靠的定位模式仍需检测何时已退化为会漂移的局部 VO。
 
-## 七、具体例子与前置概念
+## 六、追问：把RGB-D深度转成虚拟右图坐标后，是否意味着其噪声就与真实双目相同？
 
-**自构例子，未运行。** 取焦距 500 px、基线 0.1 m。2 m 处视差 25 px，20 m 处仅 2.5 px；0.5 px 误差对应的一阶深度误差约为 0.04 m 与 4 m。远点深度不准仍可对朝向变化提供约束，解释了“不丢掉所有远点，也不把远点当可靠近点”。
+&lt;details&gt;
+&lt;summary&gt;把RGB-D深度转成虚拟右图坐标后，是否意味着其噪声就与真实双目相同？&lt;/summary&gt;
 
-1. **视差**：校正双目中左右对应位置的水平差，与深度成反比。
-2. **公制尺度**：重建长度对应实际单位，需要已知基线或深度等信息。
-3. **共视图**：连接观察到共同地图点的关键帧。
-4. **重定位**：跟踪中断后，相对已有地图重新估计位姿。
-5. **局部与全局 BA**：调整的状态范围不同，计算频率和代价也不同。
+**参考答案**：统一的是观测表达和几何接口，不是传感器的误差生成机制。仍须按深度来源、距离与标定条件设置权重并验证。比较时也应区分双目、RGB-D和纯单目模式，避免把一种输入的尺度能力归给全部模式。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 输入观测形式不同 | 统一单目/双目特征约束 | 共享后端与地图管理 | 三数据集 | 标定和深度尺度仍关键 |
-| 远点深度不可靠 | 区分近远点并调整关键帧策略 | 保留旋转信息并补充近点 | KITTI 01 | 高速少纹理仍困难 |
-| 全局修正计算长 | 后台 BA 与更新传播 | 跟踪可继续运行 | 表 IV | 并发状态需要一致管理 |
-| 已建图区域重复漂移 | 地图复用和定位模式 | 重新约束到旧地图 | 系统演示与回环结果 | 未建图区域仍会漂移 |
+&lt;/details&gt;
 
-## 八、理解检查：问题与答案
+## 七、加入惯性和多地图，或转向稠密表面
+
+- **直接继承**：[ORB-SLAM3：跟踪丢了以后，地图还能继续生长吗](098-orbslam3.md)。增加惯性初始化和Atlas多地图管理。
+- **平行路线**：[ElasticFusion：直接修正稠密地图，而不只修正相机轨迹](084-elasticfusion.md)。用表面融合与形变处理RGB-D稠密地图。
+
+## 八、自测与参考答案
 
 **问题 1：RGB-D 的虚拟右坐标是否意味着凭空增加了一个独立测量？**
 

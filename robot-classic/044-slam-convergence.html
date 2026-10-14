@@ -42,24 +42,23 @@
                 <span class="text-gray-500">SLAM 的收敛结构：地图为什么能越走越确定</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="df17a55da2c9e498ddfa28ecd2724f1c133bcf6a567291f7f72c6a3a14d79858"><h1>044｜SLAM 的收敛结构：地图为什么能越走越确定</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="c1dd3c3402e2cf70d3eba53220ad9f0069b530bb9b9f581b055308e95243ab81"><h1>044｜SLAM 的收敛结构：地图为什么能越走越确定</h1>
 <p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="043-rrt-connect.html">上一篇</a> · <a href="045-fastslam.html">下一篇</a></p>
 <p><strong>论文</strong>：M. W. M. G. Dissanayake、Paul Newman、Steven Clark、Hugh F. Durrant-Whyte、M. Csorba，<em>A Solution to the Simultaneous Localization and Map Building (SLAM) Problem</em>，IEEE Transactions on Robotics and Automation 17(3)，229–241，2001。<a href="https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf">原文</a> · <a href="https://doi.org/10.1109/70.938381">DOI</a>。</p>
-<p><strong>阅读范围</strong>：已核对十三页原文的理论正文、实验描述、图注及两个附录；部分公式在文本抽取中缺失，以下公式用统一符号重写基本滤波与协方差关系，不逐字转录缺失表达式。图中的连续曲线不估读为精确数值。</p>
-<h2 id="一分钟共同犯错反而能知道彼此相隔多远">一分钟：共同犯错，反而能知道彼此相隔多远</h2>
-<p>机器人不知道自己在哪里，也不知道周围路标在哪里，却要用这些路标定位。这看似循环依赖：自身位置不准会把地图画错，地图不准又会影响自身位置。</p>
-<p>关键是这些错误并不是彼此独立的。机器人把自身位置整体向东估偏，刚看到的几个路标也会一起向东偏。它们的绝对位置可能都不准，彼此之间的距离却可以很准确。如果把这种共同误差记录下来，后续观测就能一致地修正整张地图。</p>
-<p>本文沿用联合状态的 Kalman 滤波框架，重点解释协方差的结构与收敛性质，并用室外毫米波雷达数据展示实际实现。它不是说所有非线性、动态、错误匹配的 SLAM 都已经解决，而是给出一个特定估计模型下的可解结构。</p>
-<p>一句话：<strong>在静态路标与正确观测模型等条件下，通过保留车辆和地图之间的相关性，可以逐步减少相对地图的不确定性，代价是联合估计规模增长，而且绝对参考信息不能凭空产生。</strong></p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="017-uncertain-map.html">空间不确定性</a>已经强调联合相关性，本篇追问反复观测后地图究竟收敛到什么。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>联合状态</strong>把车辆和地图一起估计；<strong>交叉协方差</strong>记录共同误差；<strong>创新</strong>是观测减去预测；<strong>一致性</strong>考察不确定性与实际误差是否匹配；<strong>参考自由度</strong>指相对观测不能自行确定的整体坐标变换。</p>
-<h2 id="背景与问题定义">背景与问题定义</h2>
+<h2 id="一问题设定反复观测后地图的相关误差究竟收敛到什么">一、问题设定：反复观测后地图的相关误差究竟收敛到什么</h2>
+<p>机器人不知道自己在哪里，也不知道周围路标在哪里，却要用这些路标定位。这看似循环依赖：自身位置不准会把地图画错，地图不准又会影响自身位置。</p>
+<h3 id="背景与问题定义">背景与问题定义</h3>
 <p>系统状态写成</p>
 <p><span class="reading-math" data-tex="X=[x_r^T,m_1^T,\ldots,m_N^T]^T,"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>X</mi><mo>=</mo><mo stretchy="false">[</mo><msubsup><mi>x</mi><mi>r</mi><mi>T</mi></msubsup><mo separator="true">,</mo><msubsup><mi>m</mi><mn>1</mn><mi>T</mi></msubsup><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><msubsup><mi>m</mi><mi>N</mi><mi>T</mi></msubsup><msup><mo stretchy="false">]</mo><mi>T</mi></msup><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">X=[x_r^T,m_1^T,\ldots,m_N^T]^T,</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1413em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.10903em;">N</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mclose"><span class="mclose">]</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span><span class="mpunct">,</span></span></span></span></span></span></p>
 <p>其中 <span class="reading-math" data-tex="x_r"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mi>r</mi></msub></mrow><annotation encoding="application/x-tex">x_r</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是车辆位置和朝向，<span class="reading-math" data-tex="m_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>m</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">m_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是静止路标的位置。输入是运动信息 <span class="reading-math" data-tex="u_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>u</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">u_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 和相对观测 <span class="reading-math" data-tex="z_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>z</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">z_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>；输出是联合状态估计 <span class="reading-math" data-tex="\hat X_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mover accent="true"><mi>X</mi><mo>^</mo></mover><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">\hat X_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0968em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 与协方差 <span class="reading-math" data-tex="P_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>P</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">P_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。这属于递归状态估计，没有策略学习、奖励函数或训练回合。</p>
 <p>理论部分第 II 节使用线性离散模型；第 IV 节实际车辆运动与距离、方位观测是非线性的，使用 EKF。观测所对应的路标必须关联正确，噪声模型要足以描述真实误差，地图里的路标应保持静止。原文第 231 页明确指出，若让路标随机运动，可以写进状态方程，但文中收敛性质不再成立。</p>
 <p>本文反对的捷径是：为了节省计算，将路标间的交叉协方差直接抹掉，再把它们当作独立地图点融合。这样虽然矩阵变小，却丢失了重复使用同一车辆误差的信息。真正的计算简化，需要保持适当的统计结构或采用保守近似，不能把相关当成不相关。</p>
-<h2 id="方法联合协方差究竟记录什么">方法：联合协方差究竟记录什么</h2>
+<h2 id="二保留车辆与地标联合协方差拆开三类结论">二、保留车辆与地标联合协方差，拆开三类结论</h2>
+<h3 id="方法联合协方差究竟记录什么">方法：联合协方差究竟记录什么</h3>
 <p>将协方差分块：</p>
 <p><span class="reading-math" data-tex="P=\begin{bmatrix}P_{rr}&amp;P_{rm}\\P_{mr}&amp;P_{mm}\end{bmatrix}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>P</mi><mo>=</mo><mrow><mo fence="true">[</mo><mtable rowspacing="0.16em" columnalign="center center" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><msub><mi>P</mi><mrow><mi>r</mi><mi>r</mi></mrow></msub></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><msub><mi>P</mi><mrow><mi>r</mi><mi>m</mi></mrow></msub></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><msub><mi>P</mi><mrow><mi>m</mi><mi>r</mi></mrow></msub></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><msub><mi>P</mi><mrow><mi>m</mi><mi>m</mi></mrow></msub></mstyle></mtd></mtr></mtable><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">P=\begin{bmatrix}P_{rr}&amp;P_{rm}\\P_{mr}&amp;P_{mm}\end{bmatrix}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">[</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">rr</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">m</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em;"></span><span class="arraycolsep" style="width:0.5em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span><span class="mord mathnormal mtight">m</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">mm</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="P_{rr}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>P</mi><mrow><mi>r</mi><mi>r</mi></mrow></msub></mrow><annotation encoding="application/x-tex">P_{rr}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">rr</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 表示车辆不确定性，<span class="reading-math" data-tex="P_{mm}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>P</mi><mrow><mi>m</mi><mi>m</mi></mrow></msub></mrow><annotation encoding="application/x-tex">P_{mm}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">mm</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 表示地图不确定性，非对角块记录车辆与地图误差如何一起变化。地图块内部也有不同路标之间的交叉协方差。</p>
@@ -71,14 +70,20 @@
 <h3 id="数学目标算法机制和评价指标">数学目标、算法机制和评价指标</h3>
 <p>滤波追求基于观测的状态估计及其不确定性；在线性高斯条件下，条件均值具有最小均方误差意义。本文新增的核心不是一个更换权重的损失，而是对完整联合滤波结构的收敛分析和实际建图实现。</p>
 <p>实验检查车辆与路标误差、创新和由协方差导出的置信界。协方差小是估计器对自身误差的判断；是否可信，要对照真实或参考误差，不能仅以椭圆变小判定成功。</p>
-<h2 id="三个结论怎样读才准确">三个结论怎样读才准确</h2>
+<h3 id="用共同模态与相对模态分开看地图收敛">用共同模态与相对模态分开看“地图收敛”</h3>
+<p>两路标的一维协方差若为 <span class="reading-math" data-tex="P=\begin{bmatrix}1&amp;0.99\\0.99&amp;1\end{bmatrix}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi><mo>=</mo><mrow><mo fence="true">[</mo><mtable rowspacing="0.16em" columnalign="center center" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>1</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>0.99</mn></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>0.99</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>1</mn></mstyle></mtd></mtr></mtable><mo fence="true">]</mo></mrow></mrow><annotation encoding="application/x-tex">P=\begin{bmatrix}1&amp;0.99\\0.99&amp;1\end{bmatrix}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">[</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">0.99</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em;"></span><span class="arraycolsep" style="width:0.5em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">0.99</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">]</span></span></span></span></span></span></span>，各自标准差仍为1米，但间距 <span class="reading-math" data-tex="m_2-m_1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>m</mi><mn>2</mn></msub><mo>−</mo><msub><mi>m</mi><mn>1</mn></msub></mrow><annotation encoding="application/x-tex">m_2-m_1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 的方差仅0.02平方米，标准差约0.141米。将非对角元删掉就会错误地得到2平方米。反过来，沿共同平移方向 <span class="reading-math" data-tex="(1,1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1,1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span> 的不确定性并没有被相对观测消除。</p>
+<p>从观测 <span class="reading-math" data-tex="z=m-r"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>z</mi><mo>=</mo><mi>m</mi><mo>−</mo><mi>r</mi></mrow><annotation encoding="application/x-tex">z=m-r</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">m</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span></span></span></span> 也能直接看到规范自由度：把机器人与所有路标一起加 <span class="reading-math" data-tex="\delta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>δ</mi></mrow><annotation encoding="application/x-tex">\delta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span></span></span></span></span>，所有 <span class="reading-math" data-tex="z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>z</mi></mrow><annotation encoding="application/x-tex">z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span></span></span></span></span> 不变。零残差不意味着绝对位置已确定。需要外部参考或明确固定规范，且不能把任意固定原点当成新传感信息。这个<strong>教学模态分析</strong>帮助理解原文第II节为何保留联合状态，以及为何特别假定路标静止。<a href="https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf">原文模型部分</a></p>
+<p><a href="017-uncertain-map.html">不确定地图</a>提供联合相关性的历史基础；<a href="045-fastslam.html">FastSLAM</a>是条件化分解的平行表示，未把地图点边缘独立化；<a href="053-graphslam.html">GraphSLAM</a>用稀疏约束组织历史轨迹。三者都必须面对相同的相对观测信息边界，不能由协方差或残差单项排名。</p>
+<h3 id="三个结论怎样读才准确">三个结论怎样读才准确</h3>
 <p><strong>第一，静态地图的协方差不增。</strong> 第 III.A 节的证明利用观测更新减去半正定矩阵，而静态路标在预测阶段没有新的过程噪声注入。因而地图协方差及相应主子矩阵具有单调性质。车辆本身会受运动噪声影响，完整状态协方差不能因此宣称每时刻都下降。原文定理措辞涉及子矩阵，理解其不确定性含义时应使用对应变量集合的主子矩阵，不能随意拿一个非对称矩形块的“体积”解释。</p>
 <p><strong>第二，相关性可以保存精确的相对关系。</strong> 对两个同类路标，差值的不确定性为</p>
 <p><span class="reading-math" data-tex="\operatorname{Cov}(m_i-m_j)=P_{ii}+P_{jj}-P_{ij}-P_{ji}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Cov</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>m</mi><mi>i</mi></msub><mo>−</mo><msub><mi>m</mi><mi>j</mi></msub><mo stretchy="false">)</mo><mo>=</mo><msub><mi>P</mi><mrow><mi>i</mi><mi>i</mi></mrow></msub><mo>+</mo><msub><mi>P</mi><mrow><mi>j</mi><mi>j</mi></mrow></msub><mo>−</mo><msub><mi>P</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>−</mo><msub><mi>P</mi><mrow><mi>j</mi><mi>i</mi></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\operatorname{Cov}(m_i-m_j)=P_{ii}+P_{jj}-P_{ij}-P_{ji}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm" style="margin-right:0.01389em;">Cov</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">ii</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">jj</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">ji</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p>即便各自绝对方差非零，只要误差主要是共同平移，差值方差仍可很小。原文第 233 页的极限论述围绕这一点。将交叉项删除，会把共同误差误当作两份独立误差。</p>
 <p><strong>第三，绝对地图存在参考不确定性的下界。</strong> 第 III 节第 234 页通过理想化、无运动过程噪声条件构造下界，并明确说非零过程噪声与观测信息竞争时，实际极限还受噪声影响。因此“下界由初始不确定性决定”不等于“任意轨迹都恰好达到这个下界”。外部已知路标或 GPS 可增加绝对参考，改变这个问题。</p>
 <p>这些都是模型内的结果。要从不断观测走向相对误差趋零，还需要相应地图关系持续获得有效信息；只在一个角落无限重复观测、从不联系远处地图，并不能让所有相对位置自动确定。对非线性系统，朝向不确定性和不可观方向还要单独分析，不能把线性定理当作普遍一致性证明。</p>
-<h2 id="输入到输出完整滤波之前还要确认路标">输入到输出：完整滤波之前还要确认路标</h2>
+<h3 id="输入到输出完整滤波之前还要确认路标">输入到输出：完整滤波之前还要确认路标</h3>
+<p>联合协方差保留了共同误差，实际更新却还依赖正确路标关联。两根柱子一起偏移的例子将检查相对精度，再进入雷达数据中的收敛证据。</p>
+<h2 id="三执行观测关联与滤波用共同平移误差验算">三、执行观测关联与滤波，用共同平移误差验算</h2>
 <pre><code class="language-text">输入：车辆运动数据、相对路标观测、运动和观测噪声模型
 初始化车辆估计与协方差；确认路标列表、候选列表为空
 每次运动数据到达：
@@ -95,7 +100,17 @@
 输出：车辆位姿、地图、联合不确定性和创新诊断
 </code></pre>
 <p>这是第 II 节滤波流程与附录 II 地图管理的教学合并。候选确认门限的具体实现依赖传感器；伪代码没有给出任意虚构的默认次数。增广新路标时，其位置由当前车辆估计计算，因此与车辆及已有地图相关，不能初始化为完全独立。</p>
-<h2 id="实验设定与证据">实验设定与证据</h2>
+<h3 id="自构例子两根柱子都偏了一米">自构例子：两根柱子都偏了一米</h3>
+<p>假设真实柱子在 5 米与 8 米处，机器人将自身原点整体错移了 1 米，于是地图给出 6 米与 9 米。绝对误差都是 1 米，柱间距离却仍为 3 米。若共同偏移的方差为 1，且独立误差可忽略，则 <span class="reading-math" data-tex="P_{11}=P_{22}=P_{12}=P_{21}=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>P</mi><mn>11</mn></msub><mo>=</mo><msub><mi>P</mi><mn>22</mn></msub><mo>=</mo><msub><mi>P</mi><mn>12</mn></msub><mo>=</mo><msub><mi>P</mi><mn>21</mn></msub><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">P_{11}=P_{22}=P_{12}=P_{21}=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">11</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">22</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">12</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">21</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>，差值方差等于零。</p>
+<p>这是说明相关性的理想教学例子，不是对实测精度的声称。加入独立观测噪声后，差值也会有方差；重复有效观测可以减小这一部分，却不能知道整个坐标原点应该平移多少。</p>
+<h2 id="四对照理论条件与室外雷达实验">四、对照理论条件与室外雷达实验</h2>
+<!-- figure-ref-v6:start:rc-44-figure-8-anchor -->
+<p><span id="rc-44-figure-8"></span></p>
+<!-- figure-ref-v6:end:rc-44-figure-8-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/044-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/044-evidence.png" width="800" height="625" alt="Fig. 8：比较估计位置误差与图中的置信界，而不是只看最终轨迹是否重合；真实误差与内部协方差描述的是不同对象" loading="lazy"></a><figcaption>原论文结果图／表摘引：M. W. M. G. Dissanayake、Paul Newman、Steven Clark、Hugh F. Durrant-Whyte、M. Csorba（2001），Fig. 8，PDF 第 9 页；<a href="https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=9" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：比较估计位置误差与图中的置信界，而不是只看最终轨迹是否重合；真实误差与内部协方差描述的是不同对象。一次符合置信界的运行不等于严格的长期一致性证明。</p>
+<p>标准差下降描述模型后验，不保证每次观测后真值误差都下降。联合相关性与绝对规范自由度必须同时保留。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -140,58 +155,71 @@
 <td>全量计算性能与大规模地图实验仍有限</td>
 </tr>
 </tbody></table></div>
-<p><strong>Fig. 5，第 236 页</strong>：大量雷达反射并不属于稳定点路标，约三成观测对应可辨认路标。这张图支持前端管理的重要性，不能把原始雷达回波全作为可靠地图约束。</p>
-<p><strong>Fig. 7–8，第 237 页</strong>：车辆轨迹和定位误差与参考比较，作者观察误差处于估计置信界内。文中约 5 厘米指参考轨迹算法计算出的绝对精度，不是 SLAM 自身的平均误差。</p>
-<p><strong>Fig. 9，第 237 页</strong>：距离、方位创新及其置信界用于在线模型诊断。创新合理支持观测预测的一致性，但一次匹配后的残差小也可能受错误关联筛选影响，不能独立排除所有地图偏差。</p>
-<p><strong>Fig. 10–11，第 238 页</strong>：对照不同时间初始化的两个反射器，展示车辆当时的不确定性如何进入路标初始方差。这比只看最终地图重叠，更直接检验联合估计的机制。</p>
-<p><strong>Fig. 12–13，第 238 页</strong>：路标标准差逐渐下降。原文注明为了画图，在路标被确认前将其方差显示为零，因此图上从零跳起不是“已经精确的路标突然变差”。该图支持有限数据下的协方差趋势，不能通过外观验证无限时间的极限定理。</p>
-<h2 id="贡献代价和未解决的问题">贡献、代价和未解决的问题</h2>
-<p>本篇把交叉相关性从计算麻烦重新解释为 SLAM 的核心信息。它也说明理论、前端和后端是相互依赖的：后端保留相关性，前端仍须避免把动态反射和错误对应变成硬约束。</p>
+<p><strong><a href="#rc-44-figure-5">Fig. 5</a>，第 236 页</strong>：大量雷达反射并不属于稳定点路标，约三成观测对应可辨认路标。这张图支持前端管理的重要性，不能把原始雷达回波全作为可靠地图约束。</p>
+<!-- figure-ref-v6:start:rc-44-figure-5 -->
+<figure class="reading-evidence-figure" id="rc-44-figure-5"><a href="/robot-classic/assets/figure-refs-v6/044-figure-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/044-figure-5.png" width="588" height="472" alt="原论文 Figure 5：雷达观测、车辆路径与反射器" loading="lazy"></a><figcaption>原论文图摘引：Dissanayake 等（2001），Figure 5，PDF 第 8 页；<a href="https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=8" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+<p>读图：图例分开原始雷达观测、车辆路径和反射器，远离真实反射器的散点说明原始返回并不都能直接当作可靠地标。</p>
+<!-- figure-ref-v6:end:rc-44-figure-5 -->
+
+<p><strong><a href="#rc-44-figure-7">Fig. 7–8</a>，第 237 页</strong>：车辆轨迹和定位误差与参考比较，作者观察误差处于估计置信界内。文中约 5 厘米指参考轨迹算法计算出的绝对精度，不是 SLAM 自身的平均误差。</p>
+<!-- figure-ref-v6:start:rc-44-figure-7 -->
+<figure class="reading-evidence-figure" id="rc-44-figure-7"><a href="/robot-classic/assets/figure-refs-v6/044-figure-7.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/044-figure-7.png" width="595" height="472" alt="原论文 Figure 7：实测与估计地标位置及车辆闭合路线" loading="lazy"></a><figcaption>原论文图摘引：Dissanayake 等（2001），Figure 7，PDF 第 9 页；<a href="https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=9" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+<p>读图：圆圈和星号分别对应实测与估计地标，环形曲线是车辆路线；视觉接近只是定性检查，还需和误差及协方差图一起读。</p>
+<!-- figure-ref-v6:end:rc-44-figure-7 -->
+
+<p><strong><a href="#rc-44-figure-9">Fig. 9</a>，第 237 页</strong>：距离、方位创新及其置信界用于在线模型诊断。创新合理支持观测预测的一致性，但一次匹配后的残差小也可能受错误关联筛选影响，不能独立排除所有地图偏差。</p>
+<!-- figure-ref-v6:start:rc-44-figure-9 -->
+<figure class="reading-evidence-figure" id="rc-44-figure-9"><a href="/robot-classic/assets/figure-refs-v6/044-figure-9.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/044-figure-9.png" width="592" height="466" alt="原论文 Figure 9：距离与方位创新及置信界" loading="lazy"></a><figcaption>原论文图摘引：Dissanayake 等（2001），Figure 9，PDF 第 9 页；<a href="https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=9" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+<p>读图：上下两图分别显示距离和方位创新，外侧曲线是对应置信界；应对照时间段检查残差是否与所估计的不确定性相符。</p>
+<!-- figure-ref-v6:end:rc-44-figure-9 -->
+
+<p><strong><a href="#rc-44-figure-10">Fig. 10–11</a>，第 238 页</strong>：对照不同时间初始化的两个反射器，展示车辆当时的不确定性如何进入路标初始方差。这比只看最终地图重叠，更直接检验联合估计的机制。</p>
+<!-- figure-ref-v6:start:rc-44-figure-11-reviewed -->
+<figure class="reading-evidence-figure" id="rc-44-figure-11"><a href="/robot-classic/assets/figure-refs-v6/044-fig-11-reviewed.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/044-fig-11-reviewed.png" width="640" height="503" alt="第三个路标的两方向估计误差及置信范围" loading="lazy"></a><figcaption>原论文图摘引：M. W. M. G. Dissanayake、Paul Newman、Steven Clark、Hugh F. Durrant-Whyte、M. Csorba，A Solution to the Simultaneous Localization and Map Building (SLAM) Problem，IEEE Transactions on Robotics and Automation 17(3)，229–241，2001，图 11，PDF 第 10 页；<a href="https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=10" target="_blank" rel="noopener noreferrer">原文与图注</a>。局部裁切；原版权保留。点击图片可放大。</figcaption></figure>
+
+<p>读图：这个路标较晚被观测，初始化时的置信范围与此前路标不同；保留这张对照才能检验车辆不确定性向新路标传播的论点。</p>
+<!-- figure-ref-v6:end:rc-44-figure-11-reviewed -->
+
+
+<!-- figure-ref-v6:start:rc-44-figure-10 -->
+<figure class="reading-evidence-figure" id="rc-44-figure-10"><a href="/robot-classic/assets/figure-refs-v6/044-figure-10.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/044-figure-10.png" width="591" height="480" alt="原论文 Figure 10：第一号地标的x、y位置误差" loading="lazy"></a><figcaption>原论文图摘引：Dissanayake 等（2001），Figure 10，PDF 第 10 页；<a href="https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=10" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+<p>读图：实线是地标误差，虚线给出置信边界；边界收窄与误差始终为零是不同的命题。</p>
+<!-- figure-ref-v6:end:rc-44-figure-10 -->
+
+<p><strong><a href="#rc-44-figure-12">Fig. 12–13</a>，第 238 页</strong>：路标标准差逐渐下降。原文注明为了画图，在路标被确认前将其方差显示为零，因此图上从零跳起不是“已经精确的路标突然变差”。该图支持有限数据下的协方差趋势，不能通过外观验证无限时间的极限定理。</p>
+<!-- figure-ref-v6:start:rc-44-figure-13-reviewed -->
+<figure class="reading-evidence-figure" id="rc-44-figure-13"><a href="/robot-classic/assets/figure-refs-v6/044-fig-13-reviewed.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/044-fig-13-reviewed.png" width="662" height="503" alt="全部路标在y方向的估计标准差随时间变化" loading="lazy"></a><figcaption>原论文图摘引：M. W. M. G. Dissanayake、Paul Newman、Steven Clark、Hugh F. Durrant-Whyte、M. Csorba，A Solution to the Simultaneous Localization and Map Building (SLAM) Problem，IEEE Transactions on Robotics and Automation 17(3)，229–241，2001，图 13，PDF 第 10 页；<a href="https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=10" target="_blank" rel="noopener noreferrer">原文与图注</a>。局部裁切；原版权保留。点击图片可放大。</figcaption></figure>
+
+<p>读图：与另一方向分开读取能看出不同坐标的不确定性；确认前人为显示为零的作图约定不能当作实际确定性。</p>
+<!-- figure-ref-v6:end:rc-44-figure-13-reviewed -->
+
+
+<!-- figure-ref-v6:start:rc-44-figure-12 -->
+<figure class="reading-evidence-figure" id="rc-44-figure-12"><a href="/robot-classic/assets/figure-refs-v6/044-figure-12.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/044-figure-12.png" width="591" height="475" alt="原论文 Figure 12：地标x方向标准差随时间变化" loading="lazy"></a><figcaption>原论文图摘引：Dissanayake 等（2001），Figure 12，PDF 第 10 页；<a href="https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=10" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+<p>读图：多条曲线代表不同地标的x方向标准差，首次观测和再观测发生在不同时间；下降趋势不应误读为所有地标同时初始化。</p>
+<!-- figure-ref-v6:end:rc-44-figure-12 -->
+
+<h2 id="五区分相对精度绝对参考与非线性失配">五、区分相对精度、绝对参考与非线性失配</h2>
 <p>完整协方差需要随地图规模平方增长的存储；单次局部观测也会影响大量矩阵元素。第 V 节讨论保守近似、相对表示与局部地图，说明可扩展性并没有被这篇论文彻底解决。下一篇 FastSLAM 将从条件独立性的角度寻找另一种分解。</p>
 <p><strong>作者明确的限制</strong>包括规模较小、路标提取和关联、地图管理及计算负担。<strong>进一步分析</strong>是：有限轨迹中的误差落在置信界内，尚不足以证明一般 EKF 一致性；共同使用传感器数据产生的参考轨迹也不是完全独立测量。加入外部参考、改变初始朝向误差或系统性偏差，才能更全面测试结论边界。</p>
-<h2 id="自构例子两根柱子都偏了一米">自构例子：两根柱子都偏了一米</h2>
-<p>假设真实柱子在 5 米与 8 米处，机器人将自身原点整体错移了 1 米，于是地图给出 6 米与 9 米。绝对误差都是 1 米，柱间距离却仍为 3 米。若共同偏移的方差为 1，且独立误差可忽略，则 <span class="reading-math" data-tex="P_{11}=P_{22}=P_{12}=P_{21}=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>P</mi><mn>11</mn></msub><mo>=</mo><msub><mi>P</mi><mn>22</mn></msub><mo>=</mo><msub><mi>P</mi><mn>12</mn></msub><mo>=</mo><msub><mi>P</mi><mn>21</mn></msub><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">P_{11}=P_{22}=P_{12}=P_{21}=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">11</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">22</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">12</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">21</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>，差值方差等于零。</p>
-<p>这是说明相关性的理想教学例子，不是对实测精度的声称。加入独立观测噪声后，差值也会有方差；重复有效观测可以减小这一部分，却不能知道整个坐标原点应该平移多少。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>不清楚地图会不会持续漂移</td>
-<td>分析完整联合协方差的收敛结构</td>
-<td>静态地图保留累计相对信息</td>
-<td>第 III 节及 Fig. 12–13</td>
-<td>理论条件不能无条件外推到非线性系统</td>
-</tr>
-<tr>
-<td>为节省计算删除相关性</td>
-<td>强调保留交叉协方差</td>
-<td>防止共同误差被错误重复融合</td>
-<td>联合更新方程与路标误差图</td>
-<td>地图规模增大时成本高</td>
-</tr>
-<tr>
-<td>雷达反射不全是稳定路标</td>
-<td>候选确认、质量与关联管理</td>
-<td>筛去不符合点路标模型的观测</td>
-<td>Fig. 5–6、附录 II</td>
-<td>关联错误仍可破坏地图</td>
-</tr>
-<tr>
-<td>相对准确被误解为绝对准确</td>
-<td>分析初始参考带来的下界</td>
-<td>揭示观测无法创造的信息</td>
-<td>第 234 页下界讨论</td>
-<td>绝对定位需外部约束</td>
-</tr>
-</tbody></table></div>
-<h2 id="自测与参考答案">自测与参考答案</h2>
+<h2 id="六追问如果所有路标和机器人一起平移内部相对观测能否发现这次变化">六、追问：如果所有路标和机器人一起平移，内部相对观测能否发现这次变化？</h2>
+<details>
+<summary>如果所有路标和机器人一起平移，内部相对观测能否发现这次变化？</summary>
+
+<p><strong>参考答案</strong>：在没有相应绝对参考的设定下，相对几何关系不会因共同平移而改变。共同误差与相对误差必须分开讨论；地图内部越来越精确不能自行给出绝对位置。比较协方差或真值误差时，应说明固定了什么参考系及如何对齐。</p>
+</details>
+
+<h2 id="七以不同表示扩展联合地图估计">七、以不同表示扩展联合地图估计</h2>
+<ul>
+<li><strong>平行路线</strong>：<a href="045-fastslam.html">FastSLAM：不删除相关性，而是把它放进轨迹假设</a>。条件于轨迹分解地图，以粒子表示共同历史歧义。</li>
+<li><strong>平行路线</strong>：<a href="053-graphslam.html">GraphSLAM：让整段历史一起解释地图</a>。保留历史变量并优化稀疏约束，改变计算组织而不创造绝对信息。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <p><strong>问题 1：为什么删除路标之间的协方差，可能同时让某些量看起来更不确定、又让后续融合过度自信？</strong></p>
 <p><strong>参考答案</strong>：删除正相关项会抬高差值方差，因为无法消去共同误差；但后续把本来相关的观测或估计当作独立证据重复融合，又可能错误地降低联合不确定性。问题不在所有方差都向同一方向变化，而是统计关系被破坏。</p>
 <p><strong>问题 2：一张图里地图标准差持续下降，是否证明地图实际误差每次都下降？</strong></p>
@@ -209,19 +237,15 @@
 
 **论文**：M. W. M. G. Dissanayake、Paul Newman、Steven Clark、Hugh F. Durrant-Whyte、M. Csorba，*A Solution to the Simultaneous Localization and Map Building (SLAM) Problem*，IEEE Transactions on Robotics and Automation 17(3)，229–241，2001。[原文](https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf) · [DOI](https://doi.org/10.1109/70.938381)。
 
-**阅读范围**：已核对十三页原文的理论正文、实验描述、图注及两个附录；部分公式在文本抽取中缺失，以下公式用统一符号重写基本滤波与协方差关系，不逐字转录缺失表达式。图中的连续曲线不估读为精确数值。
+### 先接住前作的问题
 
-## 一分钟：共同犯错，反而能知道彼此相隔多远
+[空间不确定性](017-uncertain-map.md)已经强调联合相关性，本篇追问反复观测后地图究竟收敛到什么。
+
+## 一、问题设定：反复观测后地图的相关误差究竟收敛到什么
 
 机器人不知道自己在哪里，也不知道周围路标在哪里，却要用这些路标定位。这看似循环依赖：自身位置不准会把地图画错，地图不准又会影响自身位置。
 
-关键是这些错误并不是彼此独立的。机器人把自身位置整体向东估偏，刚看到的几个路标也会一起向东偏。它们的绝对位置可能都不准，彼此之间的距离却可以很准确。如果把这种共同误差记录下来，后续观测就能一致地修正整张地图。
-
-本文沿用联合状态的 Kalman 滤波框架，重点解释协方差的结构与收敛性质，并用室外毫米波雷达数据展示实际实现。它不是说所有非线性、动态、错误匹配的 SLAM 都已经解决，而是给出一个特定估计模型下的可解结构。
-
-一句话：**在静态路标与正确观测模型等条件下，通过保留车辆和地图之间的相关性，可以逐步减少相对地图的不确定性，代价是联合估计规模增长，而且绝对参考信息不能凭空产生。**
-
-## 背景与问题定义
+### 背景与问题定义
 
 系统状态写成
 
@@ -233,7 +257,9 @@ $$X=[x_r^T,m_1^T,\ldots,m_N^T]^T,$$
 
 本文反对的捷径是：为了节省计算，将路标间的交叉协方差直接抹掉，再把它们当作独立地图点融合。这样虽然矩阵变小，却丢失了重复使用同一车辆误差的信息。真正的计算简化，需要保持适当的统计结构或采用保守近似，不能把相关当成不相关。
 
-## 方法：联合协方差究竟记录什么
+## 二、保留车辆与地标联合协方差，拆开三类结论
+
+### 方法：联合协方差究竟记录什么
 
 将协方差分块：
 
@@ -256,7 +282,15 @@ $H$ 是观测矩阵，$R$ 是观测噪声协方差，$S$ 是创新协方差，$K
 
 实验检查车辆与路标误差、创新和由协方差导出的置信界。协方差小是估计器对自身误差的判断；是否可信，要对照真实或参考误差，不能仅以椭圆变小判定成功。
 
-## 三个结论怎样读才准确
+### 用共同模态与相对模态分开看“地图收敛”
+
+两路标的一维协方差若为 $P=\begin{bmatrix}1&amp;0.99\\0.99&amp;1\end{bmatrix}$，各自标准差仍为1米，但间距 $m_2-m_1$ 的方差仅0.02平方米，标准差约0.141米。将非对角元删掉就会错误地得到2平方米。反过来，沿共同平移方向 $(1,1)$ 的不确定性并没有被相对观测消除。
+
+从观测 $z=m-r$ 也能直接看到规范自由度：把机器人与所有路标一起加 $\delta$，所有 $z$ 不变。零残差不意味着绝对位置已确定。需要外部参考或明确固定规范，且不能把任意固定原点当成新传感信息。这个**教学模态分析**帮助理解原文第II节为何保留联合状态，以及为何特别假定路标静止。[原文模型部分](https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf)
+
+[不确定地图](017-uncertain-map.md)提供联合相关性的历史基础；[FastSLAM](045-fastslam.md)是条件化分解的平行表示，未把地图点边缘独立化；[GraphSLAM](053-graphslam.md)用稀疏约束组织历史轨迹。三者都必须面对相同的相对观测信息边界，不能由协方差或残差单项排名。
+
+### 三个结论怎样读才准确
 
 **第一，静态地图的协方差不增。** 第 III.A 节的证明利用观测更新减去半正定矩阵，而静态路标在预测阶段没有新的过程噪声注入。因而地图协方差及相应主子矩阵具有单调性质。车辆本身会受运动噪声影响，完整状态协方差不能因此宣称每时刻都下降。原文定理措辞涉及子矩阵，理解其不确定性含义时应使用对应变量集合的主子矩阵，不能随意拿一个非对称矩形块的“体积”解释。
 
@@ -270,7 +304,11 @@ $$\operatorname{Cov}(m_i-m_j)=P_{ii}+P_{jj}-P_{ij}-P_{ji}.$$
 
 这些都是模型内的结果。要从不断观测走向相对误差趋零，还需要相应地图关系持续获得有效信息；只在一个角落无限重复观测、从不联系远处地图，并不能让所有相对位置自动确定。对非线性系统，朝向不确定性和不可观方向还要单独分析，不能把线性定理当作普遍一致性证明。
 
-## 输入到输出：完整滤波之前还要确认路标
+### 输入到输出：完整滤波之前还要确认路标
+
+联合协方差保留了共同误差，实际更新却还依赖正确路标关联。两根柱子一起偏移的例子将检查相对精度，再进入雷达数据中的收敛证据。
+
+## 三、执行观测关联与滤波，用共同平移误差验算
 
 ```text
 输入：车辆运动数据、相对路标观测、运动和观测噪声模型
@@ -291,7 +329,24 @@ $$\operatorname{Cov}(m_i-m_j)=P_{ii}+P_{jj}-P_{ij}-P_{ji}.$$
 
 这是第 II 节滤波流程与附录 II 地图管理的教学合并。候选确认门限的具体实现依赖传感器；伪代码没有给出任意虚构的默认次数。增广新路标时，其位置由当前车辆估计计算，因此与车辆及已有地图相关，不能初始化为完全独立。
 
-## 实验设定与证据
+### 自构例子：两根柱子都偏了一米
+
+假设真实柱子在 5 米与 8 米处，机器人将自身原点整体错移了 1 米，于是地图给出 6 米与 9 米。绝对误差都是 1 米，柱间距离却仍为 3 米。若共同偏移的方差为 1，且独立误差可忽略，则 $P_{11}=P_{22}=P_{12}=P_{21}=1$，差值方差等于零。
+
+这是说明相关性的理想教学例子，不是对实测精度的声称。加入独立观测噪声后，差值也会有方差；重复有效观测可以减小这一部分，却不能知道整个坐标原点应该平移多少。
+
+五个前置概念：**联合状态**把车辆和地图一起估计；**交叉协方差**记录共同误差；**创新**是观测减去预测；**一致性**考察不确定性与实际误差是否匹配；**参考自由度**指相对观测不能自行确定的整体坐标变换。
+
+## 四、对照理论条件与室外雷达实验
+
+&lt;!-- figure-ref-v6:start:rc-44-figure-8-anchor --&gt;
+&lt;span id=&quot;rc-44-figure-8&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-44-figure-8-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/044-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/044-evidence.png&quot; width=&quot;800&quot; height=&quot;625&quot; alt=&quot;Fig. 8：比较估计位置误差与图中的置信界，而不是只看最终轨迹是否重合；真实误差与内部协方差描述的是不同对象&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文结果图／表摘引：M. W. M. G. Dissanayake、Paul Newman、Steven Clark、Hugh F. Durrant-Whyte、M. Csorba（2001），Fig. 8，PDF 第 9 页；&lt;a href=&quot;https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=9&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：比较估计位置误差与图中的置信界，而不是只看最终轨迹是否重合；真实误差与内部协方差描述的是不同对象。一次符合置信界的运行不等于严格的长期一致性证明。
+
+标准差下降描述模型后验，不保证每次观测后真值误差都下降。联合相关性与绝对规范自由度必须同时保留。
 
 | 项目 | 第 IV 节的实际设置 | 解释边界 |
 |---|---|---|
@@ -303,40 +358,81 @@ $$\operatorname{Cov}(m_i-m_j)=P_{ii}+P_{jj}-P_{ij}-P_{ji}.$$
 | 评价 | 状态误差、创新及 95% 置信界；地图标准差随时间变化 | 显示一致性现象，没有跨大量独立任务的统计覆盖率检验 |
 | 训练预算 | 不适用；无神经网络训练 | 全量计算性能与大规模地图实验仍有限 |
 
-**Fig. 5，第 236 页**：大量雷达反射并不属于稳定点路标，约三成观测对应可辨认路标。这张图支持前端管理的重要性，不能把原始雷达回波全作为可靠地图约束。
+**[Fig. 5](#rc-44-figure-5)，第 236 页**：大量雷达反射并不属于稳定点路标，约三成观测对应可辨认路标。这张图支持前端管理的重要性，不能把原始雷达回波全作为可靠地图约束。
 
-**Fig. 7–8，第 237 页**：车辆轨迹和定位误差与参考比较，作者观察误差处于估计置信界内。文中约 5 厘米指参考轨迹算法计算出的绝对精度，不是 SLAM 自身的平均误差。
+&lt;!-- figure-ref-v6:start:rc-44-figure-5 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-44-figure-5&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/044-figure-5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/044-figure-5.png&quot; width=&quot;588&quot; height=&quot;472&quot; alt=&quot;原论文 Figure 5：雷达观测、车辆路径与反射器&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图摘引：Dissanayake 等（2001），Figure 5，PDF 第 8 页；&lt;a href=&quot;https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=8&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。点击图片可放大。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-**Fig. 9，第 237 页**：距离、方位创新及其置信界用于在线模型诊断。创新合理支持观测预测的一致性，但一次匹配后的残差小也可能受错误关联筛选影响，不能独立排除所有地图偏差。
+读图：图例分开原始雷达观测、车辆路径和反射器，远离真实反射器的散点说明原始返回并不都能直接当作可靠地标。
+&lt;!-- figure-ref-v6:end:rc-44-figure-5 --&gt;
 
-**Fig. 10–11，第 238 页**：对照不同时间初始化的两个反射器，展示车辆当时的不确定性如何进入路标初始方差。这比只看最终地图重叠，更直接检验联合估计的机制。
+**[Fig. 7–8](#rc-44-figure-7)，第 237 页**：车辆轨迹和定位误差与参考比较，作者观察误差处于估计置信界内。文中约 5 厘米指参考轨迹算法计算出的绝对精度，不是 SLAM 自身的平均误差。
 
-**Fig. 12–13，第 238 页**：路标标准差逐渐下降。原文注明为了画图，在路标被确认前将其方差显示为零，因此图上从零跳起不是“已经精确的路标突然变差”。该图支持有限数据下的协方差趋势，不能通过外观验证无限时间的极限定理。
+&lt;!-- figure-ref-v6:start:rc-44-figure-7 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-44-figure-7&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/044-figure-7.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/044-figure-7.png&quot; width=&quot;595&quot; height=&quot;472&quot; alt=&quot;原论文 Figure 7：实测与估计地标位置及车辆闭合路线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图摘引：Dissanayake 等（2001），Figure 7，PDF 第 9 页；&lt;a href=&quot;https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=9&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。点击图片可放大。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-## 贡献、代价和未解决的问题
+读图：圆圈和星号分别对应实测与估计地标，环形曲线是车辆路线；视觉接近只是定性检查，还需和误差及协方差图一起读。
+&lt;!-- figure-ref-v6:end:rc-44-figure-7 --&gt;
 
-本篇把交叉相关性从计算麻烦重新解释为 SLAM 的核心信息。它也说明理论、前端和后端是相互依赖的：后端保留相关性，前端仍须避免把动态反射和错误对应变成硬约束。
+**[Fig. 9](#rc-44-figure-9)，第 237 页**：距离、方位创新及其置信界用于在线模型诊断。创新合理支持观测预测的一致性，但一次匹配后的残差小也可能受错误关联筛选影响，不能独立排除所有地图偏差。
+
+&lt;!-- figure-ref-v6:start:rc-44-figure-9 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-44-figure-9&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/044-figure-9.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/044-figure-9.png&quot; width=&quot;592&quot; height=&quot;466&quot; alt=&quot;原论文 Figure 9：距离与方位创新及置信界&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图摘引：Dissanayake 等（2001），Figure 9，PDF 第 9 页；&lt;a href=&quot;https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=9&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。点击图片可放大。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：上下两图分别显示距离和方位创新，外侧曲线是对应置信界；应对照时间段检查残差是否与所估计的不确定性相符。
+&lt;!-- figure-ref-v6:end:rc-44-figure-9 --&gt;
+
+**[Fig. 10–11](#rc-44-figure-10)，第 238 页**：对照不同时间初始化的两个反射器，展示车辆当时的不确定性如何进入路标初始方差。这比只看最终地图重叠，更直接检验联合估计的机制。
+
+&lt;!-- figure-ref-v6:start:rc-44-figure-11-reviewed --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-44-figure-11&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/044-fig-11-reviewed.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/044-fig-11-reviewed.png&quot; width=&quot;640&quot; height=&quot;503&quot; alt=&quot;第三个路标的两方向估计误差及置信范围&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图摘引：M. W. M. G. Dissanayake、Paul Newman、Steven Clark、Hugh F. Durrant-Whyte、M. Csorba，A Solution to the Simultaneous Localization and Map Building (SLAM) Problem，IEEE Transactions on Robotics and Automation 17(3)，229–241，2001，图 11，PDF 第 10 页；&lt;a href=&quot;https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=10&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。局部裁切；原版权保留。点击图片可放大。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：这个路标较晚被观测，初始化时的置信范围与此前路标不同；保留这张对照才能检验车辆不确定性向新路标传播的论点。
+&lt;!-- figure-ref-v6:end:rc-44-figure-11-reviewed --&gt;
+
+
+&lt;!-- figure-ref-v6:start:rc-44-figure-10 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-44-figure-10&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/044-figure-10.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/044-figure-10.png&quot; width=&quot;591&quot; height=&quot;480&quot; alt=&quot;原论文 Figure 10：第一号地标的x、y位置误差&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图摘引：Dissanayake 等（2001），Figure 10，PDF 第 10 页；&lt;a href=&quot;https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=10&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。点击图片可放大。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：实线是地标误差，虚线给出置信边界；边界收窄与误差始终为零是不同的命题。
+&lt;!-- figure-ref-v6:end:rc-44-figure-10 --&gt;
+
+**[Fig. 12–13](#rc-44-figure-12)，第 238 页**：路标标准差逐渐下降。原文注明为了画图，在路标被确认前将其方差显示为零，因此图上从零跳起不是“已经精确的路标突然变差”。该图支持有限数据下的协方差趋势，不能通过外观验证无限时间的极限定理。
+
+&lt;!-- figure-ref-v6:start:rc-44-figure-13-reviewed --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-44-figure-13&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/044-fig-13-reviewed.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/044-fig-13-reviewed.png&quot; width=&quot;662&quot; height=&quot;503&quot; alt=&quot;全部路标在y方向的估计标准差随时间变化&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图摘引：M. W. M. G. Dissanayake、Paul Newman、Steven Clark、Hugh F. Durrant-Whyte、M. Csorba，A Solution to the Simultaneous Localization and Map Building (SLAM) Problem，IEEE Transactions on Robotics and Automation 17(3)，229–241，2001，图 13，PDF 第 10 页；&lt;a href=&quot;https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=10&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。局部裁切；原版权保留。点击图片可放大。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：与另一方向分开读取能看出不同坐标的不确定性；确认前人为显示为零的作图约定不能当作实际确定性。
+&lt;!-- figure-ref-v6:end:rc-44-figure-13-reviewed --&gt;
+
+
+&lt;!-- figure-ref-v6:start:rc-44-figure-12 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-44-figure-12&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/044-figure-12.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/044-figure-12.png&quot; width=&quot;591&quot; height=&quot;475&quot; alt=&quot;原论文 Figure 12：地标x方向标准差随时间变化&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图摘引：Dissanayake 等（2001），Figure 12，PDF 第 10 页；&lt;a href=&quot;https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/d/00938381.pdf#page=10&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。点击图片可放大。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：多条曲线代表不同地标的x方向标准差，首次观测和再观测发生在不同时间；下降趋势不应误读为所有地标同时初始化。
+&lt;!-- figure-ref-v6:end:rc-44-figure-12 --&gt;
+
+## 五、区分相对精度、绝对参考与非线性失配
 
 完整协方差需要随地图规模平方增长的存储；单次局部观测也会影响大量矩阵元素。第 V 节讨论保守近似、相对表示与局部地图，说明可扩展性并没有被这篇论文彻底解决。下一篇 FastSLAM 将从条件独立性的角度寻找另一种分解。
 
 **作者明确的限制**包括规模较小、路标提取和关联、地图管理及计算负担。**进一步分析**是：有限轨迹中的误差落在置信界内，尚不足以证明一般 EKF 一致性；共同使用传感器数据产生的参考轨迹也不是完全独立测量。加入外部参考、改变初始朝向误差或系统性偏差，才能更全面测试结论边界。
 
-## 自构例子：两根柱子都偏了一米
+## 六、追问：如果所有路标和机器人一起平移，内部相对观测能否发现这次变化？
 
-假设真实柱子在 5 米与 8 米处，机器人将自身原点整体错移了 1 米，于是地图给出 6 米与 9 米。绝对误差都是 1 米，柱间距离却仍为 3 米。若共同偏移的方差为 1，且独立误差可忽略，则 $P_{11}=P_{22}=P_{12}=P_{21}=1$，差值方差等于零。
+&lt;details&gt;
+&lt;summary&gt;如果所有路标和机器人一起平移，内部相对观测能否发现这次变化？&lt;/summary&gt;
 
-这是说明相关性的理想教学例子，不是对实测精度的声称。加入独立观测噪声后，差值也会有方差；重复有效观测可以减小这一部分，却不能知道整个坐标原点应该平移多少。
+**参考答案**：在没有相应绝对参考的设定下，相对几何关系不会因共同平移而改变。共同误差与相对误差必须分开讨论；地图内部越来越精确不能自行给出绝对位置。比较协方差或真值误差时，应说明固定了什么参考系及如何对齐。
 
-五个前置概念：**联合状态**把车辆和地图一起估计；**交叉协方差**记录共同误差；**创新**是观测减去预测；**一致性**考察不确定性与实际误差是否匹配；**参考自由度**指相对观测不能自行确定的整体坐标变换。
+&lt;/details&gt;
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 不清楚地图会不会持续漂移 | 分析完整联合协方差的收敛结构 | 静态地图保留累计相对信息 | 第 III 节及 Fig. 12–13 | 理论条件不能无条件外推到非线性系统 |
-| 为节省计算删除相关性 | 强调保留交叉协方差 | 防止共同误差被错误重复融合 | 联合更新方程与路标误差图 | 地图规模增大时成本高 |
-| 雷达反射不全是稳定路标 | 候选确认、质量与关联管理 | 筛去不符合点路标模型的观测 | Fig. 5–6、附录 II | 关联错误仍可破坏地图 |
-| 相对准确被误解为绝对准确 | 分析初始参考带来的下界 | 揭示观测无法创造的信息 | 第 234 页下界讨论 | 绝对定位需外部约束 |
+## 七、以不同表示扩展联合地图估计
 
-## 自测与参考答案
+- **平行路线**：[FastSLAM：不删除相关性，而是把它放进轨迹假设](045-fastslam.md)。条件于轨迹分解地图，以粒子表示共同历史歧义。
+- **平行路线**：[GraphSLAM：让整段历史一起解释地图](053-graphslam.md)。保留历史变量并优化稀疏约束，改变计算组织而不创造绝对信息。
+
+## 八、自测与参考答案
 
 **问题 1：为什么删除路标之间的协方差，可能同时让某些量看起来更不确定、又让后续融合过度自信？**
 
@@ -349,6 +445,8 @@ $$\operatorname{Cov}(m_i-m_j)=P_{ii}+P_{jj}-P_{ij}-P_{ji}.$$
 **问题 3：为什么本文的“初始不确定性下界”不能读成任意机器人最终误差都等于初始误差？**
 
 **参考答案**：下界在理想条件下构造，实际有过程噪声、观测不足和线性化误差，未必达到。外部已知路标会提供新的绝对信息，从而改变下界的前提；只增加未知路标则不会凭空确定绝对参考。
+
+
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

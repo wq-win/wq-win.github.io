@@ -42,21 +42,19 @@
                 <span class="text-gray-500">SVO：先用亮度找运动，再让特征做精修</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="5e087eeeca903a288c6b42987d5f046a3b0cb6de74e1a5ef949b7bc7c8408986"><h1>078｜SVO：先用亮度找运动，再让特征做精修</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="e1ebd92862d1bcb08adc95a97b2c73a20ab78afabdaa3748f5c361fec8975237"><h1>078｜SVO：先用亮度找运动，再让特征做精修</h1>
 <p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="077-loam.html">上一篇</a> · <a href="079-informed-rrtstar.html">下一篇</a></p>
 <p><strong>论文</strong>：Christian Forster、Matia Pizzoli、Davide Scaramuzza，<em>SVO: Fast Semi-Direct Monocular Visual Odometry</em>，ICRA 2014，15–22。<a href="https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf">作者提供的八页原稿</a> · <a href="https://rpg.ifi.uzh.ch/research_vo.html">实验室项目说明</a>。</p>
-<p><strong>阅读范围</strong>：核对原稿的系统、运动估计、深度滤波、参数与实验。页码按 PDF 页序。2017 年多相机版本及后来的 SVO Pro 是后续工作；其 IMU 先验、回环与当前速度数据不能归入本篇。</p>
-<h2 id="一分钟为什么一定要先给每个点找名字">一分钟：为什么一定要先给每个点找名字</h2>
-<p>传统特征流程会先检测、描述和匹配图像点，再用这些匹配估计相机运动。连续视频中两帧通常很接近，已有地图还能预测某个点应该出现在图像哪里。此时重新进行大范围特征识别可能浪费计算。</p>
-<p>SVO 先移动整台“虚拟相机”，让已有三维点周围的小图像块与新图像的亮度对齐；然后允许各个图像块独立微调位置，最后通过几何重投影误差精修位姿与结构。它是半直接方法，因为运动初始化使用亮度，后续仍使用显式图像对应和几何残差。</p>
-<p>地图也不急于接受一次三角化的结果。每个新点先有一个不确定的深度分布，多帧观测让分布收敛后才进入稳定地图，减少错误点污染跟踪。</p>
-<p>一句话：在相邻帧运动较小、相机已标定的单目视频中，通过直接对齐与概率深度筛选，降低运动估计成本并改善可靠性；代价是亮度和局部收敛假设，单目尺度及长期漂移仍需另外处理。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="008-lucas-kanade.html">LK</a>提供小块亮度对齐，特征法则有成熟的几何重投影优化；SVO把两种残差通过独立块精修连接起来。与同年的<a href="076-lsdslam.html">LSD-SLAM</a>相比，本篇是半直接里程计与稀疏地图路线，不能把后者的全局回环当作SVO原版已有功能。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>光度误差</strong>比较对应图像位置的亮度；<strong>重投影误差</strong>比较三维点投影与二维观测的位置；<strong>逆深度</strong>用距离倒数表示远近，适于初始化较远的点；<strong>极线约束</strong>把另一幅图中的候选对应限制到一条线；<strong>束调整</strong>联合优化相机位姿与三维结构。</p>
-<h2 id="背景与问题定义">背景与问题定义</h2>
+<h2 id="一问题设定相邻视频帧怎样连接亮度初始化与几何精修">一、问题设定：相邻视频帧怎样连接亮度初始化与几何精修</h2>
+<p>传统特征流程会先检测、描述和匹配图像点，再用这些匹配估计相机运动。连续视频中两帧通常很接近，已有地图还能预测某个点应该出现在图像哪里。此时重新进行大范围特征识别可能浪费计算。</p>
+<h3 id="背景与问题定义">背景与问题定义</h3>
 <p>目标是视觉里程计，服务于微型飞行器等平台的状态估计。它不是学习动作策略，也不是原生带全局回环的完整地图优化系统。输入为图像及相机模型；状态包含当前位姿、少量关键帧与地图点，输出相对运动和稀疏地图。</p>
 <p>单目相机只测视线方向，不能单凭图像决定真实米制尺度。把整张地图和相机平移一起放大，图像投影不变。高帧率使每步估计更容易，但不能取消这项几何不可辨识性。</p>
-<h2 id="方法三个阶段分别解决什么">方法：三个阶段分别解决什么</h2>
+<h2 id="二先直接对齐再独立调块和优化重投影">二、先直接对齐，再独立调块和优化重投影</h2>
 <h3 id="1用稀疏图像块约束一个相机运动">1．用稀疏图像块约束一个相机运动</h3>
 <p>设上一帧中地图点为 <span class="reading-math" data-tex="P_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>P</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">P_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，相机投影为 <span class="reading-math" data-tex="\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>π</mi></mrow><annotation encoding="application/x-tex">\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span></span></span></span></span>，当前相对位姿为 <span class="reading-math" data-tex="T"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>T</mi></mrow><annotation encoding="application/x-tex">T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">T</span></span></span></span></span>。教学形式的光度残差为</p>
 <p><span class="reading-math" data-tex="r_{i,u}(T)=I_k\bigl(\pi(TP_{i,u})\bigr)-I_{k-1}(u)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>r</mi><mrow><mi>i</mi><mo separator="true">,</mo><mi>u</mi></mrow></msub><mo stretchy="false">(</mo><mi>T</mi><mo stretchy="false">)</mo><mo>=</mo><msub><mi>I</mi><mi>k</mi></msub><mo fence="true" stretchy="true" minsize="1.2em" maxsize="1.2em">(</mo><mi>π</mi><mo stretchy="false">(</mo><mi>T</mi><msub><mi>P</mi><mrow><mi>i</mi><mo separator="true">,</mo><mi>u</mi></mrow></msub><mo stretchy="false">)</mo><mo fence="true" stretchy="true" minsize="1.2em" maxsize="1.2em">)</mo><mo>−</mo><msub><mi>I</mi><mrow><mi>k</mi><mo>−</mo><mn>1</mn></mrow></msub><mo stretchy="false">(</mo><mi>u</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">r_{i,u}(T)=I_k\bigl(\pi(TP_{i,u})\bigr)-I_{k-1}(u).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">u</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.35em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen"><span class="delimsizing size1">(</span></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">u</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mclose"><span class="delimsizing size1">)</span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">u</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
@@ -73,6 +71,13 @@
 <p><span class="reading-math" data-tex="p(\tilde d\mid d,\rho)=\rho\,\mathcal N(\tilde d;d,\tau^2)+(1-\rho)\,\mathcal U(\tilde d;d_{\min},d_{\max})."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>p</mi><mo stretchy="false">(</mo><mover accent="true"><mi>d</mi><mo>~</mo></mover><mo>∣</mo><mi>d</mi><mo separator="true">,</mo><mi>ρ</mi><mo stretchy="false">)</mo><mo>=</mo><mi>ρ</mi><mtext> </mtext><mi mathvariant="script">N</mi><mo stretchy="false">(</mo><mover accent="true"><mi>d</mi><mo>~</mo></mover><mo separator="true">;</mo><mi>d</mi><mo separator="true">,</mo><msup><mi>τ</mi><mn>2</mn></msup><mo stretchy="false">)</mo><mo>+</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>ρ</mi><mo stretchy="false">)</mo><mtext> </mtext><mi mathvariant="script">U</mi><mo stretchy="false">(</mo><mover accent="true"><mi>d</mi><mo>~</mo></mover><mo separator="true">;</mo><msub><mi>d</mi><mi>min</mi><mo>⁡</mo></msub><mo separator="true">,</mo><msub><mi>d</mi><mi>max</mi><mo>⁡</mo></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">p(\tilde d\mid d,\rho)=\rho\,\mathcal N(\tilde d;d,\tau^2)+(1-\rho)\,\mathcal U(\tilde d;d_{\min},d_{\max}).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1813em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9313em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">d</span></span><span style="top:-3.6134em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0833em;"><span class="mord">~</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">d</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">ρ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1813em;vertical-align:-0.25em;"></span><span class="mord mathnormal">ρ</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathcal" style="margin-right:0.14736em;">N</span><span class="mopen">(</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9313em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">d</span></span><span style="top:-3.6134em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0833em;"><span class="mord">~</span></span></span></span></span></span></span><span class="mpunct">;</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">d</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1813em;vertical-align:-0.25em;"></span><span class="mord mathnormal">ρ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathcal" style="margin-right:0.09931em;">U</span><span class="mopen">(</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9313em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">d</span></span><span style="top:-3.6134em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0833em;"><span class="mord">~</span></span></span></span></span></span></span><span class="mpunct">;</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3175em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mop mtight"><span class="mtight">m</span><span class="mtight">i</span><span class="mtight">n</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mop mtight"><span class="mtight">m</span><span class="mtight">a</span><span class="mtight">x</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="\rho"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ρ</mi></mrow><annotation encoding="application/x-tex">\rho</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ρ</span></span></span></span></span> 是内点概率，<span class="reading-math" data-tex="\tau^2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>τ</mi><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">\tau^2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span></span> 描述正常测量的不确定性。公式先按原文的深度记号说明模型；其实现采用逆深度滤波，不应把深度的方差数值原封不动当成逆深度方差。滤波更新综合多次观测，置信度足够才把点插入地图。</p>
 <p>这不是证明所有错误点都被消除：重复纹理产生的相关错误可能连续出现，且估计的位姿本身也有误差。独立观测假设失效时，分布可能过早变窄。概率模型提供的是处理外点的机制，而不是“地图永远没有外点”的证书。</p>
+<p>“不在运动估计阶段重新提取特征”并不等于“系统完全不提取特征”。原稿 §VI 仍在建图时使用 FAST，并用图像网格促使角点分布均匀。</p>
+<p>混合模型怎样让一次坏匹配“少说话”？固定候选真实深度 <span class="reading-math" data-tex="d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi></mrow><annotation encoding="application/x-tex">d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span>，并假定观测落在均匀外点分布的支持区间内，观测属于内点的条件概率为</p>
+<p><span class="reading-math" data-tex="\gamma=\frac{\rho\,\mathcal N(\tilde d;d,\tau^2)}{\rho\,\mathcal N(\tilde d;d,\tau^2)+(1-\rho)/(d_{\max}-d_{\min})}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>γ</mi><mo>=</mo><mfrac><mrow><mi>ρ</mi><mtext> </mtext><mi mathvariant="script">N</mi><mo stretchy="false">(</mo><mover accent="true"><mi>d</mi><mo>~</mo></mover><mo separator="true">;</mo><mi>d</mi><mo separator="true">,</mo><msup><mi>τ</mi><mn>2</mn></msup><mo stretchy="false">)</mo></mrow><mrow><mi>ρ</mi><mtext> </mtext><mi mathvariant="script">N</mi><mo stretchy="false">(</mo><mover accent="true"><mi>d</mi><mo>~</mo></mover><mo separator="true">;</mo><mi>d</mi><mo separator="true">,</mo><msup><mi>τ</mi><mn>2</mn></msup><mo stretchy="false">)</mo><mo>+</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>ρ</mi><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><msub><mi>d</mi><mi>max</mi><mo>⁡</mo></msub><mo>−</mo><msub><mi>d</mi><mi>min</mi><mo>⁡</mo></msub><mo stretchy="false">)</mo></mrow></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\gamma=\frac{\rho\,\mathcal N(\tilde d;d,\tau^2)}{\rho\,\mathcal N(\tilde d;d,\tau^2)+(1-\rho)/(d_{\max}-d_{\min})}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.6796em;vertical-align:-1.0713em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.6083em;"><span style="top:-2.1787em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">ρ</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathcal" style="margin-right:0.14736em;">N</span><span class="mopen">(</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9313em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">d</span></span><span style="top:-3.6134em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0833em;"><span class="mord">~</span></span></span></span></span></span></span><span class="mpunct">;</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">d</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7401em;"><span style="top:-2.989em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord mathnormal">ρ</span><span class="mclose">)</span><span class="mord">/</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mop mtight"><span class="mtight">m</span><span class="mtight">a</span><span class="mtight">x</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3175em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mop mtight"><span class="mtight">m</span><span class="mtight">i</span><span class="mtight">n</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">ρ</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathcal" style="margin-right:0.14736em;">N</span><span class="mopen">(</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9313em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">d</span></span><span style="top:-3.6134em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0833em;"><span class="mord">~</span></span></span></span></span></span></span><span class="mpunct">;</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">d</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.0713em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>原创密度比较取 <span class="reading-math" data-tex="\rho=0.8,\tau=0.1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ρ</mi><mo>=</mo><mn>0.8</mn><mo separator="true">,</mo><mi>τ</mi><mo>=</mo><mn>0.1</mn></mrow><annotation encoding="application/x-tex">\rho=0.8,\tau=0.1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ρ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8389em;vertical-align:-0.1944em;"></span><span class="mord">0.8</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.1</span></span></span></span></span>，均匀外点区间宽度10。观测恰在预测均值上时，高斯密度约3.989，<span class="reading-math" data-tex="\gamma\approx0.994"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi><mo>≈</mo><mn>0.994</mn></mrow><annotation encoding="application/x-tex">\gamma\approx0.994</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6776em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.994</span></span></span></span></span>；若偏离1，即十个标准差，高斯项接近零，该观测主要被解释为外点。这里比较的是概率密度而非把密度3.989当成超过1的概率；完整滤波还要积分深度不确定性并更新内点概率，不能把这条条件式冒充整套原算法。</p>
+<p>若暂时条件化为可靠内点，先验均值1、方差0.04，与观测1.1、方差0.01的高斯融合给均值1.08、方差0.008。这是为什么地图点要经多帧检验再加入的数值直觉。但帧率升高时相邻视角基线也可能更小，测量并不必然更独立或更有深度信息；原文的高速度结果不能直接换算成同倍数的信息增长。</p>
+<p>整相机亮度对齐给出初值，各块精修才提供几何后端的对应。下面把这三阶段与深度接受规则接起来，再对照速度精度实验。</p>
+<h2 id="三跟踪并延迟接受深度用多帧证据检查新点">三、跟踪并延迟接受深度，用多帧证据检查新点</h2>
 <pre><code class="language-text">输入：已标定单目视频、当前稀疏地图和关键帧
 跟踪线程对每帧执行：
     建立图像金字塔，投影已有地图点
@@ -87,8 +92,18 @@
     仅把足够收敛的点加入可用于跟踪的地图
 输出：相机里程计与稀疏三维点
 </code></pre>
-<p>“不在运动估计阶段重新提取特征”并不等于“系统完全不提取特征”。原稿 §VI 仍在建图时使用 FAST，并用图像网格促使角点分布均匀。</p>
-<h2 id="实验设置速度和精度采用了哪些条件">实验设置：速度和精度采用了哪些条件</h2>
+<h2 id="四读速度与精度的各自测试条件">四、读速度与精度的各自测试条件</h2>
+<!-- figure-ref-v6:start:rc-78-figure-13-anchor -->
+<p><span id="rc-78-figure-13"></span></p>
+<!-- figure-ref-v6:end:rc-78-figure-13-anchor -->
+<!-- figure-ref-v6:start:rc-78-figure-14-anchor -->
+<p><span id="rc-78-figure-14"></span></p>
+<!-- figure-ref-v6:end:rc-78-figure-14-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/078-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/078-evidence.png" width="790" height="576" alt="Figs. 13–14：上下分别是笔记本与嵌入式平台，横轴单位均为处理时间" loading="lazy"></a><figcaption>原论文结果图／表摘引：Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），Figs. 13–14，PDF 第 7 页；<a href="https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=7" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：上下分别是笔记本与嵌入式平台，横轴单位均为处理时间。先读完整运动估计与各阶段，再讨论吞吐；处理能力高于相机帧率不表示获得了更多观测。</p>
+<h3 id="实验设置速度和精度采用了哪些条件">实验设置：速度和精度采用了哪些条件</h3>
+<p>本篇是 2014 年单目版本；SVO Pro 与多相机后作的 IMU 先验和回环不属于原始实验。运动估计帧率也不是整机闭环频率。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -130,35 +145,70 @@
 </tr>
 </tbody></table></div>
 <p>比较并不是严格同特征数实验：PTAM 跟踪约 160—220 点，SVO Fast 上限为 120。原文还讨论对照版本省略最高分辨率特征及部分亚像素精修。这些差异解释了速度和精度的来源，也限制了把全部收益归因于单一“直接法”标签。</p>
-<h2 id="五组证据与边界">五组证据与边界</h2>
-<p><strong>表 I、图 12（第 6 页）：计算规模不同。</strong> Fast 和 Accurate 不只改变一个开关，还改变特征、关键帧预算。它们可以比较实际配置，但不能作为“仅局部 BA”的干净消融。</p>
-<p><strong>表 II（第 7 页）：相对误差。</strong> Fast、Accurate、PTAM 的位置 RMSE 分别为 0.0059、0.0051、0.0164 m/s；旋转 RMSE 为 0.4295、0.4519、0.4585 deg/s。这不是整程 ATE。Accurate 的旋转值并没有优于 Fast，故不能说更重配置在每项指标上都更好。</p>
-<p><strong>图 8—10（第 6 页）：漂移与尺度。</strong> 初始对齐后误差仍随时间变化，尺度也会漂移。结果支持短期跟踪表现，不能把初始用真值校准尺度后的轨迹当作算法自行恢复绝对尺度。</p>
-<p><strong>图 13—14（第 7 页）：运动估计时间。</strong> 笔记本总计 3.04 ms，嵌入式 18.17 ms，对应约 329 和 55 帧每秒的计算吞吐；PTAM 的报告值分别约 91 和 27 fps。图中分项不应被强行相加视为精确等式，主文还指出建图代价随深度滤波器数量变化。高于相机帧率的处理能力不是相机真的采到了更多图像。</p>
-<p><strong>图 15—17（第 7—8 页）：纹理与平台。</strong> 重复、高频纹理上的地图图示显示更少外点，机载演示说明集成可行；这是场景证据，没有给出跨照明、动态遮挡、所有地表的失败概率。飞行控制还需要尺度和惯性状态估计，不能把整套控制能力归给纯单目前端。</p>
-<h2 id="贡献代价与自构小例子">贡献、代价与自构小例子</h2>
+<h3 id="五组证据与边界">五组证据与边界</h3>
+<p><strong><a href="https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=6">表 I</a>、<a href="#rc-78-figure-12">图 12</a>（第 6 页）：计算规模不同。</strong> Fast 和 Accurate 不只改变一个开关，还改变特征、关键帧预算。它们可以比较实际配置，但不能作为“仅局部 BA”的干净消融。</p>
+<!-- figure-ref-v6:start:rc-78-figure-12 -->
+<figure class="reading-evidence-figure" id="rc-78-figure-12"><a href="/robot-classic/assets/figure-refs-v6/078-fig-12.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/078-fig-12.png" width="640" height="136" alt="SVO两种配置随时间跟踪的特征数" loading="lazy"></a><figcaption>Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 12，PDF 第 6 页；<a href="https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=6" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：蓝色与绿色曲线分别受各自的特征预算限制，因此速度和精度比较同时改变了计算规模。</p>
+<!-- figure-ref-v6:end:rc-78-figure-12 -->
+
+<p><strong><a href="https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=7">表 II</a>（第 7 页）：相对误差。</strong> Fast、Accurate、PTAM 的位置 RMSE 分别为 0.0059、0.0051、0.0164 m/s；旋转 RMSE 为 0.4295、0.4519、0.4585 deg/s。这不是整程 ATE。Accurate 的旋转值并没有优于 Fast，故不能说更重配置在每项指标上都更好。</p>
+<p><strong><a href="#rc-78-figure-8">图 8–10</a>（第 6 页）：漂移与尺度。</strong> 初始对齐后误差仍随时间变化，尺度也会漂移。结果支持短期跟踪表现，不能把初始用真值校准尺度后的轨迹当作算法自行恢复绝对尺度。</p>
+<!-- figure-ref-v6:start:rc-78-figure-8 -->
+<figure class="reading-evidence-figure" id="rc-78-figure-8"><a href="/robot-classic/assets/figure-refs-v6/078-fig-8.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/078-fig-8.png" width="640" height="477" alt="SVO和PTAM的三轴位置漂移时间曲线" loading="lazy"></a><figcaption>Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 8，PDF 第 6 页；<a href="https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=6" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：三个分量随时间的变化并不相同，初始对齐不能消除后续积累的位置漂移。</p>
+<!-- figure-ref-v6:end:rc-78-figure-8 -->
+
+<!-- figure-ref-v6:start:rc-78-figure-9 -->
+<figure class="reading-evidence-figure" id="rc-78-figure-9"><a href="/robot-classic/assets/figure-refs-v6/078-fig-9.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/078-fig-9.png" width="640" height="442" alt="SVO和PTAM的三轴姿态漂移时间曲线" loading="lazy"></a><figcaption>Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 9，PDF 第 6 页；<a href="https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=6" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：三组曲线给出各姿态分量的误差变化，局部波动与长期偏差都应看清，而不能只比较某一瞬间。</p>
+<!-- figure-ref-v6:end:rc-78-figure-9 -->
+
+<!-- figure-ref-v6:start:rc-78-figure-10 -->
+<figure class="reading-evidence-figure" id="rc-78-figure-10"><a href="/robot-classic/assets/figure-refs-v6/078-fig-10.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/078-fig-10.png" width="640" height="174" alt="不同方法的尺度漂移随时间变化" loading="lazy"></a><figcaption>Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 10，PDF 第 6 页；<a href="https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=6" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：纵轴是尺度漂移百分比，曲线仍在零点附近波动并偏离，不能据初始真值对齐声称单目系统自行恢复了绝对尺度。</p>
+<!-- figure-ref-v6:end:rc-78-figure-10 -->
+
+<p><strong><a href="#rc-78-figure-13">图 13–14</a>（第 7 页）：运动估计时间。</strong> 笔记本总计 3.04 ms，嵌入式 18.17 ms，对应约 329 和 55 帧每秒的计算吞吐；PTAM 的报告值分别约 91 和 27 fps。图中分项不应被强行相加视为精确等式，主文还指出建图代价随深度滤波器数量变化。高于相机帧率的处理能力不是相机真的采到了更多图像。</p>
+<p><strong><a href="#rc-78-figure-15">图 15</a>–<a href="#rc-78-figure-17">图 17</a>（第 7—8 页）：纹理与平台。</strong> 重复、高频纹理上的地图图示显示更少外点，机载演示说明集成可行；这是场景证据，没有给出跨照明、动态遮挡、所有地表的失败概率。飞行控制还需要尺度和惯性状态估计，不能把整套控制能力归给纯单目前端。</p>
+<!-- figure-ref-v6:start:rc-78-figure-15 -->
+<figure class="reading-evidence-figure" id="rc-78-figure-15"><a href="/robot-classic/assets/figure-refs-v6/078-fig-15.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/078-fig-15.png" width="640" height="392" alt="重复高频纹理场景中的四帧特征跟踪结果" loading="lazy"></a><figcaption>Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 15，PDF 第 7 页；<a href="https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=7" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：绿色特征点覆盖地面和墙面重复纹理；这是所示场景的跟踪证据，不是所有重复纹理条件下的成功率统计。</p>
+<!-- figure-ref-v6:end:rc-78-figure-15 -->
+
+<!-- figure-ref-v6:start:rc-78-figure-16 -->
+<figure class="reading-evidence-figure" id="rc-78-figure-16"><a href="/robot-classic/assets/figure-refs-v6/078-fig-16.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/078-fig-16.png" width="640" height="287" alt="SVO与PTAM点云的侧视外点对比" loading="lazy"></a><figcaption>Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 16，PDF 第 7 页；<a href="https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=7" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：右图箭头指出偏离主体几何的外点，而左图点云更集中；该对照用于解释深度过滤的效果。</p>
+<!-- figure-ref-v6:end:rc-78-figure-16 -->
+
+<!-- figure-ref-v6:start:rc-78-figure-17 -->
+<figure class="reading-evidence-figure" id="rc-78-figure-17"><a href="/robot-classic/assets/figure-refs-v6/078-fig-17.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/078-fig-17.png" width="640" height="395" alt="安装处理器与下视相机的微型四旋翼平台" loading="lazy"></a><figcaption>Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 17，PDF 第 8 页；<a href="https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=8" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：箭头标明机载处理器和相机位置，说明系统集成的硬件条件；飞行控制仍依赖额外状态估计和控制模块。</p>
+<!-- figure-ref-v6:end:rc-78-figure-17 -->
+
+<h2 id="五保留小运动光度和单目漂移限制">五、保留小运动、光度和单目漂移限制</h2>
 <p>贡献是将直接跟踪、局部特征精修与带外点模型的延迟建图组合起来，使“少而可靠的点”支持较轻的跟踪。其收益依赖时间连续性；相机被快速搬到完全不同位置时，原有投影可能不再提供可靠搜索中心。</p>
 <p><strong>自构例子。</strong> 地面有重复瓷砖。一次两帧匹配可能把第 3 块误认成第 4 块，得到错误深度。立即插入地图会让后续位姿被错误几何牵引；先积累不同视角的深度测量，则不一致测量可能被外点分支吸收。但如果每次都错到同一重复位置，滤波也可能自信地错。因此需要足够视差、模型检查及多样观测。</p>
 <p>纯旋转是另一项明确的几何边界：它能产生图像运动，却没有三角化距离所需的平移基线。再高的帧率也不能凭空让未知深度收敛。极弱纹理、曝光突变、运动模糊和滚动快门也会破坏对齐所用的假设。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>每帧特征识别昂贵，误三角化点污染跟踪</td>
-<td>稀疏直接对齐、特征精修、概率深度筛选</td>
-<td>先用低维运动限制搜索，再延迟接纳不可靠几何</td>
-<td>表 II、图 10、图 13—17</td>
-<td>对亮度和初值敏感，不能恢复单目绝对尺度，不是全局回环系统</td>
-</tr>
-</tbody></table></div>
-<h2 id="自测与参考答案">自测与参考答案</h2>
+<h2 id="六追问去掉图像块独立微调而直接进入几何优化会改变哪条信息接口">六、追问：去掉图像块独立微调而直接进入几何优化，会改变哪条信息接口？</h2>
+<details>
+<summary>去掉图像块独立微调而直接进入几何优化，会改变哪条信息接口？</summary>
+
+<p><strong>参考答案</strong>：几何优化使用显式图像对应，独立微调为各点修正位置，不能简单与整相机的亮度对齐合并。省掉这一阶段会改变后端得到的观测。比较时应固定地图、初值和预算，并分别检查块位置误差与最终位姿。</p>
+</details>
+
+<h2 id="七比较半直接分工与直接联合优化">七、比较半直接分工与直接联合优化</h2>
+<ul>
+<li><strong>平行路线</strong>：<a href="085-dso.html">DSO：用少量像素联合优化，而不是用尽所有像素</a>。直接联合优化光度变量与几何，不再采用相同的半直接分工。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <p><strong>1．SVO 都用亮度对齐了，为什么最后还优化重投影误差？</strong></p>
 <p>直接对齐共享一个刚体运动，受地图深度误差影响；独立块对齐得到更自由的亚像素观测，最后再由几何一致性综合它们，并联系关键帧和地图。三个阶段各自承担初始化、对应精修和结构约束，不能视为重复做同一件事。</p>
 <p><strong>2．深度滤波器的方差很小，是否就说明该点真实可靠？</strong></p>
@@ -176,19 +226,15 @@
 
 **论文**：Christian Forster、Matia Pizzoli、Davide Scaramuzza，*SVO: Fast Semi-Direct Monocular Visual Odometry*，ICRA 2014，15–22。[作者提供的八页原稿](https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf) · [实验室项目说明](https://rpg.ifi.uzh.ch/research_vo.html)。
 
-**阅读范围**：核对原稿的系统、运动估计、深度滤波、参数与实验。页码按 PDF 页序。2017 年多相机版本及后来的 SVO Pro 是后续工作；其 IMU 先验、回环与当前速度数据不能归入本篇。
+### 先接住前作的问题
 
-## 一分钟：为什么一定要先给每个点找名字
+[LK](008-lucas-kanade.md)提供小块亮度对齐，特征法则有成熟的几何重投影优化；SVO把两种残差通过独立块精修连接起来。与同年的[LSD-SLAM](076-lsdslam.md)相比，本篇是半直接里程计与稀疏地图路线，不能把后者的全局回环当作SVO原版已有功能。
+
+## 一、问题设定：相邻视频帧怎样连接亮度初始化与几何精修
 
 传统特征流程会先检测、描述和匹配图像点，再用这些匹配估计相机运动。连续视频中两帧通常很接近，已有地图还能预测某个点应该出现在图像哪里。此时重新进行大范围特征识别可能浪费计算。
 
-SVO 先移动整台“虚拟相机”，让已有三维点周围的小图像块与新图像的亮度对齐；然后允许各个图像块独立微调位置，最后通过几何重投影误差精修位姿与结构。它是半直接方法，因为运动初始化使用亮度，后续仍使用显式图像对应和几何残差。
-
-地图也不急于接受一次三角化的结果。每个新点先有一个不确定的深度分布，多帧观测让分布收敛后才进入稳定地图，减少错误点污染跟踪。
-
-一句话：在相邻帧运动较小、相机已标定的单目视频中，通过直接对齐与概率深度筛选，降低运动估计成本并改善可靠性；代价是亮度和局部收敛假设，单目尺度及长期漂移仍需另外处理。
-
-## 背景与问题定义
+### 背景与问题定义
 
 目标是视觉里程计，服务于微型飞行器等平台的状态估计。它不是学习动作策略，也不是原生带全局回环的完整地图优化系统。输入为图像及相机模型；状态包含当前位姿、少量关键帧与地图点，输出相对运动和稀疏地图。
 
@@ -196,7 +242,7 @@ SVO 先移动整台“虚拟相机”，让已有三维点周围的小图像块�
 
 单目相机只测视线方向，不能单凭图像决定真实米制尺度。把整张地图和相机平移一起放大，图像投影不变。高帧率使每步估计更容易，但不能取消这项几何不可辨识性。
 
-## 方法：三个阶段分别解决什么
+## 二、先直接对齐，再独立调块和优化重投影
 
 ### 1．用稀疏图像块约束一个相机运动
 
@@ -230,6 +276,20 @@ $\rho$ 是内点概率，$\tau^2$ 描述正常测量的不确定性。公式先�
 
 这不是证明所有错误点都被消除：重复纹理产生的相关错误可能连续出现，且估计的位姿本身也有误差。独立观测假设失效时，分布可能过早变窄。概率模型提供的是处理外点的机制，而不是“地图永远没有外点”的证书。
 
+“不在运动估计阶段重新提取特征”并不等于“系统完全不提取特征”。原稿 §VI 仍在建图时使用 FAST，并用图像网格促使角点分布均匀。
+
+混合模型怎样让一次坏匹配“少说话”？固定候选真实深度 $d$，并假定观测落在均匀外点分布的支持区间内，观测属于内点的条件概率为
+
+$$\gamma=\frac{\rho\,\mathcal N(\tilde d;d,\tau^2)}{\rho\,\mathcal N(\tilde d;d,\tau^2)+(1-\rho)/(d_{\max}-d_{\min})}.$$
+
+原创密度比较取 $\rho=0.8,\tau=0.1$，均匀外点区间宽度10。观测恰在预测均值上时，高斯密度约3.989，$\gamma\approx0.994$；若偏离1，即十个标准差，高斯项接近零，该观测主要被解释为外点。这里比较的是概率密度而非把密度3.989当成超过1的概率；完整滤波还要积分深度不确定性并更新内点概率，不能把这条条件式冒充整套原算法。
+
+若暂时条件化为可靠内点，先验均值1、方差0.04，与观测1.1、方差0.01的高斯融合给均值1.08、方差0.008。这是为什么地图点要经多帧检验再加入的数值直觉。但帧率升高时相邻视角基线也可能更小，测量并不必然更独立或更有深度信息；原文的高速度结果不能直接换算成同倍数的信息增长。
+
+整相机亮度对齐给出初值，各块精修才提供几何后端的对应。下面把这三阶段与深度接受规则接起来，再对照速度精度实验。
+
+## 三、跟踪并延迟接受深度，用多帧证据检查新点
+
 ```text
 输入：已标定单目视频、当前稀疏地图和关键帧
 跟踪线程对每帧执行：
@@ -246,9 +306,21 @@ $\rho$ 是内点概率，$\tau^2$ 描述正常测量的不确定性。公式先�
 输出：相机里程计与稀疏三维点
 ```
 
-“不在运动估计阶段重新提取特征”并不等于“系统完全不提取特征”。原稿 §VI 仍在建图时使用 FAST，并用图像网格促使角点分布均匀。
+## 四、读速度与精度的各自测试条件
 
-## 实验设置：速度和精度采用了哪些条件
+&lt;!-- figure-ref-v6:start:rc-78-figure-13-anchor --&gt;
+&lt;span id=&quot;rc-78-figure-13&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-78-figure-13-anchor --&gt;
+&lt;!-- figure-ref-v6:start:rc-78-figure-14-anchor --&gt;
+&lt;span id=&quot;rc-78-figure-14&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-78-figure-14-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/078-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/078-evidence.png&quot; width=&quot;790&quot; height=&quot;576&quot; alt=&quot;Figs. 13–14：上下分别是笔记本与嵌入式平台，横轴单位均为处理时间&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文结果图／表摘引：Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），Figs. 13–14，PDF 第 7 页；&lt;a href=&quot;https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：上下分别是笔记本与嵌入式平台，横轴单位均为处理时间。先读完整运动估计与各阶段，再讨论吞吐；处理能力高于相机帧率不表示获得了更多观测。
+
+### 实验设置：速度和精度采用了哪些条件
+
+本篇是 2014 年单目版本；SVO Pro 与多相机后作的 IMU 先验和回环不属于原始实验。运动估计帧率也不是整机闭环频率。
 
 | 项目 | 设置与检验对象 |
 |---|---|
@@ -263,19 +335,61 @@ $\rho$ 是内点概率，$\tau^2$ 描述正常测量的不确定性。公式先�
 
 比较并不是严格同特征数实验：PTAM 跟踪约 160—220 点，SVO Fast 上限为 120。原文还讨论对照版本省略最高分辨率特征及部分亚像素精修。这些差异解释了速度和精度的来源，也限制了把全部收益归因于单一“直接法”标签。
 
-## 五组证据与边界
+### 五组证据与边界
 
-**表 I、图 12（第 6 页）：计算规模不同。** Fast 和 Accurate 不只改变一个开关，还改变特征、关键帧预算。它们可以比较实际配置，但不能作为“仅局部 BA”的干净消融。
+**[表 I](https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=6)、[图 12](#rc-78-figure-12)（第 6 页）：计算规模不同。** Fast 和 Accurate 不只改变一个开关，还改变特征、关键帧预算。它们可以比较实际配置，但不能作为“仅局部 BA”的干净消融。
 
-**表 II（第 7 页）：相对误差。** Fast、Accurate、PTAM 的位置 RMSE 分别为 0.0059、0.0051、0.0164 m/s；旋转 RMSE 为 0.4295、0.4519、0.4585 deg/s。这不是整程 ATE。Accurate 的旋转值并没有优于 Fast，故不能说更重配置在每项指标上都更好。
+&lt;!-- figure-ref-v6:start:rc-78-figure-12 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-78-figure-12&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/078-fig-12.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/078-fig-12.png&quot; width=&quot;640&quot; height=&quot;136&quot; alt=&quot;SVO两种配置随时间跟踪的特征数&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 12，PDF 第 6 页；&lt;a href=&quot;https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-**图 8—10（第 6 页）：漂移与尺度。** 初始对齐后误差仍随时间变化，尺度也会漂移。结果支持短期跟踪表现，不能把初始用真值校准尺度后的轨迹当作算法自行恢复绝对尺度。
+读图：蓝色与绿色曲线分别受各自的特征预算限制，因此速度和精度比较同时改变了计算规模。
+&lt;!-- figure-ref-v6:end:rc-78-figure-12 --&gt;
 
-**图 13—14（第 7 页）：运动估计时间。** 笔记本总计 3.04 ms，嵌入式 18.17 ms，对应约 329 和 55 帧每秒的计算吞吐；PTAM 的报告值分别约 91 和 27 fps。图中分项不应被强行相加视为精确等式，主文还指出建图代价随深度滤波器数量变化。高于相机帧率的处理能力不是相机真的采到了更多图像。
+**[表 II](https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=7)（第 7 页）：相对误差。** Fast、Accurate、PTAM 的位置 RMSE 分别为 0.0059、0.0051、0.0164 m/s；旋转 RMSE 为 0.4295、0.4519、0.4585 deg/s。这不是整程 ATE。Accurate 的旋转值并没有优于 Fast，故不能说更重配置在每项指标上都更好。
 
-**图 15—17（第 7—8 页）：纹理与平台。** 重复、高频纹理上的地图图示显示更少外点，机载演示说明集成可行；这是场景证据，没有给出跨照明、动态遮挡、所有地表的失败概率。飞行控制还需要尺度和惯性状态估计，不能把整套控制能力归给纯单目前端。
+**[图 8–10](#rc-78-figure-8)（第 6 页）：漂移与尺度。** 初始对齐后误差仍随时间变化，尺度也会漂移。结果支持短期跟踪表现，不能把初始用真值校准尺度后的轨迹当作算法自行恢复绝对尺度。
 
-## 贡献、代价与自构小例子
+&lt;!-- figure-ref-v6:start:rc-78-figure-8 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-78-figure-8&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/078-fig-8.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/078-fig-8.png&quot; width=&quot;640&quot; height=&quot;477&quot; alt=&quot;SVO和PTAM的三轴位置漂移时间曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 8，PDF 第 6 页；&lt;a href=&quot;https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：三个分量随时间的变化并不相同，初始对齐不能消除后续积累的位置漂移。
+&lt;!-- figure-ref-v6:end:rc-78-figure-8 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-78-figure-9 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-78-figure-9&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/078-fig-9.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/078-fig-9.png&quot; width=&quot;640&quot; height=&quot;442&quot; alt=&quot;SVO和PTAM的三轴姿态漂移时间曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 9，PDF 第 6 页；&lt;a href=&quot;https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：三组曲线给出各姿态分量的误差变化，局部波动与长期偏差都应看清，而不能只比较某一瞬间。
+&lt;!-- figure-ref-v6:end:rc-78-figure-9 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-78-figure-10 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-78-figure-10&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/078-fig-10.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/078-fig-10.png&quot; width=&quot;640&quot; height=&quot;174&quot; alt=&quot;不同方法的尺度漂移随时间变化&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 10，PDF 第 6 页；&lt;a href=&quot;https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：纵轴是尺度漂移百分比，曲线仍在零点附近波动并偏离，不能据初始真值对齐声称单目系统自行恢复了绝对尺度。
+&lt;!-- figure-ref-v6:end:rc-78-figure-10 --&gt;
+
+**[图 13–14](#rc-78-figure-13)（第 7 页）：运动估计时间。** 笔记本总计 3.04 ms，嵌入式 18.17 ms，对应约 329 和 55 帧每秒的计算吞吐；PTAM 的报告值分别约 91 和 27 fps。图中分项不应被强行相加视为精确等式，主文还指出建图代价随深度滤波器数量变化。高于相机帧率的处理能力不是相机真的采到了更多图像。
+
+**[图 15](#rc-78-figure-15)–[图 17](#rc-78-figure-17)（第 7—8 页）：纹理与平台。** 重复、高频纹理上的地图图示显示更少外点，机载演示说明集成可行；这是场景证据，没有给出跨照明、动态遮挡、所有地表的失败概率。飞行控制还需要尺度和惯性状态估计，不能把整套控制能力归给纯单目前端。
+
+&lt;!-- figure-ref-v6:start:rc-78-figure-15 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-78-figure-15&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/078-fig-15.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/078-fig-15.png&quot; width=&quot;640&quot; height=&quot;392&quot; alt=&quot;重复高频纹理场景中的四帧特征跟踪结果&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 15，PDF 第 7 页；&lt;a href=&quot;https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：绿色特征点覆盖地面和墙面重复纹理；这是所示场景的跟踪证据，不是所有重复纹理条件下的成功率统计。
+&lt;!-- figure-ref-v6:end:rc-78-figure-15 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-78-figure-16 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-78-figure-16&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/078-fig-16.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/078-fig-16.png&quot; width=&quot;640&quot; height=&quot;287&quot; alt=&quot;SVO与PTAM点云的侧视外点对比&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 16，PDF 第 7 页；&lt;a href=&quot;https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：右图箭头指出偏离主体几何的外点，而左图点云更集中；该对照用于解释深度过滤的效果。
+&lt;!-- figure-ref-v6:end:rc-78-figure-16 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-78-figure-17 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-78-figure-17&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/078-fig-17.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/078-fig-17.png&quot; width=&quot;640&quot; height=&quot;395&quot; alt=&quot;安装处理器与下视相机的微型四旋翼平台&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Christian Forster、Matia Pizzoli、Davide Scaramuzza（2014），图 17，PDF 第 8 页；&lt;a href=&quot;https://rpg.ifi.uzh.ch/docs/ICRA14_Forster.pdf#page=8&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：箭头标明机载处理器和相机位置，说明系统集成的硬件条件；飞行控制仍依赖额外状态估计和控制模块。
+&lt;!-- figure-ref-v6:end:rc-78-figure-17 --&gt;
+
+## 五、保留小运动、光度和单目漂移限制
 
 贡献是将直接跟踪、局部特征精修与带外点模型的延迟建图组合起来，使“少而可靠的点”支持较轻的跟踪。其收益依赖时间连续性；相机被快速搬到完全不同位置时，原有投影可能不再提供可靠搜索中心。
 
@@ -283,11 +397,20 @@ $\rho$ 是内点概率，$\tau^2$ 描述正常测量的不确定性。公式先�
 
 纯旋转是另一项明确的几何边界：它能产生图像运动，却没有三角化距离所需的平移基线。再高的帧率也不能凭空让未知深度收敛。极弱纹理、曝光突变、运动模糊和滚动快门也会破坏对齐所用的假设。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 每帧特征识别昂贵，误三角化点污染跟踪 | 稀疏直接对齐、特征精修、概率深度筛选 | 先用低维运动限制搜索，再延迟接纳不可靠几何 | 表 II、图 10、图 13—17 | 对亮度和初值敏感，不能恢复单目绝对尺度，不是全局回环系统 |
+## 六、追问：去掉图像块独立微调而直接进入几何优化，会改变哪条信息接口？
 
-## 自测与参考答案
+&lt;details&gt;
+&lt;summary&gt;去掉图像块独立微调而直接进入几何优化，会改变哪条信息接口？&lt;/summary&gt;
+
+**参考答案**：几何优化使用显式图像对应，独立微调为各点修正位置，不能简单与整相机的亮度对齐合并。省掉这一阶段会改变后端得到的观测。比较时应固定地图、初值和预算，并分别检查块位置误差与最终位姿。
+
+&lt;/details&gt;
+
+## 七、比较半直接分工与直接联合优化
+
+- **平行路线**：[DSO：用少量像素联合优化，而不是用尽所有像素](085-dso.md)。直接联合优化光度变量与几何，不再采用相同的半直接分工。
+
+## 八、自测与参考答案
 
 **1．SVO 都用亮度对齐了，为什么最后还优化重投影误差？**
 

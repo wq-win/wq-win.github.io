@@ -42,15 +42,11 @@
                 <span class="text-gray-500">IMU 预积分：把高频惯性测量压缩成可以反复优化的约束</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="7adb8b548f8e75d053dc6f26c0885e9eb9241e33dce86f48b6a935b44bd60eaf"><h1>083｜IMU 预积分：把高频惯性测量压缩成可以反复优化的约束</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="5e28e213984a0bd841505e116a283deb5a53fd54165287b83e448accdf6503f5"><h1>083｜IMU 预积分：把高频惯性测量压缩成可以反复优化的约束</h1>
 <p><a href="00-timeline.html">返回总览</a> · <a href="082-orbslam.html">上一篇：ORB-SLAM</a> · <a href="084-elasticfusion.html">下一篇：ElasticFusion</a></p>
 <p><strong>论文</strong>：Christian Forster、Luca Carlone、Frank Dellaert、Davide Scaramuzza，<em>IMU Preintegration on Manifold for Efficient Visual-Inertial Maximum-a-Posteriori Estimation</em>，RSS 2015。<a href="https://www.roboticsproceedings.org/rss11/p06.pdf">会议原文</a> · <a href="https://doi.org/10.15607/RSS.2015.XI.006">正式入口</a>。</p>
-<p><strong>阅读范围</strong>：RSS 2015 正文的方法、实现和实验部分；未逐项复算补充材料的雅可比。本文不将后来期刊扩展版的实验归入会议论文。数值依据第 VIII 节；其中室外轨迹的图注与正文存在不一致，见下文。</p>
-<h2 id="一一分钟理解优化器为什么不该反复重放-imu">一、一分钟理解：优化器为什么不该反复重放 IMU</h2>
-<p>相机两帧之间可能已经收到几十条惯性测量。直接处理有两个麻烦：为每个 IMU 时刻建立状态，优化问题太大；把测量积分成下一时刻位姿，又会依赖起始位姿和偏置，一旦优化器修改它们，旧积分可能需要重做。</p>
-<p>预积分的想法是先回答一个局部问题：“从这个关键帧出发，惯性测量描述了怎样的相对变化？”把许多读数压缩成旋转、速度和位置的增量及其不确定性，再连接两个关键帧状态。局部增量不依赖世界坐标中的起始位姿；偏置变化则先用一阶修正处理。</p>
-<p>作者的贡献不是首次提出预积分，而是在旋转流形上建立测量、噪声传播和偏置修正，并把它接入增量视觉惯性估计。实验支持该系统在所测轨迹上兼顾误差与计算时间，不能证明所有运动条件下都优于滤波器。</p>
-<p>一句话：<strong>在关键帧视觉惯性估计中，通过局部预积分与偏置的一阶修正，减少反复积分的计算，代价是噪声线性化、短区间偏置模型以及标定和初始化要求。</strong></p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="068-isam2.html">iSAM2</a>让后端能反复修正历史状态，高频 IMU 却会让朴素重积分变贵；本篇提供可缓存且带相关不确定性的惯性因子，与增量后端属于模块组合。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：</p>
 <ol>
@@ -60,12 +56,14 @@
 <li><strong>因子图</strong>：用局部概率约束连接待估计状态的图表示。</li>
 <li><strong>边缘化或消元</strong>：消去部分变量并保留其对其他变量的约束，不等于直接丢弃测量。</li>
 </ol>
-<h2 id="二问题定义imu-测到的不是位置">二、问题定义：IMU 测到的不是位置</h2>
+<h2 id="一问题设定关键帧状态被修改时怎样避免反复重放全部imu">一、问题设定：关键帧状态被修改时怎样避免反复重放全部IMU</h2>
+<p>相机两帧之间可能已经收到几十条惯性测量。直接处理有两个麻烦：为每个 IMU 时刻建立状态，优化问题太大；把测量积分成下一时刻位姿，又会依赖起始位姿和偏置，一旦优化器修改它们，旧积分可能需要重做。</p>
+<h3 id="问题定义imu-测到的不是位置">问题定义：IMU 测到的不是位置</h3>
 <p>这是状态估计问题，不是强化学习。没有策略、奖励或训练回合。状态可写成 <span class="reading-math" data-tex="x_i=(R_i,p_i,v_i,b_i^g,b_i^a)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mi>i</mi></msub><mo>=</mo><mo stretchy="false">(</mo><msub><mi>R</mi><mi>i</mi></msub><mo separator="true">,</mo><msub><mi>p</mi><mi>i</mi></msub><mo separator="true">,</mo><msub><mi>v</mi><mi>i</mi></msub><mo separator="true">,</mo><msubsup><mi>b</mi><mi>i</mi><mi>g</mi></msubsup><mo separator="true">,</mo><msubsup><mi>b</mi><mi>i</mi><mi>a</mi></msubsup><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">x_i=(R_i,p_i,v_i,b_i^g,b_i^a)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0592em;vertical-align:-0.2769em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7823em;"><span style="top:-2.4231em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.1809em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2769em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-2.4413em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2587em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>：姿态、位置、速度、陀螺仪偏置和加速度计偏置。相机提供地标观测，IMU 提供角速度和比力。</p>
 <p>比力尤其容易误解。静止放在桌面上的加速度计并非必然输出零；重力必须结合姿态和坐标约定处理。速度也不是把原始加速度读数直接累加就能可靠得到的。</p>
 <p>过去方案并非“不会融合相机与 IMU”，而是融合方式影响计算和线性化误差。滤波法通常及时压缩历史；优化法可以反复修正历史状态，却要处理大量测量和重线性化的代价。本文选择关键帧优化，利用 IMU 在视觉帧之间提供运动约束。</p>
 <p>第 V 节假设相机与 IMU 已同步，并在两个关键帧之间把偏置视为常量；跨关键帧再建立偏置演化模型。时间偏移、相机内参、相机—IMU 外参都不是可以随意省略的工程细节。视觉惯性系统仍有全局位置、绕重力方向的整体航向等规范自由度；引入 IMU 不等于获得 GPS 式绝对位置。</p>
-<h2 id="三方法增量可以缓存状态仍要优化">三、方法：增量可以缓存，状态仍要优化</h2>
+<h2 id="二在局部坐标预积分并传播相关噪声和偏置导数">二、在局部坐标预积分，并传播相关噪声和偏置导数</h2>
 <h3 id="1-三种增量分别消除了什么">1. 三种增量分别消除了什么</h3>
 <p>采用 <span class="reading-math" data-tex="R_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>R</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">R_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 将机体向量变换到世界系的约定，核心关系为：</p>
 <p><span class="reading-math" data-tex="\Delta R_{ij}=R_i^TR_j,
@@ -87,9 +85,18 @@
 \qquad
 \Delta\tilde p(b+\delta b)\approx\Delta\tilde p(b)+J_p\delta b.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">Δ</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span></span><span style="top:-3.35em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">~</span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">b</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal">b</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">Δ</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span></span><span style="top:-3.35em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">~</span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">b</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal">b</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">Δ</span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">p</span></span><span style="top:-3.35em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">~</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">b</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal">b</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">Δ</span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">p</span></span><span style="top:-3.35em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">~</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">b</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">p</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal">b</span><span class="mord">.</span></span></span></span></span></span></p>
 <p>旋转修正则通过指数映射组合，而非直接加到旋转矩阵。<span class="reading-math" data-tex="J"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>J</mi></mrow><annotation encoding="application/x-tex">J</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.09618em;">J</span></span></span></span></span> 是预积分对偏置的敏感度。它把“再积分所有样本”变成较小的矩阵运算；这是近似修正，不是任意大偏置变化下的恒等式。</p>
+<h3 id="速度和位置误差为什么不能各算各的">速度和位置误差为什么不能各算各的</h3>
+<p>预积分把许多读数压成一个因子，也把<strong>共享读数造成的相关性</strong>保留下来。第 V-B 节给出旋转、速度、位置误差共同的九维协方差；把它改成三个互不相干的权重，通常已改变统计模型。</p>
+<p><strong>原创一维教学例。</strong> 固定姿态、忽略偏置与重力误差，取两个长为 <span class="reading-math" data-tex="h"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi></mrow><annotation encoding="application/x-tex">h</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">h</span></span></span></span></span> 的积分步；每步加速度噪声 <span class="reading-math" data-tex="n_0,n_1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>n</mi><mn>0</mn></msub><mo separator="true">,</mo><msub><mi>n</mi><mn>1</mn></msub></mrow><annotation encoding="application/x-tex">n_0,n_1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 独立、均值零、方差 <span class="reading-math" data-tex="\sigma^2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>σ</mi><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">\sigma^2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span></span>，步内采用常加速度。按先更新位置再更新速度的递推，累计误差为</p>
+<p><span class="reading-math" data-tex="\delta v=h(n_0+n_1),\qquad \delta p=h^2(\tfrac32 n_0+\tfrac12 n_1)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>δ</mi><mi>v</mi><mo>=</mo><mi>h</mi><mo stretchy="false">(</mo><msub><mi>n</mi><mn>0</mn></msub><mo>+</mo><msub><mi>n</mi><mn>1</mn></msub><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><mi>δ</mi><mi>p</mi><mo>=</mo><msup><mi>h</mi><mn>2</mn></msup><mo stretchy="false">(</mo><mstyle displaystyle="false" scriptlevel="0"><mfrac><mn>3</mn><mn>2</mn></mfrac></mstyle><msub><mi>n</mi><mn>0</mn></msub><mo>+</mo><mstyle displaystyle="false" scriptlevel="0"><mfrac><mn>1</mn><mn>2</mn></mfrac></mstyle><msub><mi>n</mi><mn>1</mn></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\delta v=h(n_0+n_1),\qquad \delta p=h^2(\tfrac32 n_0+\tfrac12 n_1).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2091em;vertical-align:-0.345em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8451em;"><span style="top:-2.655em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">2</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.394em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">3</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.345em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1901em;vertical-align:-0.345em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8451em;"><span style="top:-2.655em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">2</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.394em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.345em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>第一步噪声不仅影响该步位移，还经速度带入第二步，因此它在位置里的系数是 <span class="reading-math" data-tex="3/2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>3</mn><mi mathvariant="normal">/</mi><mn>2</mn></mrow><annotation encoding="application/x-tex">3/2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">3/2</span></span></span></span></span>。直接计算得到</p>
+<p><span class="reading-math" data-tex="\operatorname{Var}(\delta v)=2h^2\sigma^2,\quad \operatorname{Var}(\delta p)=\tfrac52h^4\sigma^2,\quad \operatorname{Cov}(\delta v,\delta p)=2h^3\sigma^2."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Var</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>δ</mi><mi>v</mi><mo stretchy="false">)</mo><mo>=</mo><mn>2</mn><msup><mi>h</mi><mn>2</mn></msup><msup><mi>σ</mi><mn>2</mn></msup><mo separator="true">,</mo><mspace width="1em"/><mi mathvariant="normal">Var</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>δ</mi><mi>p</mi><mo stretchy="false">)</mo><mo>=</mo><mstyle displaystyle="false" scriptlevel="0"><mfrac><mn>5</mn><mn>2</mn></mfrac></mstyle><msup><mi>h</mi><mn>4</mn></msup><msup><mi>σ</mi><mn>2</mn></msup><mo separator="true">,</mo><mspace width="1em"/><mi mathvariant="normal">Cov</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>δ</mi><mi>v</mi><mo separator="true">,</mo><mi>δ</mi><mi>p</mi><mo stretchy="false">)</mo><mo>=</mo><mn>2</mn><msup><mi>h</mi><mn>3</mn></msup><msup><mi>σ</mi><mn>2</mn></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\operatorname{Var}(\delta v)=2h^2\sigma^2,\quad \operatorname{Var}(\delta p)=\tfrac52h^4\sigma^2,\quad \operatorname{Cov}(\delta v,\delta p)=2h^3\sigma^2.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">Var</span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mord mathrm">Var</span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal">p</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2091em;vertical-align:-0.345em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8451em;"><span style="top:-2.655em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">2</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.394em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">5</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.345em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">4</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mord mathrm" style="margin-right:0.01389em;">Cov</span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="mord mathnormal">p</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8641em;"></span><span class="mord">2</span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">3</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>取 <span class="reading-math" data-tex="h=1,\sigma^2=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi><mo>=</mo><mn>1</mn><mo separator="true">,</mo><msup><mi>σ</mi><mn>2</mn></msup><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">h=1,\sigma^2=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">h</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0085em;vertical-align:-0.1944em;"></span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span> 作为归一化数值，协方差矩阵为 <span class="reading-math" data-tex="\begin{bmatrix}2&amp;2\\2&amp;2.5\end{bmatrix}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo fence="true">[</mo><mtable rowspacing="0.16em" columnalign="center center" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>2</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>2</mn></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>2</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>2.5</mn></mstyle></mtd></mtr></mtable><mo fence="true">]</mo></mrow><annotation encoding="application/x-tex">\begin{bmatrix}2&amp;2\\2&amp;2.5\end{bmatrix}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">[</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">2</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em;"></span><span class="arraycolsep" style="width:0.5em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">2</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">2.5</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">]</span></span></span></span></span></span></span>，相关系数约 0.894。即使原始噪声独立，积分后两类误差也高度相关；完整三维情形还会由姿态误差把陀螺仪噪声传到速度和位置。这个例子解释协方差结构，不是论文 Monte Carlo 数据；<a href="#rc-83-figure-10">图 10</a> 的偏置实验检验的是另一件事，即一阶偏置修正与重新积分的差别。依据<a href="#rc-83-figure-10">原文 V-B、V-C 与图10</a>。</p>
 <h3 id="4-概率目标与无结构视觉因子">4. 概率目标与无结构视觉因子</h3>
 <p>系统优化的是带先验、IMU、偏置和视觉约束的最大后验估计，常写成加权残差平方和。权重来自协方差，而不是人为让某个传感器永远占上风。</p>
 <p>第 VI 节还在线性化后消去地标增量，只保留它对观察这些地标的位姿的约束。“无结构”不表示图像里不需要三维几何，也不表示没有三角化，而是最终线性求解不显式保留所有地标变量。非线性 MAP 问题仍可能有局部极小；消元保留当前线性化子问题的信息，不构成全局最优证明。</p>
+<p>旋转增量、速度增量和位置增量共享噪声，缓存时必须保留其相关性。下面检查偏置修正如何进入因子，再对照计算节约与误差。</p>
+<h2 id="三缓存区间增量检查一阶偏置修正">三、缓存区间增量，检查一阶偏置修正</h2>
 <h3 id="5-伪代码区分测量积累与优化更新">5. 伪代码：区分测量积累与优化更新</h3>
 <pre><code class="language-text">输入：已标定、已同步的图像与 IMU 流；初始状态和偏置
 创建关键帧 i，保存参考偏置 b_ref
@@ -107,7 +114,17 @@
 输出：关键帧姿态、位置、速度和偏置估计
 </code></pre>
 <p>这是教学流程，不是完整复现程序；异常值处理、规范固定和重新积分策略仍需实现。目标是 MAP 误差，机制是压缩与复用，测量指标才是轨迹误差和耗时，三者不能混为一个“损失下降所以定位更准”的结论。</p>
-<h2 id="四实验怎样安排">四、实验怎样安排</h2>
+<h3 id="用一个小例子建立直觉">用一个小例子建立直觉</h3>
+<p><strong>自构教学例子，未运行实验。</strong> 假设相机 20 Hz、IMU 800 Hz，通常相邻相机帧之间有约 40 条惯性读数。后端反复调整起始世界位置，并不会改变这 40 条读数描述的局部运动，因此局部预积分可复用。如果陀螺仪偏置也变了，才用保存的雅可比近似修正。这里“40”由频率相除得到，不表示论文始终每个相机帧都创建关键帧。</p>
+<h2 id="四读误差与计算时间核对惯性和视觉输入">四、读误差与计算时间，核对惯性和视觉输入</h2>
+<!-- figure-ref-v6:start:rc-83-figure-10-anchor -->
+<p><span id="rc-83-figure-10"></span></p>
+<!-- figure-ref-v6:end:rc-83-figure-10-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/083-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/083-evidence.png" width="845" height="279" alt="Fig. 10：按纵轴从左到右读位置、速度和旋转的一阶偏置修正误差，横轴扩大偏置扰动" loading="lazy"></a><figcaption>原论文结果图／表摘引：Christian Forster、Luca Carlone、Frank Dellaert、Davide Scaramuzza（2015），Fig. 10，PDF 第 8 页；<a href="https://www.roboticsproceedings.org/rss11/p06.pdf#page=8" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：按纵轴从左到右读位置、速度和旋转的一阶偏置修正误差，横轴扩大偏置扰动。误差随扰动上升提醒我们修正是局部近似，不能把小扰动下的小误差当作永不重新积分的保证。</p>
+<h3 id="实验怎样安排">实验怎样安排</h3>
+<p>这里是 RSS 2015 版；室外路线图注与正文的数值不一致已在结果处保留，不能用后来的期刊版数字无声补齐。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -140,62 +157,56 @@
 <td>不涉及学习训练步数；真实轨迹独立重复次数、统一调参预算未报告；不能把模拟重复数用于真实轨迹置信度</td>
 </tr>
 </tbody></table></div>
-<h2 id="五哪些结论有证据哪些不能推出">五、哪些结论有证据，哪些不能推出</h2>
-<p><strong>图 7：相对漂移。</strong> 在 360 m 轨迹片段尺度，正文报告平均平移漂移约 0.3 m，而两项基线约 0.7 m。按这些舍入数计算下降约 57%，但它不是所有轨迹平均的榜单提升，也不等于终点误差。该比较支持系统级精度优势，不能单独证明流形表示或某个模块贡献了全部改善。</p>
-<p><strong>图 8：后端耗时。</strong> 作者报告平均后端更新约 10 ms，前端每帧约 3 ms。关键帧后端和相机帧前端的运行频率不同，不能简单宣布整个系统以 <span class="reading-math" data-tex="1/(10+3)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mn>10</mn><mo>+</mo><mn>3</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">1/(10+3)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/</span><span class="mopen">(</span><span class="mord">10</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">3</span><span class="mclose">)</span></span></span></span></span> 秒的固定频率运行。平均值也不是最坏延迟保证；原图存在峰值。ASLAM 对应耗时未报告，因此不能据此计算两者加速比。</p>
-<p><strong>图 9 与第 VIII 节：一个必须保留的数值疑点。</strong> 室外约 300 m 路线，本方法终点误差在图注为 <strong>1.0 m</strong>，正文为 <strong>1.5 m</strong>；Tango 均为 <strong>2.2 m</strong>。不能自行挑选较好数字，也不适合给出确定的百分比提升。作者还明确提醒两系统传感器不同，比较属于有限的系统级参照。</p>
-<p><strong>图 1：跨楼层。</strong> 约 160 m 路线返回起点，报告本方法 0.5 m、Tango 1.4 m。它支持这条路线上的低终点漂移，但小终点误差可能掩盖中间路径误差，不能替代完整 ATE。</p>
-<p><strong>图 10：偏置修正。</strong> 一阶修正与重新积分在所测扰动下差异很小，支持局部近似的实用性；实验没有证明任意温漂、任意长积分区间都无需重新积分。图与正文说明的是误差量级，不应从图上估出很多位小数冒充原始数据。</p>
-<p>上述证据见<a href="https://www.roboticsproceedings.org/rss11/p06.pdf">原文第 VIII 节及图 1、7–10</a>。</p>
-<h2 id="六贡献代价与适用边界">六、贡献、代价与适用边界</h2>
-<p>真正的贡献是让高频惯性约束更适合可重线性化的优化后端，并给出一致的旋转、协方差及偏置处理。它不是独立于系统的魔法模块：相机跟踪失败、错误外参、时间不同步、激励不足或不合理噪声参数，仍可能破坏估计。</p>
+<h3 id="哪些结论有证据哪些不能推出">哪些结论有证据，哪些不能推出</h3>
+<p><strong><a href="#rc-83-figure-7">图 7</a>：相对漂移。</strong> 在 360 m 轨迹片段尺度，正文报告平均平移漂移约 0.3 m，而两项基线约 0.7 m。按这些舍入数计算下降约 57%，但它不是所有轨迹平均的榜单提升，也不等于终点误差。该比较支持系统级精度优势，不能单独证明流形表示或某个模块贡献了全部改善。</p>
+<!-- figure-ref-v6:start:rc-83-figure-7 -->
+<figure class="reading-evidence-figure" id="rc-83-figure-7"><a href="/robot-classic/assets/figure-refs-v6/083-fig-7.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/083-fig-7.png" width="640" height="537" alt="原论文图7：三种视觉惯性方法随行进距离变化的平移、偏航和倾斜误差箱线图" loading="lazy"></a><figcaption>Christian Forster、Luca Carlone、Frank Dellaert、Davide Scaramuzza（2015），图 7，PDF 第 7 页；<a href="https://www.roboticsproceedings.org/rss11/p06.pdf#page=7" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：三个纵轴对应不同误差量，箱体与离群点展示分布；不能把最小一条中位数当成所有指标都占优。</p>
+<!-- figure-ref-v6:end:rc-83-figure-7 -->
+
+<p><strong><a href="#rc-83-figure-8">图 8</a>：后端耗时。</strong> 作者报告平均后端更新约 10 ms，前端每帧约 3 ms。关键帧后端和相机帧前端的运行频率不同，不能简单宣布整个系统以 <span class="reading-math" data-tex="1/(10+3)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mn>10</mn><mo>+</mo><mn>3</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">1/(10+3)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/</span><span class="mopen">(</span><span class="mord">10</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">3</span><span class="mclose">)</span></span></span></span></span> 秒的固定频率运行。平均值也不是最坏延迟保证；原图存在峰值。ASLAM 对应耗时未报告，因此不能据此计算两者加速比。</p>
+<!-- figure-ref-v6:start:rc-83-figure-8 -->
+<figure class="reading-evidence-figure" id="rc-83-figure-8"><a href="/robot-classic/assets/figure-refs-v6/083-fig-8.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/083-fig-8.png" width="640" height="168" alt="原论文图8：增量视觉惯性估计的每关键帧处理耗时曲线" loading="lazy"></a><figcaption>Christian Forster、Luca Carlone、Frank Dellaert、Davide Scaramuzza（2015），图 8，PDF 第 7 页；<a href="https://www.roboticsproceedings.org/rss11/p06.pdf#page=7" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：横轴是关键帧编号，尖峰与常态耗时分开读；均值不能替代实时系统对最坏延迟的要求。</p>
+<!-- figure-ref-v6:end:rc-83-figure-8 -->
+
+<p><strong><a href="#rc-83-figure-9">图 9</a> 与第 VIII 节：一个必须保留的数值疑点。</strong> 室外约 300 m 路线，本方法终点误差在图注为 <strong>1.0 m</strong>，正文为 <strong>1.5 m</strong>；Tango 均为 <strong>2.2 m</strong>。不能自行挑选较好数字，也不适合给出确定的百分比提升。作者还明确提醒两系统传感器不同，比较属于有限的系统级参照。</p>
+<!-- figure-ref-v6:start:rc-83-figure-9 -->
+<figure class="reading-evidence-figure" id="rc-83-figure-9"><a href="/robot-classic/assets/figure-refs-v6/083-fig-9.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/083-fig-9.png" width="560" height="352" alt="原论文图9：闭合室外轨迹上所提方法和Tango的估计路径" loading="lazy"></a><figcaption>Christian Forster、Luca Carlone、Frank Dellaert、Davide Scaramuzza（2015），图 9，PDF 第 8 页；<a href="https://www.roboticsproceedings.org/rss11/p06.pdf#page=8" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：路径起终点设在同一坐标处；轨迹看起来接近不等于每个位置都有真值误差保证。</p>
+<!-- figure-ref-v6:end:rc-83-figure-9 -->
+
+<p><strong><a href="#rc-83-figure-1">图 1</a>：跨楼层。</strong> 约 160 m 路线返回起点，报告本方法 0.5 m、Tango 1.4 m。它支持这条路线上的低终点漂移，但小终点误差可能掩盖中间路径误差，不能替代完整 ATE。</p>
+<!-- figure-ref-v6:start:rc-83-figure-1 -->
+<figure class="reading-evidence-figure" id="rc-83-figure-1"><a href="/robot-classic/assets/figure-refs-v6/083-fig-1.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/083-fig-1.png" width="640" height="336" alt="原论文图1：楼梯场景下所提方法与Tango三维轨迹的两个投影视图" loading="lazy"></a><figcaption>Christian Forster、Luca Carlone、Frank Dellaert、Davide Scaramuzza（2015），图 1，PDF 第 1 页；<a href="https://www.roboticsproceedings.org/rss11/p06.pdf#page=1" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：两个投影呈现同一段上下楼运动；要同时比较平面位移和高度变化，避免只凭单个视图判断漂移。</p>
+<!-- figure-ref-v6:end:rc-83-figure-1 -->
+
+<p><strong><a href="#rc-83-figure-10">图 10</a>：偏置修正。</strong> 一阶修正与重新积分在所测扰动下差异很小，支持局部近似的实用性；实验没有证明任意温漂、任意长积分区间都无需重新积分。图与正文说明的是误差量级，不应从图上估出很多位小数冒充原始数据。</p>
+<p>上述证据见<a href="#rc-83-figure-1">原文第 VIII 节及图 1、7–10</a>。</p>
+<h2 id="五保留短区间模型标定和初始化限制">五、保留短区间模型、标定和初始化限制</h2>
 <p>作者给出了有限真实轨迹和数值验证；“在极低纹理、高振动、极端偏置变化下也可靠”不在这些实验的证明范围。我的分析是，区间长度同时影响计算和近似：关键帧过密会增加后端规模，过稀又可能放大偏置常量假设和线性近似误差。这个权衡需要专门实验，不能从一次平均耗时中决定。</p>
-<h2 id="七用一个小例子建立直觉">七、用一个小例子建立直觉</h2>
-<p><strong>自构教学例子，未运行实验。</strong> 假设相机 20 Hz、IMU 800 Hz，通常相邻相机帧之间有约 40 条惯性读数。后端反复调整起始世界位置，并不会改变这 40 条读数描述的局部运动，因此局部预积分可复用。如果陀螺仪偏置也变了，才用保存的雅可比近似修正。这里“40”由频率相除得到，不表示论文始终每个相机帧都创建关键帧。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>高频读数造成重复积分</td>
-<td>在起始局部坐标系预积分</td>
-<td>全局状态调整不要求重放所有读数</td>
-<td>图 8 系统耗时</td>
-<td>仍依赖前端与增量求解器</td>
-</tr>
-<tr>
-<td>偏置估计变化</td>
-<td>预存敏感度，进行一阶修正</td>
-<td>用小矩阵运算近似重新积分</td>
-<td>图 10 的 Monte Carlo</td>
-<td>大变化和长区间未获一般保证</td>
-</tr>
-<tr>
-<td>欧拉角噪声与奇异性</td>
-<td>在旋转流形上建模</td>
-<td>尊重旋转组合及局部误差结构</td>
-<td>理论推导与整体实验</td>
-<td>仍有局部线性化与非凸求解</td>
-</tr>
-<tr>
-<td>地标变量增大优化规模</td>
-<td>无结构视觉因子</td>
-<td>消元后保留位姿约束</td>
-<td>整体系统结果</td>
-<td>未单独隔离所有组件贡献</td>
-</tr>
-</tbody></table></div>
-<h2 id="八理解检查三个问题与答案">八、理解检查：三个问题与答案</h2>
+<h2 id="六追问预积分的旋转速度和位置误差为什么不能各自独立加权">六、追问：预积分的旋转、速度和位置误差为什么不能各自独立加权？</h2>
+<details>
+<summary>预积分的旋转、速度和位置误差为什么不能各自独立加权？</summary>
+
+<p><strong>参考答案</strong>：同一段惯性噪声通过积分同时进入多个增量。用线性教学形式写作 <span class="reading-math" data-tex="e_v=A n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>e</mi><mi>v</mi></msub><mo>=</mo><mi>A</mi><mi>n</mi></mrow><annotation encoding="application/x-tex">e_v=A n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span><span class="mord mathnormal">n</span></span></span></span></span>、<span class="reading-math" data-tex="e_p=B n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>e</mi><mi>p</mi></msub><mo>=</mo><mi>B</mi><mi>n</mi></mrow><annotation encoding="application/x-tex">e_p=B n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">p</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mord mathnormal">n</span></span></span></span></span>，其交叉协方差为 <span class="reading-math" data-tex="A\Sigma_nB^\top"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi><msub><mi mathvariant="normal">Σ</mi><mi>n</mi></msub><msup><mi>B</mi><mi mathvariant="normal">⊤</mi></msup></mrow><annotation encoding="application/x-tex">A\Sigma_nB^\top</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9991em;vertical-align:-0.15em;"></span><span class="mord mathnormal">A</span><span class="mord"><span class="mord">Σ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span></span></span></span></span>，一般非零。分别取三个方差会丢掉共享噪声的方向关系。把它们作为一个带联合协方差的因子，是<a href="https://gtsam.org/tutorials/intro.html">Dellaert因子与噪声模型讲法</a>在本文的具体应用，不是新增独立传感信息。</p>
+</details>
+
+<h2 id="七把惯性因子接入完整估计系统">七、把惯性因子接入完整估计系统</h2>
+<ul>
+<li><strong>直接继承</strong>：<a href="092-vinsmono.html">VINS-Mono：让单目视觉与 IMU 组成可以长期运行的定位系统</a>。用预积分组织完整视觉惯性估计，增加启动与失效处理。</li>
+<li><strong>模块组合</strong>：<a href="097-liosam.html">LIO-SAM：让激光、惯性、GPS 与回环共同解释运动</a>。让惯性区间约束进入激光因子图。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <p><strong>问题 1：既然预积分结果不依赖起始位姿，为什么残差还出现 <span class="reading-math" data-tex="R_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>R</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">R_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>？</strong></p>
 <p><strong>答案：</strong> 缓存的是局部测量，不依赖世界系起点；残差要把两个世界状态预测的相对运动与这个局部测量比较，所以必须使用 <span class="reading-math" data-tex="R_i^T"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>R</mi><mi>i</mi><mi>T</mi></msubsup></mrow><annotation encoding="application/x-tex">R_i^T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1em;vertical-align:-0.2587em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-2.4413em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2587em;"><span></span></span></span></span></span></span></span></span></span></span> 变换坐标。测量可复用与残差依赖待估状态并不矛盾。</p>
 <p><strong>问题 2：偏置修正能否永远代替重新积分？怎样验证？</strong></p>
-<p><strong>答案：</strong> 不能，它是一阶近似。应固定同一批原始 IMU，逐步扩大偏置扰动和积分区间，比较修正结果与重新积分的旋转、速度、位置误差，并记录误差进入最终轨迹的影响。图 10 只覆盖其报告的范围。</p>
+<p><strong>答案：</strong> 不能，它是一阶近似。应固定同一批原始 IMU，逐步扩大偏置扰动和积分区间，比较修正结果与重新积分的旋转、速度、位置误差，并记录误差进入最终轨迹的影响。<a href="#rc-83-figure-10">图 10</a> 只覆盖其报告的范围。</p>
 <p><strong>问题 3：终点误差更小，能否证明预积分方法更准确？</strong></p>
 <p><strong>答案：</strong> 不能单凭这一项。需要同传感器、同前端、相近预算的消融和全程真值，才能较好隔离方法作用；闭合路线上的误差可能相互抵消。这里室外数值还有图注与正文不一致，比较结论必须进一步收窄。</p>
 </div><!-- READING:END -->
@@ -209,19 +220,15 @@
 
 **论文**：Christian Forster、Luca Carlone、Frank Dellaert、Davide Scaramuzza，*IMU Preintegration on Manifold for Efficient Visual-Inertial Maximum-a-Posteriori Estimation*，RSS 2015。[会议原文](https://www.roboticsproceedings.org/rss11/p06.pdf) · [正式入口](https://doi.org/10.15607/RSS.2015.XI.006)。
 
-**阅读范围**：RSS 2015 正文的方法、实现和实验部分；未逐项复算补充材料的雅可比。本文不将后来期刊扩展版的实验归入会议论文。数值依据第 VIII 节；其中室外轨迹的图注与正文存在不一致，见下文。
+### 先接住前作的问题
 
-## 一、一分钟理解：优化器为什么不该反复重放 IMU
+[iSAM2](068-isam2.md)让后端能反复修正历史状态，高频 IMU 却会让朴素重积分变贵；本篇提供可缓存且带相关不确定性的惯性因子，与增量后端属于模块组合。
+
+## 一、问题设定：关键帧状态被修改时怎样避免反复重放全部IMU
 
 相机两帧之间可能已经收到几十条惯性测量。直接处理有两个麻烦：为每个 IMU 时刻建立状态，优化问题太大；把测量积分成下一时刻位姿，又会依赖起始位姿和偏置，一旦优化器修改它们，旧积分可能需要重做。
 
-预积分的想法是先回答一个局部问题：“从这个关键帧出发，惯性测量描述了怎样的相对变化？”把许多读数压缩成旋转、速度和位置的增量及其不确定性，再连接两个关键帧状态。局部增量不依赖世界坐标中的起始位姿；偏置变化则先用一阶修正处理。
-
-作者的贡献不是首次提出预积分，而是在旋转流形上建立测量、噪声传播和偏置修正，并把它接入增量视觉惯性估计。实验支持该系统在所测轨迹上兼顾误差与计算时间，不能证明所有运动条件下都优于滤波器。
-
-一句话：**在关键帧视觉惯性估计中，通过局部预积分与偏置的一阶修正，减少反复积分的计算，代价是噪声线性化、短区间偏置模型以及标定和初始化要求。**
-
-## 二、问题定义：IMU 测到的不是位置
+### 问题定义：IMU 测到的不是位置
 
 这是状态估计问题，不是强化学习。没有策略、奖励或训练回合。状态可写成 $x_i=(R_i,p_i,v_i,b_i^g,b_i^a)$：姿态、位置、速度、陀螺仪偏置和加速度计偏置。相机提供地标观测，IMU 提供角速度和比力。
 
@@ -231,7 +238,7 @@
 
 第 V 节假设相机与 IMU 已同步，并在两个关键帧之间把偏置视为常量；跨关键帧再建立偏置演化模型。时间偏移、相机内参、相机—IMU 外参都不是可以随意省略的工程细节。视觉惯性系统仍有全局位置、绕重力方向的整体航向等规范自由度；引入 IMU 不等于获得 GPS 式绝对位置。
 
-## 三、方法：增量可以缓存，状态仍要优化
+## 二、在局部坐标预积分，并传播相关噪声和偏置导数
 
 ### 1. 三种增量分别消除了什么
 
@@ -269,11 +276,29 @@ $$
 
 旋转修正则通过指数映射组合，而非直接加到旋转矩阵。$J$ 是预积分对偏置的敏感度。它把“再积分所有样本”变成较小的矩阵运算；这是近似修正，不是任意大偏置变化下的恒等式。
 
+### 速度和位置误差为什么不能各算各的
+
+预积分把许多读数压成一个因子，也把**共享读数造成的相关性**保留下来。第 V-B 节给出旋转、速度、位置误差共同的九维协方差；把它改成三个互不相干的权重，通常已改变统计模型。
+
+**原创一维教学例。** 固定姿态、忽略偏置与重力误差，取两个长为 $h$ 的积分步；每步加速度噪声 $n_0,n_1$ 独立、均值零、方差 $\sigma^2$，步内采用常加速度。按先更新位置再更新速度的递推，累计误差为
+
+$$\delta v=h(n_0+n_1),\qquad \delta p=h^2(\tfrac32 n_0+\tfrac12 n_1).$$
+
+第一步噪声不仅影响该步位移，还经速度带入第二步，因此它在位置里的系数是 $3/2$。直接计算得到
+
+$$\operatorname{Var}(\delta v)=2h^2\sigma^2,\quad \operatorname{Var}(\delta p)=\tfrac52h^4\sigma^2,\quad \operatorname{Cov}(\delta v,\delta p)=2h^3\sigma^2.$$
+
+取 $h=1,\sigma^2=1$ 作为归一化数值，协方差矩阵为 $\begin{bmatrix}2&amp;2\\2&amp;2.5\end{bmatrix}$，相关系数约 0.894。即使原始噪声独立，积分后两类误差也高度相关；完整三维情形还会由姿态误差把陀螺仪噪声传到速度和位置。这个例子解释协方差结构，不是论文 Monte Carlo 数据；[图 10](#rc-83-figure-10) 的偏置实验检验的是另一件事，即一阶偏置修正与重新积分的差别。依据[原文 V-B、V-C 与图10](#rc-83-figure-10)。
+
 ### 4. 概率目标与无结构视觉因子
 
 系统优化的是带先验、IMU、偏置和视觉约束的最大后验估计，常写成加权残差平方和。权重来自协方差，而不是人为让某个传感器永远占上风。
 
 第 VI 节还在线性化后消去地标增量，只保留它对观察这些地标的位姿的约束。“无结构”不表示图像里不需要三维几何，也不表示没有三角化，而是最终线性求解不显式保留所有地标变量。非线性 MAP 问题仍可能有局部极小；消元保留当前线性化子问题的信息，不构成全局最优证明。
+
+旋转增量、速度增量和位置增量共享噪声，缓存时必须保留其相关性。下面检查偏置修正如何进入因子，再对照计算节约与误差。
+
+## 三、缓存区间增量，检查一阶偏置修正
 
 ### 5. 伪代码：区分测量积累与优化更新
 
@@ -296,38 +321,7 @@ $$
 
 这是教学流程，不是完整复现程序；异常值处理、规范固定和重新积分策略仍需实现。目标是 MAP 误差，机制是压缩与复用，测量指标才是轨迹误差和耗时，三者不能混为一个“损失下降所以定位更准”的结论。
 
-## 四、实验怎样安排
-
-| 项目 | 原文设置与要验证的问题 |
-|---|---|
-| 室内精度 | VI-Sensor，使用左相机；相机 20 Hz、IMU 800 Hz，Vicon 真值；比较所测轨迹上的相对漂移 |
-| 对比方法 | ASLAM 与 MSCKF 的结果来自相关作者；比较的是完整系统，前端和实现也可能影响结果 |
-| 实时性 | Intel i7 2.4 GHz 笔记本；后端 iSAM2 每次采用 10 次优化迭代；前后端分线程 |
-| 室外与楼层 | 与刚性连接的 Tango 设备共同运动，以返回起点的终点误差评价；不等于全程真值误差 |
-| 偏置修正 | 每段 100 条 IMU 测量，偏置扰动幅度 0.04–0.2，1000 次 Monte Carlo；比较一阶修正与重新积分 |
-| 数据和预算边界 | 不涉及学习训练步数；真实轨迹独立重复次数、统一调参预算未报告；不能把模拟重复数用于真实轨迹置信度 |
-
-## 五、哪些结论有证据，哪些不能推出
-
-**图 7：相对漂移。** 在 360 m 轨迹片段尺度，正文报告平均平移漂移约 0.3 m，而两项基线约 0.7 m。按这些舍入数计算下降约 57%，但它不是所有轨迹平均的榜单提升，也不等于终点误差。该比较支持系统级精度优势，不能单独证明流形表示或某个模块贡献了全部改善。
-
-**图 8：后端耗时。** 作者报告平均后端更新约 10 ms，前端每帧约 3 ms。关键帧后端和相机帧前端的运行频率不同，不能简单宣布整个系统以 $1/(10+3)$ 秒的固定频率运行。平均值也不是最坏延迟保证；原图存在峰值。ASLAM 对应耗时未报告，因此不能据此计算两者加速比。
-
-**图 9 与第 VIII 节：一个必须保留的数值疑点。** 室外约 300 m 路线，本方法终点误差在图注为 **1.0 m**，正文为 **1.5 m**；Tango 均为 **2.2 m**。不能自行挑选较好数字，也不适合给出确定的百分比提升。作者还明确提醒两系统传感器不同，比较属于有限的系统级参照。
-
-**图 1：跨楼层。** 约 160 m 路线返回起点，报告本方法 0.5 m、Tango 1.4 m。它支持这条路线上的低终点漂移，但小终点误差可能掩盖中间路径误差，不能替代完整 ATE。
-
-**图 10：偏置修正。** 一阶修正与重新积分在所测扰动下差异很小，支持局部近似的实用性；实验没有证明任意温漂、任意长积分区间都无需重新积分。图与正文说明的是误差量级，不应从图上估出很多位小数冒充原始数据。
-
-上述证据见[原文第 VIII 节及图 1、7–10](https://www.roboticsproceedings.org/rss11/p06.pdf)。
-
-## 六、贡献、代价与适用边界
-
-真正的贡献是让高频惯性约束更适合可重线性化的优化后端，并给出一致的旋转、协方差及偏置处理。它不是独立于系统的魔法模块：相机跟踪失败、错误外参、时间不同步、激励不足或不合理噪声参数，仍可能破坏估计。
-
-作者给出了有限真实轨迹和数值验证；“在极低纹理、高振动、极端偏置变化下也可靠”不在这些实验的证明范围。我的分析是，区间长度同时影响计算和近似：关键帧过密会增加后端规模，过稀又可能放大偏置常量假设和线性近似误差。这个权衡需要专门实验，不能从一次平均耗时中决定。
-
-## 七、用一个小例子建立直觉
+### 用一个小例子建立直觉
 
 **自构教学例子，未运行实验。** 假设相机 20 Hz、IMU 800 Hz，通常相邻相机帧之间有约 40 条惯性读数。后端反复调整起始世界位置，并不会改变这 40 条读数描述的局部运动，因此局部预积分可复用。如果陀螺仪偏置也变了，才用保存的雅可比近似修正。这里“40”由频率相除得到，不表示论文始终每个相机帧都创建关键帧。
 
@@ -339,14 +333,85 @@ $$
 4. **因子图**：用局部概率约束连接待估计状态的图表示。
 5. **边缘化或消元**：消去部分变量并保留其对其他变量的约束，不等于直接丢弃测量。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 高频读数造成重复积分 | 在起始局部坐标系预积分 | 全局状态调整不要求重放所有读数 | 图 8 系统耗时 | 仍依赖前端与增量求解器 |
-| 偏置估计变化 | 预存敏感度，进行一阶修正 | 用小矩阵运算近似重新积分 | 图 10 的 Monte Carlo | 大变化和长区间未获一般保证 |
-| 欧拉角噪声与奇异性 | 在旋转流形上建模 | 尊重旋转组合及局部误差结构 | 理论推导与整体实验 | 仍有局部线性化与非凸求解 |
-| 地标变量增大优化规模 | 无结构视觉因子 | 消元后保留位姿约束 | 整体系统结果 | 未单独隔离所有组件贡献 |
+## 四、读误差与计算时间，核对惯性和视觉输入
 
-## 八、理解检查：三个问题与答案
+&lt;!-- figure-ref-v6:start:rc-83-figure-10-anchor --&gt;
+&lt;span id=&quot;rc-83-figure-10&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-83-figure-10-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/083-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/083-evidence.png&quot; width=&quot;845&quot; height=&quot;279&quot; alt=&quot;Fig. 10：按纵轴从左到右读位置、速度和旋转的一阶偏置修正误差，横轴扩大偏置扰动&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文结果图／表摘引：Christian Forster、Luca Carlone、Frank Dellaert、Davide Scaramuzza（2015），Fig. 10，PDF 第 8 页；&lt;a href=&quot;https://www.roboticsproceedings.org/rss11/p06.pdf#page=8&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：按纵轴从左到右读位置、速度和旋转的一阶偏置修正误差，横轴扩大偏置扰动。误差随扰动上升提醒我们修正是局部近似，不能把小扰动下的小误差当作永不重新积分的保证。
+
+### 实验怎样安排
+
+这里是 RSS 2015 版；室外路线图注与正文的数值不一致已在结果处保留，不能用后来的期刊版数字无声补齐。
+
+| 项目 | 原文设置与要验证的问题 |
+|---|---|
+| 室内精度 | VI-Sensor，使用左相机；相机 20 Hz、IMU 800 Hz，Vicon 真值；比较所测轨迹上的相对漂移 |
+| 对比方法 | ASLAM 与 MSCKF 的结果来自相关作者；比较的是完整系统，前端和实现也可能影响结果 |
+| 实时性 | Intel i7 2.4 GHz 笔记本；后端 iSAM2 每次采用 10 次优化迭代；前后端分线程 |
+| 室外与楼层 | 与刚性连接的 Tango 设备共同运动，以返回起点的终点误差评价；不等于全程真值误差 |
+| 偏置修正 | 每段 100 条 IMU 测量，偏置扰动幅度 0.04–0.2，1000 次 Monte Carlo；比较一阶修正与重新积分 |
+| 数据和预算边界 | 不涉及学习训练步数；真实轨迹独立重复次数、统一调参预算未报告；不能把模拟重复数用于真实轨迹置信度 |
+
+### 哪些结论有证据，哪些不能推出
+
+**[图 7](#rc-83-figure-7)：相对漂移。** 在 360 m 轨迹片段尺度，正文报告平均平移漂移约 0.3 m，而两项基线约 0.7 m。按这些舍入数计算下降约 57%，但它不是所有轨迹平均的榜单提升，也不等于终点误差。该比较支持系统级精度优势，不能单独证明流形表示或某个模块贡献了全部改善。
+
+&lt;!-- figure-ref-v6:start:rc-83-figure-7 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-83-figure-7&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/083-fig-7.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/083-fig-7.png&quot; width=&quot;640&quot; height=&quot;537&quot; alt=&quot;原论文图7：三种视觉惯性方法随行进距离变化的平移、偏航和倾斜误差箱线图&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Christian Forster、Luca Carlone、Frank Dellaert、Davide Scaramuzza（2015），图 7，PDF 第 7 页；&lt;a href=&quot;https://www.roboticsproceedings.org/rss11/p06.pdf#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：三个纵轴对应不同误差量，箱体与离群点展示分布；不能把最小一条中位数当成所有指标都占优。
+&lt;!-- figure-ref-v6:end:rc-83-figure-7 --&gt;
+
+**[图 8](#rc-83-figure-8)：后端耗时。** 作者报告平均后端更新约 10 ms，前端每帧约 3 ms。关键帧后端和相机帧前端的运行频率不同，不能简单宣布整个系统以 $1/(10+3)$ 秒的固定频率运行。平均值也不是最坏延迟保证；原图存在峰值。ASLAM 对应耗时未报告，因此不能据此计算两者加速比。
+
+&lt;!-- figure-ref-v6:start:rc-83-figure-8 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-83-figure-8&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/083-fig-8.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/083-fig-8.png&quot; width=&quot;640&quot; height=&quot;168&quot; alt=&quot;原论文图8：增量视觉惯性估计的每关键帧处理耗时曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Christian Forster、Luca Carlone、Frank Dellaert、Davide Scaramuzza（2015），图 8，PDF 第 7 页；&lt;a href=&quot;https://www.roboticsproceedings.org/rss11/p06.pdf#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：横轴是关键帧编号，尖峰与常态耗时分开读；均值不能替代实时系统对最坏延迟的要求。
+&lt;!-- figure-ref-v6:end:rc-83-figure-8 --&gt;
+
+**[图 9](#rc-83-figure-9) 与第 VIII 节：一个必须保留的数值疑点。** 室外约 300 m 路线，本方法终点误差在图注为 **1.0 m**，正文为 **1.5 m**；Tango 均为 **2.2 m**。不能自行挑选较好数字，也不适合给出确定的百分比提升。作者还明确提醒两系统传感器不同，比较属于有限的系统级参照。
+
+&lt;!-- figure-ref-v6:start:rc-83-figure-9 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-83-figure-9&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/083-fig-9.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/083-fig-9.png&quot; width=&quot;560&quot; height=&quot;352&quot; alt=&quot;原论文图9：闭合室外轨迹上所提方法和Tango的估计路径&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Christian Forster、Luca Carlone、Frank Dellaert、Davide Scaramuzza（2015），图 9，PDF 第 8 页；&lt;a href=&quot;https://www.roboticsproceedings.org/rss11/p06.pdf#page=8&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：路径起终点设在同一坐标处；轨迹看起来接近不等于每个位置都有真值误差保证。
+&lt;!-- figure-ref-v6:end:rc-83-figure-9 --&gt;
+
+**[图 1](#rc-83-figure-1)：跨楼层。** 约 160 m 路线返回起点，报告本方法 0.5 m、Tango 1.4 m。它支持这条路线上的低终点漂移，但小终点误差可能掩盖中间路径误差，不能替代完整 ATE。
+
+&lt;!-- figure-ref-v6:start:rc-83-figure-1 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-83-figure-1&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/083-fig-1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/083-fig-1.png&quot; width=&quot;640&quot; height=&quot;336&quot; alt=&quot;原论文图1：楼梯场景下所提方法与Tango三维轨迹的两个投影视图&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Christian Forster、Luca Carlone、Frank Dellaert、Davide Scaramuzza（2015），图 1，PDF 第 1 页；&lt;a href=&quot;https://www.roboticsproceedings.org/rss11/p06.pdf#page=1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：两个投影呈现同一段上下楼运动；要同时比较平面位移和高度变化，避免只凭单个视图判断漂移。
+&lt;!-- figure-ref-v6:end:rc-83-figure-1 --&gt;
+
+**[图 10](#rc-83-figure-10)：偏置修正。** 一阶修正与重新积分在所测扰动下差异很小，支持局部近似的实用性；实验没有证明任意温漂、任意长积分区间都无需重新积分。图与正文说明的是误差量级，不应从图上估出很多位小数冒充原始数据。
+
+上述证据见[原文第 VIII 节及图 1、7–10](#rc-83-figure-1)。
+
+## 五、保留短区间模型、标定和初始化限制
+
+作者给出了有限真实轨迹和数值验证；“在极低纹理、高振动、极端偏置变化下也可靠”不在这些实验的证明范围。我的分析是，区间长度同时影响计算和近似：关键帧过密会增加后端规模，过稀又可能放大偏置常量假设和线性近似误差。这个权衡需要专门实验，不能从一次平均耗时中决定。
+
+## 六、追问：预积分的旋转、速度和位置误差为什么不能各自独立加权？
+
+&lt;details&gt;
+&lt;summary&gt;预积分的旋转、速度和位置误差为什么不能各自独立加权？&lt;/summary&gt;
+
+**参考答案**：同一段惯性噪声通过积分同时进入多个增量。用线性教学形式写作 $e_v=A n$、$e_p=B n$，其交叉协方差为 $A\Sigma_nB^\top$，一般非零。分别取三个方差会丢掉共享噪声的方向关系。把它们作为一个带联合协方差的因子，是[Dellaert因子与噪声模型讲法](https://gtsam.org/tutorials/intro.html)在本文的具体应用，不是新增独立传感信息。
+
+&lt;/details&gt;
+
+## 七、把惯性因子接入完整估计系统
+
+- **直接继承**：[VINS-Mono：让单目视觉与 IMU 组成可以长期运行的定位系统](092-vinsmono.md)。用预积分组织完整视觉惯性估计，增加启动与失效处理。
+- **模块组合**：[LIO-SAM：让激光、惯性、GPS 与回环共同解释运动](097-liosam.md)。让惯性区间约束进入激光因子图。
+
+## 八、自测与参考答案
 
 **问题 1：既然预积分结果不依赖起始位姿，为什么残差还出现 $R_i$？**
 
@@ -354,7 +419,7 @@ $$
 
 **问题 2：偏置修正能否永远代替重新积分？怎样验证？**
 
-**答案：** 不能，它是一阶近似。应固定同一批原始 IMU，逐步扩大偏置扰动和积分区间，比较修正结果与重新积分的旋转、速度、位置误差，并记录误差进入最终轨迹的影响。图 10 只覆盖其报告的范围。
+**答案：** 不能，它是一阶近似。应固定同一批原始 IMU，逐步扩大偏置扰动和积分区间，比较修正结果与重新积分的旋转、速度、位置误差，并记录误差进入最终轨迹的影响。[图 10](#rc-83-figure-10) 只覆盖其报告的范围。
 
 **问题 3：终点误差更小，能否证明预积分方法更准确？**
 

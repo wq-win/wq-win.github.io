@@ -42,15 +42,11 @@
                 <span class="text-gray-500">ORB-SLAM：从持续跟踪走向能够重访和恢复的单目地图</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="b413fc9a06b7fecbc6539018ac737331d5416bd67cea6bb3a4b604bf461c3ff1"><h1>082｜ORB-SLAM：从持续跟踪走向能够重访和恢复的单目地图</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="45956a034d2ac8577760b67164701195288fc0b5567e207d2dfc2b1ef80b4325"><h1>082｜ORB-SLAM：从持续跟踪走向能够重访和恢复的单目地图</h1>
 <p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="081-bitstar.html">上一篇</a> · <a href="083-imu-preintegration.html">下一篇</a></p>
 <p><strong>论文</strong>：Raúl Mur-Artal、J. M. M. Montiel、Juan D. Tardós，<em>ORB-SLAM: A Versatile and Accurate Monocular SLAM System</em>，2015。<a href="https://arxiv.org/html/1502.00956">原文</a> · <a href="https://github.com/raulmur/ORB_SLAM">官方代码</a>。</p>
-<p><strong>阅读范围</strong>：核对正文系统设计、初始化、跟踪/建图/回环及实验，阅读附录的优化目标；未运行程序，未复算全部表格。后文简化推导与例子用于教学，不将 ORB-SLAM2/3 的能力移入第一代。</p>
-<h2 id="一分钟理解建过的地图应该帮助下一次定位">一分钟理解：建过的地图应该帮助下一次定位</h2>
-<p>相机向前走时，靠相邻图像估计运动可以形成一条轨迹。但一旦跟踪丢失，或绕一圈回来，系统还需要认出旧地点并修正累计误差。否则地图只是不断增长的历史记录。</p>
-<p>ORB-SLAM 用同一类 ORB 特征服务跟踪、三角化、重定位和回环，通过局部共视关系限制计算，并利用稀疏全局图修正长期漂移。关键帧可以积极创建，再删除冗余部分。</p>
-<p>实验支持它在多种室内外单目序列中兼顾精度、恢复和地图复用，但它仍有尺度模糊、初始化退化和回环漏检。单目结果经过尺度对齐后的厘米误差，不等于系统自己知道真实米制尺度。</p>
-<p><strong>一句话</strong>：在有可重复视觉特征的单目定位中，通过统一特征、局部优化与尺度感知回环，把局部跟踪扩展为更完整的 SLAM 系统，代价是特征与地图管理，且无纹理、低视差和重访外观差异仍会限制表现。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="056-ptam.html">PTAM</a>解决了局部关键帧跟踪与建图的分工，长期重访、失踪恢复与尺度漂移仍需要额外机制；ORB-SLAM 将<a href="060-orb.html">ORB</a>与<a href="066-dbow.html">DBoW</a>等模块组织到统一地图中。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：</p>
 <ol>
@@ -60,19 +56,22 @@
 <li><strong>Sim(3)</strong>：含尺度、旋转和平移的相似变换。</li>
 <li><strong>重定位</strong>：跟踪中断后利用旧地图重新估计相机位姿。</li>
 </ol>
-<h2 id="1问题定义相机位姿和地图一起估计">1．问题定义：相机位姿和地图一起估计</h2>
+<h2 id="一问题设定单目关键帧地图怎样支持重定位与长期回访">一、问题设定：单目关键帧地图怎样支持重定位与长期回访</h2>
+<p>相机向前走时，靠相邻图像估计运动可以形成一条轨迹。但一旦跟踪丢失，或绕一圈回来，系统还需要认出旧地点并修正累计误差。否则地图只是不断增长的历史记录。</p>
+<h3 id="问题定义相机位姿和地图一起估计">问题定义：相机位姿和地图一起估计</h3>
 <p>输入是经过标定的单目图像流；状态包括关键帧位姿与三维地图点。输出是相机轨迹与稀疏地图，没有 IMU、双目深度或强化学习策略。</p>
 <p>单幅图像不能确定深度，多幅图像可以通过视差约束结构，但整体尺度仍不可观测。系统内部可以选定一个尺度，评价时再做相似变换对齐。不要把这种评价操作当作算法从图像中恢复了绝对距离。</p>
 <p>与 PTAM 相比，本篇强调自动初始化、全局回环、对视角变化更稳健的重定位和更大的地图范围。它继承关键帧 BA、词袋检索及尺度回环等已有思想，新意主要在组件改进与系统组织。</p>
-<h2 id="2地图里的几种图各负责什么">2．地图里的几种图，各负责什么</h2>
+<h2 id="二统一orb特征区分共视图与回环约束">二、统一ORB特征，区分共视图与回环约束</h2>
+<h3 id="地图里的几种图各负责什么">地图里的几种图，各负责什么</h3>
 <p><strong>共视图</strong>连接观察到相同地图点的关键帧，帮助定位局部相关区域。<strong>生成树</strong>保持全局连通骨架。<strong>Essential Graph</strong>由生成树、强共视边和回环边构成，用较稀疏的约束做全局优化。</p>
 <p>“Essential Graph”不是本质矩阵，也不是将所有地图点都删掉只剩位姿。系统仍保留地图点与局部 BA，稀疏全局图主要服务回环修正。</p>
 <p>三个并行线程分别做逐帧跟踪、局部建图与回环。局部 BA 耗时可以大于相机帧间隔，因为它与逐帧跟踪并行；实时系统不要求每个后台任务都逐帧完成。</p>
-<h2 id="3初始化宁可等待也不急着选错解释">3．初始化：宁可等待，也不急着选错解释</h2>
+<h3 id="初始化宁可等待也不急着选错解释">初始化：宁可等待，也不急着选错解释</h3>
 <p>第 IV 节并行拟合单应矩阵 <span class="reading-math" data-tex="H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>H</mi></mrow><annotation encoding="application/x-tex">H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span></span></span> 和基础矩阵 <span class="reading-math" data-tex="F"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>F</mi></mrow><annotation encoding="application/x-tex">F</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">F</span></span></span></span></span>。前者适合平面及部分退化情况，后者用于具有足够视差的一般结构。</p>
 <p>论文以得分比例 <span class="reading-math" data-tex="R_H=S_H/(S_H+S_F)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>R</mi><mi>H</mi></msub><mo>=</mo><msub><mi>S</mi><mi>H</mi></msub><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><msub><mi>S</mi><mi>H</mi></msub><mo>+</mo><msub><mi>S</mi><mi>F</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">R_H=S_H/(S_H+S_F)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">F</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span> 选择模型，给出的启发式阈值是 0.45。选好模型还不够，必须检验运动假设的正深度、视差和重投影误差；有多个难以区分的解释时继续等待。</p>
 <p>这种拒绝初始化是合理行为。一个系统立即给出错误地图，不能仅凭“成功启动”就比谨慎等待的系统更稳健。实验中的平面二义性案例正说明了这个问题。</p>
-<h2 id="4跟踪ba-与回环的数学关系">4．跟踪、BA 与回环的数学关系</h2>
+<h3 id="跟踪ba-与回环的数学关系">跟踪、BA 与回环的数学关系</h3>
 <p>基本重投影残差可写为：</p>
 <p><span class="reading-math" data-tex="e_{ij}=z_{ij}-\pi(T_{iw}P_j),\qquad
 \min_{T,P}\sum_{ij}\rho(e_{ij}^{\mathsf T}\Sigma_{ij}^{-1}e_{ij})."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>e</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>=</mo><msub><mi>z</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>−</mo><mi>π</mi><mo stretchy="false">(</mo><msub><mi>T</mi><mrow><mi>i</mi><mi>w</mi></mrow></msub><msub><mi>P</mi><mi>j</mi></msub><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mrow><mi>T</mi><mo separator="true">,</mo><mi>P</mi></mrow></munder><munder><mo>∑</mo><mrow><mi>i</mi><mi>j</mi></mrow></munder><mi>ρ</mi><mo stretchy="false">(</mo><msubsup><mi>e</mi><mrow><mi>i</mi><mi>j</mi></mrow><mi mathvariant="sans-serif">T</mi></msubsup><msubsup><mi mathvariant="normal">Σ</mi><mrow><mi>i</mi><mi>j</mi></mrow><mrow><mo>−</mo><mn>1</mn></mrow></msubsup><msub><mi>e</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">e_{ij}=z_{ij}-\pi(T_{iw}P_j),\qquad
@@ -80,6 +79,15 @@
 <p><span class="reading-math" data-tex="z_{ij}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>z</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub></mrow><annotation encoding="application/x-tex">z_{ij}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是地图点 <span class="reading-math" data-tex="j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span></span></span></span></span> 在关键帧 <span class="reading-math" data-tex="i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span></span> 的图像观测，<span class="reading-math" data-tex="T_{iw}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mrow><mi>i</mi><mi>w</mi></mrow></msub></mrow><annotation encoding="application/x-tex">T_{iw}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 将世界点变到相机坐标，<span class="reading-math" data-tex="\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>π</mi></mrow><annotation encoding="application/x-tex">\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span></span></span></span></span> 为投影。跟踪时通常固定地图点，只优化当前位姿；局部 BA 同时优化局部关键帧和地图点，边界观测的其他关键帧固定。</p>
 <p>回环需要处理单目尺度漂移，因此使用含尺度的相似变换 <span class="reading-math" data-tex="Sim(3)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mi>i</mi><mi>m</mi><mo stretchy="false">(</mo><mn>3</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">Sim(3)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="mord mathnormal">im</span><span class="mopen">(</span><span class="mord">3</span><span class="mclose">)</span></span></span></span></span>，而不是只调整平移旋转的 <span class="reading-math" data-tex="SE(3)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mi>E</mi><mo stretchy="false">(</mo><mn>3</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">SE(3)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">SE</span><span class="mopen">(</span><span class="mord">3</span><span class="mclose">)</span></span></span></span></span>。词袋检索只给候选，随后通过几何一致性和相似变换验证。</p>
 <p>目标函数减小几何观测误差；算法机制是检索、关键帧筛选和分层优化；实验指标包括轨迹误差、恢复召回率和处理时间。三者不能简写为“ORB 特征让所有误差都下降”。</p>
+<p>关键帧剔除考虑其他关键帧是否以相同或更细尺度观察其大部分点，不是按时间间隔机械删帧。这让短期快速插帧和长期紧凑地图可以并存。</p>
+<h3 id="尺度修正为什么必须同时作用于地图点">尺度修正为什么必须同时作用于地图点</h3>
+<p>为避免把“七自由度”只当成术语，设某关键帧的相似变换为 <span class="reading-math" data-tex="S_{iw}:X_w\mapsto s_iR_iX_w+t_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>S</mi><mrow><mi>i</mi><mi>w</mi></mrow></msub><mo>:</mo><msub><mi>X</mi><mi>w</mi></msub><mo>↦</mo><msub><mi>s</mi><mi>i</mi></msub><msub><mi>R</mi><mi>i</mi></msub><msub><mi>X</mi><mi>w</mi></msub><mo>+</mo><msub><mi>t</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">S_{iw}:X_w\mapsto s_iR_iX_w+t_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">:</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">↦</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7651em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">t</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，其中 <span class="reading-math" data-tex="s_i&gt;0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mi>i</mi></msub><mo>&gt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">s_i&gt;0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6891em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span> 是尺度，<span class="reading-math" data-tex="R_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>R</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">R_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是旋转，<span class="reading-math" data-tex="t_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>t</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">t_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7651em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">t</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是平移。投影满足 <span class="reading-math" data-tex="\pi(s_iR_iX_w+t_i)=\pi(R_iX_w+t_i/s_i)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>π</mi><mo stretchy="false">(</mo><msub><mi>s</mi><mi>i</mi></msub><msub><mi>R</mi><mi>i</mi></msub><msub><mi>X</mi><mi>w</mi></msub><mo>+</mo><msub><mi>t</mi><mi>i</mi></msub><mo stretchy="false">)</mo><mo>=</mo><mi>π</mi><mo stretchy="false">(</mo><msub><mi>R</mi><mi>i</mi></msub><msub><mi>X</mi><mi>w</mi></msub><mo>+</mo><msub><mi>t</mi><mi>i</mi></msub><mi mathvariant="normal">/</mi><msub><mi>s</mi><mi>i</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\pi(s_iR_iX_w+t_i)=\pi(R_iX_w+t_i/s_i)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">t</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">t</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，所以从优化后的相似变换恢复用于投影的刚体位姿时，平移必须除以尺度，不能直接删去 <span class="reading-math" data-tex="s_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">s_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。</p>
+<p>地图点也要随参照关键帧一起修正。若该帧优化前后变换分别为 <span class="reading-math" data-tex="S_{iw}^{old}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>S</mi><mrow><mi>i</mi><mi>w</mi></mrow><mrow><mi>o</mi><mi>l</mi><mi>d</mi></mrow></msubsup></mrow><annotation encoding="application/x-tex">S_{iw}^{old}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1078em;vertical-align:-0.2587em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-2.4413em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2587em;"><span></span></span></span></span></span></span></span></span></span></span> 与 <span class="reading-math" data-tex="S_{iw}^{new}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>S</mi><mrow><mi>i</mi><mi>w</mi></mrow><mrow><mi>n</mi><mi>e</mi><mi>w</mi></mrow></msubsup></mrow><annotation encoding="application/x-tex">S_{iw}^{new}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.942em;vertical-align:-0.2587em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-2.4413em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2587em;"><span></span></span></span></span></span></span></span></span></span></span>，保持相似变换所得局部坐标不变、因而保持图像投影一致的更新是</p>
+<p><span class="reading-math" data-tex="X_w^{new}=(S_{iw}^{new})^{-1}S_{iw}^{old}X_w^{old}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msubsup><mi>X</mi><mi>w</mi><mrow><mi>n</mi><mi>e</mi><mi>w</mi></mrow></msubsup><mo>=</mo><mo stretchy="false">(</mo><msubsup><mi>S</mi><mrow><mi>i</mi><mi>w</mi></mrow><mrow><mi>n</mi><mi>e</mi><mi>w</mi></mrow></msubsup><msup><mo stretchy="false">)</mo><mrow><mo>−</mo><mn>1</mn></mrow></msup><msubsup><mi>S</mi><mrow><mi>i</mi><mi>w</mi></mrow><mrow><mi>o</mi><mi>l</mi><mi>d</mi></mrow></msubsup><msubsup><mi>X</mi><mi>w</mi><mrow><mi>o</mi><mi>l</mi><mi>d</mi></mrow></msubsup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">X_w^{new}=(S_{iw}^{new})^{-1}S_{iw}^{old}X_w^{old}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9614em;vertical-align:-0.247em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-2.453em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1491em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-2.453em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-2.453em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-2.453em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><strong>原创教学例。</strong> 只看一维坐标，把旧变换设为 <span class="reading-math" data-tex="S^{old}(X)=X"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>S</mi><mrow><mi>o</mi><mi>l</mi><mi>d</mi></mrow></msup><mo stretchy="false">(</mo><mi>X</mi><mo stretchy="false">)</mo><mo>=</mo><mi>X</mi></mrow><annotation encoding="application/x-tex">S^{old}(X)=X</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0991em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">d</span></span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span></span></span></span></span>、新变换设为 <span class="reading-math" data-tex="S^{new}(X)=2X+1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>S</mi><mrow><mi>n</mi><mi>e</mi><mi>w</mi></mrow></msup><mo stretchy="false">(</mo><mi>X</mi><mo stretchy="false">)</mo><mo>=</mo><mn>2</mn><mi>X</mi><mo>+</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">S^{new}(X)=2X+1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>。旧地图点 3 应改成 <span class="reading-math" data-tex="(3-1)/2=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>3</mn><mo>−</mo><mn>1</mn><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mn>2</mn><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">(3-1)/2=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">3</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose">)</span><span class="mord">/2</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>，再投进新帧仍是 3；若只改相机却把地图点留在 3，新帧中会得到 7。这个算例不模拟完整回环，只检查“相机与地图一起改”的坐标一致性。</p>
+<p><a href="https://arxiv.org/html/1502.00956">原文 VII-D 与附录</a>说明按观察关键帧的修正更新地图点，并固定一个回环关键帧消除七维规范自由度。固定参考系让方程可求，不提供外部米制标尺；因此下文实验中的尺度对齐与系统自身尺度可观测性仍须分开。</p>
+<p>共视关系、BA与回环各约束不同范围，统一特征并不抹去这些职责。下面先检查初始化与尺度，再把局部和长期结果拆开。</p>
+<h2 id="三完成初始化跟踪和地图维护检查尺度">三、完成初始化跟踪和地图维护，检查尺度</h2>
 <pre><code class="language-text">对每帧图像：
     提取 ORB 特征
     若地图未初始化：并行拟合 H/F，验证重建；不足时等待
@@ -94,8 +102,17 @@
     估计 Sim(3)，融合重复地图点，优化 Essential Graph
 返回当前轨迹和可复用的稀疏地图
 </code></pre>
-<p>关键帧剔除考虑其他关键帧是否以相同或更细尺度观察其大部分点，不是按时间间隔机械删帧。这让短期快速插帧和长期紧凑地图可以并存。</p>
-<h2 id="5实验设计与评价口径">5．实验设计与评价口径</h2>
+<h3 id="自构例子与前置概念">自构例子与前置概念</h3>
+<p><strong>自构例子，未运行</strong>：拿相机绕办公室一圈。局部 BA 不断修正附近桌角，但整圈的尺度与方向仍可能漂移；回到门口后，ORB 匹配与几何验证建立远距离约束，Sim(3) 图修正把两个门口对齐。若只是看到相似房门却不是同一地点，词袋分数高也不能直接闭环。</p>
+<h2 id="四按系统模式读轨迹误差与恢复结果">四、按系统模式读轨迹误差与恢复结果</h2>
+<!-- figure-ref-v6:start:rc-82-figure-9-anchor -->
+<p><span id="rc-82-figure-9"></span></p>
+<!-- figure-ref-v6:end:rc-82-figure-9-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/082-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/082-evidence.png" width="781" height="333" alt="Fig. 9：横轴时间增长时，对比重复观察同一静态环境的关键帧数量" loading="lazy"></a><figcaption>原论文结果图／表摘引：Raúl Mur-Artal、J. M. M. Montiel、Juan D. Tardós（2015），Fig. 9，PDF 第 13 页；<a href="https://arxiv.org/pdf/1502.00956#page=13" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：横轴时间增长时，对比重复观察同一静态环境的关键帧数量。冗余删除让 ORB-SLAM 曲线趋缓，证据范围是重访环境，不意味着探索无限新区域时地图仍固定大小。</p>
+<h3 id="实验设计与评价口径">实验设计与评价口径</h3>
+<p>第一代 ORB-SLAM 的单目结果应保留尺度对齐条件；第二、三代的深度、惯性和多地图功能不能移入这里。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -138,95 +155,49 @@
 </tbody></table></div>
 <p>TUM 的单目方法采用七自由度对齐；PTAM 初始化由人工选择合适帧，LSD-SLAM 的初始关键帧被按文中规则排除。公平讨论需要写明这些处理，而不是只给一列最低误差。</p>
 <p>这里没有策略训练或环境交互预算。重复执行次数明确，但实验表未统一报告全部任务的置信区间。原文给出的部分结果来自网站已有轨迹，也不等同于全部方法都在完全相同代码环境下重新训练运行。</p>
-<h2 id="6关键证据系统优势不代表每个单项都赢">6．关键证据：系统优势不代表每个单项都赢</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>图表</th>
-<th>比较什么 → 观察什么</th>
-<th>支持什么</th>
-<th>不能证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>表 I、II</td>
-<td>跟踪、局部建图、回环耗时</td>
-<td>不同频率模块可并行组织</td>
-<td>总时间简单相加就是每帧延迟</td>
-</tr>
-<tr>
-<td>表 III</td>
-<td>所选 TUM 序列 ATE 与失效</td>
-<td>多数序列精度和鲁棒性较好</td>
-<td>每条序列误差最低</td>
-</tr>
-<tr>
-<td>表 IV</td>
-<td>重定位召回与误差</td>
-<td>能从更多视角恢复定位</td>
-<td>更高召回必然伴随更低条件误差</td>
-</tr>
-<tr>
-<td>图 9、10</td>
-<td>同一环境的关键帧增删</td>
-<td>冗余删除可限制重复区域增长</td>
-<td>探索无限新环境时地图仍固定大小</td>
-</tr>
-<tr>
-<td>表 VI、图 13</td>
-<td>KITTI 09 不同回环优化</td>
-<td>先图优化可改善大误差初值</td>
-<td>更多 BA 迭代总能解决错误初值</td>
-</tr>
-</tbody></table></div>
-<p>表 III 中 fr2_xyz 的 RMSE 为 ORB-SLAM 0.30 cm、PTAM 0.20 cm，说明优势并非所有单项都成立。表 IV 的 fr2_xyz 重定位召回为 78.4% 对 34.9%，但成功恢复帧的 RMSE 为 0.38 cm 对 0.26 cm；覆盖更多困难帧会改变误差统计的样本组成。</p>
-<p>表 VI 的同一次 KITTI 09 比较中，无回环误差 48.77 m；直接做 20 次 BA 为 49.90 m，而 Essential Graph 的一个配置约 0.48 s 得到 8.36 m。它说明非线性 BA 需要好的初值和全局约束，不能靠迭代次数替代回环信息。</p>
+<h3 id="关键证据系统优势不代表每个单项都赢">关键证据：系统优势不代表每个单项都赢</h3>
+<p><strong><a href="https://arxiv.org/pdf/1502.00956#page=10">表 I</a>、II。</strong> 跟踪、局部建图、回环耗时；不同频率模块可并行组织；不能据此推出：总时间简单相加就是每帧延迟。</p>
+<p><strong><a href="https://arxiv.org/pdf/1502.00956#page=12">表 III</a>。</strong> 所选 TUM 序列 ATE 与失效；多数序列精度和鲁棒性较好；不能据此推出：每条序列误差最低。</p>
+<p><strong><a href="https://arxiv.org/pdf/1502.00956#page=13">表 IV</a>。</strong> 重定位召回与误差；能从更多视角恢复定位；不能据此推出：更高召回必然伴随更低条件误差。</p>
+<p><strong><a href="#rc-82-figure-9">图 9</a>、10。</strong> 同一环境的关键帧增删；冗余删除可限制重复区域增长；不能据此推出：探索无限新环境时地图仍固定大小。</p>
+<!-- figure-ref-v6:start:rc-82-figure-10 -->
+<figure class="reading-evidence-figure" id="rc-82-figure-10"><a href="/robot-classic/assets/figure-refs-v6/082-fig-10.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/082-fig-10.png" width="616" height="1008" alt="原论文图10：动态环境中关键帧数量、创建销毁和存活比例三个面板" loading="lazy"></a><figcaption>Raúl Mur-Artal、J. M. M. Montiel、Juan D. Tardós（2015），图 10，PDF 第 13 页；<a href="https://arxiv.org/pdf/1502.00956#page=13" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：(a)统计当前地图中的关键帧，(b)每条横线表示一帧的寿命，(c)统计相对剩余序列长度的存活比例；三者的纵轴不能混用。</p>
+<!-- figure-ref-v6:end:rc-82-figure-10 -->
+
+<p><strong><a href="https://arxiv.org/pdf/1502.00956#page=15">表 VI</a>、<a href="#rc-82-figure-13">图 13</a>。</strong> KITTI 09 不同回环优化；先图优化可改善大误差初值；不能据此推出：更多 BA 迭代总能解决错误初值。</p>
+<!-- figure-ref-v6:start:rc-82-figure-13 -->
+<figure class="reading-evidence-figure" id="rc-82-figure-13"><a href="/robot-classic/assets/figure-refs-v6/082-fig-13.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/082-fig-13.png" width="640" height="557" alt="原论文图13：KITTI 09中四种回环处理方案与真值的轨迹对比" loading="lazy"></a><figcaption>Raúl Mur-Artal、J. M. M. Montiel、Juan D. Tardós（2015），图 13，PDF 第 15 页；<a href="https://arxiv.org/pdf/1502.00956#page=15" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：按无回环、BA、Essential Graph以及二者组合的顺序读四个面板；地图变得闭合仍需结合正文误差衡量。</p>
+<!-- figure-ref-v6:end:rc-82-figure-13 -->
+
+<p><a href="https://arxiv.org/pdf/1502.00956#page=12">表 III</a> 中 fr2_xyz 的 RMSE 为 ORB-SLAM 0.30 cm、PTAM 0.20 cm，说明优势并非所有单项都成立。<a href="https://arxiv.org/pdf/1502.00956#page=13">表 IV</a> 的 fr2_xyz 重定位召回为 78.4% 对 34.9%，但成功恢复帧的 RMSE 为 0.38 cm 对 0.26 cm；覆盖更多困难帧会改变误差统计的样本组成。</p>
+<p><a href="https://arxiv.org/pdf/1502.00956#page=15">表 VI</a> 的同一次 KITTI 09 比较中，无回环误差 48.77 m；直接做 20 次 BA 为 49.90 m，而 Essential Graph 的一个配置约 0.48 s 得到 8.36 m。它说明非线性 BA 需要好的初值和全局约束，不能靠迭代次数替代回环信息。</p>
 <p>更需注意的是，KITTI 09 常规结果只纳入成功检测到末尾回环的执行。这个条件应留在解读中，不能当作任意重复都能得到的无条件成绩。NewCollege 反向经过的大环未闭合，也直接展示地点识别的边界。</p>
-<h2 id="7贡献代价与局限">7．贡献、代价与局限</h2>
+<h2 id="五保留低视差弱纹理与单目尺度自由度">五、保留低视差、弱纹理与单目尺度自由度</h2>
 <p>统一特征避免跟踪与地点识别维护两套不一致的信息；共视局部地图让计算集中于相关区域；关键帧积极插入、严格删除兼顾短期鲁棒性和长期规模。这些系统决策共同起作用。</p>
 <p>局限包括单目尺度、稀疏地图、无纹理、远处结构与低视差、动态遮挡及外观变化。原文提出未来加入无穷远点和更密重建，而不是已经解决这些问题。</p>
 <p>作者用当时比较讨论特征法与直接法的精度。本文分析认为，这些结果比较的是具体系统及配置，不能成为“特征法在所有情况下必然优于直接法”的定理；后续方法还会改变优化、标定和评价设置。</p>
-<h2 id="8自构例子与前置概念">8．自构例子与前置概念</h2>
-<p><strong>自构例子，未运行</strong>：拿相机绕办公室一圈。局部 BA 不断修正附近桌角，但整圈的尺度与方向仍可能漂移；回到门口后，ORB 匹配与几何验证建立远距离约束，Sim(3) 图修正把两个门口对齐。若只是看到相似房门却不是同一地点，词袋分数高也不能直接闭环。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>跟踪与重访处理割裂</td>
-<td>同一 ORB 特征服务多个模块</td>
-<td>几何与检索信息易于复用</td>
-<td>表 IV、回环实验</td>
-<td>特征匹配仍受外观限制</td>
-</tr>
-<tr>
-<td>单目初始化容易选错</td>
-<td>H/F 模型选择及二义性拒绝</td>
-<td>避免低视差下过早重建</td>
-<td>第 IV 节、图 3、TUM 平面例</td>
-<td>可能等待或拒绝启动</td>
-</tr>
-<tr>
-<td>大地图计算与漂移增长</td>
-<td>局部 BA、关键帧剔除、Essential Graph</td>
-<td>集中计算并加入全局约束</td>
-<td>表 I、II、VI</td>
-<td>地图新内容仍增长，回环可能漏检</td>
-</tr>
-</tbody></table></div>
-<h2 id="9读懂了吗三个问题与答案">9．读懂了吗？三个问题与答案</h2>
+<h2 id="六追问关闭回环后与另一视觉里程计比较为什么不能把结论直接写成完整slam排名">六、追问：关闭回环后与另一视觉里程计比较，为什么不能把结论直接写成完整SLAM排名？</h2>
+<details>
+<summary>关闭回环后与另一视觉里程计比较，为什么不能把结论直接写成完整SLAM排名？</summary>
+
+<p><strong>参考答案</strong>：关闭功能改变了被测系统的能力与计算开销。应注明模式并分开评价局部轨迹、恢复和全局一致性。单目尺度对齐后的误差还不表示系统独立恢复米制尺度；各项比较需要相同输入与对齐协议。</p>
+</details>
+
+<h2 id="七将单目系统扩展到深度输入">七、将单目系统扩展到深度输入</h2>
+<ul>
+<li><strong>直接继承</strong>：<a href="089-orbslam2.html">ORB-SLAM2：把单目、双目和深度观测接入同一套 SLAM 后端</a>。把架构扩展到双目和RGB-D，并增加全局优化。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <h3 id="问题一为什么单目-ate-很小不代表算法恢复了真实尺度">问题一：为什么单目 ATE 很小，不代表算法恢复了真实尺度？</h3>
 <p><strong>答案</strong>：单目评估先用含尺度的相似变换对齐真值，消除了全局尺度自由度。小 ATE 描述对齐后的轨迹形状与位置一致性，不能证明算法自身从图像知道“一米”。要获得物理尺度，需要额外信息或假设。</p>
 <h3 id="问题二为什么有时拒绝初始化反而是更稳健的设计">问题二：为什么有时拒绝初始化反而是更稳健的设计？</h3>
 <p><strong>答案</strong>：低视差或平面二义性使多个三维解释同时符合图像。强行选一个可能产生看似合理却错误的地图，后续优化难以恢复。等待额外视差是在承认观测信息不足，不能只按启动速度评价。</p>
 <h3 id="问题三为什么回环先做稀疏图优化而不是直接无限增加-ba-次数">问题三：为什么回环先做稀疏图优化，而不是直接无限增加 BA 次数？</h3>
-<p><strong>答案</strong>：长程漂移可能使全局 BA 初值很差，局部非线性优化难以跨越较大误差。尺度感知图约束先把全局结构拉回合理范围，再做 BA 才更有效。表 VI 正是对这一机制的具体证据。</p>
+<p><strong>答案</strong>：长程漂移可能使全局 BA 初值很差，局部非线性优化难以跨越较大误差。尺度感知图约束先把全局结构拉回合理范围，再做 BA 才更有效。<a href="https://arxiv.org/pdf/1502.00956#page=15">表 VI</a> 正是对这一机制的具体证据。</p>
 </div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
@@ -238,19 +209,15 @@
 
 **论文**：Raúl Mur-Artal、J. M. M. Montiel、Juan D. Tardós，*ORB-SLAM: A Versatile and Accurate Monocular SLAM System*，2015。[原文](https://arxiv.org/html/1502.00956) · [官方代码](https://github.com/raulmur/ORB_SLAM)。
 
-**阅读范围**：核对正文系统设计、初始化、跟踪/建图/回环及实验，阅读附录的优化目标；未运行程序，未复算全部表格。后文简化推导与例子用于教学，不将 ORB-SLAM2/3 的能力移入第一代。
+### 先接住前作的问题
 
-## 一分钟理解：建过的地图应该帮助下一次定位
+[PTAM](056-ptam.md)解决了局部关键帧跟踪与建图的分工，长期重访、失踪恢复与尺度漂移仍需要额外机制；ORB-SLAM 将[ORB](060-orb.md)与[DBoW](066-dbow.md)等模块组织到统一地图中。
+
+## 一、问题设定：单目关键帧地图怎样支持重定位与长期回访
 
 相机向前走时，靠相邻图像估计运动可以形成一条轨迹。但一旦跟踪丢失，或绕一圈回来，系统还需要认出旧地点并修正累计误差。否则地图只是不断增长的历史记录。
 
-ORB-SLAM 用同一类 ORB 特征服务跟踪、三角化、重定位和回环，通过局部共视关系限制计算，并利用稀疏全局图修正长期漂移。关键帧可以积极创建，再删除冗余部分。
-
-实验支持它在多种室内外单目序列中兼顾精度、恢复和地图复用，但它仍有尺度模糊、初始化退化和回环漏检。单目结果经过尺度对齐后的厘米误差，不等于系统自己知道真实米制尺度。
-
-**一句话**：在有可重复视觉特征的单目定位中，通过统一特征、局部优化与尺度感知回环，把局部跟踪扩展为更完整的 SLAM 系统，代价是特征与地图管理，且无纹理、低视差和重访外观差异仍会限制表现。
-
-## 1．问题定义：相机位姿和地图一起估计
+### 问题定义：相机位姿和地图一起估计
 
 输入是经过标定的单目图像流；状态包括关键帧位姿与三维地图点。输出是相机轨迹与稀疏地图，没有 IMU、双目深度或强化学习策略。
 
@@ -258,7 +225,9 @@ ORB-SLAM 用同一类 ORB 特征服务跟踪、三角化、重定位和回环，
 
 与 PTAM 相比，本篇强调自动初始化、全局回环、对视角变化更稳健的重定位和更大的地图范围。它继承关键帧 BA、词袋检索及尺度回环等已有思想，新意主要在组件改进与系统组织。
 
-## 2．地图里的几种图，各负责什么
+## 二、统一ORB特征，区分共视图与回环约束
+
+### 地图里的几种图，各负责什么
 
 **共视图**连接观察到相同地图点的关键帧，帮助定位局部相关区域。**生成树**保持全局连通骨架。**Essential Graph**由生成树、强共视边和回环边构成，用较稀疏的约束做全局优化。
 
@@ -266,7 +235,7 @@ ORB-SLAM 用同一类 ORB 特征服务跟踪、三角化、重定位和回环，
 
 三个并行线程分别做逐帧跟踪、局部建图与回环。局部 BA 耗时可以大于相机帧间隔，因为它与逐帧跟踪并行；实时系统不要求每个后台任务都逐帧完成。
 
-## 3．初始化：宁可等待，也不急着选错解释
+### 初始化：宁可等待，也不急着选错解释
 
 第 IV 节并行拟合单应矩阵 $H$ 和基础矩阵 $F$。前者适合平面及部分退化情况，后者用于具有足够视差的一般结构。
 
@@ -274,7 +243,7 @@ ORB-SLAM 用同一类 ORB 特征服务跟踪、三角化、重定位和回环，
 
 这种拒绝初始化是合理行为。一个系统立即给出错误地图，不能仅凭“成功启动”就比谨慎等待的系统更稳健。实验中的平面二义性案例正说明了这个问题。
 
-## 4．跟踪、BA 与回环的数学关系
+### 跟踪、BA 与回环的数学关系
 
 基本重投影残差可写为：
 
@@ -288,6 +257,24 @@ $z_{ij}$ 是地图点 $j$ 在关键帧 $i$ 的图像观测，$T_{iw}$ 将世界�
 回环需要处理单目尺度漂移，因此使用含尺度的相似变换 $Sim(3)$，而不是只调整平移旋转的 $SE(3)$。词袋检索只给候选，随后通过几何一致性和相似变换验证。
 
 目标函数减小几何观测误差；算法机制是检索、关键帧筛选和分层优化；实验指标包括轨迹误差、恢复召回率和处理时间。三者不能简写为“ORB 特征让所有误差都下降”。
+
+关键帧剔除考虑其他关键帧是否以相同或更细尺度观察其大部分点，不是按时间间隔机械删帧。这让短期快速插帧和长期紧凑地图可以并存。
+
+### 尺度修正为什么必须同时作用于地图点
+
+为避免把“七自由度”只当成术语，设某关键帧的相似变换为 $S_{iw}:X_w\mapsto s_iR_iX_w+t_i$，其中 $s_i&gt;0$ 是尺度，$R_i$ 是旋转，$t_i$ 是平移。投影满足 $\pi(s_iR_iX_w+t_i)=\pi(R_iX_w+t_i/s_i)$，所以从优化后的相似变换恢复用于投影的刚体位姿时，平移必须除以尺度，不能直接删去 $s_i$。
+
+地图点也要随参照关键帧一起修正。若该帧优化前后变换分别为 $S_{iw}^{old}$ 与 $S_{iw}^{new}$，保持相似变换所得局部坐标不变、因而保持图像投影一致的更新是
+
+$$X_w^{new}=(S_{iw}^{new})^{-1}S_{iw}^{old}X_w^{old}.$$
+
+**原创教学例。** 只看一维坐标，把旧变换设为 $S^{old}(X)=X$、新变换设为 $S^{new}(X)=2X+1$。旧地图点 3 应改成 $(3-1)/2=1$，再投进新帧仍是 3；若只改相机却把地图点留在 3，新帧中会得到 7。这个算例不模拟完整回环，只检查“相机与地图一起改”的坐标一致性。
+
+[原文 VII-D 与附录](https://arxiv.org/html/1502.00956)说明按观察关键帧的修正更新地图点，并固定一个回环关键帧消除七维规范自由度。固定参考系让方程可求，不提供外部米制标尺；因此下文实验中的尺度对齐与系统自身尺度可观测性仍须分开。
+
+共视关系、BA与回环各约束不同范围，统一特征并不抹去这些职责。下面先检查初始化与尺度，再把局部和长期结果拆开。
+
+## 三、完成初始化跟踪和地图维护，检查尺度
 
 ```text
 对每帧图像：
@@ -305,9 +292,30 @@ $z_{ij}$ 是地图点 $j$ 在关键帧 $i$ 的图像观测，$T_{iw}$ 将世界�
 返回当前轨迹和可复用的稀疏地图
 ```
 
-关键帧剔除考虑其他关键帧是否以相同或更细尺度观察其大部分点，不是按时间间隔机械删帧。这让短期快速插帧和长期紧凑地图可以并存。
+### 自构例子与前置概念
 
-## 5．实验设计与评价口径
+**自构例子，未运行**：拿相机绕办公室一圈。局部 BA 不断修正附近桌角，但整圈的尺度与方向仍可能漂移；回到门口后，ORB 匹配与几何验证建立远距离约束，Sim(3) 图修正把两个门口对齐。若只是看到相似房门却不是同一地点，词袋分数高也不能直接闭环。
+
+五个前置概念：
+
+1. **三角化**：利用不同视点的射线恢复三维点。
+2. **Bundle Adjustment**：联合优化相机位姿与地图点的重投影误差。
+3. **共视**：多个关键帧观察到相同三维点的关系。
+4. **Sim(3)**：含尺度、旋转和平移的相似变换。
+5. **重定位**：跟踪中断后利用旧地图重新估计相机位姿。
+
+## 四、按系统模式读轨迹误差与恢复结果
+
+&lt;!-- figure-ref-v6:start:rc-82-figure-9-anchor --&gt;
+&lt;span id=&quot;rc-82-figure-9&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-82-figure-9-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/082-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/082-evidence.png&quot; width=&quot;781&quot; height=&quot;333&quot; alt=&quot;Fig. 9：横轴时间增长时，对比重复观察同一静态环境的关键帧数量&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文结果图／表摘引：Raúl Mur-Artal、J. M. M. Montiel、Juan D. Tardós（2015），Fig. 9，PDF 第 13 页；&lt;a href=&quot;https://arxiv.org/pdf/1502.00956#page=13&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：横轴时间增长时，对比重复观察同一静态环境的关键帧数量。冗余删除让 ORB-SLAM 曲线趋缓，证据范围是重访环境，不意味着探索无限新区域时地图仍固定大小。
+
+### 实验设计与评价口径
+
+第一代 ORB-SLAM 的单目结果应保留尺度对齐条件；第二、三代的深度、惯性和多地图功能不能移入这里。
 
 | 实验 | 数据与条件 | 基线与指标 | 必须保留的限制 |
 |---|---|---|---|
@@ -321,23 +329,37 @@ TUM 的单目方法采用七自由度对齐；PTAM 初始化由人工选择合�
 
 这里没有策略训练或环境交互预算。重复执行次数明确，但实验表未统一报告全部任务的置信区间。原文给出的部分结果来自网站已有轨迹，也不等同于全部方法都在完全相同代码环境下重新训练运行。
 
-## 6．关键证据：系统优势不代表每个单项都赢
+### 关键证据：系统优势不代表每个单项都赢
 
-| 图表 | 比较什么 → 观察什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 表 I、II | 跟踪、局部建图、回环耗时 | 不同频率模块可并行组织 | 总时间简单相加就是每帧延迟 |
-| 表 III | 所选 TUM 序列 ATE 与失效 | 多数序列精度和鲁棒性较好 | 每条序列误差最低 |
-| 表 IV | 重定位召回与误差 | 能从更多视角恢复定位 | 更高召回必然伴随更低条件误差 |
-| 图 9、10 | 同一环境的关键帧增删 | 冗余删除可限制重复区域增长 | 探索无限新环境时地图仍固定大小 |
-| 表 VI、图 13 | KITTI 09 不同回环优化 | 先图优化可改善大误差初值 | 更多 BA 迭代总能解决错误初值 |
+**[表 I](https://arxiv.org/pdf/1502.00956#page=10)、II。** 跟踪、局部建图、回环耗时；不同频率模块可并行组织；不能据此推出：总时间简单相加就是每帧延迟。
 
-表 III 中 fr2_xyz 的 RMSE 为 ORB-SLAM 0.30 cm、PTAM 0.20 cm，说明优势并非所有单项都成立。表 IV 的 fr2_xyz 重定位召回为 78.4% 对 34.9%，但成功恢复帧的 RMSE 为 0.38 cm 对 0.26 cm；覆盖更多困难帧会改变误差统计的样本组成。
+**[表 III](https://arxiv.org/pdf/1502.00956#page=12)。** 所选 TUM 序列 ATE 与失效；多数序列精度和鲁棒性较好；不能据此推出：每条序列误差最低。
 
-表 VI 的同一次 KITTI 09 比较中，无回环误差 48.77 m；直接做 20 次 BA 为 49.90 m，而 Essential Graph 的一个配置约 0.48 s 得到 8.36 m。它说明非线性 BA 需要好的初值和全局约束，不能靠迭代次数替代回环信息。
+**[表 IV](https://arxiv.org/pdf/1502.00956#page=13)。** 重定位召回与误差；能从更多视角恢复定位；不能据此推出：更高召回必然伴随更低条件误差。
+
+**[图 9](#rc-82-figure-9)、10。** 同一环境的关键帧增删；冗余删除可限制重复区域增长；不能据此推出：探索无限新环境时地图仍固定大小。
+
+&lt;!-- figure-ref-v6:start:rc-82-figure-10 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-82-figure-10&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/082-fig-10.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/082-fig-10.png&quot; width=&quot;616&quot; height=&quot;1008&quot; alt=&quot;原论文图10：动态环境中关键帧数量、创建销毁和存活比例三个面板&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Raúl Mur-Artal、J. M. M. Montiel、Juan D. Tardós（2015），图 10，PDF 第 13 页；&lt;a href=&quot;https://arxiv.org/pdf/1502.00956#page=13&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：(a)统计当前地图中的关键帧，(b)每条横线表示一帧的寿命，(c)统计相对剩余序列长度的存活比例；三者的纵轴不能混用。
+&lt;!-- figure-ref-v6:end:rc-82-figure-10 --&gt;
+
+**[表 VI](https://arxiv.org/pdf/1502.00956#page=15)、[图 13](#rc-82-figure-13)。** KITTI 09 不同回环优化；先图优化可改善大误差初值；不能据此推出：更多 BA 迭代总能解决错误初值。
+
+&lt;!-- figure-ref-v6:start:rc-82-figure-13 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-82-figure-13&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/082-fig-13.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/082-fig-13.png&quot; width=&quot;640&quot; height=&quot;557&quot; alt=&quot;原论文图13：KITTI 09中四种回环处理方案与真值的轨迹对比&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Raúl Mur-Artal、J. M. M. Montiel、Juan D. Tardós（2015），图 13，PDF 第 15 页；&lt;a href=&quot;https://arxiv.org/pdf/1502.00956#page=15&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：按无回环、BA、Essential Graph以及二者组合的顺序读四个面板；地图变得闭合仍需结合正文误差衡量。
+&lt;!-- figure-ref-v6:end:rc-82-figure-13 --&gt;
+
+[表 III](https://arxiv.org/pdf/1502.00956#page=12) 中 fr2_xyz 的 RMSE 为 ORB-SLAM 0.30 cm、PTAM 0.20 cm，说明优势并非所有单项都成立。[表 IV](https://arxiv.org/pdf/1502.00956#page=13) 的 fr2_xyz 重定位召回为 78.4% 对 34.9%，但成功恢复帧的 RMSE 为 0.38 cm 对 0.26 cm；覆盖更多困难帧会改变误差统计的样本组成。
+
+[表 VI](https://arxiv.org/pdf/1502.00956#page=15) 的同一次 KITTI 09 比较中，无回环误差 48.77 m；直接做 20 次 BA 为 49.90 m，而 Essential Graph 的一个配置约 0.48 s 得到 8.36 m。它说明非线性 BA 需要好的初值和全局约束，不能靠迭代次数替代回环信息。
 
 更需注意的是，KITTI 09 常规结果只纳入成功检测到末尾回环的执行。这个条件应留在解读中，不能当作任意重复都能得到的无条件成绩。NewCollege 反向经过的大环未闭合，也直接展示地点识别的边界。
 
-## 7．贡献、代价与局限
+## 五、保留低视差、弱纹理与单目尺度自由度
 
 统一特征避免跟踪与地点识别维护两套不一致的信息；共视局部地图让计算集中于相关区域；关键帧积极插入、严格删除兼顾短期鲁棒性和长期规模。这些系统决策共同起作用。
 
@@ -345,25 +367,20 @@ TUM 的单目方法采用七自由度对齐；PTAM 初始化由人工选择合�
 
 作者用当时比较讨论特征法与直接法的精度。本文分析认为，这些结果比较的是具体系统及配置，不能成为“特征法在所有情况下必然优于直接法”的定理；后续方法还会改变优化、标定和评价设置。
 
-## 8．自构例子与前置概念
+## 六、追问：关闭回环后与另一视觉里程计比较，为什么不能把结论直接写成完整SLAM排名？
 
-**自构例子，未运行**：拿相机绕办公室一圈。局部 BA 不断修正附近桌角，但整圈的尺度与方向仍可能漂移；回到门口后，ORB 匹配与几何验证建立远距离约束，Sim(3) 图修正把两个门口对齐。若只是看到相似房门却不是同一地点，词袋分数高也不能直接闭环。
+&lt;details&gt;
+&lt;summary&gt;关闭回环后与另一视觉里程计比较，为什么不能把结论直接写成完整SLAM排名？&lt;/summary&gt;
 
-五个前置概念：
+**参考答案**：关闭功能改变了被测系统的能力与计算开销。应注明模式并分开评价局部轨迹、恢复和全局一致性。单目尺度对齐后的误差还不表示系统独立恢复米制尺度；各项比较需要相同输入与对齐协议。
 
-1. **三角化**：利用不同视点的射线恢复三维点。
-2. **Bundle Adjustment**：联合优化相机位姿与地图点的重投影误差。
-3. **共视**：多个关键帧观察到相同三维点的关系。
-4. **Sim(3)**：含尺度、旋转和平移的相似变换。
-5. **重定位**：跟踪中断后利用旧地图重新估计相机位姿。
+&lt;/details&gt;
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 跟踪与重访处理割裂 | 同一 ORB 特征服务多个模块 | 几何与检索信息易于复用 | 表 IV、回环实验 | 特征匹配仍受外观限制 |
-| 单目初始化容易选错 | H/F 模型选择及二义性拒绝 | 避免低视差下过早重建 | 第 IV 节、图 3、TUM 平面例 | 可能等待或拒绝启动 |
-| 大地图计算与漂移增长 | 局部 BA、关键帧剔除、Essential Graph | 集中计算并加入全局约束 | 表 I、II、VI | 地图新内容仍增长，回环可能漏检 |
+## 七、将单目系统扩展到深度输入
 
-## 9．读懂了吗？三个问题与答案
+- **直接继承**：[ORB-SLAM2：把单目、双目和深度观测接入同一套 SLAM 后端](089-orbslam2.md)。把架构扩展到双目和RGB-D，并增加全局优化。
+
+## 八、自测与参考答案
 
 ### 问题一：为什么单目 ATE 很小，不代表算法恢复了真实尺度？
 
@@ -375,7 +392,7 @@ TUM 的单目方法采用七自由度对齐；PTAM 初始化由人工选择合�
 
 ### 问题三：为什么回环先做稀疏图优化，而不是直接无限增加 BA 次数？
 
-**答案**：长程漂移可能使全局 BA 初值很差，局部非线性优化难以跨越较大误差。尺度感知图约束先把全局结构拉回合理范围，再做 BA 才更有效。表 VI 正是对这一机制的具体证据。
+**答案**：长程漂移可能使全局 BA 初值很差，局部非线性优化难以跨越较大误差。尺度感知图约束先把全局结构拉回合理范围，再做 BA 才更有效。[表 VI](https://arxiv.org/pdf/1502.00956#page=15) 正是对这一机制的具体证据。
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

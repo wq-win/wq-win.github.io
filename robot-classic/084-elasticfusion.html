@@ -42,15 +42,11 @@
                 <span class="text-gray-500">ElasticFusion：直接修正稠密地图，而不只修正相机轨迹</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="c6d691ddd27d01dea4722373a810e2aeea88326a1fde8fb893af7a596ddd47e6"><h1>084｜ElasticFusion：直接修正稠密地图，而不只修正相机轨迹</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="08ff70bb0b269de9cd3e5686360b9d1ce83f8fcfc369a29c092405feea725d3b"><h1>084｜ElasticFusion：直接修正稠密地图，而不只修正相机轨迹</h1>
 <p><a href="00-timeline.html">返回总览</a> · <a href="083-imu-preintegration.html">上一篇：IMU 预积分</a> · <a href="085-dso.html">下一篇：DSO</a></p>
 <p><strong>论文</strong>：Thomas Whelan、Stefan Leutenegger、Renato F. Salas-Moreno、Ben Glocker、Andrew J. Davison，<em>ElasticFusion: Dense SLAM Without a Pose Graph</em>，RSS 2015。<a href="https://www.roboticsproceedings.org/rss11/p01.pdf">会议原文</a> · <a href="https://github.com/mp3guy/ElasticFusion">官方代码</a>。</p>
-<p><strong>阅读范围</strong>：会议正文第 II–VII 节、算法 1、表 I–IV 和图 2–6；代码入口用于确认实现来源，未运行程序。本文讨论原始 RGB-D 系统，不把后续动态场景重建方法的能力归入本论文。</p>
-<h2 id="一一分钟讲明白">一、一分钟讲明白</h2>
-<p>拿深度相机绕着房间扫描，第二次看到同一张桌子时，地图里可能已经出现两张略微错开的桌面。常见处理是先优化历史相机位姿，再想办法修复融合后的地图。ElasticFusion 换了着力点：把地图当成可以局部形变的表面，发现新旧表面对应后，直接让它们对齐。</p>
-<p>核心是三件事一起工作：当前帧对已融合模型跟踪；近期与较早表面分开管理；利用局部和全局回环约束驱动形变。这里“非刚性”描述的是纠正地图误差的数学操作，<strong>并不表示论文已经解决运动人物、衣服或柔性物体的动态重建</strong>。</p>
-<p>作者提出无需位姿图优化的稠密 SLAM 系统。实验支持房间尺度重建与所测轨迹精度，但题目里的“没有位姿图”不等于没有图：系统明确维护形变图。</p>
-<p>一句话：<strong>在 RGB-D 房间扫描中，通过表面级回环和形变优化改善稠密地图一致性，代价是 GPU 计算、地图增长及回环关联的可靠性要求。</strong></p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="064-kinfu.html">KinectFusion</a>的累计模型适合跟踪，但漂移已经融合到表面后不容易修复；ElasticFusion 改用可形变 surfel 地图，让回环直接作用于表面。它与<a href="082-orbslam.html">ORB-SLAM</a>是同代平行表示选择，后者优化稀疏关键帧和地图点，不能把“没有位姿图”理解为完全没有图优化。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：</p>
 <ol>
@@ -60,12 +56,14 @@
 <li><strong>正则化</strong>：通过附加代价限制不合理或过度自由的解。</li>
 <li><strong>ATE 与表面误差</strong>：前者评估轨迹，后者评估重建几何，不能合并成同一精度。</li>
 </ol>
-<h2 id="二背景与问题定义">二、背景与问题定义</h2>
+<h2 id="一问题设定已经融合到表面的漂移怎样在回访时修正">一、问题设定：已经融合到表面的漂移怎样在回访时修正</h2>
+<p>拿深度相机绕着房间扫描，第二次看到同一张桌子时，地图里可能已经出现两张略微错开的桌面。常见处理是先优化历史相机位姿，再想办法修复融合后的地图。ElasticFusion 换了着力点：把地图当成可以局部形变的表面，发现新旧表面对应后，直接让它们对齐。</p>
+<h3 id="背景与问题定义">背景与问题定义</h3>
 <p>输入是连续彩色图像与深度图，输出是相机轨迹和带颜色的稠密表面地图。这是在线几何估计，不涉及强化学习状态—动作—奖励定义，也没有训练数据或策略更新。</p>
 <p>地图元素是 surfel，可理解为带位置、法向、颜色、半径、置信度和时间信息的小圆片。与只存几何点相比，surfel 更适合渲染可见表面并融合重复观测；与规则体素相比，它围绕已有表面分配表示。但它不是天然 watertight 的网格，也不自动提供物体类别。</p>
 <p>问题出现在长时间反复绕行时：局部误差不断积累，而已经融合的表面难以简单撤销。若把重复看到的偏移表面直接融合，地图可能变厚或出现重影；如果只修正相机轨迹而不改地图，已经固化的几何错误仍然存在。</p>
 <p>本文把近期观测部分称为 active，较久未见部分称为 inactive。它们是<strong>时间与融合状态的划分</strong>，不是“动态物体/静态物体”的语义分割。旧地图也没有删除：它等待与当前表面建立回环对应，随后重新参与融合。</p>
-<h2 id="三方法跟踪融合变形各优化什么">三、方法：跟踪、融合、变形各优化什么</h2>
+<h2 id="二管理活跃表面并以回环约束驱动形变">二、管理活跃表面，并以回环约束驱动形变</h2>
 <h3 id="1-当前帧对模型而非只对上一帧">1. 当前帧对模型，而非只对上一帧</h3>
 <p>系统渲染当前模型的预测深度和颜色，再把新 RGB-D 帧与预测对齐。跟踪目标为：</p>
 <p><span class="reading-math" data-tex="E_{track}=E_{icp}+w_{rgb}E_{rgb}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>E</mi><mrow><mi>t</mi><mi>r</mi><mi>a</mi><mi>c</mi><mi>k</mi></mrow></msub><mo>=</mo><msub><mi>E</mi><mrow><mi>i</mi><mi>c</mi><mi>p</mi></mrow></msub><mo>+</mo><msub><mi>w</mi><mrow><mi>r</mi><mi>g</mi><mi>b</mi></mrow></msub><msub><mi>E</mi><mrow><mi>r</mi><mi>g</mi><mi>b</mi></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">E_{track}=E_{icp}+w_{rgb}E_{rgb}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight">c</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight">c</span><span class="mord mathnormal mtight">p</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="mord mathnormal mtight">b</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="mord mathnormal mtight">b</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
@@ -77,6 +75,10 @@
 <p><span class="reading-math" data-tex="\phi(p)=\sum_{k\in\mathcal N(p)}\bar w_k\{R_k(p-g_k)+g_k+t_k\},\qquad\sum_k\bar w_k=1."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>ϕ</mi><mo stretchy="false">(</mo><mi>p</mi><mo stretchy="false">)</mo><mo>=</mo><munder><mo>∑</mo><mrow><mi>k</mi><mo>∈</mo><mi mathvariant="script">N</mi><mo stretchy="false">(</mo><mi>p</mi><mo stretchy="false">)</mo></mrow></munder><msub><mover accent="true"><mi>w</mi><mo>ˉ</mo></mover><mi>k</mi></msub><mo stretchy="false">{</mo><msub><mi>R</mi><mi>k</mi></msub><mo stretchy="false">(</mo><mi>p</mi><mo>−</mo><msub><mi>g</mi><mi>k</mi></msub><mo stretchy="false">)</mo><mo>+</mo><msub><mi>g</mi><mi>k</mi></msub><mo>+</mo><msub><mi>t</mi><mi>k</mi></msub><mo stretchy="false">}</mo><mo separator="true">,</mo><mspace width="2em"/><munder><mo>∑</mo><mi>k</mi></munder><msub><mover accent="true"><mi>w</mi><mo>ˉ</mo></mover><mi>k</mi></msub><mo>=</mo><mn>1.</mn></mrow><annotation encoding="application/x-tex">\phi(p)=\sum_{k\in\mathcal N(p)}\bar w_k\{R_k(p-g_k)+g_k+t_k\},\qquad\sum_k\bar w_k=1.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">ϕ</span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.566em;vertical-align:-1.516em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.809em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mrel mtight">∈</span><span class="mord mathcal mtight" style="margin-right:0.14736em;">N</span><span class="mopen mtight">(</span><span class="mord mathnormal mtight">p</span><span class="mclose mtight">)</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.516em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">{</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.3521em;vertical-align:-1.3021em;"></span><span class="mord"><span class="mord mathnormal">t</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">}</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3021em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="g_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>g</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">g_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是图节点位置，<span class="reading-math" data-tex="R_k,t_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>R</mi><mi>k</mi></msub><mo separator="true">,</mo><msub><mi>t</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">R_k,t_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">t</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是其局部变换，<span class="reading-math" data-tex="\bar w_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mover accent="true"><mi>w</mi><mo>ˉ</mo></mover><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">\bar w_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7178em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是归一化影响权重。论文算法 1 显式计算权重和再归一化；只照抄未归一化的距离权重会改变映射。</p>
 <p>这里节点矩阵通过代价鼓励接近旋转，不应把整个形变宣称为一个全局刚体运动。邻近节点协同变化，使大地图能分布式吸收累计误差。</p>
+<h3 id="点能混合变形法向却不能照搬点公式">点能混合变形，法向却不能照搬点公式</h3>
+<p>第 IV 节节点矩阵是接近旋转的仿射矩阵。对一个局部可逆矩阵 <span class="reading-math" data-tex="A"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span>，切向量 <span class="reading-math" data-tex="u"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>u</mi></mrow><annotation encoding="application/x-tex">u</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">u</span></span></span></span></span> 变为 <span class="reading-math" data-tex="Au"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi><mi>u</mi></mrow><annotation encoding="application/x-tex">Au</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span><span class="mord mathnormal">u</span></span></span></span></span>；若原法向 <span class="reading-math" data-tex="n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 满足 <span class="reading-math" data-tex="n^Tu=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>n</mi><mi>T</mi></msup><mi>u</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">n^Tu=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8413em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span><span class="mord mathnormal">u</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，新法向须满足 <span class="reading-math" data-tex="n'^TAu=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>n</mi><mrow><mo mathvariant="normal">′</mo><mi>T</mi></mrow></msup><mi>A</mi><mi>u</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">n&#x27;^TAu=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8413em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span></span><span class="mord mathnormal">A</span><span class="mord mathnormal">u</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，所以可取 <span class="reading-math" data-tex="n'=A^{-T}n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>n</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>=</mo><msup><mi>A</mi><mrow><mo>−</mo><mi>T</mi></mrow></msup><mi>n</mi></mrow><annotation encoding="application/x-tex">n&#x27;=A^{-T}n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7519em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7519em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8413em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span></span><span class="mord mathnormal">n</span></span></span></span></span>，随后单位化。这解释了论文式(9)为什么出现逆转置，而不是任何时候都直接乘 <span class="reading-math" data-tex="A"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span>。</p>
+<p><strong>原创手算例。</strong> 二维截面里，表面切向量为 <span class="reading-math" data-tex="(1,-1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mo>−</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1,-1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">−</span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span>、法向为 <span class="reading-math" data-tex="(1,1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1,1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span>。让局部矩阵 <span class="reading-math" data-tex="A=\operatorname{diag}(2,1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi><mo>=</mo><mi mathvariant="normal">diag</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>2</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">A=\operatorname{diag}(2,1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm" style="margin-right:0.01389em;">diag</span></span><span class="mopen">(</span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span>：新切向是 <span class="reading-math" data-tex="(2,-1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>2</mn><mo separator="true">,</mo><mo>−</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(2,-1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">−</span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span>，逆转置得到法向 <span class="reading-math" data-tex="(1/2,1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mi mathvariant="normal">/</mi><mn>2</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1/2,1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1/2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span>，点积为零；直接乘 <span class="reading-math" data-tex="A"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span> 会得到 <span class="reading-math" data-tex="(2,1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>2</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(2,1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span>，点积为 3，已经不垂直。</p>
+<p>多节点时论文混合各节点的逆转置法向，再归一化；它是该形变模型采用的更新规则，不能误认为任意空间变化权重下完整形变雅可比的精确逆转置。此外，即便两个节点各自严格旋转，平均后的映射也未必刚性：二维 <span class="reading-math" data-tex="+90^\circ"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>+</mo><mn>9</mn><msup><mn>0</mn><mo>∘</mo></msup></mrow><annotation encoding="application/x-tex">+90^\circ</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7574em;vertical-align:-0.0833em;"></span><span class="mord">+</span><span class="mord">9</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6741em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∘</span></span></span></span></span></span></span></span></span></span></span></span> 与 <span class="reading-math" data-tex="-90^\circ"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><mn>9</mn><msup><mn>0</mn><mo>∘</mo></msup></mrow><annotation encoding="application/x-tex">-90^\circ</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7574em;vertical-align:-0.0833em;"></span><span class="mord">−</span><span class="mord">9</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6741em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∘</span></span></span></span></span></span></span></span></span></span></span></span> 旋转等权相加会成为零矩阵。这正说明只约束每个节点“像旋转”还不够，下一节的相邻平滑项要限制节点间的相互矛盾。公式依据<a href="https://www.roboticsproceedings.org/rss11/p01.pdf">原文 IV 节式(8)–(10)</a>，退化算例不是论文观察到的重建结果。</p>
 <h3 id="3-形变不是任意拉扯">3. 形变不是任意拉扯</h3>
 <p>第 IV-C 节的能量有四部分：接近刚性、相邻节点变换平滑、对应点对齐、旧表面锚定。解释性表达为：</p>
 <p><span class="reading-math" data-tex="E_{def}=\lambda_rE_{rigid}+\lambda_sE_{smooth}+\lambda_cE_{match}+\lambda_pE_{pin}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>E</mi><mrow><mi>d</mi><mi>e</mi><mi>f</mi></mrow></msub><mo>=</mo><msub><mi>λ</mi><mi>r</mi></msub><msub><mi>E</mi><mrow><mi>r</mi><mi>i</mi><mi>g</mi><mi>i</mi><mi>d</mi></mrow></msub><mo>+</mo><msub><mi>λ</mi><mi>s</mi></msub><msub><mi>E</mi><mrow><mi>s</mi><mi>m</mi><mi>o</mi><mi>o</mi><mi>t</mi><mi>h</mi></mrow></msub><mo>+</mo><msub><mi>λ</mi><mi>c</mi></msub><msub><mi>E</mi><mrow><mi>m</mi><mi>a</mi><mi>t</mi><mi>c</mi><mi>h</mi></mrow></msub><mo>+</mo><msub><mi>λ</mi><mi>p</mi></msub><msub><mi>E</mi><mrow><mi>p</mi><mi>i</mi><mi>n</mi></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">E_{def}=\lambda_rE_{rigid}+\lambda_sE_{smooth}+\lambda_cE_{match}+\lambda_pE_{pin}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">s</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">s</span><span class="mord mathnormal mtight">m</span><span class="mord mathnormal mtight">oo</span><span class="mord mathnormal mtight">t</span><span class="mord mathnormal mtight">h</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">c</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">ma</span><span class="mord mathnormal mtight">t</span><span class="mord mathnormal mtight">c</span><span class="mord mathnormal mtight">h</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">p</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="mord mathnormal mtight">in</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
@@ -84,6 +86,8 @@
 <h3 id="4-局部与全局回环">4. 局部与全局回环</h3>
 <p>局部回环在当前位姿附近注册 active 与 inactive 的模型预测，适合漂移尚小的重复访问。全局回环利用随机 fern 编码寻找较远历史视图，再做配准与几何质量检验，适合更大漂移。</p>
 <p>外观检索只提出候选。论文还检查残差、内点数量和近似不确定性，并检查形变后的代价。全局回环之后不立即用简单规则重划所有活动状态，后续局部回环再处理表面重新激活。这些步骤说明系统不是“识别到同一房间就强制合并”。</p>
+<p>回环对应产生形变约束，活跃表面管理决定何时触发它们。下面沿跟踪—融合—变形检查更新，再同时看表面与轨迹。</p>
+<h2 id="三跟踪融合与形变交替检查表面关联">三、跟踪融合与形变交替，检查表面关联</h2>
 <h3 id="5-伪代码">5. 伪代码</h3>
 <pre><code class="language-text">输入：标定好的 RGB-D 流
 初始化 surfel 地图、时间戳、fern 历史视图数据库
@@ -102,7 +106,28 @@
 输出：持续修正的相机轨迹和稠密 surfel 地图
 </code></pre>
 <p>这是解释性流程，省略 GPU 缓冲、可见性和详细阈值。两个目标分别服务于位姿与地图修正；实验指标则是轨迹 ATE、表面距离和运行耗时，不能互相替代。</p>
-<h2 id="四实验设计与公平性">四、实验设计与公平性</h2>
+<h3 id="教学例子与前置概念">教学例子与前置概念</h3>
+<p><strong>自构例子，未运行。</strong> 第一次扫桌面时把它放在高度 1.00 m；绕房间回来，漂移使第二次表面落在 1.03 m。直接平均可能得到厚或模糊的几何。ElasticFusion 的思路是先保留新旧观测的可区分关系，验证两层对应后，用平滑形变让它们对齐再继续融合。这里的 3 cm 是人为设定，不能当作论文测试。</p>
+<h2 id="四分开读重建表面和相机轨迹结果">四、分开读重建表面和相机轨迹结果</h2>
+<h3 id="结果表面更好不代表每条轨迹都第一">结果：表面更好不代表每条轨迹都第一</h3>
+<p><strong><a href="https://www.roboticsproceedings.org/rss11/p01.pdf#page=7">表 I</a>，真实轨迹。</strong> fr3/office 的 ATE 为 0.017 m，对照 frame-to-model 为 0.025 m；fr2/xyz 本方法 0.011 m，而 RGB-D SLAM 为 0.008 m。因此不能说四条序列全部领先。前者按舍入数字算下降 32%，仅适用于该序列与该对照。</p>
+<p><strong><a href="https://www.roboticsproceedings.org/rss11/p01.pdf#page=7">表 II</a> 与<a href="https://www.roboticsproceedings.org/rss11/p01.pdf#page=7">表 III</a>，别混指标。</strong> kt0 的 ATE 从无形变的 0.497 m 降为 0.009 m；对应表面平均距离从 0.098 m 降为 0.007 m。两者单位都为米，却回答不同问题。kt1 没有重访，ElasticFusion 与 frame-to-model 相同，支持收益与回环机会有关，而非额外模块无条件改善。</p>
+<p><strong>局部/全局回环消融。</strong> kt3 只开局部或只开全局回环时，ATE 为 0.234/0.236 m，完整系统为 0.106 m；表面误差为 0.099/0.103 m，完整系统为 0.028 m。它支持这条序列中两者互补，不是所有场景都必须同时触发的证明。Office 定性序列甚至没有全局回环。</p>
+<p><strong><a href="#rc-84-figure-4">图 4</a>，重建热图。</strong> 图注明确移除了距离真值超过 0.1 m 的点以便显示。读者不能把图上“看不到严重错误”当成所有输出点都准确的证据。<a href="https://www.roboticsproceedings.org/rss11/p01.pdf#page=7">表 III</a> 的最近表面距离也不独立度量地图完整度：漏掉难重建区域可能改变平均值。</p>
+<!-- figure-ref-v6:start:rc-84-figure-4 -->
+<figure class="reading-evidence-figure" id="rc-84-figure-4"><a href="/robot-classic/assets/figure-refs-v6/084-fig-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/084-fig-4.png" width="640" height="301" alt="原论文图4：六种重建方法在kt0场景的正视误差热图" loading="lazy"></a><figcaption>Thomas Whelan、Stefan Leutenegger、Renato F. Salas-Moreno、Ben Glocker、Andrew J. Davison（2015），图 4，PDF 第 7 页；<a href="https://www.roboticsproceedings.org/rss11/p01.pdf#page=7" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：各面板共用0至0.1米色标；被剔除的更大误差点不会显示为更深的颜色。</p>
+<!-- figure-ref-v6:end:rc-84-figure-4 -->
+
+<p><strong><a href="#rc-84-figure-6">图 6</a>，实时性。</strong> 报告整体平均约 31 ms，每帧平均耗时峰值约 45 ms。地图增长后变慢，不能把平均值包装成始终满足 30 Hz 的硬实时保证，更不能当作最坏执行时间的形式证明。参见<a href="https://www.roboticsproceedings.org/rss11/p01.pdf">原文第 VII 节</a>。</p>
+<!-- figure-ref-v6:start:rc-84-figure-6-anchor -->
+<p><span id="rc-84-figure-6"></span></p>
+<!-- figure-ref-v6:end:rc-84-figure-6-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/084-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/084-evidence.png" width="808" height="376" alt="Fig. 6：随着视频帧推进，蓝色 surfel 数量与红色帧耗时一同增长" loading="lazy"></a><figcaption>原论文结果图／表摘引：Thomas Whelan、Stefan Leutenegger、Renato F. Salas-Moreno、Ben Glocker、Andrew J. Davison（2015），Fig. 6，PDF 第 8 页；<a href="https://www.roboticsproceedings.org/rss11/p01.pdf#page=8" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：随着视频帧推进，蓝色 surfel 数量与红色帧耗时一同增长。这里是两个纵轴，不是耗时对 surfel 数直接回归；整体平均接近实时仍不能作为严格最坏执行时间界。</p>
+<p>活动／非活动地图由观测时间划分，原图中的全局形变也不意味着能估计任意运动物体；后续动态重建能力不属于原始 RGB-D 系统。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -112,11 +137,11 @@
 </thead>
 <tbody><tr>
 <td>真实轨迹</td>
-<td>TUM RGB-D 的四条选定序列，运动捕捉真值；表 I 测 ATE RMSE</td>
+<td>TUM RGB-D 的四条选定序列，运动捕捉真值；<a href="https://www.roboticsproceedings.org/rss11/p01.pdf#page=7">表 I</a> 测 ATE RMSE</td>
 </tr>
 <tr>
 <td>合成轨迹与表面</td>
-<td>ICL-NUIM living room 四条轨迹，包含合成噪声；表 II 测轨迹，表 III 测到真值表面的距离</td>
+<td>ICL-NUIM living room 四条轨迹，包含合成噪声；<a href="https://www.roboticsproceedings.org/rss11/p01.pdf#page=7">表 II</a> 测轨迹，<a href="https://www.roboticsproceedings.org/rss11/p01.pdf#page=7">表 III</a> 测到真值表面的距离</td>
 </tr>
 <tr>
 <td>基线</td>
@@ -124,11 +149,11 @@
 </tr>
 <tr>
 <td>定性规模</td>
-<td>Copy、Lab、Hotel、Office；表 IV 列帧数、surfel 数、图节点、局部与全局回环数量</td>
+<td>Copy、Lab、Hotel、Office；<a href="https://www.roboticsproceedings.org/rss11/p01.pdf#page=8">表 IV</a> 列帧数、surfel 数、图节点、局部与全局回环数量</td>
 </tr>
 <tr>
 <td>计算资源</td>
-<td>i7-4930K 3.4 GHz、32 GB RAM、GTX 780 Ti 3 GB；图 6 为 Hotel 耗时随地图增长</td>
+<td>i7-4930K 3.4 GHz、32 GB RAM、GTX 780 Ti 3 GB；<a href="#rc-84-figure-6">图 6</a> 为 Hotel 耗时随地图增长</td>
 </tr>
 <tr>
 <td>不确定性</td>
@@ -136,64 +161,29 @@
 </tr>
 </tbody></table></div>
 <p>数据集不同不等于泛化到任意机器人。这里主要考查室内深度相机扫描；反光、透明、极强日光和大量移动物体并未形成系统性压力测试。</p>
-<h2 id="五结果表面更好不代表每条轨迹都第一">五、结果：表面更好不代表每条轨迹都第一</h2>
-<p><strong>表 I，真实轨迹。</strong> fr3/office 的 ATE 为 0.017 m，对照 frame-to-model 为 0.025 m；fr2/xyz 本方法 0.011 m，而 RGB-D SLAM 为 0.008 m。因此不能说四条序列全部领先。前者按舍入数字算下降 32%，仅适用于该序列与该对照。</p>
-<p><strong>表 II 与表 III，别混指标。</strong> kt0 的 ATE 从无形变的 0.497 m 降为 0.009 m；对应表面平均距离从 0.098 m 降为 0.007 m。两者单位都为米，却回答不同问题。kt1 没有重访，ElasticFusion 与 frame-to-model 相同，支持收益与回环机会有关，而非额外模块无条件改善。</p>
-<p><strong>局部/全局回环消融。</strong> kt3 只开局部或只开全局回环时，ATE 为 0.234/0.236 m，完整系统为 0.106 m；表面误差为 0.099/0.103 m，完整系统为 0.028 m。它支持这条序列中两者互补，不是所有场景都必须同时触发的证明。Office 定性序列甚至没有全局回环。</p>
-<p><strong>图 4，重建热图。</strong> 图注明确移除了距离真值超过 0.1 m 的点以便显示。读者不能把图上“看不到严重错误”当成所有输出点都准确的证据。表 III 的最近表面距离也不独立度量地图完整度：漏掉难重建区域可能改变平均值。</p>
-<p><strong>图 6，实时性。</strong> 报告整体平均约 31 ms，每帧平均耗时峰值约 45 ms。地图增长后变慢，不能把平均值包装成始终满足 30 Hz 的硬实时保证，更不能当作最坏执行时间的形式证明。参见<a href="https://www.roboticsproceedings.org/rss11/p01.pdf">原文第 VII 节</a>。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<h2 id="五保留gpu预算地图增长与错误回环风险">五、保留GPU预算、地图增长与错误回环风险</h2>
 <p>贡献是以地图为中心组织稠密 SLAM，让频繁的小回环与较大的全局回环共同修正已经融合的表面。已有的 surfel、配准、fern 和形变思想被组织为完整系统；不能把其中每项都写成首次发明。</p>
 <p>作者把超出房间尺度的可扩展性和长期运行列为未来方向。本文的分析是：地图越大，存储、渲染和形变应用的成本越高；错误回环可能造成几何扭曲，而仅靠低残差无法排除重复结构的歧义。该系统并不输出一套经过严格联合后验推导的任意长期地图不确定性保证。</p>
 <p>原文提到可借 fern 数据库在跟踪失败后重定位，但所评估数据没有遇到该情况。因此“存在重定位机制”与“已量化验证失效恢复率”应分开。复现还要固定官方代码版本和旧 GPU 依赖，不能用现代移植结果倒填论文的性能表。</p>
-<h2 id="七教学例子与前置概念">七、教学例子与前置概念</h2>
-<p><strong>自构例子，未运行。</strong> 第一次扫桌面时把它放在高度 1.00 m；绕房间回来，漂移使第二次表面落在 1.03 m。直接平均可能得到厚或模糊的几何。ElasticFusion 的思路是先保留新旧观测的可区分关系，验证两层对应后，用平滑形变让它们对齐再继续融合。这里的 3 cm 是人为设定，不能当作论文测试。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>融合后地图难以修正</td>
-<td>直接优化形变图</td>
-<td>把回环误差分布到表面</td>
-<td>表 III</td>
-<td>错对应可能扭曲地图</td>
-</tr>
-<tr>
-<td>重访产生局部重影</td>
-<td>活动/非活动模型局部配准</td>
-<td>及时吸收小漂移</td>
-<td>回环消融</td>
-<td>需要足够重叠与可观测几何</td>
-</tr>
-<tr>
-<td>漂移超出局部捕获范围</td>
-<td>fern 候选与几何验证</td>
-<td>提供较远历史参照</td>
-<td>kt3 等实验</td>
-<td>未证明任意漂移都可恢复</td>
-</tr>
-<tr>
-<td>稠密计算昂贵</td>
-<td>GPU 跟踪、渲染和地图操作</td>
-<td>并行处理大量表面元素</td>
-<td>图 6</td>
-<td>耗时随规模增长</td>
-</tr>
-</tbody></table></div>
-<h2 id="八理解检查问题与答案">八、理解检查：问题与答案</h2>
+<h2 id="六追问地图变形后表面看起来闭合怎样检查不是把错误对应强行拉到一起">六、追问：地图变形后表面看起来闭合，怎样检查不是把错误对应强行拉到一起？</h2>
+<details>
+<summary>地图变形后表面看起来闭合，怎样检查不是把错误对应强行拉到一起？</summary>
+
+<p><strong>参考答案</strong>：需要核对触发形变的对应关系、几何残差及独立轨迹或表面证据，而不能只看可视化接缝。形变优化会服从所给约束，错误回环仍可能产生看似整齐的错误地图。“非刚性”也不等于已建模真实运动物体。</p>
+</details>
+
+<h2 id="七比较稀疏关键帧与稠密表面路线">七、比较稀疏关键帧与稠密表面路线</h2>
+<ul>
+<li><strong>平行路线</strong>：<a href="082-orbslam.html">ORB-SLAM：从持续跟踪走向能够重访和恢复的单目地图</a>。用稀疏关键帧和地图点优化长期一致性，表示对象不同。</li>
+<li><strong>平行路线</strong>：<a href="089-orbslam2.html">ORB-SLAM2：把单目、双目和深度观测接入同一套 SLAM 后端</a>。比较RGB-D输入下稀疏地图与稠密表面的职责。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <p><strong>问题 1：没有位姿图，是否就没有全局优化？</strong></p>
 <p><strong>答案：</strong> 不是。全局回环可产生作用于整张地图的形变约束，系统优化形变图节点的参数。区别在优化变量和约束组织方式，不在于有没有“全局”操作。</p>
 <p><strong>问题 2：为什么不能将活动地图理解为运动物体？</strong></p>
 <p><strong>答案：</strong> 活动由最近观测时间决定。一面静止墙刚被看到时是 active，久未看到就变为 inactive；这是防止错误重复融合并支持回环的管理机制，不是物体运动估计。</p>
 <p><strong>问题 3：若表面平均距离下降，怎样排除“只留下容易重建的点”？</strong></p>
-<p><strong>答案：</strong> 还要报告完整度、覆盖率、被剔除点比例和同区域双向距离，并固定可见性与过滤规则。图 4 的显示剔除尤其提醒我们，漂亮热图和低单向平均距离不足以证明完整且准确的重建。</p>
+<p><strong>答案：</strong> 还要报告完整度、覆盖率、被剔除点比例和同区域双向距离，并固定可见性与过滤规则。<a href="#rc-84-figure-4">图 4</a> 的显示剔除尤其提醒我们，漂亮热图和低单向平均距离不足以证明完整且准确的重建。</p>
 </div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
@@ -205,19 +195,15 @@
 
 **论文**：Thomas Whelan、Stefan Leutenegger、Renato F. Salas-Moreno、Ben Glocker、Andrew J. Davison，*ElasticFusion: Dense SLAM Without a Pose Graph*，RSS 2015。[会议原文](https://www.roboticsproceedings.org/rss11/p01.pdf) · [官方代码](https://github.com/mp3guy/ElasticFusion)。
 
-**阅读范围**：会议正文第 II–VII 节、算法 1、表 I–IV 和图 2–6；代码入口用于确认实现来源，未运行程序。本文讨论原始 RGB-D 系统，不把后续动态场景重建方法的能力归入本论文。
+### 先接住前作的问题
 
-## 一、一分钟讲明白
+[KinectFusion](064-kinfu.md)的累计模型适合跟踪，但漂移已经融合到表面后不容易修复；ElasticFusion 改用可形变 surfel 地图，让回环直接作用于表面。它与[ORB-SLAM](082-orbslam.md)是同代平行表示选择，后者优化稀疏关键帧和地图点，不能把“没有位姿图”理解为完全没有图优化。
+
+## 一、问题设定：已经融合到表面的漂移怎样在回访时修正
 
 拿深度相机绕着房间扫描，第二次看到同一张桌子时，地图里可能已经出现两张略微错开的桌面。常见处理是先优化历史相机位姿，再想办法修复融合后的地图。ElasticFusion 换了着力点：把地图当成可以局部形变的表面，发现新旧表面对应后，直接让它们对齐。
 
-核心是三件事一起工作：当前帧对已融合模型跟踪；近期与较早表面分开管理；利用局部和全局回环约束驱动形变。这里“非刚性”描述的是纠正地图误差的数学操作，**并不表示论文已经解决运动人物、衣服或柔性物体的动态重建**。
-
-作者提出无需位姿图优化的稠密 SLAM 系统。实验支持房间尺度重建与所测轨迹精度，但题目里的“没有位姿图”不等于没有图：系统明确维护形变图。
-
-一句话：**在 RGB-D 房间扫描中，通过表面级回环和形变优化改善稠密地图一致性，代价是 GPU 计算、地图增长及回环关联的可靠性要求。**
-
-## 二、背景与问题定义
+### 背景与问题定义
 
 输入是连续彩色图像与深度图，输出是相机轨迹和带颜色的稠密表面地图。这是在线几何估计，不涉及强化学习状态—动作—奖励定义，也没有训练数据或策略更新。
 
@@ -227,7 +213,7 @@
 
 本文把近期观测部分称为 active，较久未见部分称为 inactive。它们是**时间与融合状态的划分**，不是“动态物体/静态物体”的语义分割。旧地图也没有删除：它等待与当前表面建立回环对应，随后重新参与融合。
 
-## 三、方法：跟踪、融合、变形各优化什么
+## 二、管理活跃表面，并以回环约束驱动形变
 
 ### 1. 当前帧对模型，而非只对上一帧
 
@@ -251,6 +237,14 @@ $g_k$ 是图节点位置，$R_k,t_k$ 是其局部变换，$\bar w_k$ 是归一�
 
 这里节点矩阵通过代价鼓励接近旋转，不应把整个形变宣称为一个全局刚体运动。邻近节点协同变化，使大地图能分布式吸收累计误差。
 
+### 点能混合变形，法向却不能照搬点公式
+
+第 IV 节节点矩阵是接近旋转的仿射矩阵。对一个局部可逆矩阵 $A$，切向量 $u$ 变为 $Au$；若原法向 $n$ 满足 $n^Tu=0$，新法向须满足 $n'^TAu=0$，所以可取 $n'=A^{-T}n$，随后单位化。这解释了论文式(9)为什么出现逆转置，而不是任何时候都直接乘 $A$。
+
+**原创手算例。** 二维截面里，表面切向量为 $(1,-1)$、法向为 $(1,1)$。让局部矩阵 $A=\operatorname{diag}(2,1)$：新切向是 $(2,-1)$，逆转置得到法向 $(1/2,1)$，点积为零；直接乘 $A$ 会得到 $(2,1)$，点积为 3，已经不垂直。
+
+多节点时论文混合各节点的逆转置法向，再归一化；它是该形变模型采用的更新规则，不能误认为任意空间变化权重下完整形变雅可比的精确逆转置。此外，即便两个节点各自严格旋转，平均后的映射也未必刚性：二维 $+90^\circ$ 与 $-90^\circ$ 旋转等权相加会成为零矩阵。这正说明只约束每个节点“像旋转”还不够，下一节的相邻平滑项要限制节点间的相互矛盾。公式依据[原文 IV 节式(8)–(10)](https://www.roboticsproceedings.org/rss11/p01.pdf)，退化算例不是论文观察到的重建结果。
+
 ### 3. 形变不是任意拉扯
 
 第 IV-C 节的能量有四部分：接近刚性、相邻节点变换平滑、对应点对齐、旧表面锚定。解释性表达为：
@@ -264,6 +258,10 @@ $$E_{def}=\lambda_rE_{rigid}+\lambda_sE_{smooth}+\lambda_cE_{match}+\lambda_pE_{
 局部回环在当前位姿附近注册 active 与 inactive 的模型预测，适合漂移尚小的重复访问。全局回环利用随机 fern 编码寻找较远历史视图，再做配准与几何质量检验，适合更大漂移。
 
 外观检索只提出候选。论文还检查残差、内点数量和近似不确定性，并检查形变后的代价。全局回环之后不立即用简单规则重划所有活动状态，后续局部回环再处理表面重新激活。这些步骤说明系统不是“识别到同一房间就强制合并”。
+
+回环对应产生形变约束，活跃表面管理决定何时触发它们。下面沿跟踪—融合—变形检查更新，再同时看表面与轨迹。
+
+## 三、跟踪融合与形变交替，检查表面关联
 
 ### 5. 伪代码
 
@@ -287,40 +285,7 @@ $$E_{def}=\lambda_rE_{rigid}+\lambda_sE_{smooth}+\lambda_cE_{match}+\lambda_pE_{
 
 这是解释性流程，省略 GPU 缓冲、可见性和详细阈值。两个目标分别服务于位姿与地图修正；实验指标则是轨迹 ATE、表面距离和运行耗时，不能互相替代。
 
-## 四、实验设计与公平性
-
-| 项目 | 设置与用途 |
-|---|---|
-| 真实轨迹 | TUM RGB-D 的四条选定序列，运动捕捉真值；表 I 测 ATE RMSE |
-| 合成轨迹与表面 | ICL-NUIM living room 四条轨迹，包含合成噪声；表 II 测轨迹，表 III 测到真值表面的距离 |
-| 基线 | DVO SLAM、RGB-D SLAM、MRSMap、Kintinuous；另有关闭形变的 frame-to-model 对照 |
-| 定性规模 | Copy、Lab、Hotel、Office；表 IV 列帧数、surfel 数、图节点、局部与全局回环数量 |
-| 计算资源 | i7-4930K 3.4 GHz、32 GB RAM、GTX 780 Ti 3 GB；图 6 为 Hotel 耗时随地图增长 |
-| 不确定性 | 表格没有报告跨随机种子的均值与置信区间；统一调参、统一硬件重跑全部基线的预算未报告 |
-
-数据集不同不等于泛化到任意机器人。这里主要考查室内深度相机扫描；反光、透明、极强日光和大量移动物体并未形成系统性压力测试。
-
-## 五、结果：表面更好不代表每条轨迹都第一
-
-**表 I，真实轨迹。** fr3/office 的 ATE 为 0.017 m，对照 frame-to-model 为 0.025 m；fr2/xyz 本方法 0.011 m，而 RGB-D SLAM 为 0.008 m。因此不能说四条序列全部领先。前者按舍入数字算下降 32%，仅适用于该序列与该对照。
-
-**表 II 与表 III，别混指标。** kt0 的 ATE 从无形变的 0.497 m 降为 0.009 m；对应表面平均距离从 0.098 m 降为 0.007 m。两者单位都为米，却回答不同问题。kt1 没有重访，ElasticFusion 与 frame-to-model 相同，支持收益与回环机会有关，而非额外模块无条件改善。
-
-**局部/全局回环消融。** kt3 只开局部或只开全局回环时，ATE 为 0.234/0.236 m，完整系统为 0.106 m；表面误差为 0.099/0.103 m，完整系统为 0.028 m。它支持这条序列中两者互补，不是所有场景都必须同时触发的证明。Office 定性序列甚至没有全局回环。
-
-**图 4，重建热图。** 图注明确移除了距离真值超过 0.1 m 的点以便显示。读者不能把图上“看不到严重错误”当成所有输出点都准确的证据。表 III 的最近表面距离也不独立度量地图完整度：漏掉难重建区域可能改变平均值。
-
-**图 6，实时性。** 报告整体平均约 31 ms，每帧平均耗时峰值约 45 ms。地图增长后变慢，不能把平均值包装成始终满足 30 Hz 的硬实时保证，更不能当作最坏执行时间的形式证明。参见[原文第 VII 节](https://www.roboticsproceedings.org/rss11/p01.pdf)。
-
-## 六、贡献、代价与局限
-
-贡献是以地图为中心组织稠密 SLAM，让频繁的小回环与较大的全局回环共同修正已经融合的表面。已有的 surfel、配准、fern 和形变思想被组织为完整系统；不能把其中每项都写成首次发明。
-
-作者把超出房间尺度的可扩展性和长期运行列为未来方向。本文的分析是：地图越大，存储、渲染和形变应用的成本越高；错误回环可能造成几何扭曲，而仅靠低残差无法排除重复结构的歧义。该系统并不输出一套经过严格联合后验推导的任意长期地图不确定性保证。
-
-原文提到可借 fern 数据库在跟踪失败后重定位，但所评估数据没有遇到该情况。因此“存在重定位机制”与“已量化验证失效恢复率”应分开。复现还要固定官方代码版本和旧 GPU 依赖，不能用现代移植结果倒填论文的性能表。
-
-## 七、教学例子与前置概念
+### 教学例子与前置概念
 
 **自构例子，未运行。** 第一次扫桌面时把它放在高度 1.00 m；绕房间回来，漂移使第二次表面落在 1.03 m。直接平均可能得到厚或模糊的几何。ElasticFusion 的思路是先保留新旧观测的可区分关系，验证两层对应后，用平滑形变让它们对齐再继续融合。这里的 3 cm 是人为设定，不能当作论文测试。
 
@@ -332,14 +297,69 @@ $$E_{def}=\lambda_rE_{rigid}+\lambda_sE_{smooth}+\lambda_cE_{match}+\lambda_pE_{
 4. **正则化**：通过附加代价限制不合理或过度自由的解。
 5. **ATE 与表面误差**：前者评估轨迹，后者评估重建几何，不能合并成同一精度。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 融合后地图难以修正 | 直接优化形变图 | 把回环误差分布到表面 | 表 III | 错对应可能扭曲地图 |
-| 重访产生局部重影 | 活动/非活动模型局部配准 | 及时吸收小漂移 | 回环消融 | 需要足够重叠与可观测几何 |
-| 漂移超出局部捕获范围 | fern 候选与几何验证 | 提供较远历史参照 | kt3 等实验 | 未证明任意漂移都可恢复 |
-| 稠密计算昂贵 | GPU 跟踪、渲染和地图操作 | 并行处理大量表面元素 | 图 6 | 耗时随规模增长 |
+## 四、分开读重建表面和相机轨迹结果
 
-## 八、理解检查：问题与答案
+### 结果：表面更好不代表每条轨迹都第一
+
+**[表 I](https://www.roboticsproceedings.org/rss11/p01.pdf#page=7)，真实轨迹。** fr3/office 的 ATE 为 0.017 m，对照 frame-to-model 为 0.025 m；fr2/xyz 本方法 0.011 m，而 RGB-D SLAM 为 0.008 m。因此不能说四条序列全部领先。前者按舍入数字算下降 32%，仅适用于该序列与该对照。
+
+**[表 II](https://www.roboticsproceedings.org/rss11/p01.pdf#page=7) 与[表 III](https://www.roboticsproceedings.org/rss11/p01.pdf#page=7)，别混指标。** kt0 的 ATE 从无形变的 0.497 m 降为 0.009 m；对应表面平均距离从 0.098 m 降为 0.007 m。两者单位都为米，却回答不同问题。kt1 没有重访，ElasticFusion 与 frame-to-model 相同，支持收益与回环机会有关，而非额外模块无条件改善。
+
+**局部/全局回环消融。** kt3 只开局部或只开全局回环时，ATE 为 0.234/0.236 m，完整系统为 0.106 m；表面误差为 0.099/0.103 m，完整系统为 0.028 m。它支持这条序列中两者互补，不是所有场景都必须同时触发的证明。Office 定性序列甚至没有全局回环。
+
+**[图 4](#rc-84-figure-4)，重建热图。** 图注明确移除了距离真值超过 0.1 m 的点以便显示。读者不能把图上“看不到严重错误”当成所有输出点都准确的证据。[表 III](https://www.roboticsproceedings.org/rss11/p01.pdf#page=7) 的最近表面距离也不独立度量地图完整度：漏掉难重建区域可能改变平均值。
+
+&lt;!-- figure-ref-v6:start:rc-84-figure-4 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-84-figure-4&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/084-fig-4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/084-fig-4.png&quot; width=&quot;640&quot; height=&quot;301&quot; alt=&quot;原论文图4：六种重建方法在kt0场景的正视误差热图&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Thomas Whelan、Stefan Leutenegger、Renato F. Salas-Moreno、Ben Glocker、Andrew J. Davison（2015），图 4，PDF 第 7 页；&lt;a href=&quot;https://www.roboticsproceedings.org/rss11/p01.pdf#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：各面板共用0至0.1米色标；被剔除的更大误差点不会显示为更深的颜色。
+&lt;!-- figure-ref-v6:end:rc-84-figure-4 --&gt;
+
+**[图 6](#rc-84-figure-6)，实时性。** 报告整体平均约 31 ms，每帧平均耗时峰值约 45 ms。地图增长后变慢，不能把平均值包装成始终满足 30 Hz 的硬实时保证，更不能当作最坏执行时间的形式证明。参见[原文第 VII 节](https://www.roboticsproceedings.org/rss11/p01.pdf)。
+
+&lt;!-- figure-ref-v6:start:rc-84-figure-6-anchor --&gt;
+&lt;span id=&quot;rc-84-figure-6&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-84-figure-6-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/084-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/084-evidence.png&quot; width=&quot;808&quot; height=&quot;376&quot; alt=&quot;Fig. 6：随着视频帧推进，蓝色 surfel 数量与红色帧耗时一同增长&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文结果图／表摘引：Thomas Whelan、Stefan Leutenegger、Renato F. Salas-Moreno、Ben Glocker、Andrew J. Davison（2015），Fig. 6，PDF 第 8 页；&lt;a href=&quot;https://www.roboticsproceedings.org/rss11/p01.pdf#page=8&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：随着视频帧推进，蓝色 surfel 数量与红色帧耗时一同增长。这里是两个纵轴，不是耗时对 surfel 数直接回归；整体平均接近实时仍不能作为严格最坏执行时间界。
+
+活动／非活动地图由观测时间划分，原图中的全局形变也不意味着能估计任意运动物体；后续动态重建能力不属于原始 RGB-D 系统。
+
+| 项目 | 设置与用途 |
+|---|---|
+| 真实轨迹 | TUM RGB-D 的四条选定序列，运动捕捉真值；[表 I](https://www.roboticsproceedings.org/rss11/p01.pdf#page=7) 测 ATE RMSE |
+| 合成轨迹与表面 | ICL-NUIM living room 四条轨迹，包含合成噪声；[表 II](https://www.roboticsproceedings.org/rss11/p01.pdf#page=7) 测轨迹，[表 III](https://www.roboticsproceedings.org/rss11/p01.pdf#page=7) 测到真值表面的距离 |
+| 基线 | DVO SLAM、RGB-D SLAM、MRSMap、Kintinuous；另有关闭形变的 frame-to-model 对照 |
+| 定性规模 | Copy、Lab、Hotel、Office；[表 IV](https://www.roboticsproceedings.org/rss11/p01.pdf#page=8) 列帧数、surfel 数、图节点、局部与全局回环数量 |
+| 计算资源 | i7-4930K 3.4 GHz、32 GB RAM、GTX 780 Ti 3 GB；[图 6](#rc-84-figure-6) 为 Hotel 耗时随地图增长 |
+| 不确定性 | 表格没有报告跨随机种子的均值与置信区间；统一调参、统一硬件重跑全部基线的预算未报告 |
+
+数据集不同不等于泛化到任意机器人。这里主要考查室内深度相机扫描；反光、透明、极强日光和大量移动物体并未形成系统性压力测试。
+
+## 五、保留GPU预算、地图增长与错误回环风险
+
+贡献是以地图为中心组织稠密 SLAM，让频繁的小回环与较大的全局回环共同修正已经融合的表面。已有的 surfel、配准、fern 和形变思想被组织为完整系统；不能把其中每项都写成首次发明。
+
+作者把超出房间尺度的可扩展性和长期运行列为未来方向。本文的分析是：地图越大，存储、渲染和形变应用的成本越高；错误回环可能造成几何扭曲，而仅靠低残差无法排除重复结构的歧义。该系统并不输出一套经过严格联合后验推导的任意长期地图不确定性保证。
+
+原文提到可借 fern 数据库在跟踪失败后重定位，但所评估数据没有遇到该情况。因此“存在重定位机制”与“已量化验证失效恢复率”应分开。复现还要固定官方代码版本和旧 GPU 依赖，不能用现代移植结果倒填论文的性能表。
+
+## 六、追问：地图变形后表面看起来闭合，怎样检查不是把错误对应强行拉到一起？
+
+&lt;details&gt;
+&lt;summary&gt;地图变形后表面看起来闭合，怎样检查不是把错误对应强行拉到一起？&lt;/summary&gt;
+
+**参考答案**：需要核对触发形变的对应关系、几何残差及独立轨迹或表面证据，而不能只看可视化接缝。形变优化会服从所给约束，错误回环仍可能产生看似整齐的错误地图。“非刚性”也不等于已建模真实运动物体。
+
+&lt;/details&gt;
+
+## 七、比较稀疏关键帧与稠密表面路线
+
+- **平行路线**：[ORB-SLAM：从持续跟踪走向能够重访和恢复的单目地图](082-orbslam.md)。用稀疏关键帧和地图点优化长期一致性，表示对象不同。
+- **平行路线**：[ORB-SLAM2：把单目、双目和深度观测接入同一套 SLAM 后端](089-orbslam2.md)。比较RGB-D输入下稀疏地图与稠密表面的职责。
+
+## 八、自测与参考答案
 
 **问题 1：没有位姿图，是否就没有全局优化？**
 
@@ -351,7 +371,7 @@ $$E_{def}=\lambda_rE_{rigid}+\lambda_sE_{smooth}+\lambda_cE_{match}+\lambda_pE_{
 
 **问题 3：若表面平均距离下降，怎样排除“只留下容易重建的点”？**
 
-**答案：** 还要报告完整度、覆盖率、被剔除点比例和同区域双向距离，并固定可见性与过滤规则。图 4 的显示剔除尤其提醒我们，漂亮热图和低单向平均距离不足以证明完整且准确的重建。
+**答案：** 还要报告完整度、覆盖率、被剔除点比例和同区域双向距离，并固定可见性与过滤规则。[图 4](#rc-84-figure-4) 的显示剔除尤其提醒我们，漂亮热图和低单向平均距离不足以证明完整且准确的重建。
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

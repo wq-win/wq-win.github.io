@@ -42,14 +42,11 @@
                 <span class="text-gray-500">OMPL：怎样让不同运动规划算法使用同一套问题接口</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="376385ac36f3573f4328e8fab43b62b5008275b855dcdc5d58dc6f4b4cbc5b97"><h1>067｜OMPL：怎样让不同运动规划算法使用同一套问题接口</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="c90b6a62c86f0323993a26e8f0cd5ad46f9c292c1f43571ff6c19d57e66fd08d"><h1>067｜OMPL：怎样让不同运动规划算法使用同一套问题接口</h1>
 <p><a href="00-timeline.html">总览</a> · <a href="066-dbow.html">上一篇</a> · <a href="068-isam2.html">下一篇</a></p>
 <p><strong>原论文：</strong> <em>The Open Motion Planning Library</em>，Ioan A. Şucan、Mark Moll、Lydia E. Kavraki，IEEE Robotics &amp; Automation Magazine，2012。<a href="https://doi.org/10.1109/MRA.2012.2205651">出版链接</a> · <a href="https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf">作者论文稿</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p>想比较RRT与PRM，通常要先写状态表示、距离计算、采样、碰撞检查和实验脚本。若两份代码连最近邻结构与碰撞检测精度都不同，测出的“算法优势”可能只是底层实现差异。将算法移到另一台机器人，又可能重写一遍基础设施。</p>
-<p>OMPL把运动规划拆成可替换组件，让规划器通过统一接口访问状态空间、有效性检查、目标和可选动力学。库集中实现采样式规划，几何模型、碰撞库、可视化与机器人中间件通过外部组件接入。它还提供重复运行与记录指标的基准工具。</p>
-<p>本文的核心贡献是可扩展的软件架构和研究基础设施，并非发明了一个永远最快的新规划器。案例说明同一抽象能支撑几何规划、动力学规划和ROS集成；没有一个统一速度提升百分比可用来概括整篇。</p>
-<p>一句话：在需要复用与比较采样式运动规划的场景中，通过清晰的状态、约束、目标和规划器接口，减少重复实现并提高实验可比性，代价是应用仍必须正确提供碰撞、运动学和动力学信息。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="035-prm.html">PRM</a>与<a href="043-rrt-connect.html">RRT-Connect</a>可以各自实现，但不同碰撞检查和预算会妨碍比较。OMPL抽象共同组件并提供基准工具；与<a href="058-ros.html">ROS</a>组合后，规划依旧需要正确的机器人模型。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>理解本文需要的五个概念：</p>
 <ul>
@@ -59,7 +56,9 @@
 <li><strong>控制传播</strong>：在给定输入和时间后，计算动力学系统的后继状态。</li>
 <li><strong>概率完备性</strong>：在相应假设下，采样增加时有解问题成功概率趋近1。</li>
 </ul>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<h2 id="一问题设定规划器比较怎样避免混入碰撞和状态实现差异">一、问题设定：规划器比较怎样避免混入碰撞和状态实现差异</h2>
+<p>想比较RRT与PRM，通常要先写状态表示、距离计算、采样、碰撞检查和实验脚本。若两份代码连最近邻结构与碰撞检测精度都不同，测出的“算法优势”可能只是底层实现差异。将算法移到另一台机器人，又可能重写一遍基础设施。</p>
+<h3 id="研究背景与问题定义">研究背景与问题定义</h3>
 <p>运动规划寻找从起点到目标区域的连续可行路径。用教学记号写为：</p>
 <p><span class="reading-math" data-tex="q:[0,1]\rightarrow X_{\rm valid},\qquad
 q(0)=q_{\rm start},\quad q(1)\in X_{\rm goal}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>q</mi><mo>:</mo><mo stretchy="false">[</mo><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">]</mo><mo>→</mo><msub><mi>X</mi><mrow><mi mathvariant="normal">v</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">l</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">d</mi></mrow></msub><mo separator="true">,</mo><mspace width="2em"/><mi>q</mi><mo stretchy="false">(</mo><mn>0</mn><mo stretchy="false">)</mo><mo>=</mo><msub><mi>q</mi><mrow><mi mathvariant="normal">s</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">t</mi></mrow></msub><mo separator="true">,</mo><mspace width="1em"/><mi>q</mi><mo stretchy="false">(</mo><mn>1</mn><mo stretchy="false">)</mo><mo>∈</mo><msub><mi>X</mi><mrow><mi mathvariant="normal">g</mi><mi mathvariant="normal">o</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">l</mi></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">q:[0,1]\rightarrow X_{\rm valid},\qquad
@@ -69,7 +68,7 @@ q(0)=q_{\rm start},\quad q(1)\in X_{\rm goal}.</annotation></semantics></math></
 <p>状态 <span class="reading-math" data-tex="q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi></mrow><annotation encoding="application/x-tex">q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span></span></span></span> 在动力学场景可能包含位置与速度，<span class="reading-math" data-tex="u"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>u</mi></mrow><annotation encoding="application/x-tex">u</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">u</span></span></span></span></span>是控制，<span class="reading-math" data-tex="f"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>f</mi></mrow><annotation encoding="application/x-tex">f</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span></span></span></span></span>由用户或模拟器提供。汽车不能横移，即使两点之间几何直线没有障碍，也可能不能直接执行。OMPL明确区分这两类问题。</p>
 <p>这不是强化学习论文：没有从奖励学习策略，也没有训练数据集或梯度更新预算。采样是搜索手段，不等于用环境回报训练。算法找到一条路径，仍需轨迹时间参数化、控制器跟踪与环境更新才能成为真实机器人动作。</p>
 <p>原文讨论概率完备性：对满足相应假设且有解的问题，随着采样增加，找到解的概率趋近1。它不意味着在一秒期限内必然找到，更不意味着超时可以证明无解。软件接口也不能自动使所有接入算法拥有同样的理论性质。</p>
-<h2 id="三方法软件架构到底改了什么">三、方法：软件架构到底改了什么</h2>
+<h2 id="二按状态空间有效性目标和规划器划分接口">二、按状态空间、有效性、目标和规划器划分接口</h2>
 <h3 id="1-规划器只依赖需要的操作">1. 规划器只依赖需要的操作</h3>
 <p>StateSpace定义距离、插值、相等判断、状态存储及分配。规划器无需知道内部坐标怎么排列，只调用这些接口。CompoundStateSpace可组合子空间，例如三维刚体由平移与旋转组成，移动双臂机器人由底盘和两条手臂组成。</p>
 <p>拓扑非常重要。连续转动关节宜按圆周处理；有限转角关节需要边界，不能随意从上限绕回下限。把所有状态都塞进普通欧氏向量，可能让距离、采样和插值含义错误，算法即使正常运行也可能规划错误问题。</p>
@@ -97,7 +96,17 @@ q(0)=q_{\rm start},\quad q(1)\in X_{\rm goal}.</annotation></semantics></math></
 输出：路径或控制序列，以及求解状态与评价记录
 </code></pre>
 <p>这是根据§III—IV重构的教学流程。数学可优化路径长度等应用指标，但本文没有给全部规划器定义同一个新损失；机制改动是组件组织，实验收益是复用、集成和比较能力。不能虚构成“OMPL损失降低所以路径更优”。</p>
-<h2 id="四论文怎样验证设计">四、论文怎样验证设计</h2>
+<h3 id="相同接口不等于相同问题比较前先锁定可行性检查">相同接口不等于相同问题，比较前先锁定可行性检查</h3>
+<p><strong>教学反例</strong>：一维路径端点0和1均合法，障碍为 <span class="reading-math" data-tex="(0.49,0.51)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0.49</mn><mo separator="true">,</mo><mn>0.51</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0.49,0.51)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.49</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.51</span><span class="mclose">)</span></span></span></span></span>。只检查端点的验证器报告可行；每0.1检查一次会撞到0.5；若采样网格恰好避开障碍仍可能漏检。更换规划器并不能修复错误的运动验证器。状态合法性、整段运动合法性与动力学传播是三个接口责任。</p>
+<p>公平基准应固定状态空间距离、碰撞几何、验证分辨率、终止预算和目标函数，再多次运行随机规划器。若十次有两次未找到解，仅平均另外八次的路径长度会产生幸存者偏差；应同时报成功率和截止时成本分布。</p>
+<p>本篇把<a href="035-prm.html">PRM</a>、<a href="043-rrt-connect.html">RRT-Connect</a>、<a href="062-rrtstar.html">RRT*</a>组织成可替换模块，并与<a href="058-ros.html">ROS</a>组合。<a href="https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf">原文第II节及Benchmark框</a>强调共同组件和重复比较。库的价值是让条件一致的对比和集成更容易，不是证明每个接口默认值适合所有机器人。</p>
+<p>接口把规划器与机器人模型分开，也把比较中的配置责任留给应用。下面按状态、检查器、目标和预算组装一次实验，再读集成案例。</p>
+<h2 id="三组装规划问题再固定预算运行基准">三、组装规划问题，再固定预算运行基准</h2>
+<p><strong>自构例子，未运行。</strong> 两个姿态位于一堵薄墙两侧，端点都有效。规划器尝试连接，若MotionValidator只检查端点，它会误判直线可行；检查中间点可能发现碰撞，更细分辨率代价更高。换一个规划器但保留错误验证器，不会修复问题。这说明规划算法和几何有效性是两个独立责任。</p>
+<p>另一个例子是连续关节从179度到负179度。圆周空间应走约2度短弧；普通有界实数插值可能走358度。正确拓扑能改变最近邻与扩展，而不仅是显示角度更好看。</p>
+<p>阅读范围：核对<a href="https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf">2012作者论文稿</a>的概念、实现、示例及集成章节。没有将后续OMPL版本功能当成2012成果；未运行库或上述自构例子，也未重测规划性能。</p>
+<h2 id="四读几何动力学与ros集成案例">四、读几何、动力学与ROS集成案例</h2>
+<h3 id="论文怎样验证设计">论文怎样验证设计</h3>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -108,12 +117,12 @@ q(0)=q_{\rm start},\quad q(1)\in X_{\rm goal}.</annotation></semantics></math></
 </thead>
 <tbody><tr>
 <td>架构图</td>
-<td>图2把空间、采样、检查、目标、规划器关系展开</td>
+<td><a href="#rc-67-figure-2">图 2</a>把空间、采样、检查、目标、规划器关系展开</td>
 <td>接口如何覆盖共同概念</td>
 </tr>
 <tr>
 <td>最小程序</td>
-<td>图3用SE(3)、有效性回调、起终点及SimpleSetup</td>
+<td><a href="#rc-67-figure-3">图 3</a>用SE(3)、有效性回调、起终点及SimpleSetup</td>
 <td>简单问题的接入代码较少</td>
 </tr>
 <tr>
@@ -123,12 +132,12 @@ q(0)=q_{\rm start},\quad q(1)\in X_{\rm goal}.</annotation></semantics></math></
 </tr>
 <tr>
 <td>图形前端</td>
-<td>图4 OMPL.app加载几何、显示搜索状态与解路径</td>
+<td><a href="#rc-67-figure-4">图 4</a> OMPL.app加载几何、显示搜索状态与解路径</td>
 <td>核心规划与外部可视化可分离</td>
 </tr>
 <tr>
 <td>ROS集成</td>
-<td>§V.B、图5，URDF到关节组及状态空间</td>
+<td>§V.B、<a href="#rc-67-figure-5">图 5</a>，URDF到关节组及状态空间</td>
 <td>同一接口可进入机器人软件栈</td>
 </tr>
 <tr>
@@ -142,63 +151,56 @@ q(0)=q_{\rm start},\quad q(1)\in X_{\rm goal}.</annotation></semantics></math></
 <td>不能声称库优于所有其他库</td>
 </tr>
 </tbody></table></div>
-<p>图3调用一秒求解期限，这是示例参数，不是“所有机器人一秒内规划成功”的实验结论。Box 1描述重复试验功能，也不等于论文每个示例已经采用相同种子、次数和硬件完成系统性统计比较。本文未确认这样的统一实验预算。</p>
+<!-- figure-ref-v6:start:rc-67-figure-2 -->
+<figure class="reading-evidence-figure" id="rc-67-figure-2"><a href="/robot-classic/assets/figure-refs-v6/067-fig-2.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/067-fig-2.png" width="1293" height="904" alt="原论文图2：OMPL状态空间、采样、有效性、目标与规划器的接口关系" loading="lazy"></a><figcaption>The Open Motion Planning Library（2012），图 2，PDF 第 4 页；<a href="https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf#page=4" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：颜色和箭头区分用户配置的对象与库实现的抽象接口。</p>
+<!-- figure-ref-v6:end:rc-67-figure-2 -->
+
+<!-- figure-ref-v6:start:rc-67-figure-5 -->
+<figure class="reading-evidence-figure" id="rc-67-figure-5"><a href="/robot-classic/assets/figure-refs-v6/067-fig-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/067-fig-5.png" width="629" height="515" alt="原论文图5：OMPL通过ROS接口为PR2双臂构造规划问题的场景" loading="lazy"></a><figcaption>The Open Motion Planning Library（2012），图 5，PDF 第 9 页；<a href="https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf#page=9" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：模型、关节组和碰撞场景仍是必要输入，统一接口并不免除这些设定。</p>
+<!-- figure-ref-v6:end:rc-67-figure-5 -->
+
+<!-- figure-ref-v6:start:rc-67-figure-3 -->
+<figure class="reading-evidence-figure" id="rc-67-figure-3"><a href="/robot-classic/assets/figure-refs-v6/067-fig-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/067-fig-3.png" width="662" height="639" alt="OMPL原论文图3：用SE(3)状态空间、有效性回调和SimpleSetup求解的完整Python示例" loading="lazy"></a><figcaption>The Open Motion Planning Library（2012），图 3，PDF 第 7 页；<a href="https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf#page=7" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：最后的solve(1.0)只给本示例一秒期限，不承诺任意机器人场景在一秒内求解成功。</p>
+<!-- figure-ref-v6:end:rc-67-figure-3 -->
+
+<p><a href="#rc-67-figure-3">图 3</a>调用一秒求解期限，这是示例参数，不是“所有机器人一秒内规划成功”的实验结论。Box 1描述重复试验功能，也不等于论文每个示例已经采用相同种子、次数和硬件完成系统性统计比较。本文未确认这样的统一实验预算。</p>
 <p>对随机规划算法，公平性还要控制状态有效性分辨率、最近邻结构、时间与内存上限、目标容差及路径后处理。共享框架可以减少差异，不能消除所有调参影响。如果只比较成功运行的耗时，超时失败被删除，也会形成选择偏差。</p>
-<h2 id="五五处证据应该怎样读">五、五处证据应该怎样读</h2>
-<p><strong>证据1：图2与§IV.A。</strong> 抽象状态空间提供拓扑相关操作，复合空间组合已有结构。它支持“算法代码不必直接操作机器人坐标数组”的架构结论；不能证明任意用户定义的距离都满足某个规划器的理论假设。</p>
+<!-- figure-ref-v6:start:rc-67-figure-4-anchor -->
+<p><span id="rc-67-figure-4"></span></p>
+<!-- figure-ref-v6:end:rc-67-figure-4-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/067-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/067-evidence.png" width="763" height="515" alt="Fig. 4：GUI 把机器人模型、规划参数和路径可视化并置，展示库如何接入真实几何场景" loading="lazy"></a><figcaption>原论文方法图摘引：Şucan、Moll、Kavraki（2012），Fig. 4，PDF 第 8 页；<a href="https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf#page=8" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：GUI 把机器人模型、规划参数和路径可视化并置，展示库如何接入真实几何场景。界面里能显示路径，不代表任意碰撞模型、距离函数或一秒预算都具有同样保证。</p>
+<p><strong>证据1：<a href="#rc-67-figure-2">图 2</a>与§IV.A。</strong> 抽象状态空间提供拓扑相关操作，复合空间组合已有结构。它支持“算法代码不必直接操作机器人坐标数组”的架构结论；不能证明任意用户定义的距离都满足某个规划器的理论假设。</p>
 <p><strong>证据2：§IV.B。</strong> 状态检查、运动检查与控制传播分别定义。论文明确允许替换默认离散检查，说明安全有效性由验证器语义决定。这个设计降低耦合，但不把数值积分误差或碰撞漏检自动消除。</p>
-<p><strong>证据3：图3。</strong> 短示例说明只需配置空间、有效性和起终点便可运行基本规划。其有效性是一个简单坐标条件，并非完整真实碰撞场景，所以代码行数不能当作真机部署成本。复杂机器人仍需正确的模型与约束。</p>
+<p><strong>证据3：<a href="#rc-67-figure-3">图 3</a>。</strong> 短示例说明只需配置空间、有效性和起终点便可运行基本规划。其有效性是一个简单坐标条件，并非完整真实碰撞场景，所以代码行数不能当作真机部署成本。复杂机器人仍需正确的模型与约束。</p>
 <p><strong>证据4：Box 1与§V.A。</strong> 基准接口能多次运行、记录配置和指标，并导出箱线图。支持系统具备统计实验工具，不支持某个规划器在全部场景最佳。中位数、失败概率和长尾延迟应共同看，而不是只取最快一次。</p>
 <p><strong>证据5：§V.B与VI。</strong> ROS接口把URDF、关节组、携带物体和目标约束映射到规划问题；作者还讨论分子构象搜索使用不同状态空间。说明接口具有跨应用复用潜力。但应用演示没有量化证明新增算法或新平台的开发工作量固定降低多少。</p>
 <p>论文的主要证据是可工作的实现、接口细节和案例。对软件论文，这种证据有价值；准确解读应承认其类型，而不是硬补不存在的3%成功率提升或十倍加速结果。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
+<h2 id="五保留应用模型责任和实验可比性">五、保留应用模型责任和实验可比性</h2>
 <p>贡献包括概念与类接口对应、规划器与应用解耦、几何和控制规划的组织、教学前端以及基准实验工具。它让研究者能把注意力集中到采样或扩展策略，而不必反复搭建所有底层组件。</p>
 <p>代价是责任边界更明确，也要求使用者理解边界。若有效性检查漏掉夹持物体，规划器不会凭空知道手上多了一个箱子；若动力学模型忽略制动距离，控制规划也不能保证真机按预测停下。错误接口会稳定地产生错误结果。</p>
 <p>作者把长期成功归于社区采用与维护，而不是仅凭架构即可保证。本文进一步分析：统一库可能产生共同默认参数偏差；某些专用规划器的最佳实现未必符合通用接口；概率完备算法的长尾仍可能不适合严格实时期限。工程复用和算法适用性需要分别评估。</p>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<p><strong>自构例子，未运行。</strong> 两个姿态位于一堵薄墙两侧，端点都有效。规划器尝试连接，若MotionValidator只检查端点，它会误判直线可行；检查中间点可能发现碰撞，更细分辨率代价更高。换一个规划器但保留错误验证器，不会修复问题。这说明规划算法和几何有效性是两个独立责任。</p>
-<p>另一个例子是连续关节从179度到负179度。圆周空间应走约2度短弧；普通有界实数插值可能走358度。正确拓扑能改变最近邻与扩展，而不仅是显示角度更好看。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>算法重复搭基础设施</td>
-<td>统一空间和规划接口</td>
-<td>复用采样、距离等组件</td>
-<td>图2、§IV</td>
-<td>用户仍需正确建模</td>
-</tr>
-<tr>
-<td>碰撞和规划耦合</td>
-<td>独立有效性与运动验证</td>
-<td>更换机器人时替换应用层</td>
-<td>§IV.B、OMPL.app</td>
-<td>默认离散检查非连续保证</td>
-</tr>
-<tr>
-<td>随机比较难组织</td>
-<td>重复运行与日志工具</td>
-<td>保留配置和结果分布</td>
-<td>Box 1</td>
-<td>不自动保证预算公平</td>
-</tr>
-<tr>
-<td>难集成真实软件栈</td>
-<td>ROS及外部库适配</td>
-<td>保留已有几何和运动学能力</td>
-<td>§V、图5</td>
-<td>集成案例不是闭环安全证明</td>
-</tr>
-</tbody></table></div>
-<p>阅读范围：核对<a href="https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf">2012作者论文稿</a>的概念、实现、示例及集成章节。没有将后续OMPL版本功能当成2012成果；未运行库或上述自构例子，也未重测规划性能。</p>
-<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<h2 id="六追问两个规划器使用同一ompl接口为什么仍需核对运动有效性检查分辨率">六、追问：两个规划器使用同一OMPL接口，为什么仍需核对运动有效性检查分辨率？</h2>
+<details>
+<summary>两个规划器使用同一OMPL接口，为什么仍需核对运动有效性检查分辨率？</summary>
+
+<p><strong>参考答案</strong>：接口一致不保证配置一致。检查分辨率会影响碰撞漏检风险和计算量，因而改变成功率与时间。应固定状态空间、有效性规则、终止预算和随机协议，再比较规划器；库的抽象并不自动完成公平实验。</p>
+<p>教学参照：<a href="https://ompl.kavrakilab.org/benchmark.html">How to Benchmark Planners</a>。这里借用其固定问题并同时报告时间、质量和失败的讲法。</p>
+</details>
+
+<h2 id="七组合具体规划器与通信框架">七、组合具体规划器与通信框架</h2>
+<ul>
+<li><strong>模块组合</strong>：<a href="043-rrt-connect.html">RRT-Connect：让两棵搜索树主动相遇</a>。通过统一接口运行双向树规划，并由应用提供碰撞模型。</li>
+<li><strong>模块组合</strong>：<a href="058-ros.html">ROS：让机器人算法能组成系统</a>。接入消息与部署框架后，规划问题定义仍属于应用。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <p><strong>问题1：为什么两个无碰撞状态之间，仍需要MotionValidator？</strong></p>
 <p>答案：路径中间可能穿过障碍，或违反其他约束。状态检查只提供点上的判断，运动验证负责整段连接。离散检查需要足够分辨率，连续检查则由相应几何算法及假设提供保证。</p>
 <p><strong>问题2：给汽车选择SE(2)状态空间，是否已经解决不能横移的问题？</strong></p>
@@ -216,17 +218,15 @@ q(0)=q_{\rm start},\quad q(1)\in X_{\rm goal}.</annotation></semantics></math></
 
 **原论文：** *The Open Motion Planning Library*，Ioan A. Şucan、Mark Moll、Lydia E. Kavraki，IEEE Robotics &amp; Automation Magazine，2012。[出版链接](https://doi.org/10.1109/MRA.2012.2205651) · [作者论文稿](https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
+
+[PRM](035-prm.md)与[RRT-Connect](043-rrt-connect.md)可以各自实现，但不同碰撞检查和预算会妨碍比较。OMPL抽象共同组件并提供基准工具；与[ROS](058-ros.md)组合后，规划依旧需要正确的机器人模型。
+
+## 一、问题设定：规划器比较怎样避免混入碰撞和状态实现差异
 
 想比较RRT与PRM，通常要先写状态表示、距离计算、采样、碰撞检查和实验脚本。若两份代码连最近邻结构与碰撞检测精度都不同，测出的“算法优势”可能只是底层实现差异。将算法移到另一台机器人，又可能重写一遍基础设施。
 
-OMPL把运动规划拆成可替换组件，让规划器通过统一接口访问状态空间、有效性检查、目标和可选动力学。库集中实现采样式规划，几何模型、碰撞库、可视化与机器人中间件通过外部组件接入。它还提供重复运行与记录指标的基准工具。
-
-本文的核心贡献是可扩展的软件架构和研究基础设施，并非发明了一个永远最快的新规划器。案例说明同一抽象能支撑几何规划、动力学规划和ROS集成；没有一个统一速度提升百分比可用来概括整篇。
-
-一句话：在需要复用与比较采样式运动规划的场景中，通过清晰的状态、约束、目标和规划器接口，减少重复实现并提高实验可比性，代价是应用仍必须正确提供碰撞、运动学和动力学信息。
-
-## 二、研究背景与问题定义
+### 研究背景与问题定义
 
 运动规划寻找从起点到目标区域的连续可行路径。用教学记号写为：
 
@@ -247,7 +247,7 @@ $$
 
 原文讨论概率完备性：对满足相应假设且有解的问题，随着采样增加，找到解的概率趋近1。它不意味着在一秒期限内必然找到，更不意味着超时可以证明无解。软件接口也不能自动使所有接入算法拥有同样的理论性质。
 
-## 三、方法：软件架构到底改了什么
+## 二、按状态空间、有效性、目标和规划器划分接口
 
 ### 1. 规划器只依赖需要的操作
 
@@ -293,45 +293,17 @@ StateValidityChecker判断一个状态是否允许，常见实现调用碰撞检
 
 这是根据§III—IV重构的教学流程。数学可优化路径长度等应用指标，但本文没有给全部规划器定义同一个新损失；机制改动是组件组织，实验收益是复用、集成和比较能力。不能虚构成“OMPL损失降低所以路径更优”。
 
-## 四、论文怎样验证设计
+### 相同接口不等于相同问题，比较前先锁定可行性检查
 
-| 证据对象 | 原文内容 | 可以验证什么 |
-|---|---|---|
-| 架构图 | 图2把空间、采样、检查、目标、规划器关系展开 | 接口如何覆盖共同概念 |
-| 最小程序 | 图3用SE(3)、有效性回调、起终点及SimpleSetup | 简单问题的接入代码较少 |
-| 动力学例子 | Box 2的ODE车和可移动障碍 | 控制传播可与物理引擎连接 |
-| 图形前端 | 图4 OMPL.app加载几何、显示搜索状态与解路径 | 核心规划与外部可视化可分离 |
-| ROS集成 | §V.B、图5，URDF到关节组及状态空间 | 同一接口可进入机器人软件栈 |
-| 基准功能 | Box 1重复运行、保存设置、多项指标与箱线图 | 可以组织随机算法比较 |
-| 大规模统计排名 | 本文没有给统一任务集上的全面胜率表 | 不能声称库优于所有其他库 |
+**教学反例**：一维路径端点0和1均合法，障碍为 $(0.49,0.51)$。只检查端点的验证器报告可行；每0.1检查一次会撞到0.5；若采样网格恰好避开障碍仍可能漏检。更换规划器并不能修复错误的运动验证器。状态合法性、整段运动合法性与动力学传播是三个接口责任。
 
-图3调用一秒求解期限，这是示例参数，不是“所有机器人一秒内规划成功”的实验结论。Box 1描述重复试验功能，也不等于论文每个示例已经采用相同种子、次数和硬件完成系统性统计比较。本文未确认这样的统一实验预算。
+公平基准应固定状态空间距离、碰撞几何、验证分辨率、终止预算和目标函数，再多次运行随机规划器。若十次有两次未找到解，仅平均另外八次的路径长度会产生幸存者偏差；应同时报成功率和截止时成本分布。
 
-对随机规划算法，公平性还要控制状态有效性分辨率、最近邻结构、时间与内存上限、目标容差及路径后处理。共享框架可以减少差异，不能消除所有调参影响。如果只比较成功运行的耗时，超时失败被删除，也会形成选择偏差。
+本篇把[PRM](035-prm.md)、[RRT-Connect](043-rrt-connect.md)、[RRT*](062-rrtstar.md)组织成可替换模块，并与[ROS](058-ros.md)组合。[原文第II节及Benchmark框](https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf)强调共同组件和重复比较。库的价值是让条件一致的对比和集成更容易，不是证明每个接口默认值适合所有机器人。
 
-## 五、五处证据应该怎样读
+接口把规划器与机器人模型分开，也把比较中的配置责任留给应用。下面按状态、检查器、目标和预算组装一次实验，再读集成案例。
 
-**证据1：图2与§IV.A。** 抽象状态空间提供拓扑相关操作，复合空间组合已有结构。它支持“算法代码不必直接操作机器人坐标数组”的架构结论；不能证明任意用户定义的距离都满足某个规划器的理论假设。
-
-**证据2：§IV.B。** 状态检查、运动检查与控制传播分别定义。论文明确允许替换默认离散检查，说明安全有效性由验证器语义决定。这个设计降低耦合，但不把数值积分误差或碰撞漏检自动消除。
-
-**证据3：图3。** 短示例说明只需配置空间、有效性和起终点便可运行基本规划。其有效性是一个简单坐标条件，并非完整真实碰撞场景，所以代码行数不能当作真机部署成本。复杂机器人仍需正确的模型与约束。
-
-**证据4：Box 1与§V.A。** 基准接口能多次运行、记录配置和指标，并导出箱线图。支持系统具备统计实验工具，不支持某个规划器在全部场景最佳。中位数、失败概率和长尾延迟应共同看，而不是只取最快一次。
-
-**证据5：§V.B与VI。** ROS接口把URDF、关节组、携带物体和目标约束映射到规划问题；作者还讨论分子构象搜索使用不同状态空间。说明接口具有跨应用复用潜力。但应用演示没有量化证明新增算法或新平台的开发工作量固定降低多少。
-
-论文的主要证据是可工作的实现、接口细节和案例。对软件论文，这种证据有价值；准确解读应承认其类型，而不是硬补不存在的3%成功率提升或十倍加速结果。
-
-## 六、贡献、代价与局限
-
-贡献包括概念与类接口对应、规划器与应用解耦、几何和控制规划的组织、教学前端以及基准实验工具。它让研究者能把注意力集中到采样或扩展策略，而不必反复搭建所有底层组件。
-
-代价是责任边界更明确，也要求使用者理解边界。若有效性检查漏掉夹持物体，规划器不会凭空知道手上多了一个箱子；若动力学模型忽略制动距离，控制规划也不能保证真机按预测停下。错误接口会稳定地产生错误结果。
-
-作者把长期成功归于社区采用与维护，而不是仅凭架构即可保证。本文进一步分析：统一库可能产生共同默认参数偏差；某些专用规划器的最佳实现未必符合通用接口；概率完备算法的长尾仍可能不适合严格实时期限。工程复用和算法适用性需要分别评估。
-
-## 七、帮助建立理解
+## 三、组装规划问题，再固定预算运行基准
 
 **自构例子，未运行。** 两个姿态位于一堵薄墙两侧，端点都有效。规划器尝试连接，若MotionValidator只检查端点，它会误判直线可行；检查中间点可能发现碰撞，更细分辨率代价更高。换一个规划器但保留错误验证器，不会修复问题。这说明规划算法和几何有效性是两个独立责任。
 
@@ -345,16 +317,88 @@ StateValidityChecker判断一个状态是否允许，常见实现调用碰撞检
 - **控制传播**：在给定输入和时间后，计算动力学系统的后继状态。
 - **概率完备性**：在相应假设下，采样增加时有解问题成功概率趋近1。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 算法重复搭基础设施 | 统一空间和规划接口 | 复用采样、距离等组件 | 图2、§IV | 用户仍需正确建模 |
-| 碰撞和规划耦合 | 独立有效性与运动验证 | 更换机器人时替换应用层 | §IV.B、OMPL.app | 默认离散检查非连续保证 |
-| 随机比较难组织 | 重复运行与日志工具 | 保留配置和结果分布 | Box 1 | 不自动保证预算公平 |
-| 难集成真实软件栈 | ROS及外部库适配 | 保留已有几何和运动学能力 | §V、图5 | 集成案例不是闭环安全证明 |
-
 阅读范围：核对[2012作者论文稿](https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf)的概念、实现、示例及集成章节。没有将后续OMPL版本功能当成2012成果；未运行库或上述自构例子，也未重测规划性能。
 
-## 八、三个问题及答案
+## 四、读几何、动力学与ROS集成案例
+
+### 论文怎样验证设计
+
+| 证据对象 | 原文内容 | 可以验证什么 |
+|---|---|---|
+| 架构图 | [图 2](#rc-67-figure-2)把空间、采样、检查、目标、规划器关系展开 | 接口如何覆盖共同概念 |
+| 最小程序 | [图 3](#rc-67-figure-3)用SE(3)、有效性回调、起终点及SimpleSetup | 简单问题的接入代码较少 |
+| 动力学例子 | Box 2的ODE车和可移动障碍 | 控制传播可与物理引擎连接 |
+| 图形前端 | [图 4](#rc-67-figure-4) OMPL.app加载几何、显示搜索状态与解路径 | 核心规划与外部可视化可分离 |
+| ROS集成 | §V.B、[图 5](#rc-67-figure-5)，URDF到关节组及状态空间 | 同一接口可进入机器人软件栈 |
+| 基准功能 | Box 1重复运行、保存设置、多项指标与箱线图 | 可以组织随机算法比较 |
+| 大规模统计排名 | 本文没有给统一任务集上的全面胜率表 | 不能声称库优于所有其他库 |
+
+&lt;!-- figure-ref-v6:start:rc-67-figure-2 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-67-figure-2&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/067-fig-2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/067-fig-2.png&quot; width=&quot;1293&quot; height=&quot;904&quot; alt=&quot;原论文图2：OMPL状态空间、采样、有效性、目标与规划器的接口关系&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;The Open Motion Planning Library（2012），图 2，PDF 第 4 页；&lt;a href=&quot;https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf#page=4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：颜色和箭头区分用户配置的对象与库实现的抽象接口。
+&lt;!-- figure-ref-v6:end:rc-67-figure-2 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-67-figure-5 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-67-figure-5&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/067-fig-5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/067-fig-5.png&quot; width=&quot;629&quot; height=&quot;515&quot; alt=&quot;原论文图5：OMPL通过ROS接口为PR2双臂构造规划问题的场景&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;The Open Motion Planning Library（2012），图 5，PDF 第 9 页；&lt;a href=&quot;https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf#page=9&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：模型、关节组和碰撞场景仍是必要输入，统一接口并不免除这些设定。
+&lt;!-- figure-ref-v6:end:rc-67-figure-5 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-67-figure-3 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-67-figure-3&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/067-fig-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/067-fig-3.png&quot; width=&quot;662&quot; height=&quot;639&quot; alt=&quot;OMPL原论文图3：用SE(3)状态空间、有效性回调和SimpleSetup求解的完整Python示例&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;The Open Motion Planning Library（2012），图 3，PDF 第 7 页；&lt;a href=&quot;https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：最后的solve(1.0)只给本示例一秒期限，不承诺任意机器人场景在一秒内求解成功。
+&lt;!-- figure-ref-v6:end:rc-67-figure-3 --&gt;
+
+[图 3](#rc-67-figure-3)调用一秒求解期限，这是示例参数，不是“所有机器人一秒内规划成功”的实验结论。Box 1描述重复试验功能，也不等于论文每个示例已经采用相同种子、次数和硬件完成系统性统计比较。本文未确认这样的统一实验预算。
+
+对随机规划算法，公平性还要控制状态有效性分辨率、最近邻结构、时间与内存上限、目标容差及路径后处理。共享框架可以减少差异，不能消除所有调参影响。如果只比较成功运行的耗时，超时失败被删除，也会形成选择偏差。
+
+&lt;!-- figure-ref-v6:start:rc-67-figure-4-anchor --&gt;
+&lt;span id=&quot;rc-67-figure-4&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-67-figure-4-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/067-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/067-evidence.png&quot; width=&quot;763&quot; height=&quot;515&quot; alt=&quot;Fig. 4：GUI 把机器人模型、规划参数和路径可视化并置，展示库如何接入真实几何场景&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文方法图摘引：Şucan、Moll、Kavraki（2012），Fig. 4，PDF 第 8 页；&lt;a href=&quot;https://kavrakilab.org/publications/sucan-moll2012open-motion-planning.pdf#page=8&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：GUI 把机器人模型、规划参数和路径可视化并置，展示库如何接入真实几何场景。界面里能显示路径，不代表任意碰撞模型、距离函数或一秒预算都具有同样保证。
+
+**证据1：[图 2](#rc-67-figure-2)与§IV.A。** 抽象状态空间提供拓扑相关操作，复合空间组合已有结构。它支持“算法代码不必直接操作机器人坐标数组”的架构结论；不能证明任意用户定义的距离都满足某个规划器的理论假设。
+
+**证据2：§IV.B。** 状态检查、运动检查与控制传播分别定义。论文明确允许替换默认离散检查，说明安全有效性由验证器语义决定。这个设计降低耦合，但不把数值积分误差或碰撞漏检自动消除。
+
+**证据3：[图 3](#rc-67-figure-3)。** 短示例说明只需配置空间、有效性和起终点便可运行基本规划。其有效性是一个简单坐标条件，并非完整真实碰撞场景，所以代码行数不能当作真机部署成本。复杂机器人仍需正确的模型与约束。
+
+**证据4：Box 1与§V.A。** 基准接口能多次运行、记录配置和指标，并导出箱线图。支持系统具备统计实验工具，不支持某个规划器在全部场景最佳。中位数、失败概率和长尾延迟应共同看，而不是只取最快一次。
+
+**证据5：§V.B与VI。** ROS接口把URDF、关节组、携带物体和目标约束映射到规划问题；作者还讨论分子构象搜索使用不同状态空间。说明接口具有跨应用复用潜力。但应用演示没有量化证明新增算法或新平台的开发工作量固定降低多少。
+
+论文的主要证据是可工作的实现、接口细节和案例。对软件论文，这种证据有价值；准确解读应承认其类型，而不是硬补不存在的3%成功率提升或十倍加速结果。
+
+## 五、保留应用模型责任和实验可比性
+
+贡献包括概念与类接口对应、规划器与应用解耦、几何和控制规划的组织、教学前端以及基准实验工具。它让研究者能把注意力集中到采样或扩展策略，而不必反复搭建所有底层组件。
+
+代价是责任边界更明确，也要求使用者理解边界。若有效性检查漏掉夹持物体，规划器不会凭空知道手上多了一个箱子；若动力学模型忽略制动距离，控制规划也不能保证真机按预测停下。错误接口会稳定地产生错误结果。
+
+作者把长期成功归于社区采用与维护，而不是仅凭架构即可保证。本文进一步分析：统一库可能产生共同默认参数偏差；某些专用规划器的最佳实现未必符合通用接口；概率完备算法的长尾仍可能不适合严格实时期限。工程复用和算法适用性需要分别评估。
+
+## 六、追问：两个规划器使用同一OMPL接口，为什么仍需核对运动有效性检查分辨率？
+
+&lt;details&gt;
+&lt;summary&gt;两个规划器使用同一OMPL接口，为什么仍需核对运动有效性检查分辨率？&lt;/summary&gt;
+
+**参考答案**：接口一致不保证配置一致。检查分辨率会影响碰撞漏检风险和计算量，因而改变成功率与时间。应固定状态空间、有效性规则、终止预算和随机协议，再比较规划器；库的抽象并不自动完成公平实验。
+
+教学参照：[How to Benchmark Planners](https://ompl.kavrakilab.org/benchmark.html)。这里借用其固定问题并同时报告时间、质量和失败的讲法。
+
+&lt;/details&gt;
+
+## 七、组合具体规划器与通信框架
+
+- **模块组合**：[RRT-Connect：让两棵搜索树主动相遇](043-rrt-connect.md)。通过统一接口运行双向树规划，并由应用提供碰撞模型。
+- **模块组合**：[ROS：让机器人算法能组成系统](058-ros.md)。接入消息与部署框架后，规划问题定义仍属于应用。
+
+## 八、自测与参考答案
 
 **问题1：为什么两个无碰撞状态之间，仍需要MotionValidator？**
 

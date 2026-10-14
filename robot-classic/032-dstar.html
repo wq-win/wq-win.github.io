@@ -42,24 +42,23 @@
                 <span class="text-gray-500">D*：地图变了，怎样修复已经算过的最短路</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="1b2d4507747f032ecfe3cc2f797fa4c86172f17b6f0e0ad7a3c96208bdff30f8"><h1>032｜D*：地图变了，怎样修复已经算过的最短路</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="a7a10c116c978f74f088fd5bde654f2847c565d6100732078b5a8f18175946a2"><h1>032｜D*：地图变了，怎样修复已经算过的最短路</h1>
 <p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="031-bootstrap-filter.html">上一篇</a> · <a href="033-good-features.html">下一篇</a></p>
 <p><strong>论文</strong>：Anthony Stentz，<em>Optimal and Efficient Path Planning for Partially-Known Environments</em>，ICRA 1994，3310–3317。<a href="https://publications.ri.cmu.edu/optimal-and-efficient-path-planning-for-partially-known-environments">作者机构入口</a> · <a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf">八页原文</a>。更早的相关技术报告发表于 1993 年；本文以 1994 年会议版为主，不混入后来的 Focused D* 或 D* Lite。</p>
-<p><strong>阅读范围</strong>：会议版八页全文，包括第 2 节算法、第 3 节非形式化证明、第 4 节表 1。下文页数按该 PDF 的 1–8 页计，便于对照无印刷页码的作者稿。</p>
-<h2 id="一分钟绕过新障碍不必忘掉整张地图">一分钟：绕过新障碍，不必忘掉整张地图</h2>
-<p>导航系统已经找好路线，前方却出现施工围挡。重新跑一遍最短路当然可以，但昨天算过的大量区域没有变化。反过来，只在围挡旁临时绕一下，又可能错过真正便宜的全局路线。</p>
-<p>D* 保存到目标的路径代价与后继指针。当传感器发现地图错误，算法只传播与变化有关的代价修正，直到机器人当前位置的最优路线重新可靠。这里的“局部修复”不是只看局部地图，而是复用全局搜索信息、按需更新。</p>
-<p>实验支持在给定随机地图、传感器范围和实现下，重规划明显快于从头搜索。它优化的是<strong>当前地图上的剩余路径</strong>，不会预知尚未看到的障碍，也不保证最终实际走过的整段路等于全知最短路。</p>
-<p>一句话：在边走边更新地图的图搜索任务中，通过增量传播路径代价变化，减少重复重规划计算，同时保持当前信息下的最优性，代价是保存状态、复杂的更新逻辑和有限的物理建模范围。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="003-astar.html">A*</a>解决当前图上的搜索，地图每次变化却可能导致重复劳动。D*复用已有代价依赖。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>最短路</strong>最小化边代价和；<strong>反向搜索</strong>从目标构建到达信息；<strong>优先队列</strong>首先处理最小键事件；<strong>一致性</strong>要求代价与后继关系匹配；<strong>在线信息</strong>意味着当前决策只能使用已经获得的地图。</p>
-<h2 id="问题定义最优性究竟针对哪个世界">问题定义：最优性究竟针对哪个世界</h2>
+<h2 id="一问题设定地图改变后怎样修复当前路线而不重算全部搜索">一、问题设定：地图改变后怎样修复当前路线而不重算全部搜索</h2>
+<p>导航系统已经找好路线，前方却出现施工围挡。重新跑一遍最短路当然可以，但昨天算过的大量区域没有变化。反过来，只在围挡旁临时绕一下，又可能错过真正便宜的全局路线。</p>
+<h3 id="问题定义最优性究竟针对哪个世界">问题定义：最优性究竟针对哪个世界</h3>
 <p>设有有限图 <span class="reading-math" data-tex="G=(V,E)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi><mo>=</mo><mo stretchy="false">(</mo><mi>V</mi><mo separator="true">,</mo><mi>E</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">G=(V,E)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mclose">)</span></span></span></span></span>，边代价 <span class="reading-math" data-tex="c(u,v)&gt;0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi><mo stretchy="false">(</mo><mi>u</mi><mo separator="true">,</mo><mi>v</mi><mo stretchy="false">)</mo><mo>&gt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">c(u,v)&gt;0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">c</span><span class="mopen">(</span><span class="mord mathnormal">u</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，起点随机器人移动，目标固定。状态可以是栅格位置，也可以来自其他离散规划表示。动作是沿合法边前进；到达目标或确认无路时结束。代价可以表达距离、能耗或危险暴露，但本文实验主要采用栅格通行代价。</p>
 <p>地图包含已知与估计的边代价。传感器发现实际代价不同，就发出修改。规划器解决的是</p>
 <p><span class="reading-math" data-tex="J^*(s)=\min_{s=x_0,\ldots,x_m=g}\sum_{i=0}^{m-1}c(x_i,x_{i+1}),"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>J</mi><mo>∗</mo></msup><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>=</mo><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mrow><mi>s</mi><mo>=</mo><msub><mi>x</mi><mn>0</mn></msub><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><msub><mi>x</mi><mi>m</mi></msub><mo>=</mo><mi>g</mi></mrow></munder><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>0</mn></mrow><mrow><mi>m</mi><mo>−</mo><mn>1</mn></mrow></munderover><mi>c</mi><mo stretchy="false">(</mo><msub><mi>x</mi><mi>i</mi></msub><mo separator="true">,</mo><msub><mi>x</mi><mrow><mi>i</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">)</mo><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">J^*(s)=\min_{s=x_0,\ldots,x_m=g}\sum_{i=0}^{m-1}c(x_i,x_{i+1}),</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.0788em;vertical-align:-1.2777em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.4em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">s</span><span class="mrel mtight">=</span><span class="mord mtight"><span class="mord mathnormal mtight">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3173em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span><span class="mpunct mtight">,</span><span class="minner mtight">…</span><span class="mpunct mtight">,</span><span class="mord mtight"><span class="mord mathnormal mtight">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">m</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span><span class="mrel mtight">=</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8361em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8011em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">=</span><span class="mord mtight">0</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">m</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">c</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span></span></span></span></span></span></p>
 <p>其中 <span class="reading-math" data-tex="c"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi></mrow><annotation encoding="application/x-tex">c</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">c</span></span></span></span></span> 是当时掌握的地图。未来观测如何改变地图，不在这个确定性目标中。即使每一步重规划都最优，也可能先走进死胡同再折返。这不是算法违反定理，而是全知规划与在线决策面对的信息不同。</p>
 <p>它没有策略网络、价值学习、奖励采样或训练集。路径代价函数虽然与强化学习中的价值函数形式相近，但这里根据明确图结构进行搜索和修复。也没有把主动探索的信息收益纳入路径目标。</p>
-<h2 id="方法维护一个指向目标的路标网络">方法：维护一个指向目标的路标网络</h2>
+<h2 id="二维护到目标的代价依赖传播增减两类变化">二、维护到目标的代价依赖，传播增减两类变化</h2>
+<h3 id="方法维护一个指向目标的路标网络">方法：维护一个指向目标的路标网络</h3>
 <p>对每个状态 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span>，保存到目标的代价估计 <span class="reading-math" data-tex="h(x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">h(x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span>、下一步指针 <span class="reading-math" data-tex="b(x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>b</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">b(x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">b</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span>，以及 NEW、OPEN、CLOSED 标记。OPEN 队列存储待传播变化的状态。搜索从目标向外建立信息，因此机器人移动之后，还能利用同一组到目标的路标。</p>
 <p>若代价没有变化，理想关系是</p>
 <p><span class="reading-math" data-tex="h(x)=\min_{y\in\operatorname{Succ}(x)}[c(x,y)+h(y)],\qquad h(g)=0."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>h</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mrow><mi>y</mi><mo>∈</mo><mi mathvariant="normal">Succ</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow></munder><mo stretchy="false">[</mo><mi>c</mi><mo stretchy="false">(</mo><mi>x</mi><mo separator="true">,</mo><mi>y</mi><mo stretchy="false">)</mo><mo>+</mo><mi>h</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mo separator="true">,</mo><mspace width="2em"/><mi>h</mi><mo stretchy="false">(</mo><mi>g</mi><mo stretchy="false">)</mo><mo>=</mo><mn>0.</mn></mrow><annotation encoding="application/x-tex">h(x)=\min_{y\in\operatorname{Succ}(x)}[c(x,y)+h(y)],\qquad h(g)=0.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.716em;vertical-align:-0.966em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.309em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">y</span><span class="mrel mtight">∈</span><span class="mop mtight"><span class="mord mathrm mtight">Succ</span></span><span class="mopen mtight">(</span><span class="mord mathnormal mtight">x</span><span class="mclose mtight">)</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.966em;"><span></span></span></span></span></span><span class="mopen">[</span><span class="mord mathnormal">c</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)]</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.</span></span></span></span></span></span></p>
@@ -67,7 +66,15 @@
 <p>障碍使某条边变贵时，所有依赖它的旧代价可能过于乐观。只做普通的“发现更小值就更新”无法消除这些旧承诺，因此 D* 需要传播代价上升。与此同时，附近可能存在替代路线，又要把较小的合法值传播回来。</p>
 <p>第 2.1 节为 OPEN 状态维护键值 <span class="reading-math" data-tex="k(x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">k(x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span>，记录从入队以来相关历史代价中的最小值。当 <span class="reading-math" data-tex="k(x)&lt;h(x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>&lt;</mo><mi>h</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">k(x)&lt;h(x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&lt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span> 时是 RAISE 状态；<span class="reading-math" data-tex="k(x)=h(x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><mi>h</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">k(x)=h(x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span> 时是 LOWER 状态。前者负责传递上升信息并寻找可靠替代来源，后者传递下降或初次确定的代价。</p>
 <p>不能把 RAISE 理解成“永远把邻居加一个固定数”：遇到替代路径，某些状态会改换后继，变化不会继续传到所有旧后代。也不能把 CLOSED 理解成永远不再访问，地图变化会使已经处理过的状态重新入队。</p>
-<h2 id="输入处理与输出停止条件也是算法的一部分">输入、处理与输出：停止条件也是算法的一部分</h2>
+<h3 id="输入处理与输出停止条件也是算法的一部分">输入、处理与输出：停止条件也是算法的一部分</h3>
+<p>原文用 <span class="reading-math" data-tex="k_{\min}\ge h(s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>k</mi><mi>min</mi><mo>⁡</mo></msub><mo>≥</mo><mi>h</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">k_{\min}\ge h(s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3175em;"><span style="top:-2.55em;margin-left:-0.0315em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mop mtight"><span class="mtight">m</span><span class="mtight">i</span><span class="mtight">n</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≥</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span> 表达修复足以覆盖当前状态的条件，并单独处理空队列。其含义不是“整张地图全部更新”，而是队列里尚未处理的影响已经不能破坏当前所需的最优性。若过早恢复运动，可能沿过时后继走；若每次都清空 OPEN，正确性通常仍可保留，但会丢掉按需计算的效率。</p>
+<p><strong>数学目标</strong>仍是正代价图上的最短路；<strong>新机制</strong>是复用后继结构、区分上升与下降、按键值界限停止；<strong>改善指标</strong>是地图变化后的累计重规划 CPU 时间。它没有通过降低路径质量来换速度。</p>
+<h3 id="用两条支路追踪一次代价上升">用两条支路追踪一次代价上升</h3>
+<p><strong>教学图</strong>有边 <span class="reading-math" data-tex="s\to a"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi><mo>→</mo><mi>a</mi></mrow><annotation encoding="application/x-tex">s\to a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span></span></span></span></span> 代价1、<span class="reading-math" data-tex="a\to g"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi><mo>→</mo><mi>g</mi></mrow><annotation encoding="application/x-tex">a\to g</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span></span></span></span></span> 代价1，另有 <span class="reading-math" data-tex="s\to b"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi><mo>→</mo><mi>b</mi></mrow><annotation encoding="application/x-tex">s\to b</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">b</span></span></span></span></span> 代价2、<span class="reading-math" data-tex="b\to g"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>b</mi><mo>→</mo><mi>g</mi></mrow><annotation encoding="application/x-tex">b\to g</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">b</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span></span></span></span></span> 代价2。原来的 <span class="reading-math" data-tex="h(a)=1,h(b)=2,h(s)=2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi><mo stretchy="false">(</mo><mi>a</mi><mo stretchy="false">)</mo><mo>=</mo><mn>1</mn><mo separator="true">,</mo><mi>h</mi><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo><mo>=</mo><mn>2</mn><mo separator="true">,</mo><mi>h</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>=</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">h(a)=1,h(b)=2,h(s)=2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord mathnormal">b</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span></span></span></span></span>，后继为 <span class="reading-math" data-tex="s\to a\to g"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi><mo>→</mo><mi>a</mi><mo>→</mo><mi>g</mi></mrow><annotation encoding="application/x-tex">s\to a\to g</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span></span></span></span></span>。当 <span class="reading-math" data-tex="a\to g"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi><mo>→</mo><mi>g</mi></mrow><annotation encoding="application/x-tex">a\to g</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span></span></span></span></span> 变为9，仅将 <span class="reading-math" data-tex="h(a)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi><mo stretchy="false">(</mo><mi>a</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">h(a)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mclose">)</span></span></span></span></span> 更新为9还不够：<span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span>仍携带已经失效的值2。传播依赖后，<span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span>应比较 <span class="reading-math" data-tex="1+9=10"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mo>+</mo><mn>9</mn><mo>=</mo><mn>10</mn></mrow><annotation encoding="application/x-tex">1+9=10</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">9</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">10</span></span></span></span></span> 与 <span class="reading-math" data-tex="2+2=4"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mo>+</mo><mn>2</mn><mo>=</mo><mn>4</mn></mrow><annotation encoding="application/x-tex">2+2=4</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">4</span></span></span></span></span>，改指向 <span class="reading-math" data-tex="b"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>b</mi></mrow><annotation encoding="application/x-tex">b</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">b</span></span></span></span></span>。</p>
+<p>关键不是“改了一个栅格就重算一个栅格”，而是受影响的旧最优依赖链；地图改动的空间范围很小，代价影响仍可很远。相反，不依赖该边的分支可能完全无需处理。这里展示Bellman依赖，未把四次算术冒充原版PROCESS-STATE的完整队列轨迹。</p>
+<p>与<a href="003-astar.html">A*</a>的联系是保留最短路目标、改变重计算方式；<a href="046-dstar-lite.html">D* Lite</a>是同一任务的后续增量搜索重构，不能直接把本篇RAISE标签替换为其 <span class="reading-math" data-tex="g/rhs"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi><mi mathvariant="normal">/</mi><mi>r</mi><mi>h</mi><mi>s</mi></mrow><annotation encoding="application/x-tex">g/rhs</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mord mathnormal">h</span><span class="mord mathnormal">s</span></span></span></span></span>。结合<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf">原文第3–4节</a>阅读时，“未知环境最优”应落实为每次已获信息定义的图，而不是拥有未来障碍知识的行驶总里程最优。实验的CPU节省也应对照更新次数和相同代价图。</p>
+<p>变化传播不只更新障碍旁边的节点，还可能沿代价依赖影响远处。下面用断桥例子核对处理顺序和停止条件，再将修复计时与最优性证明分开。</p>
+<h2 id="三执行状态处理与停止条件用断桥检查远处影响">三、执行状态处理与停止条件，用断桥检查远处影响</h2>
 <p>第 2.2 节包含 PROCESS-STATE 和 MODIFY-COST。前者弹出最小键状态并修复依赖，后者更新边并安排受影响状态。以下为控制流程的教学伪代码，RAISE/LOWER 内部保持原文的更新规则，不是可直接替换 D* Lite 的实现：</p>
 <pre><code class="language-text">输入：当前地图、目标、机器人位置、后续边代价观测
 初始化所有状态为 NEW，目标代价为 0，并把目标加入 OPEN
@@ -82,9 +89,22 @@
     否则沿 b(current) 移动，并更新当前位置
 输出：随地图修正的路径，以及对应剩余代价
 </code></pre>
-<p>原文用 <span class="reading-math" data-tex="k_{\min}\ge h(s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>k</mi><mi>min</mi><mo>⁡</mo></msub><mo>≥</mo><mi>h</mi><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">k_{\min}\ge h(s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3175em;"><span style="top:-2.55em;margin-left:-0.0315em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mop mtight"><span class="mtight">m</span><span class="mtight">i</span><span class="mtight">n</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≥</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span> 表达修复足以覆盖当前状态的条件，并单独处理空队列。其含义不是“整张地图全部更新”，而是队列里尚未处理的影响已经不能破坏当前所需的最优性。若过早恢复运动，可能沿过时后继走；若每次都清空 OPEN，正确性通常仍可保留，但会丢掉按需计算的效率。</p>
-<p><strong>数学目标</strong>仍是正代价图上的最短路；<strong>新机制</strong>是复用后继结构、区分上升与下降、按键值界限停止；<strong>改善指标</strong>是地图变化后的累计重规划 CPU 时间。它没有通过降低路径质量来换速度。</p>
-<h2 id="实验与证明如何各司其职">实验与证明如何各司其职</h2>
+<h3 id="自构例子一座桥为何会影响很远">自构例子：一座桥为何会影响很远</h3>
+<p>设目标在河东，机器人在河西。有一座近桥，跨越代价 2；另一座远桥绕行代价 20。旧后继树大多指向近桥。近桥关闭后，直接把这条边置为高代价还不够：河西许多状态的 <span class="reading-math" data-tex="h"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi></mrow><annotation encoding="application/x-tex">h</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">h</span></span></span></span></span> 仍错误地相信近桥可走。</p>
+<p>RAISE 把这些依赖标出，远桥方向的合法路线再通过 LOWER 传播回来。若机器人就在远桥旁，修复可能很快；若整个河西都依赖近桥，更新可能很广。这是教学构造，说明增量算法利用变化结构，而不是承诺固定局部工作量。</p>
+<h2 id="四分开阅读最优性证明与随机地图重规划计时">四、分开阅读最优性证明与随机地图重规划计时</h2>
+<!-- figure-ref-v6:start:rc-32-table-1-anchor -->
+<p><span id="rc-32-table-1"></span></p>
+<!-- figure-ref-v6:end:rc-32-table-1-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/032-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/032-evidence.png" width="717" height="253" alt="Table 1：在同一状态规模下，对照两种累计耗时与加速比" loading="lazy"></a><figcaption>原论文结果图／表摘引：Anthony Stentz（1994），Table 1，PDF 第 7 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=7" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：在同一状态规模下，对照两种累计耗时与加速比。表中比值是各次试验比值的平均，不能用两种耗时的均值再相除来替代；优势来自地图更新后的复用。</p>
+<h3 id="实验与证明如何各司其职">实验与证明如何各司其职</h3>
+<p>下文定位按八页作者 PDF 的页序；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=7">表 1</a> 的重规划比较和第 3 节的证明梗概分工不同，不能用计时表替代最短路条件。</p>
+<!-- figure-ref-v6:start:rc-32-links-100 -->
+<p>本页定位：<a href="#rc-32-table-1">表 1内嵌图</a>。</p>
+<!-- figure-ref-v6:end:rc-32-links-100 -->
+
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -94,11 +114,11 @@
 </thead>
 <tbody><tr>
 <td>机制示例</td>
-<td>50×50 八邻接栅格、点机器人、接触传感器，图 1–3 展示封闭凹陷中的更新传播</td>
+<td>50×50 八邻接栅格、点机器人、接触传感器，<a href="#rc-32-figure-1">图 1</a>–<a href="#rc-32-figure-3">图 3</a> 展示封闭凹陷中的更新传播</td>
 </tr>
 <tr>
 <td>地形示例</td>
-<td>450×450 分形地形，灰色区域通行代价为白色的五倍，图 4–6 比较地图先验</td>
+<td>450×450 分形地形，灰色区域通行代价为白色的五倍，<a href="#rc-32-figure-4">图 4</a>–<a href="#rc-32-figure-6">图 6</a> 比较地图先验</td>
 </tr>
 <tr>
 <td>运行时间比较</td>
@@ -125,60 +145,89 @@
 <td>有限图与正边代价，正确调用修改和传播过程；会议版给非形式化证明，完整证明指向早期技术报告</td>
 </tr>
 </tbody></table></div>
+<!-- figure-ref-v6:start:rc-32-figure-1 -->
+<figure class="reading-evidence-figure" id="rc-32-figure-1"><a href="/robot-classic/assets/figure-refs-v6/032-fig-1.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/032-fig-1.png" width="569" height="569" alt="图1：初始代价传播形成的栅格回指针场" loading="lazy"></a><figcaption>Anthony Stentz（1994），图 1，PDF 第 4 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=4" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/032-fig-1.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+<p>读图：箭头指向当前估计的最优后继；初始传播尚未知道新障碍，因此局部路径可以指向后来需要修复的区域。</p>
+<!-- figure-ref-v6:end:rc-32-figure-1 -->
+
+<!-- figure-ref-v6:start:rc-32-figure-2 -->
+<figure class="reading-evidence-figure" id="rc-32-figure-2"><a href="/robot-classic/assets/figure-refs-v6/032-fig-2.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/032-fig-2.png" width="568" height="571" alt="图2：RAISE状态传播代价增加，LOWER状态绕过障碍进入原路径区域" loading="lazy"></a><figcaption>Anthony Stentz（1994），图 2，PDF 第 4 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=4" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/032-fig-2.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+<p>读图：先找RAISE与LOWER两个区域，再追踪分界处箭头；D*重新处理受影响的状态，而非从头重算全部地图。</p>
+<!-- figure-ref-v6:end:rc-32-figure-2 -->
+
+<!-- figure-ref-v6:start:rc-32-figure-3 -->
+<figure class="reading-evidence-figure" id="rc-32-figure-3"><a href="/robot-classic/assets/figure-refs-v6/032-fig-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/032-fig-3.png" width="567" height="568" alt="图3：障碍变化处理后得到的最终回指针场" loading="lazy"></a><figcaption>Anthony Stentz（1994），图 3，PDF 第 5 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=5" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/032-fig-3.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+<p>读图：与图1比较障碍附近箭头如何绕行；远处仍可保留旧回指针，因此图中的局部修复不能解释成整图处处已更新。</p>
+<!-- figure-ref-v6:end:rc-32-figure-3 -->
+
+<!-- figure-ref-v6:start:rc-32-figure-4 -->
+<figure class="reading-evidence-figure" id="rc-32-figure-4"><a href="/robot-classic/assets/figure-refs-v6/032-fig-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/032-fig-4.png" width="562" height="564" alt="图4：已知完整分形地形时的规划路径" loading="lazy"></a><figcaption>Anthony Stentz（1994），图 4，PDF 第 5 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=5" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/032-fig-4.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+<p>读图：这张完整地图给出对照路线；不同灰度表示不同通行成本，不应把所有非黑区域都按同一距离度量。</p>
+<!-- figure-ref-v6:end:rc-32-figure-4 -->
+
+<!-- figure-ref-v6:start:rc-32-figure-5 -->
+<figure class="reading-evidence-figure" id="rc-32-figure-5"><a href="/robot-classic/assets/figure-refs-v6/032-fig-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/032-fig-5.png" width="562" height="573" alt="图5：从乐观未知地图出发逐渐发现障碍后的路径" loading="lazy"></a><figcaption>Anthony Stentz（1994），图 5，PDF 第 5 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=5" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/032-fig-5.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+<p>读图：白色区域最初按可通行处理，机器人随后发现死路并回退；读图要区分执行轨迹与事先知道完整地图时的最短路径。</p>
+<!-- figure-ref-v6:end:rc-32-figure-5 -->
+
+<!-- figure-ref-v6:start:rc-32-figure-6 -->
+<figure class="reading-evidence-figure" id="rc-32-figure-6"><a href="/robot-classic/assets/figure-refs-v6/032-fig-6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/032-fig-6.png" width="577" height="577" alt="图6：在粗分辨率先验地图上规划和局部细化的路径" loading="lazy"></a><figcaption>Anthony Stentz（1994），图 6，PDF 第 6 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=6" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/032-fig-6.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+<p>读图：粗网格提供先验地形代价，行进中才获得细节；与图4、5对照时，应把先验信息量作为自变量。</p>
+<!-- figure-ref-v6:end:rc-32-figure-6 -->
+
 <p>第 3 节分别讨论后继链存在且不成环、满足停止条件后的最优性、有限图上的完备性。这三件事不同：有一条可走的链不代表最短；当前最短也不代表所有未访问状态已经更新。</p>
-<h2 id="五处关键证据及其边界">五处关键证据及其边界</h2>
-<p>**图 1–3，PDF 第 4–5 页：**比较发现未知障碍前后的后继箭头。机器人脱离凹陷后，部分远处箭头仍保持旧方向。这支持按需修复的机制解释，并不表示地图全局一致已经恢复。</p>
-<p>**图 4、5，第 5 页：**同一地形中，全白乐观先验导致实际行程约为全知最优代价的两倍。它清楚表明论文的最优性不能解释为“从一开始就走对所有岔路”。</p>
-<p>**图 6，第 5–6 页：**粗分辨率先验帮助机器人选对中央障碍的绕行侧，最终代价仅比全知最优高 6%。这是这一张地图的结果，不是关于地图分辨率的普遍误差上界。</p>
-<p>**表 1，第 7 页：*<em>百万状态时，重规划器平均 50.82 分钟，D</em> 平均 16.83 秒。表中加速为 229.30 倍；不能简单拿两个平均耗时相除去“纠正”它，因为正文说明加速列是五次试验各自加速比的平均。比值的平均与平均值的比值通常不同。</p>
-<p>**第 4 节和第 5.1 节，第 7 页：**作者解释变化主要发生在机器人附近时更有利。实验没有证明每次变化都只影响小区域；若一条关键桥梁关闭，旧最短路树可能大范围失效，修复仍然很昂贵。</p>
+<h3 id="五处关键证据及其边界">五处关键证据及其边界</h3>
+<p><strong><a href="#rc-32-figure-1">图 1</a>–<a href="#rc-32-figure-3">图 3</a>，PDF 第 4–5 页：</strong>比较发现未知障碍前后的后继箭头。机器人脱离凹陷后，部分远处箭头仍保持旧方向。这支持按需修复的机制解释，并不表示地图全局一致已经恢复。</p>
+<!-- figure-ref-v6:start:rc-32-links-117 -->
+<p>本页定位：<a href="#rc-32-figure-1">图 1内嵌图</a> · <a href="#rc-32-figure-2">图 2内嵌图</a> · <a href="#rc-32-figure-3">图 3内嵌图</a>。</p>
+<!-- figure-ref-v6:end:rc-32-links-117 -->
+
+<p><strong><a href="#rc-32-figure-4">图 4</a>、5，第 5 页：</strong>同一地形中，全白乐观先验导致实际行程约为全知最优代价的两倍。它清楚表明论文的最优性不能解释为“从一开始就走对所有岔路”。</p>
+<!-- figure-ref-v6:start:rc-32-links-119 -->
+<p>本页定位：<a href="#rc-32-figure-4">图 4内嵌图</a> · <a href="#rc-32-figure-5">图 5内嵌图</a>。</p>
+<!-- figure-ref-v6:end:rc-32-links-119 -->
+
+<p><strong><a href="#rc-32-figure-6">图 6</a>，第 5–6 页：</strong>粗分辨率先验帮助机器人选对中央障碍的绕行侧，最终代价仅比全知最优高 6%。这是这一张地图的结果，不是关于地图分辨率的普遍误差上界。</p>
+<!-- figure-ref-v6:start:rc-32-links-121 -->
+<p>本页定位：<a href="#rc-32-figure-6">图 6内嵌图</a>。</p>
+<!-- figure-ref-v6:end:rc-32-links-121 -->
+
+<p><strong><a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=7">表 1</a>，第 7 页：</strong>百万状态时，重规划器平均 50.82 分钟，D* 平均 16.83 秒。表中加速为 229.30 倍；不能简单拿两个平均耗时相除去“纠正”它，因为正文说明加速列是五次试验各自加速比的平均。比值的平均与平均值的比值通常不同。</p>
+<!-- figure-ref-v6:start:rc-32-links-123 -->
+<p>本页定位：<a href="#rc-32-table-1">表 1内嵌图</a>。</p>
+<!-- figure-ref-v6:end:rc-32-links-123 -->
+
+<p><strong>第 4 节和第 5.1 节，第 7 页：</strong>作者解释变化主要发生在机器人附近时更有利。实验没有证明每次变化都只影响小区域；若一条关键桥梁关闭，旧最短路树可能大范围失效，修复仍然很昂贵。</p>
 <p>百万格上的结果不能直接外推为任何现代导航栈固定 229 倍加速。地图结构、障碍比例、数据结构、初始规划是否计时都会影响结论。两算法接受相同传感器信息，比较相对清楚；但没有系统的调参预算或置信区间报告。</p>
-<h2 id="贡献代价与失败边界">贡献、代价与失败边界</h2>
+<h2 id="五区分当前地图最优全知最优和复用成本">五、区分当前地图最优、全知最优和复用成本</h2>
 <p>D* 把变化中的图最短路变成可增量维护的计算对象，这是它的核心贡献。原文并未把高速物理避障、连续轨迹优化、定位不确定性一起解决。第 5.2 节提到室外系统集成进展，但主要定量证据仍然是离散地图实验。</p>
 <p>内存保存旧搜索信息，更新逻辑也比一次性搜索复杂。地图抖动会不断触发修改；若感知把安全区域误标成不可走，搜索再精确也会绕错。机器人形状需要由状态表示或配置空间障碍编码，不能让有体积的机器人直接执行点模型路径。</p>
 <p>进一步的系统分析是：动态边代价与具有速度的移动障碍不是同一个问题。只把障碍当前位置涂黑，没有表示到达时刻，就不能保证未来相遇安全。D* 可以作为时间扩展图上的组件，但原文栅格计时实验没有验证这样的完整系统。</p>
-<h2 id="自构例子一座桥为何会影响很远">自构例子：一座桥为何会影响很远</h2>
-<p>设目标在河东，机器人在河西。有一座近桥，跨越代价 2；另一座远桥绕行代价 20。旧后继树大多指向近桥。近桥关闭后，直接把这条边置为高代价还不够：河西许多状态的 <span class="reading-math" data-tex="h"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi></mrow><annotation encoding="application/x-tex">h</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">h</span></span></span></span></span> 仍错误地相信近桥可走。</p>
-<p>RAISE 把这些依赖标出，远桥方向的合法路线再通过 LOWER 传播回来。若机器人就在远桥旁，修复可能很快；若整个河西都依赖近桥，更新可能很广。这是教学构造，说明增量算法利用变化结构，而不是承诺固定局部工作量。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>地图变化后从头计算</td>
-<td>保留代价和后继链</td>
-<td>大量区域可以复用</td>
-<td>表 1</td>
-<td>存储与复杂更新逻辑</td>
-</tr>
-<tr>
-<td>旧路径代价过于乐观</td>
-<td>RAISE 传播上升</td>
-<td>消除失效路径的依赖</td>
-<td>图 1–3</td>
-<td>影响可能跨越很远</td>
-</tr>
-<tr>
-<td>局部绕障损失全局最优</td>
-<td>修复到当前状态满足界限</td>
-<td>使用全局图信息保证当前最短路</td>
-<td>第 3 节</td>
-<td>不是全知行程或信息采集最优</td>
-</tr>
-</tbody></table></div>
-<h2 id="自测与参考答案">自测与参考答案</h2>
+<h2 id="六追问改变传感器视野后重规划总耗时还能只归因于d实现吗">六、追问：改变传感器视野后，重规划总耗时还能只归因于D*实现吗？</h2>
+<details>
+<summary>改变传感器视野后，重规划总耗时还能只归因于D*实现吗？</summary>
+
+<p><strong>参考答案</strong>：不能。视野改变发现障碍的时机和每次更新的范围，也可能改变实际行走路线。比较应固定地图、观测协议与实现口径，分别记录搜索调用、每次修复时间和总路程。当前地图上的最优性不承诺相同探索过程，更不等于全知最短路。</p>
+</details>
+
+<h2 id="七改写增量搜索再加入质量调节">七、改写增量搜索，再加入质量调节</h2>
+<ul>
+<li><strong>直接继承</strong>：<a href="046-dstar-lite.html">D* Lite：地图变了，只修复受到影响的搜索结果</a>。用g与rhs的局部一致性组织同一增量重规划任务。</li>
+<li><strong>模块组合</strong>：<a href="052-anytime-dstar.html">AD*：先给有质量界的路线，再随时间和地图一起改进</a>。进一步同时处理快速首解与持续提高质量的需要。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <p><strong>问题1：如果新障碍没有挡住正在执行的路线，就一定不用更新吗？</strong></p>
-<p>**参考答案：**不一定。是否影响当前最优路径，需要结合代价变化的方向和旧结构判断。代价降低即使发生在旧路线之外，也可能创造更好的路径；代价上升若确实不影响任何当前所需依赖，则可能只需很少处理。不能只检查旧路径上的格子来处理所有变化。</p>
+<p><strong>参考答案：</strong>不一定。是否影响当前最优路径，需要结合代价变化的方向和旧结构判断。代价降低即使发生在旧路线之外，也可能创造更好的路径；代价上升若确实不影响任何当前所需依赖，则可能只需很少处理。不能只检查旧路径上的格子来处理所有变化。</p>
 <p><strong>问题2：为什么只支持“松弛到更小代价”的普通最短路更新不够？</strong></p>
-<p>**参考答案：**障碍会使旧代价应该变大，而只接受下降的程序永远保留过低估计。后继可能继续指向堵死的边。必须让依赖失效信息向外传播，再利用替代路线恢复合法值；RAISE/LOWER 正是在组织这两种变化。</p>
+<p><strong>参考答案：</strong>障碍会使旧代价应该变大，而只接受下降的程序永远保留过低估计。后继可能继续指向堵死的边。必须让依赖失效信息向外传播，再利用替代路线恢复合法值；RAISE/LOWER 正是在组织这两种变化。</p>
 <p><em><em>问题3：D</em> 每次都给当前最优路，为什么最终路程还能是全知最优的两倍？</em>*</p>
-<p>**参考答案：**每次优化使用的地图不同。早先不知道死胡同，进入它在乐观地图上可能最优；看到尽头后，已经付出的路程无法撤销。定理约束的是已知信息下的剩余路径，并不保证未知世界中的总体探索决策最优。</p>
+<p><strong>参考答案：</strong>每次优化使用的地图不同。早先不知道死胡同，进入它在乐观地图上可能最优；看到尽头后，已经付出的路程无法撤销。定理约束的是已知信息下的剩余路径，并不保证未知世界中的总体探索决策最优。</p>
 </div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
@@ -190,19 +239,15 @@
 
 **论文**：Anthony Stentz，*Optimal and Efficient Path Planning for Partially-Known Environments*，ICRA 1994，3310–3317。[作者机构入口](https://publications.ri.cmu.edu/optimal-and-efficient-path-planning-for-partially-known-environments) · [八页原文](https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf)。更早的相关技术报告发表于 1993 年；本文以 1994 年会议版为主，不混入后来的 Focused D* 或 D* Lite。
 
-**阅读范围**：会议版八页全文，包括第 2 节算法、第 3 节非形式化证明、第 4 节表 1。下文页数按该 PDF 的 1–8 页计，便于对照无印刷页码的作者稿。
+### 先接住前作的问题
 
-## 一分钟：绕过新障碍，不必忘掉整张地图
+[A*](003-astar.md)解决当前图上的搜索，地图每次变化却可能导致重复劳动。D*复用已有代价依赖。
+
+## 一、问题设定：地图改变后怎样修复当前路线而不重算全部搜索
 
 导航系统已经找好路线，前方却出现施工围挡。重新跑一遍最短路当然可以，但昨天算过的大量区域没有变化。反过来，只在围挡旁临时绕一下，又可能错过真正便宜的全局路线。
 
-D* 保存到目标的路径代价与后继指针。当传感器发现地图错误，算法只传播与变化有关的代价修正，直到机器人当前位置的最优路线重新可靠。这里的“局部修复”不是只看局部地图，而是复用全局搜索信息、按需更新。
-
-实验支持在给定随机地图、传感器范围和实现下，重规划明显快于从头搜索。它优化的是**当前地图上的剩余路径**，不会预知尚未看到的障碍，也不保证最终实际走过的整段路等于全知最短路。
-
-一句话：在边走边更新地图的图搜索任务中，通过增量传播路径代价变化，减少重复重规划计算，同时保持当前信息下的最优性，代价是保存状态、复杂的更新逻辑和有限的物理建模范围。
-
-## 问题定义：最优性究竟针对哪个世界
+### 问题定义：最优性究竟针对哪个世界
 
 设有有限图 $G=(V,E)$，边代价 $c(u,v)&gt;0$，起点随机器人移动，目标固定。状态可以是栅格位置，也可以来自其他离散规划表示。动作是沿合法边前进；到达目标或确认无路时结束。代价可以表达距离、能耗或危险暴露，但本文实验主要采用栅格通行代价。
 
@@ -216,7 +261,9 @@ $$
 
 它没有策略网络、价值学习、奖励采样或训练集。路径代价函数虽然与强化学习中的价值函数形式相近，但这里根据明确图结构进行搜索和修复。也没有把主动探索的信息收益纳入路径目标。
 
-## 方法：维护一个指向目标的路标网络
+## 二、维护到目标的代价依赖，传播增减两类变化
+
+### 方法：维护一个指向目标的路标网络
 
 对每个状态 $x$，保存到目标的代价估计 $h(x)$、下一步指针 $b(x)$，以及 NEW、OPEN、CLOSED 标记。OPEN 队列存储待传播变化的状态。搜索从目标向外建立信息，因此机器人移动之后，还能利用同一组到目标的路标。
 
@@ -234,7 +281,23 @@ $$
 
 不能把 RAISE 理解成“永远把邻居加一个固定数”：遇到替代路径，某些状态会改换后继，变化不会继续传到所有旧后代。也不能把 CLOSED 理解成永远不再访问，地图变化会使已经处理过的状态重新入队。
 
-## 输入、处理与输出：停止条件也是算法的一部分
+### 输入、处理与输出：停止条件也是算法的一部分
+
+原文用 $k_{\min}\ge h(s)$ 表达修复足以覆盖当前状态的条件，并单独处理空队列。其含义不是“整张地图全部更新”，而是队列里尚未处理的影响已经不能破坏当前所需的最优性。若过早恢复运动，可能沿过时后继走；若每次都清空 OPEN，正确性通常仍可保留，但会丢掉按需计算的效率。
+
+**数学目标**仍是正代价图上的最短路；**新机制**是复用后继结构、区分上升与下降、按键值界限停止；**改善指标**是地图变化后的累计重规划 CPU 时间。它没有通过降低路径质量来换速度。
+
+### 用两条支路追踪一次代价上升
+
+**教学图**有边 $s\to a$ 代价1、$a\to g$ 代价1，另有 $s\to b$ 代价2、$b\to g$ 代价2。原来的 $h(a)=1,h(b)=2,h(s)=2$，后继为 $s\to a\to g$。当 $a\to g$ 变为9，仅将 $h(a)$ 更新为9还不够：$s$仍携带已经失效的值2。传播依赖后，$s$应比较 $1+9=10$ 与 $2+2=4$，改指向 $b$。
+
+关键不是“改了一个栅格就重算一个栅格”，而是受影响的旧最优依赖链；地图改动的空间范围很小，代价影响仍可很远。相反，不依赖该边的分支可能完全无需处理。这里展示Bellman依赖，未把四次算术冒充原版PROCESS-STATE的完整队列轨迹。
+
+与[A*](003-astar.md)的联系是保留最短路目标、改变重计算方式；[D* Lite](046-dstar-lite.md)是同一任务的后续增量搜索重构，不能直接把本篇RAISE标签替换为其 $g/rhs$。结合[原文第3–4节](https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf)阅读时，“未知环境最优”应落实为每次已获信息定义的图，而不是拥有未来障碍知识的行驶总里程最优。实验的CPU节省也应对照更新次数和相同代价图。
+
+变化传播不只更新障碍旁边的节点，还可能沿代价依赖影响远处。下面用断桥例子核对处理顺序和停止条件，再将修复计时与最优性证明分开。
+
+## 三、执行状态处理与停止条件，用断桥检查远处影响
 
 第 2.2 节包含 PROCESS-STATE 和 MODIFY-COST。前者弹出最小键状态并修复依赖，后者更新边并安排受影响状态。以下为控制流程的教学伪代码，RAISE/LOWER 内部保持原文的更新规则，不是可直接替换 D* Lite 的实现：
 
@@ -253,48 +316,7 @@ $$
 输出：随地图修正的路径，以及对应剩余代价
 ```
 
-原文用 $k_{\min}\ge h(s)$ 表达修复足以覆盖当前状态的条件，并单独处理空队列。其含义不是“整张地图全部更新”，而是队列里尚未处理的影响已经不能破坏当前所需的最优性。若过早恢复运动，可能沿过时后继走；若每次都清空 OPEN，正确性通常仍可保留，但会丢掉按需计算的效率。
-
-**数学目标**仍是正代价图上的最短路；**新机制**是复用后继结构、区分上升与下降、按键值界限停止；**改善指标**是地图变化后的累计重规划 CPU 时间。它没有通过降低路径质量来换速度。
-
-## 实验与证明如何各司其职
-
-| 项目 | 原文设定与用途 |
-|---|---|
-| 机制示例 | 50×50 八邻接栅格、点机器人、接触传感器，图 1–3 展示封闭凹陷中的更新传播 |
-| 地形示例 | 450×450 分形地形，灰色区域通行代价为白色的五倍，图 4–6 比较地图先验 |
-| 运行时间比较 | 1000 到 1000000 状态，混合已知与未知障碍 |
-| 传感器 | 计时实验为全向、半径 10 格；地形示例的半径是 20 格，不能混用 |
-| 对比方法 | 使用乐观直线启发式的从头最优重规划器 |
-| 硬件与时间口径 | SPARC-10 CPU 时间；不含最初一次路径规划，只累计之后的重规划 |
-| 重复 | 每种规模五张随机生成地图取平均，没有提供方差或置信区间 |
-| 理论范围 | 有限图与正边代价，正确调用修改和传播过程；会议版给非形式化证明，完整证明指向早期技术报告 |
-
-第 3 节分别讨论后继链存在且不成环、满足停止条件后的最优性、有限图上的完备性。这三件事不同：有一条可走的链不代表最短；当前最短也不代表所有未访问状态已经更新。
-
-## 五处关键证据及其边界
-
-**图 1–3，PDF 第 4–5 页：**比较发现未知障碍前后的后继箭头。机器人脱离凹陷后，部分远处箭头仍保持旧方向。这支持按需修复的机制解释，并不表示地图全局一致已经恢复。
-
-**图 4、5，第 5 页：**同一地形中，全白乐观先验导致实际行程约为全知最优代价的两倍。它清楚表明论文的最优性不能解释为“从一开始就走对所有岔路”。
-
-**图 6，第 5–6 页：**粗分辨率先验帮助机器人选对中央障碍的绕行侧，最终代价仅比全知最优高 6%。这是这一张地图的结果，不是关于地图分辨率的普遍误差上界。
-
-**表 1，第 7 页：**百万状态时，重规划器平均 50.82 分钟，D* 平均 16.83 秒。表中加速为 229.30 倍；不能简单拿两个平均耗时相除去“纠正”它，因为正文说明加速列是五次试验各自加速比的平均。比值的平均与平均值的比值通常不同。
-
-**第 4 节和第 5.1 节，第 7 页：**作者解释变化主要发生在机器人附近时更有利。实验没有证明每次变化都只影响小区域；若一条关键桥梁关闭，旧最短路树可能大范围失效，修复仍然很昂贵。
-
-百万格上的结果不能直接外推为任何现代导航栈固定 229 倍加速。地图结构、障碍比例、数据结构、初始规划是否计时都会影响结论。两算法接受相同传感器信息，比较相对清楚；但没有系统的调参预算或置信区间报告。
-
-## 贡献、代价与失败边界
-
-D* 把变化中的图最短路变成可增量维护的计算对象，这是它的核心贡献。原文并未把高速物理避障、连续轨迹优化、定位不确定性一起解决。第 5.2 节提到室外系统集成进展，但主要定量证据仍然是离散地图实验。
-
-内存保存旧搜索信息，更新逻辑也比一次性搜索复杂。地图抖动会不断触发修改；若感知把安全区域误标成不可走，搜索再精确也会绕错。机器人形状需要由状态表示或配置空间障碍编码，不能让有体积的机器人直接执行点模型路径。
-
-进一步的系统分析是：动态边代价与具有速度的移动障碍不是同一个问题。只把障碍当前位置涂黑，没有表示到达时刻，就不能保证未来相遇安全。D* 可以作为时间扩展图上的组件，但原文栅格计时实验没有验证这样的完整系统。
-
-## 自构例子：一座桥为何会影响很远
+### 自构例子：一座桥为何会影响很远
 
 设目标在河东，机器人在河西。有一座近桥，跨越代价 2；另一座远桥绕行代价 20。旧后继树大多指向近桥。近桥关闭后，直接把这条边置为高代价还不够：河西许多状态的 $h$ 仍错误地相信近桥可走。
 
@@ -302,13 +324,126 @@ RAISE 把这些依赖标出，远桥方向的合法路线再通过 LOWER 传播�
 
 五个前置概念：**最短路**最小化边代价和；**反向搜索**从目标构建到达信息；**优先队列**首先处理最小键事件；**一致性**要求代价与后继关系匹配；**在线信息**意味着当前决策只能使用已经获得的地图。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 地图变化后从头计算 | 保留代价和后继链 | 大量区域可以复用 | 表 1 | 存储与复杂更新逻辑 |
-| 旧路径代价过于乐观 | RAISE 传播上升 | 消除失效路径的依赖 | 图 1–3 | 影响可能跨越很远 |
-| 局部绕障损失全局最优 | 修复到当前状态满足界限 | 使用全局图信息保证当前最短路 | 第 3 节 | 不是全知行程或信息采集最优 |
+## 四、分开阅读最优性证明与随机地图重规划计时
 
-## 自测与参考答案
+
+&lt;!-- figure-ref-v6:start:rc-32-table-1-anchor --&gt;
+&lt;span id=&quot;rc-32-table-1&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-32-table-1-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/032-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/032-evidence.png&quot; width=&quot;717&quot; height=&quot;253&quot; alt=&quot;Table 1：在同一状态规模下，对照两种累计耗时与加速比&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文结果图／表摘引：Anthony Stentz（1994），Table 1，PDF 第 7 页；&lt;a href=&quot;https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：在同一状态规模下，对照两种累计耗时与加速比。表中比值是各次试验比值的平均，不能用两种耗时的均值再相除来替代；优势来自地图更新后的复用。
+
+### 实验与证明如何各司其职
+
+下文定位按八页作者 PDF 的页序；[表 1](https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=7) 的重规划比较和第 3 节的证明梗概分工不同，不能用计时表替代最短路条件。
+
+&lt;!-- figure-ref-v6:start:rc-32-links-100 --&gt;
+本页定位：[表 1内嵌图](#rc-32-table-1)。
+&lt;!-- figure-ref-v6:end:rc-32-links-100 --&gt;
+
+| 项目 | 原文设定与用途 |
+|---|---|
+| 机制示例 | 50×50 八邻接栅格、点机器人、接触传感器，[图 1](#rc-32-figure-1)–[图 3](#rc-32-figure-3) 展示封闭凹陷中的更新传播 |
+| 地形示例 | 450×450 分形地形，灰色区域通行代价为白色的五倍，[图 4](#rc-32-figure-4)–[图 6](#rc-32-figure-6) 比较地图先验 |
+| 运行时间比较 | 1000 到 1000000 状态，混合已知与未知障碍 |
+| 传感器 | 计时实验为全向、半径 10 格；地形示例的半径是 20 格，不能混用 |
+| 对比方法 | 使用乐观直线启发式的从头最优重规划器 |
+| 硬件与时间口径 | SPARC-10 CPU 时间；不含最初一次路径规划，只累计之后的重规划 |
+| 重复 | 每种规模五张随机生成地图取平均，没有提供方差或置信区间 |
+| 理论范围 | 有限图与正边代价，正确调用修改和传播过程；会议版给非形式化证明，完整证明指向早期技术报告 |
+
+&lt;!-- figure-ref-v6:start:rc-32-figure-1 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-32-figure-1&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/032-fig-1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/032-fig-1.png&quot; width=&quot;569&quot; height=&quot;569&quot; alt=&quot;图1：初始代价传播形成的栅格回指针场&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Anthony Stentz（1994），图 1，PDF 第 4 页；&lt;a href=&quot;https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;；&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/032-fig-1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;放大查看&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：箭头指向当前估计的最优后继；初始传播尚未知道新障碍，因此局部路径可以指向后来需要修复的区域。
+&lt;!-- figure-ref-v6:end:rc-32-figure-1 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-32-figure-2 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-32-figure-2&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/032-fig-2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/032-fig-2.png&quot; width=&quot;568&quot; height=&quot;571&quot; alt=&quot;图2：RAISE状态传播代价增加，LOWER状态绕过障碍进入原路径区域&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Anthony Stentz（1994），图 2，PDF 第 4 页；&lt;a href=&quot;https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;；&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/032-fig-2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;放大查看&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：先找RAISE与LOWER两个区域，再追踪分界处箭头；D*重新处理受影响的状态，而非从头重算全部地图。
+&lt;!-- figure-ref-v6:end:rc-32-figure-2 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-32-figure-3 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-32-figure-3&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/032-fig-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/032-fig-3.png&quot; width=&quot;567&quot; height=&quot;568&quot; alt=&quot;图3：障碍变化处理后得到的最终回指针场&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Anthony Stentz（1994），图 3，PDF 第 5 页；&lt;a href=&quot;https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;；&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/032-fig-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;放大查看&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：与图1比较障碍附近箭头如何绕行；远处仍可保留旧回指针，因此图中的局部修复不能解释成整图处处已更新。
+&lt;!-- figure-ref-v6:end:rc-32-figure-3 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-32-figure-4 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-32-figure-4&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/032-fig-4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/032-fig-4.png&quot; width=&quot;562&quot; height=&quot;564&quot; alt=&quot;图4：已知完整分形地形时的规划路径&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Anthony Stentz（1994），图 4，PDF 第 5 页；&lt;a href=&quot;https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;；&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/032-fig-4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;放大查看&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：这张完整地图给出对照路线；不同灰度表示不同通行成本，不应把所有非黑区域都按同一距离度量。
+&lt;!-- figure-ref-v6:end:rc-32-figure-4 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-32-figure-5 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-32-figure-5&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/032-fig-5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/032-fig-5.png&quot; width=&quot;562&quot; height=&quot;573&quot; alt=&quot;图5：从乐观未知地图出发逐渐发现障碍后的路径&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Anthony Stentz（1994），图 5，PDF 第 5 页；&lt;a href=&quot;https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;；&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/032-fig-5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;放大查看&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：白色区域最初按可通行处理，机器人随后发现死路并回退；读图要区分执行轨迹与事先知道完整地图时的最短路径。
+&lt;!-- figure-ref-v6:end:rc-32-figure-5 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-32-figure-6 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-32-figure-6&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/032-fig-6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/032-fig-6.png&quot; width=&quot;577&quot; height=&quot;577&quot; alt=&quot;图6：在粗分辨率先验地图上规划和局部细化的路径&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Anthony Stentz（1994），图 6，PDF 第 6 页；&lt;a href=&quot;https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;；&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/032-fig-6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;放大查看&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：粗网格提供先验地形代价，行进中才获得细节；与图4、5对照时，应把先验信息量作为自变量。
+&lt;!-- figure-ref-v6:end:rc-32-figure-6 --&gt;
+
+第 3 节分别讨论后继链存在且不成环、满足停止条件后的最优性、有限图上的完备性。这三件事不同：有一条可走的链不代表最短；当前最短也不代表所有未访问状态已经更新。
+
+### 五处关键证据及其边界
+
+**[图 1](#rc-32-figure-1)–[图 3](#rc-32-figure-3)，PDF 第 4–5 页：**比较发现未知障碍前后的后继箭头。机器人脱离凹陷后，部分远处箭头仍保持旧方向。这支持按需修复的机制解释，并不表示地图全局一致已经恢复。
+
+&lt;!-- figure-ref-v6:start:rc-32-links-117 --&gt;
+本页定位：[图 1内嵌图](#rc-32-figure-1) · [图 2内嵌图](#rc-32-figure-2) · [图 3内嵌图](#rc-32-figure-3)。
+&lt;!-- figure-ref-v6:end:rc-32-links-117 --&gt;
+
+**[图 4](#rc-32-figure-4)、5，第 5 页：**同一地形中，全白乐观先验导致实际行程约为全知最优代价的两倍。它清楚表明论文的最优性不能解释为“从一开始就走对所有岔路”。
+
+&lt;!-- figure-ref-v6:start:rc-32-links-119 --&gt;
+本页定位：[图 4内嵌图](#rc-32-figure-4) · [图 5内嵌图](#rc-32-figure-5)。
+&lt;!-- figure-ref-v6:end:rc-32-links-119 --&gt;
+
+**[图 6](#rc-32-figure-6)，第 5–6 页：**粗分辨率先验帮助机器人选对中央障碍的绕行侧，最终代价仅比全知最优高 6%。这是这一张地图的结果，不是关于地图分辨率的普遍误差上界。
+
+&lt;!-- figure-ref-v6:start:rc-32-links-121 --&gt;
+本页定位：[图 6内嵌图](#rc-32-figure-6)。
+&lt;!-- figure-ref-v6:end:rc-32-links-121 --&gt;
+
+**[表 1](https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=7)，第 7 页：**百万状态时，重规划器平均 50.82 分钟，D* 平均 16.83 秒。表中加速为 229.30 倍；不能简单拿两个平均耗时相除去“纠正”它，因为正文说明加速列是五次试验各自加速比的平均。比值的平均与平均值的比值通常不同。
+
+&lt;!-- figure-ref-v6:start:rc-32-links-123 --&gt;
+本页定位：[表 1内嵌图](#rc-32-table-1)。
+&lt;!-- figure-ref-v6:end:rc-32-links-123 --&gt;
+
+**第 4 节和第 5.1 节，第 7 页：**作者解释变化主要发生在机器人附近时更有利。实验没有证明每次变化都只影响小区域；若一条关键桥梁关闭，旧最短路树可能大范围失效，修复仍然很昂贵。
+
+百万格上的结果不能直接外推为任何现代导航栈固定 229 倍加速。地图结构、障碍比例、数据结构、初始规划是否计时都会影响结论。两算法接受相同传感器信息，比较相对清楚；但没有系统的调参预算或置信区间报告。
+
+## 五、区分当前地图最优、全知最优和复用成本
+
+D* 把变化中的图最短路变成可增量维护的计算对象，这是它的核心贡献。原文并未把高速物理避障、连续轨迹优化、定位不确定性一起解决。第 5.2 节提到室外系统集成进展，但主要定量证据仍然是离散地图实验。
+
+内存保存旧搜索信息，更新逻辑也比一次性搜索复杂。地图抖动会不断触发修改；若感知把安全区域误标成不可走，搜索再精确也会绕错。机器人形状需要由状态表示或配置空间障碍编码，不能让有体积的机器人直接执行点模型路径。
+
+进一步的系统分析是：动态边代价与具有速度的移动障碍不是同一个问题。只把障碍当前位置涂黑，没有表示到达时刻，就不能保证未来相遇安全。D* 可以作为时间扩展图上的组件，但原文栅格计时实验没有验证这样的完整系统。
+
+## 六、追问：改变传感器视野后，重规划总耗时还能只归因于D*实现吗？
+
+&lt;details&gt;
+&lt;summary&gt;改变传感器视野后，重规划总耗时还能只归因于D*实现吗？&lt;/summary&gt;
+
+**参考答案**：不能。视野改变发现障碍的时机和每次更新的范围，也可能改变实际行走路线。比较应固定地图、观测协议与实现口径，分别记录搜索调用、每次修复时间和总路程。当前地图上的最优性不承诺相同探索过程，更不等于全知最短路。
+
+&lt;/details&gt;
+
+## 七、改写增量搜索，再加入质量调节
+
+- **直接继承**：[D* Lite：地图变了，只修复受到影响的搜索结果](046-dstar-lite.md)。用g与rhs的局部一致性组织同一增量重规划任务。
+- **模块组合**：[AD*：先给有质量界的路线，再随时间和地图一起改进](052-anytime-dstar.md)。进一步同时处理快速首解与持续提高质量的需要。
+
+## 八、自测与参考答案
 
 **问题1：如果新障碍没有挡住正在执行的路线，就一定不用更新吗？**
 

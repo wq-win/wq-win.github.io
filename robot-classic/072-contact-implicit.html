@@ -42,20 +42,21 @@
                 <span class="text-gray-500">手部 CIO：把何时接触、在哪里施力一起优化</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="596d5c266a98c770df2baa9aecb6209d114c9bdc554c679d91aaba22fa34f5e0"><h1>072｜手部 CIO：把何时接触、在哪里施力一起优化</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="ee14b7591c5bcfd851df6df23d79ab82fe3bae32fcbd6f30731eaa7fb4f1906d"><h1>072｜手部 CIO：把何时接触、在哪里施力一起优化</h1>
 <p><a href="index.html">系列首页</a> · <a href="00-timeline.html">时间线总览</a></p>
 <p>论文：Igor Mordatch、Zoran Popović、Emanuel Todorov，<em>Contact-Invariant Optimization for Hand Manipulation</em>，SCA 2012。<a href="https://homes.cs.washington.edu/~todorov/papers/MordatchSCA12.pdf">原始书目链接</a>；<a href="https://roboti.us/lab/papers/MordatchSCA12.pdf">作者存档全文</a>。本文依据八页正文的方法、实验和讨论，不与同年 SIGGRAPH 的全身 CIO 论文混同；未独立复现动画优化。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>让手把笔从桌上拿起来，可以先规定“拇指先碰、食指再夹、然后抬起”，再优化动作。但灵巧操作的难处恰恰在于不知道应该采用哪种接触顺序。CIO 把接触是否活跃、接触点位置、接触力与物体轨迹一同放进连续优化，让目标运动反过来引导手指寻找合适作用方式。</p>
-<p>这篇工作的关键扩展是适应曲面手部接触，并显式优化力及其作用点。论文展示抓取、转动物体、画图和不同手形态的动作合成。它没有训练一个可泛化神经策略，也没有证明这些轨迹能由真实手部执行器稳定跟踪。</p>
-<p>一句话总结：在已知几何和动力学的离线手部动作合成中，通过联合优化轨迹、接触活动与作用力，减少手工指定接触事件的负担；代价是软物理约束、大型非凸优化以及对手部动力学的简化。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="030-grasp-quality.html">抓取质量</a>评估既定接触，本篇还要同时寻找手怎样移动、何时接触。CIO用连续辅助变量打开优化通道；<a href="075-contact-trajopt.html">Posa方法</a>是直接施加互补约束的平行路线，物理残差边界不同。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>轨迹优化</strong>直接调整一段运动；<strong>接触模式</strong>描述哪些表面正在作用；<strong>软约束</strong>用代价惩罚而非严格禁止违反；<strong>continuation</strong>逐渐改变问题难度；<strong>摩擦锥</strong>限定接触力允许的方向与大小关系。</p>
-<h2 id="背景与问题边界">背景与问题边界</h2>
+<h2 id="一问题设定接触顺序未知时怎样同时寻找手部运动和作用点">一、问题设定：接触顺序未知时怎样同时寻找手部运动和作用点</h2>
+<p>让手把笔从桌上拿起来，可以先规定“拇指先碰、食指再夹、然后抬起”，再优化动作。但灵巧操作的难处恰恰在于不知道应该采用哪种接触顺序。CIO 把接触是否活跃、接触点位置、接触力与物体轨迹一同放进连续优化，让目标运动反过来引导手指寻找合适作用方式。</p>
+<h3 id="背景与问题边界">背景与问题边界</h3>
 <p>输入包括初始手—物状态、几何和高层任务目标；输出是固定时间区间内的状态轨迹。目标可以是物体末端位置，也可以是笔尖经过若干位置。它属于模型驱动的轨迹优化，成本函数不是从交互数据学习出来的奖励模型。</p>
 <p>原始全身 CIO 偏向平行接触面片，不适合指尖曲面和滚动接触。本篇允许接触点在曲面上改变。不过必须细读 §5.1：实现仍要求活跃接触的相对速度为零，即限制无滑动。曲面接触不等于已完整处理任意库仑滑动。</p>
 <p>另一个重要假设来自 §5.2：肩部固定，手被视为完全驱动，运动学可行的手姿态被假定为动力学可行。物体则未驱动，必须由接触力解释其运动。因此，优化中认真检查了物体的牛顿—欧拉关系，却没有同等严格地限制手部电机力矩和执行器带宽。</p>
-<h2 id="方法给接触一个可优化的中间表示">方法：给接触一个可优化的中间表示</h2>
+<h2 id="二用连续辅助变量连接接触活动与力">二、用连续辅助变量连接接触活动与力</h2>
+<h3 id="方法给接触一个可优化的中间表示">方法：给接触一个可优化的中间表示</h3>
 <p>每个候选接触有活动变量 <span class="reading-math" data-tex="c_j\in[0,1]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>c</mi><mi>j</mi></msub><mo>∈</mo><mo stretchy="false">[</mo><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">c_j\in[0,1]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8252em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">]</span></span></span></span></span>、力 <span class="reading-math" data-tex="f_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>f</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">f_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 和作用点 <span class="reading-math" data-tex="r_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>r</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">r_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>。<span class="reading-math" data-tex="c_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>c</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">c_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是连续优化辅助量，作者非正式地把它比作接触概率；它不是通过观测校准得到的概率模型。候选接触集合仍然由建模者预先确定，算法不会凭空发现没有放进模型的接触表面。</p>
 <p>为了方便理解，可以把核心代价整理为</p>
 <p><span class="reading-math" data-tex="L=L_{task}+w_C L_C+w_P L_P+w_F L_{cone}+L_{kin}+L_{pad}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>L</mi><mo>=</mo><msub><mi>L</mi><mrow><mi>t</mi><mi>a</mi><mi>s</mi><mi>k</mi></mrow></msub><mo>+</mo><msub><mi>w</mi><mi>C</mi></msub><msub><mi>L</mi><mi>C</mi></msub><mo>+</mo><msub><mi>w</mi><mi>P</mi></msub><msub><mi>L</mi><mi>P</mi></msub><mo>+</mo><msub><mi>w</mi><mi>F</mi></msub><msub><mi>L</mi><mrow><mi>c</mi><mi>o</mi><mi>n</mi><mi>e</mi></mrow></msub><mo>+</mo><msub><mi>L</mi><mrow><mi>k</mi><mi>i</mi><mi>n</mi></mrow></msub><mo>+</mo><msub><mi>L</mi><mrow><mi>p</mi><mi>a</mi><mi>d</mi></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L=L_{task}+w_C L_C+w_P L_P+w_F L_{cone}+L_{kin}+L_{pad}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight">s</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">C</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">C</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">F</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">co</span><span class="mord mathnormal mtight">n</span><span class="mord mathnormal mtight">e</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">kin</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
@@ -70,7 +71,13 @@
 \dot H-\sum_j(r_j-x)\times(c_jf_j)-\tau_{ext}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>m</mi><mover accent="true"><mi>x</mi><mo>¨</mo></mover><mo>−</mo><munder><mo>∑</mo><mi>j</mi></munder><msub><mi>c</mi><mi>j</mi></msub><msub><mi>f</mi><mi>j</mi></msub><mo>−</mo><msub><mi>f</mi><mrow><mi>e</mi><mi>x</mi><mi>t</mi></mrow></msub><mo separator="true">,</mo><mspace width="2em"/><mover accent="true"><mi>H</mi><mo>˙</mo></mover><mo>−</mo><munder><mo>∑</mo><mi>j</mi></munder><mo stretchy="false">(</mo><msub><mi>r</mi><mi>j</mi></msub><mo>−</mo><mi>x</mi><mo stretchy="false">)</mo><mo>×</mo><mo stretchy="false">(</mo><msub><mi>c</mi><mi>j</mi></msub><msub><mi>f</mi><mi>j</mi></msub><mo stretchy="false">)</mo><mo>−</mo><msub><mi>τ</mi><mrow><mi>e</mi><mi>x</mi><mi>t</mi></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">m\ddot x-\sum_j c_j f_j-f_{ext},\qquad
 \dot H-\sum_j(r_j-x)\times(c_jf_j)-\tau_{ext}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7512em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">m</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">x</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">¨</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.4638em;vertical-align:-1.4138em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1146em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight">x</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9202em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0833em;"><span class="mord">˙</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.4638em;vertical-align:-1.4138em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.1132em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight">x</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p>位置 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 指物体质心，<span class="reading-math" data-tex="H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>H</mi></mrow><annotation encoding="application/x-tex">H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span></span></span> 是角动量。这里使用标准力臂叉乘力的记号，教学实现要统一参考系、法向和力的方向。不能只抄符号不检查约定。额外的力平方惩罚会抑制不必要的大力，也倾向于让多个接触分担载荷。</p>
-<p>**为什么先允许违反物理？**若初始手离物体很远，直接要求精确接触和动力学，优化可能看不到通向成功动作的局部方向。第一阶段降低物理与接触代价，让轨迹先朝任务目标移动；第二阶段恢复权重，把手、力和物体运动协调起来。这是 continuation 思想，不是允许最终解任意违背物理。</p>
+<p><strong>为什么先允许违反物理？</strong>若初始手离物体很远，直接要求精确接触和动力学，优化可能看不到通向成功动作的局部方向。第一阶段降低物理与接触代价，让轨迹先朝任务目标移动；第二阶段恢复权重，把手、力和物体运动协调起来。这是 continuation 思想，不是允许最终解任意违背物理。</p>
+<h3 id="连续接触变量提供优化通道也引入隔空受力的检查责任">连续接触变量提供优化通道，也引入“隔空受力”的检查责任</h3>
+<p><strong>教学静态例</strong>：1千克物体需向上9.8牛支持。若活动变量 <span class="reading-math" data-tex="c=0.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">c=0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">c</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span>且力变量 <span class="reading-math" data-tex="f=19.6"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>f</mi><mo>=</mo><mn>19.6</mn></mrow><annotation encoding="application/x-tex">f=19.6</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">19.6</span></span></span></span></span>牛，乘积 <span class="reading-math" data-tex="cf=9.8"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi><mi>f</mi><mo>=</mo><mn>9.8</mn></mrow><annotation encoding="application/x-tex">cf=9.8</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">c</span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">9.8</span></span></span></span></span>牛已经满足净力平衡。假如手仍离物体2厘米，有限权重的接触几何罚项只是正数，并非绝对禁止；优化器可能以残余不物理性换取更低任务代价。增大几何权重和力代价能改变这种折中，却不等价于精确可行性证明。</p>
+<p>因此输出评估至少需要分别检查间隙、活动接触滑移、动力学残差和摩擦违规；一个总损失无法告诉我们哪项被牺牲。将 <span class="reading-math" data-tex="c"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi></mrow><annotation encoding="application/x-tex">c</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">c</span></span></span></span></span>叫作“概率”也不能让这些残差自动获得统计置信度。</p>
+<p>本篇直接扩展同作者全身CIO，使曲面接触的作用点和力进入联合变量；与本系列<a href="075-contact-trajopt.html">Posa接触轨迹优化</a>是平行方法，后者以直接互补约束强调物理可行性。<a href="https://roboti.us/lab/papers/MordatchSCA12.pdf">原稿第3.1节</a>明确软约束、取消内层QP与变量数增加的交换。手操作动画效果不能直接当作真实机械手的接触精度。</p>
+<p>连续辅助变量让接触可被优化，也引入物理残差必须检查。下面把动作目标与这些残差一起追踪，再读手部合成动作的证据范围。</p>
+<h2 id="三联合优化轨迹和接触检查残差">三、联合优化轨迹和接触，检查残差</h2>
 <pre><code class="language-text">输入：初态、手与物体几何、候选接触集合、任务目标
 重复初态生成静止轨迹；加小扰动打破对称
 初始化所有接触活动c=0.5
@@ -82,7 +89,20 @@ for 阶段 in [弱物理约束, 正常物理权重]:
     用有界L-BFGS联合更新全部关键帧变量
 输出轨迹，并单独检查任务误差与物理残差
 </code></pre>
-<h2 id="实验如何验证">实验如何验证</h2>
+<h2 id="四读抓取转动与画图的合成案例">四、读抓取、转动与画图的合成案例</h2>
+<!-- figure-ref-v6:start:rc-72-figure-2-anchor -->
+<p><span id="rc-72-figure-2"></span></p>
+<!-- figure-ref-v6:end:rc-72-figure-2-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/072-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/072-evidence.png" width="689" height="274" alt="Fig. 2：左右对照接触活动变量与手、物体几何位置是否一致" loading="lazy"></a><figcaption>原论文方法图摘引：Igor Mordatch、Zoran Popović、Emanuel Todorov（2012），Fig. 2，PDF 第 4 页；<a href="https://roboti.us/lab/papers/MordatchSCA12.pdf#page=4" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：左右对照接触活动变量与手、物体几何位置是否一致。把活动设为开启还不够，接触力与距离残差必须共同收敛；图中的可行姿态不是全部优化实例的成功率。</p>
+<!-- figure-ref-v6:start:rc-72-figure-1-anchor -->
+<p><span id="rc-72-figure-1"></span></p>
+<!-- figure-ref-v6:end:rc-72-figure-1-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/072-result.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/072-result.png" width="1359" height="277" alt="Fig. 1：抓握、持笔绘图与双手操作等不同任务的合成结果" loading="lazy"></a><figcaption>原图摘引：Mordatch、Popović、Todorov（2012），Fig. 1，PDF 第 1 页；<a href="https://roboti.us/lab/papers/MordatchSCA12.pdf#page=1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：这些是不同操作任务的合成结果选图，包括抓握、持笔绘图和双手操作，并非同一次运动的连续帧。动作看起来可行支持任务合成能力，但渲染姿态不能量化接触残差，更不能充当实机执行证据。</p>
+<h3 id="实验如何验证">实验如何验证</h3>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -124,48 +144,28 @@ for 阶段 in [弱物理约束, 正常物理权重]:
 </tr>
 </tbody></table></div>
 <p>这些是动作合成案例和运行统计，不能当作大规模任务分布上的泛化评估。形态改变后重新优化仍能合成动作，说明方法可复用；不是一个已经训练好的策略零样本迁移。</p>
-<h2 id="证据自动化到了哪一步">证据：自动化到了哪一步</h2>
-<p>**证据 1｜图 2、式 4–9：活动变量连接几何与力。**图示对比有接触活动却未重合的不可行状态与协调后的状态。这支持方法表示上的解释，不能替代最终残差统计。只看渲染图很难判断细小穿透或力的偏差。</p>
-<p>**证据 2｜§7 抓取与绘图：高层目标确实能诱发中间动作。**绘图指定笔尖到方形角点，拾笔作为中间行为出现；抓取姿态随目标方向改变。这支持减少局部动作脚本，但任务特征、模型和成本权重仍是人工提供的。</p>
-<p>**证据 3｜§7 双手抛接：不是完全没有接触时序提示。**该示例限制前半段与后半段分别使用不同手，并在中间阶段惩罚双方接触。这是明确的时序结构信息。它仍需要优化动作细节，但不宜被用来证明自由发现所有抛接模式。</p>
-<p>**证据 4｜§8：作者承认缺少关键系统对照。**显式优化力和作用点是否优于隐式逆动力学，尚未进行系统比较。初步感觉收敛更快不能被改写为已经通过消融证明。相关证据见<a href="https://roboti.us/lab/papers/MordatchSCA12.pdf">原文</a>。</p>
-<h2 id="贡献限制与一个小例子">贡献、限制与一个小例子</h2>
+<h3 id="证据自动化到了哪一步">证据：自动化到了哪一步</h3>
+<p><strong>证据 1｜<a href="#rc-72-figure-2">图 2</a>、式 4–9：活动变量连接几何与力。</strong>图示对比有接触活动却未重合的不可行状态与协调后的状态。这支持方法表示上的解释，不能替代最终残差统计。只看渲染图很难判断细小穿透或力的偏差。</p>
+<p><strong>证据 2｜§7 抓取与绘图：高层目标确实能诱发中间动作。</strong>绘图指定笔尖到方形角点，拾笔作为中间行为出现；抓取姿态随目标方向改变。这支持减少局部动作脚本，但任务特征、模型和成本权重仍是人工提供的。</p>
+<p><strong>证据 3｜§7 双手抛接：不是完全没有接触时序提示。</strong>该示例限制前半段与后半段分别使用不同手，并在中间阶段惩罚双方接触。这是明确的时序结构信息。它仍需要优化动作细节，但不宜被用来证明自由发现所有抛接模式。</p>
+<p><strong>证据 4｜§8：作者承认缺少关键系统对照。</strong>显式优化力和作用点是否优于隐式逆动力学，尚未进行系统比较。初步感觉收敛更快不能被改写为已经通过消融证明。相关证据见<a href="https://roboti.us/lab/papers/MordatchSCA12.pdf">原文</a>。</p>
+<h2 id="五保留软约束手部简化与实际执行差距">五、保留软约束、手部简化与实际执行差距</h2>
 <p>真正值得记住的是“让接触活动协调用力与几何”的中间表示，以及从平面面片走向曲面作用点。软代价改善可优化性，但最终可行程度依赖权重、离散化与局部解。论文关于大多数局部极小值对应成功动作的解释，是从展示案例作出的推测，不能视为优化景观定理。</p>
-<p>**自构例子，未运行。**两根手指从小球左右接近，目标是把球抬高。若所有 <span class="reading-math" data-tex="c=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">c=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">c</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，物体向上加速无法由接触力解释，动力学残差变大；若把 <span class="reading-math" data-tex="c"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi></mrow><annotation encoding="application/x-tex">c</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">c</span></span></span></span></span> 提高却让手指留在远处，几何残差变大。联合优化有机会同时把指尖移近、建立向上的摩擦作用和合理夹紧力。</p>
+<p><strong>自构例子，未运行。</strong>两根手指从小球左右接近，目标是把球抬高。若所有 <span class="reading-math" data-tex="c=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">c=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">c</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，物体向上加速无法由接触力解释，动力学残差变大；若把 <span class="reading-math" data-tex="c"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi></mrow><annotation encoding="application/x-tex">c</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">c</span></span></span></span></span> 提高却让手指留在远处，几何残差变大。联合优化有机会同时把指尖移近、建立向上的摩擦作用和合理夹紧力。</p>
 <p>但若手部没有力矩上限，算法可能给出真实电机无法产生的夹紧动作。这是模型层面的可执行性缺口，不是把优化器运行更久就一定能解决。更进一步的实验应加入执行器约束，在独立前向仿真中回放，并报告扰动成功率和残差。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>复杂接触顺序难脚本化</td>
-<td>联合优化活动、轨迹和力</td>
-<td>让任务与物理相互协调</td>
-<td>图 2、§7</td>
-<td>候选接触仍预设</td>
-</tr>
-<tr>
-<td>平面接触不适合指尖</td>
-<td>曲面投影和作用点变量</td>
-<td>允许接触位置沿表面改变</td>
-<td>§5.1、操作案例</td>
-<td>实现仍限制无滑动</td>
-</tr>
-<tr>
-<td>可行初始化难找</td>
-<td>降低再恢复物理权重</td>
-<td>改善局部搜索可达方向</td>
-<td>§6</td>
-<td>无全局保证、缺系统消融</td>
-</tr>
-</tbody></table></div>
-<h2 id="自测与答案">自测与答案</h2>
+<h2 id="六追问减小动作目标误差却增大物理约束残差应怎样解释这条轨迹">六、追问：减小动作目标误差却增大物理约束残差，应怎样解释这条轨迹？</h2>
+<details>
+<summary>减小动作目标误差却增大物理约束残差，应怎样解释这条轨迹？</summary>
+
+<p><strong>参考答案</strong>：它说明优化在当前软约束或罚项下作了权衡，不能只用目标成功宣称物理可行。应同时报告接触活动、力和相应物理残差，并核对手部动力学简化。本文动作合成结果不等于真实执行器已能稳定跟踪。</p>
+<p>教学参照：<a href="https://underactuated.mit.edu/contact.html">Underactuated Robotics: Planning and Control through Contact</a>。这里借用其分开连续运动、接触事件与数值实现的讲法。</p>
+</details>
+
+<h2 id="七对照硬互补约束的接触规划">七、对照硬互补约束的接触规划</h2>
+<ul>
+<li><strong>平行路线</strong>：<a href="075-contact-trajopt.html">接触隐式轨迹优化：不先规定哪只脚何时落地</a>。以互补约束表达接触，与有限软罚项具有不同可行性条件。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <p><strong>1. 把接触活动设为零，能否直接消除所有约束从而完成任务？</strong></p>
 <p>不能。这样虽然降低接触几何代价，却同时去掉传给未驱动物体的接触作用。物体若仍按目标运动，会产生动力学残差。需要联合理解几何项与力项。</p>
 <p><strong>2. 允许曲面接触，为什么还不能说论文解决了任意滑动操作？</strong></p>
@@ -183,15 +183,15 @@ for 阶段 in [弱物理约束, 正常物理权重]:
 
 论文：Igor Mordatch、Zoran Popović、Emanuel Todorov，*Contact-Invariant Optimization for Hand Manipulation*，SCA 2012。[原始书目链接](https://homes.cs.washington.edu/~todorov/papers/MordatchSCA12.pdf)；[作者存档全文](https://roboti.us/lab/papers/MordatchSCA12.pdf)。本文依据八页正文的方法、实验和讨论，不与同年 SIGGRAPH 的全身 CIO 论文混同；未独立复现动画优化。
 
-## 一分钟理解
+### 先接住前作的问题
+
+[抓取质量](030-grasp-quality.md)评估既定接触，本篇还要同时寻找手怎样移动、何时接触。CIO用连续辅助变量打开优化通道；[Posa方法](075-contact-trajopt.md)是直接施加互补约束的平行路线，物理残差边界不同。
+
+## 一、问题设定：接触顺序未知时怎样同时寻找手部运动和作用点
 
 让手把笔从桌上拿起来，可以先规定“拇指先碰、食指再夹、然后抬起”，再优化动作。但灵巧操作的难处恰恰在于不知道应该采用哪种接触顺序。CIO 把接触是否活跃、接触点位置、接触力与物体轨迹一同放进连续优化，让目标运动反过来引导手指寻找合适作用方式。
 
-这篇工作的关键扩展是适应曲面手部接触，并显式优化力及其作用点。论文展示抓取、转动物体、画图和不同手形态的动作合成。它没有训练一个可泛化神经策略，也没有证明这些轨迹能由真实手部执行器稳定跟踪。
-
-一句话总结：在已知几何和动力学的离线手部动作合成中，通过联合优化轨迹、接触活动与作用力，减少手工指定接触事件的负担；代价是软物理约束、大型非凸优化以及对手部动力学的简化。
-
-## 背景与问题边界
+### 背景与问题边界
 
 输入包括初始手—物状态、几何和高层任务目标；输出是固定时间区间内的状态轨迹。目标可以是物体末端位置，也可以是笔尖经过若干位置。它属于模型驱动的轨迹优化，成本函数不是从交互数据学习出来的奖励模型。
 
@@ -199,7 +199,9 @@ for 阶段 in [弱物理约束, 正常物理权重]:
 
 另一个重要假设来自 §5.2：肩部固定，手被视为完全驱动，运动学可行的手姿态被假定为动力学可行。物体则未驱动，必须由接触力解释其运动。因此，优化中认真检查了物体的牛顿—欧拉关系，却没有同等严格地限制手部电机力矩和执行器带宽。
 
-## 方法：给接触一个可优化的中间表示
+## 二、用连续辅助变量连接接触活动与力
+
+### 方法：给接触一个可优化的中间表示
 
 每个候选接触有活动变量 $c_j\in[0,1]$、力 $f_j$ 和作用点 $r_j$。$c_j$ 是连续优化辅助量，作者非正式地把它比作接触概率；它不是通过观测校准得到的概率模型。候选接触集合仍然由建模者预先确定，算法不会凭空发现没有放进模型的接触表面。
 
@@ -225,6 +227,18 @@ $$m\ddot x-\sum_j c_j f_j-f_{ext},\qquad
 
 **为什么先允许违反物理？**若初始手离物体很远，直接要求精确接触和动力学，优化可能看不到通向成功动作的局部方向。第一阶段降低物理与接触代价，让轨迹先朝任务目标移动；第二阶段恢复权重，把手、力和物体运动协调起来。这是 continuation 思想，不是允许最终解任意违背物理。
 
+### 连续接触变量提供优化通道，也引入“隔空受力”的检查责任
+
+**教学静态例**：1千克物体需向上9.8牛支持。若活动变量 $c=0.5$且力变量 $f=19.6$牛，乘积 $cf=9.8$牛已经满足净力平衡。假如手仍离物体2厘米，有限权重的接触几何罚项只是正数，并非绝对禁止；优化器可能以残余不物理性换取更低任务代价。增大几何权重和力代价能改变这种折中，却不等价于精确可行性证明。
+
+因此输出评估至少需要分别检查间隙、活动接触滑移、动力学残差和摩擦违规；一个总损失无法告诉我们哪项被牺牲。将 $c$叫作“概率”也不能让这些残差自动获得统计置信度。
+
+本篇直接扩展同作者全身CIO，使曲面接触的作用点和力进入联合变量；与本系列[Posa接触轨迹优化](075-contact-trajopt.md)是平行方法，后者以直接互补约束强调物理可行性。[原稿第3.1节](https://roboti.us/lab/papers/MordatchSCA12.pdf)明确软约束、取消内层QP与变量数增加的交换。手操作动画效果不能直接当作真实机械手的接触精度。
+
+连续辅助变量让接触可被优化，也引入物理残差必须检查。下面把动作目标与这些残差一起追踪，再读手部合成动作的证据范围。
+
+## 三、联合优化轨迹和接触，检查残差
+
 ```text
 输入：初态、手与物体几何、候选接触集合、任务目标
 重复初态生成静止轨迹；加小扰动打破对称
@@ -238,7 +252,23 @@ for 阶段 in [弱物理约束, 正常物理权重]:
 输出轨迹，并单独检查任务误差与物理残差
 ```
 
-## 实验如何验证
+## 四、读抓取、转动与画图的合成案例
+
+&lt;!-- figure-ref-v6:start:rc-72-figure-2-anchor --&gt;
+&lt;span id=&quot;rc-72-figure-2&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-72-figure-2-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/072-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/072-evidence.png&quot; width=&quot;689&quot; height=&quot;274&quot; alt=&quot;Fig. 2：左右对照接触活动变量与手、物体几何位置是否一致&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文方法图摘引：Igor Mordatch、Zoran Popović、Emanuel Todorov（2012），Fig. 2，PDF 第 4 页；&lt;a href=&quot;https://roboti.us/lab/papers/MordatchSCA12.pdf#page=4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：左右对照接触活动变量与手、物体几何位置是否一致。把活动设为开启还不够，接触力与距离残差必须共同收敛；图中的可行姿态不是全部优化实例的成功率。
+
+&lt;!-- figure-ref-v6:start:rc-72-figure-1-anchor --&gt;
+&lt;span id=&quot;rc-72-figure-1&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-72-figure-1-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/072-result.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/072-result.png&quot; width=&quot;1359&quot; height=&quot;277&quot; alt=&quot;Fig. 1：抓握、持笔绘图与双手操作等不同任务的合成结果&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Mordatch、Popović、Todorov（2012），Fig. 1，PDF 第 1 页；&lt;a href=&quot;https://roboti.us/lab/papers/MordatchSCA12.pdf#page=1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：这些是不同操作任务的合成结果选图，包括抓握、持笔绘图和双手操作，并非同一次运动的连续帧。动作看起来可行支持任务合成能力，但渲染姿态不能量化接触残差，更不能充当实机执行证据。
+
+### 实验如何验证
 
 | 项目 | 原文设置 |
 |---|---|
@@ -253,9 +283,9 @@ for 阶段 in [弱物理约束, 正常物理权重]:
 
 这些是动作合成案例和运行统计，不能当作大规模任务分布上的泛化评估。形态改变后重新优化仍能合成动作，说明方法可复用；不是一个已经训练好的策略零样本迁移。
 
-## 证据：自动化到了哪一步
+### 证据：自动化到了哪一步
 
-**证据 1｜图 2、式 4–9：活动变量连接几何与力。**图示对比有接触活动却未重合的不可行状态与协调后的状态。这支持方法表示上的解释，不能替代最终残差统计。只看渲染图很难判断细小穿透或力的偏差。
+**证据 1｜[图 2](#rc-72-figure-2)、式 4–9：活动变量连接几何与力。**图示对比有接触活动却未重合的不可行状态与协调后的状态。这支持方法表示上的解释，不能替代最终残差统计。只看渲染图很难判断细小穿透或力的偏差。
 
 **证据 2｜§7 抓取与绘图：高层目标确实能诱发中间动作。**绘图指定笔尖到方形角点，拾笔作为中间行为出现；抓取姿态随目标方向改变。这支持减少局部动作脚本，但任务特征、模型和成本权重仍是人工提供的。
 
@@ -263,7 +293,7 @@ for 阶段 in [弱物理约束, 正常物理权重]:
 
 **证据 4｜§8：作者承认缺少关键系统对照。**显式优化力和作用点是否优于隐式逆动力学，尚未进行系统比较。初步感觉收敛更快不能被改写为已经通过消融证明。相关证据见[原文](https://roboti.us/lab/papers/MordatchSCA12.pdf)。
 
-## 贡献、限制与一个小例子
+## 五、保留软约束、手部简化与实际执行差距
 
 真正值得记住的是“让接触活动协调用力与几何”的中间表示，以及从平面面片走向曲面作用点。软代价改善可优化性，但最终可行程度依赖权重、离散化与局部解。论文关于大多数局部极小值对应成功动作的解释，是从展示案例作出的推测，不能视为优化景观定理。
 
@@ -273,13 +303,22 @@ for 阶段 in [弱物理约束, 正常物理权重]:
 
 五个前置概念：**轨迹优化**直接调整一段运动；**接触模式**描述哪些表面正在作用；**软约束**用代价惩罚而非严格禁止违反；**continuation**逐渐改变问题难度；**摩擦锥**限定接触力允许的方向与大小关系。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 复杂接触顺序难脚本化 | 联合优化活动、轨迹和力 | 让任务与物理相互协调 | 图 2、§7 | 候选接触仍预设 |
-| 平面接触不适合指尖 | 曲面投影和作用点变量 | 允许接触位置沿表面改变 | §5.1、操作案例 | 实现仍限制无滑动 |
-| 可行初始化难找 | 降低再恢复物理权重 | 改善局部搜索可达方向 | §6 | 无全局保证、缺系统消融 |
+## 六、追问：减小动作目标误差却增大物理约束残差，应怎样解释这条轨迹？
 
-## 自测与答案
+&lt;details&gt;
+&lt;summary&gt;减小动作目标误差却增大物理约束残差，应怎样解释这条轨迹？&lt;/summary&gt;
+
+**参考答案**：它说明优化在当前软约束或罚项下作了权衡，不能只用目标成功宣称物理可行。应同时报告接触活动、力和相应物理残差，并核对手部动力学简化。本文动作合成结果不等于真实执行器已能稳定跟踪。
+
+教学参照：[Underactuated Robotics: Planning and Control through Contact](https://underactuated.mit.edu/contact.html)。这里借用其分开连续运动、接触事件与数值实现的讲法。
+
+&lt;/details&gt;
+
+## 七、对照硬互补约束的接触规划
+
+- **平行路线**：[接触隐式轨迹优化：不先规定哪只脚何时落地](075-contact-trajopt.md)。以互补约束表达接触，与有限软罚项具有不同可行性条件。
+
+## 八、自测与参考答案
 
 **1. 把接触活动设为零，能否直接消除所有约束从而完成任务？**
 

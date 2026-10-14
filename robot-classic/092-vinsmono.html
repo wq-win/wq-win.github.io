@@ -42,15 +42,11 @@
                 <span class="text-gray-500">VINS-Mono：让单目视觉与 IMU 组成可以长期运行的定位系统</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="eb78b31f1224a6d5fa5473aa8b3cd46d9c08ab0775deb5fff1eb996cb05564af"><h1>092｜VINS-Mono：让单目视觉与 IMU 组成可以长期运行的定位系统</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="36d1cb56a2544a160b0b98ef4178b350afe539b0d525137f060ea65172e79a65"><h1>092｜VINS-Mono：让单目视觉与 IMU 组成可以长期运行的定位系统</h1>
 <p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="091-cbfqp.html">上一篇</a> · <a href="093-toppra.html">下一篇</a></p>
 <p><strong>论文</strong>：Tong Qin、Peiliang Li、Shaojie Shen，<em>VINS-Mono: A Robust and Versatile Monocular Visual-Inertial State Estimator</em>，2017 年预印本，2018 年期刊发表。<a href="https://arxiv.org/html/1708.03852">原文</a> · <a href="https://arxiv.org/pdf/1708.03852">PDF</a> · <a href="https://github.com/HKUST-Aerial-Robotics/VINS-Mono">官方代码</a>。</p>
-<p><strong>阅读范围</strong>：核对正文的方法、系统流程、实验与官方项目说明，并对 PDF 第 7 页式 23 做视觉复核；未执行官方程序，未逐项复算 IMU 雅可比。后文小例子与简化公式用于教学。</p>
-<h2 id="一分钟理解不是给相机加一只-imu-就结束了">一分钟理解：不是给相机加一只 IMU 就结束了</h2>
-<p>单目相机能从图像变化推断运动，却很难直接知道一段位移究竟是一米还是十米。IMU 有物理单位，能补充快速运动信息，但积分会受偏置影响而漂移。二者互补，却需要合适的初始尺度、重力方向和偏置，才能放进同一个优化问题。</p>
-<p>VINS-Mono 把这件事扩展成完整系统：初始化、局部视觉惯性优化、故障恢复、回环重定位、全局位姿图，以及不同频率的输出。它的重要性既在数学建模，也在这些模块能否持续配合。</p>
-<p>实验支持的是一套系统能在公开序列、较长手持路线、无人机与手机应用中运行。作者也明确指出，纯 VIO 与 OKVIS 的精度接近；加入回环后的系统优势，不应全部归因于局部估计器更精确。</p>
-<p><strong>一句话</strong>：在具有足够视觉结构和运动激励的单目惯性定位中，通过初始化、滑窗优化及回环协作，改善系统的启动、持续定位与长期漂移，代价是标定、非线性计算和多模块管理，且不能消除所有退化与失效。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="083-imu-preintegration.html">流形预积分</a>解决了惯性测量如何高效进入优化，却没有单独完成整套系统的启动与恢复；VINS-Mono承接预积分并组合视觉SfM、滑窗和回环。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：</p>
 <ol>
@@ -60,18 +56,58 @@
 <li><strong>边缘化</strong>：消去旧变量并将其信息压缩成当前优化的先验。</li>
 <li><strong>可观测性</strong>：测量和运动是否足以区分不同状态解释。</li>
 </ol>
-<h2 id="1背景与状态估计什么缺什么">1．背景与状态：估计什么，缺什么</h2>
+<h2 id="一问题设定单目和imu怎样完成可信启动并持续恢复定位">一、问题设定：单目和IMU怎样完成可信启动并持续恢复定位</h2>
+<p>单目相机能从图像变化推断运动，却很难直接知道一段位移究竟是一米还是十米。IMU 有物理单位，能补充快速运动信息，但积分会受偏置影响而漂移。二者互补，却需要合适的初始尺度、重力方向和偏置，才能放进同一个优化问题。</p>
+<h3 id="背景与状态估计什么缺什么">背景与状态：估计什么，缺什么</h3>
 <p>这是在线状态估计，没有强化学习策略、奖励和训练回合。输入是连续图像、陀螺仪与加速度计数据；输出是位置、速度、姿态，以及用于修正测量的偏置等状态。</p>
 <p>滑窗里每个时刻的状态可概括为：</p>
 <p><span class="reading-math" data-tex="x_k=(p_k,v_k,q_k,b_{a,k},b_{g,k})."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>x</mi><mi>k</mi></msub><mo>=</mo><mo stretchy="false">(</mo><msub><mi>p</mi><mi>k</mi></msub><mo separator="true">,</mo><msub><mi>v</mi><mi>k</mi></msub><mo separator="true">,</mo><msub><mi>q</mi><mi>k</mi></msub><mo separator="true">,</mo><msub><mi>b</mi><mrow><mi>a</mi><mo separator="true">,</mo><mi>k</mi></mrow></msub><mo separator="true">,</mo><msub><mi>b</mi><mrow><mi>g</mi><mo separator="true">,</mo><mi>k</mi></mrow></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">x_k=(p_k,v_k,q_k,b_{a,k},b_{g,k}).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
 <p>窗口还包含相机相对 IMU 的外参，以及视觉特征的逆深度。姿态 <span class="reading-math" data-tex="q_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>q</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">q_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 不是普通四维欧氏变量；更新时必须尊重旋转结构。</p>
 <p>单目视觉的尺度模糊，不等于“任何情况下加 IMU 都立即得到尺度”。纯旋转缺少三角化所需的平移，运动激励不足时，尺度、加速度偏置与重力方向也可能难以区分。初始化要检查信息是否足够，而不能只等固定几帧就宣布成功。</p>
 <p>与只融合两个独立位姿输出的松耦合方案相比，紧耦合直接让特征观测和惯性测量共同约束状态。它保留的信息更丰富，但也更依赖测量模型、时间对应和初值。</p>
-<h2 id="2初始化先找到一个可信的起点">2．初始化：先找到一个可信的起点</h2>
+<h2 id="二连接尺度重力初始化预积分与视觉残差">二、连接尺度重力初始化、预积分与视觉残差</h2>
+<h3 id="初始化先找到一个可信的起点">初始化：先找到一个可信的起点</h3>
 <p>第 V 节先进行视觉 SfM，得到只有相对尺度的相机轨迹与特征，再与 IMU 预积分对齐。过程包括陀螺仪偏置校准、速度与尺度估计，以及重力方向细化。</p>
 <p>重力大小在设定中已知，方向只有两个自由度，因此可以在单位方向的切平面中更新。这样避免把重力的三个分量当成完全自由变量。</p>
 <p>一个容易漏掉的细节是：初始化阶段不同时强行估计全部惯性偏置。作者说明短时间内加速度偏置与重力耦合，因而先忽略加速度偏置，随后在非线性估计中处理。这是对可观测性的工程选择，不是认为加速度计没有偏置。</p>
-<h2 id="3局部估计三类证据一起优化">3．局部估计：三类证据一起优化</h2>
+<h3 id="消去初速度后尺度信息从哪里出现">消去初速度后，尺度信息从哪里出现</h3>
+<p>先做一个只保留尺度的教学化简：固定姿态，已知并扣除重力及加速度偏置，忽略相机—IMU 杆臂，沿一个水平方向以等时间间隔 <span class="reading-math" data-tex="\Delta t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">Δ</mi><mi>t</mi></mrow><annotation encoding="application/x-tex">\Delta t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">Δ</span><span class="mord mathnormal">t</span></span></span></span></span> 观测恒加速度运动。令视觉位置为 <span class="reading-math" data-tex="\bar p_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mover accent="true"><mi>p</mi><mo>ˉ</mo></mover><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">\bar p_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7622em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">p</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">ˉ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，真实位置为 <span class="reading-math" data-tex="p_k=s\bar p_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mi>k</mi></msub><mo>=</mo><mi>s</mi><msub><mover accent="true"><mi>p</mi><mo>ˉ</mo></mover><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">p_k=s\bar p_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7622em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">s</span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">p</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">ˉ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，未知尺度 <span class="reading-math" data-tex="s&gt;0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi><mo>&gt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">s&gt;0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em;"></span><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>。相邻位移相减消去初速度，有</p>
+<p><span class="reading-math" data-tex="s(\bar p_{k+2}-2\bar p_{k+1}+\bar p_k)=a\Delta t^2,"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>s</mi><mo stretchy="false">(</mo><msub><mover accent="true"><mi>p</mi><mo>ˉ</mo></mover><mrow><mi>k</mi><mo>+</mo><mn>2</mn></mrow></msub><mo>−</mo><mn>2</mn><msub><mover accent="true"><mi>p</mi><mo>ˉ</mo></mover><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>+</mo><msub><mover accent="true"><mi>p</mi><mo>ˉ</mo></mover><mi>k</mi></msub><mo stretchy="false">)</mo><mo>=</mo><mi>a</mi><mi mathvariant="normal">Δ</mi><msup><mi>t</mi><mn>2</mn></msup><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">s(\bar p_{k+2}-2\bar p_{k+1}+\bar p_k)=a\Delta t^2,</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mopen">(</span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">p</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">ˉ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">+</span><span class="mord mtight">2</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8528em;vertical-align:-0.2083em;"></span><span class="mord">2</span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">p</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">ˉ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">p</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">ˉ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0585em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">a</span><span class="mord">Δ</span><span class="mord"><span class="mord mathnormal">t</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mpunct">,</span></span></span></span></span></span></p>
+<p>其中 <span class="reading-math" data-tex="a"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi></mrow><annotation encoding="application/x-tex">a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span></span></span></span></span> 是 IMU 给出的该方向米制加速度。<strong>原创手算：</strong> <span class="reading-math" data-tex="\Delta t=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">Δ</mi><mi>t</mi><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\Delta t=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">Δ</span><span class="mord mathnormal">t</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span> s，视觉位置为 <span class="reading-math" data-tex="0,1,3"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo separator="true">,</mo><mn>3</mn></mrow><annotation encoding="application/x-tex">0,1,3</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8389em;vertical-align:-0.1944em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">3</span></span></span></span></span> 个任意单位，IMU 加速度为 <span class="reading-math" data-tex="2\,\mathrm{m/s^2}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mtext> </mtext><mrow><mi mathvariant="normal">m</mi><mi mathvariant="normal">/</mi><msup><mi mathvariant="normal">s</mi><mn>2</mn></msup></mrow></mrow><annotation encoding="application/x-tex">2\,\mathrm{m/s^2}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathrm">m/</span><span class="mord"><span class="mord mathrm">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathrm mtight">2</span></span></span></span></span></span></span></span></span></span></span></span></span>，则视觉二阶差分为 1，尺度为每视觉单位 2 m。</p>
+<p>若视觉位置换成 <span class="reading-math" data-tex="0,1,2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo separator="true">,</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">0,1,2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8389em;vertical-align:-0.1944em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">2</span></span></span></span></span>，IMU 同时给出零加速度，方程退化为 <span class="reading-math" data-tex="0=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">0=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，任何正尺度都成立；“移动了很远”不等于“有足够加速度激励”。再把未知加速度偏置 <span class="reading-math" data-tex="b_a"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>b</mi><mi>a</mi></msub></mrow><annotation encoding="application/x-tex">b_a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 放回第一例，测得的比力经重力补偿后只给出 <span class="reading-math" data-tex="s+b_a=2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi><mo>+</mo><msub><mi>b</mi><mi>a</mi></msub><mo>=</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">s+b_a=2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span></span></span></span></span>（数值采用上述单位），一段固定姿态恒加速度数据无法独立确定两者。真实系统靠更多姿态和运动变化增加区分能力。</p>
+<p>这解释了<a href="https://arxiv.org/html/1708.03852">原文V-B</a>为什么先忽略短窗里难以分离的加速度偏置，再做重力切平面细化并进入完整非线性优化。本文例子不是论文初始化实现的替代公式，也不将 EuRoC 成功运行解释为所有恒速或纯旋转输入都能启动。</p>
+<h3 id="长期运行局部窗口之外还需要什么">长期运行：局部窗口之外还需要什么</h3>
+<p>回环首先检索旧地点，再做几何检查。匹配通过后，旧关键帧的特征可以作为额外约束加入当前窗口；重定位时旧帧位姿固定，而历史全局图在另一个线程中优化。</p>
+<p>全局图主要优化三维位置和偏航角，共四个自由度。理由是正常视觉惯性条件下重力提供横滚与俯仰参照，长期自由漂移的方向与纯单目不同。这里的可观测性并不意味着横滚和俯仰没有噪声或估计误差。</p>
+<p>高频输出不代表每次都完成了完整滑窗优化。IMU 前向传播、轻量运动优化、全窗口优化和回环图优化有不同成本与频率。</p>
+<p>初始化先确定可联合估计的起点，局部窗口和长期图才有一致参照。下面检查各模块何时接管，再拆开纯VIO与回环收益。</p>
+<h2 id="三运行滑窗和全局回环检查各频率输出">三、运行滑窗和全局回环，检查各频率输出</h2>
+<pre><code class="language-text">输入：带时间戳图像、IMU、相机模型与外参初值
+持续接收数据：
+    跟踪视觉角点；累计两帧之间的 IMU 预积分
+    若尚未初始化：
+        检查特征与视差；运行视觉 SfM
+        对齐视觉轨迹与 IMU，估计尺度、速度、重力与初始陀螺偏置
+        条件不足时继续等待新观测
+    否则：
+        优化窗口内状态、偏置、外参与特征深度
+        根据关键帧状态边缘化或丢弃相应测量
+        检测异常；必要时重新初始化并建立新的图段
+    并行检索回环、几何验证、紧耦合重定位与四自由度图优化
+    用最新优化结果加 IMU 前向传播提供高频输出
+输出：局部状态估计及经过回环修正的全局轨迹
+</code></pre>
+<h3 id="自构例子与前置概念">自构例子与前置概念</h3>
+<p><strong>自构例子，未运行</strong>：拿着手机绕桌子一圈。前半圈相机提供桌角的相对几何，IMU 帮助估计有单位的运动；暂时看向白墙时，惯性传播维持短时间预测，但误差增大；回到桌子前，匹配旧桌角提供回环约束，修正长期漂移。如果开始只绕手机光心旋转，则无法把“拿手机走了一圈”的正常初始化结论直接照搬。</p>
+<h2 id="四把纯vio精度与加入回环后的系统结果拆开">四、把纯VIO精度与加入回环后的系统结果拆开</h2>
+<!-- figure-ref-v6:start:rc-92-figure-17-anchor -->
+<p><span id="rc-92-figure-17"></span></p>
+<!-- figure-ref-v6:end:rc-92-figure-17-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/092-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/092-evidence.png" width="781" height="873" alt="Fig. 17：三条室内轨迹依次比较 OKVIS、无回环 VINS 和含回环 VINS" loading="lazy"></a><figcaption>原论文结果图／表摘引：Tong Qin、Peiliang Li、Shaojie Shen（2017），Fig. 17，PDF 第 13 页；<a href="https://arxiv.org/pdf/1708.03852#page=13" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：三条室内轨迹依次比较 OKVIS、无回环 VINS 和含回环 VINS。闭环后的起终点更一致表明全局约束发挥作用，不能由首尾闭合推断中间每一时刻都同样准确。</p>
+<h3 id="局部估计三类证据一起优化">局部估计：三类证据一起优化</h3>
+<p>纯 VIO、加入回环的系统和高频惯性传播用了不同信息与时序；回环后的误差改善不能全部归因于局部预积分。</p>
 <p>将原文式 22 写成更易读的形式：</p>
 <p><span class="reading-math" data-tex="\min_{\mathcal X}\ \|r_{\rm prior}\|^2+
 \sum_k r_{I,k}^{\mathsf T}\Sigma_{I,k}^{-1}r_{I,k}
@@ -104,26 +140,7 @@ s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
 c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
 M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2397em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">1</span><span class="mpunct">,</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.19em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:1em;"></span><span class="col-align-l"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.69em;"><span style="top:-3.69em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord">1</span><span class="mpunct">,</span></span></span><span style="top:-2.25em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord">1.</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.19em;"><span></span></span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span></span></p>
 <p>其定义可在 <a href="https://ceres-solver.readthedocs.io/latest/nnls_modeling.html">Ceres 官方损失函数文档</a> 核对。这个版本差异不等于已经证明原实验代码使用了错误损失；论文排版和实际实现需要分别检查。</p>
-<h2 id="4长期运行局部窗口之外还需要什么">4．长期运行：局部窗口之外还需要什么</h2>
-<p>回环首先检索旧地点，再做几何检查。匹配通过后，旧关键帧的特征可以作为额外约束加入当前窗口；重定位时旧帧位姿固定，而历史全局图在另一个线程中优化。</p>
-<p>全局图主要优化三维位置和偏航角，共四个自由度。理由是正常视觉惯性条件下重力提供横滚与俯仰参照，长期自由漂移的方向与纯单目不同。这里的可观测性并不意味着横滚和俯仰没有噪声或估计误差。</p>
-<pre><code class="language-text">输入：带时间戳图像、IMU、相机模型与外参初值
-持续接收数据：
-    跟踪视觉角点；累计两帧之间的 IMU 预积分
-    若尚未初始化：
-        检查特征与视差；运行视觉 SfM
-        对齐视觉轨迹与 IMU，估计尺度、速度、重力与初始陀螺偏置
-        条件不足时继续等待新观测
-    否则：
-        优化窗口内状态、偏置、外参与特征深度
-        根据关键帧状态边缘化或丢弃相应测量
-        检测异常；必要时重新初始化并建立新的图段
-    并行检索回环、几何验证、紧耦合重定位与四自由度图优化
-    用最新优化结果加 IMU 前向传播提供高频输出
-输出：局部状态估计及经过回环修正的全局轨迹
-</code></pre>
-<p>高频输出不代表每次都完成了完整滑窗优化。IMU 前向传播、轻量运动优化、全窗口优化和回环图优化有不同成本与频率。</p>
-<h2 id="5实验设计与比较条件">5．实验设计与比较条件</h2>
+<h3 id="实验设计与比较条件">实验设计与比较条件</h3>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -166,88 +183,89 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 </tbody></table></div>
 <p>这些都是估计与控制实验，不存在统一策略训练预算。第 IX 节未给出覆盖全部实验的多随机种子置信区间；不能从一条轨迹图推导成功概率。</p>
 <p>公开序列比较还规定了对齐方式：先丢弃部分初始输出，再用随后一段进行对齐，最后比较余下输出。对齐使用多少轨迹会影响误差，因此复现必须保留该口径。</p>
-<h2 id="6结果怎样避免把不同证据合成一个分数">6．结果：怎样避免把不同证据合成一个分数</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>图表</th>
-<th>比较什么 → 观察到什么</th>
-<th>支持的结论</th>
-<th>不能推出的结论</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>图 11–14</td>
-<td>OKVIS、纯 VIO、含回环系统</td>
-<td>回环能约束累计位置漂移</td>
-<td>局部 VIO 在每个姿态分量都更好</td>
-</tr>
-<tr>
-<td>图 17–19</td>
-<td>室内外回环前后轨迹</td>
-<td>系统模块能改善长期一致性</td>
-<td>无真值路段的逐时刻绝对精度</td>
-</tr>
-<tr>
-<td>表 I</td>
-<td>长程实验中不同模块时间</td>
-<td>计算可以分线程、分频率组织</td>
-<td>每帧所有模块均耗时相同或串行相加</td>
-</tr>
-<tr>
-<td>图 22–23</td>
-<td>无人机轨迹与 OptiTrack</td>
-<td>无回环局部估计可用于该飞行反馈</td>
-<td>任意高速动作和光照都能稳定控制</td>
-</tr>
-<tr>
-<td>图 25</td>
-<td>手机 AR 与 Tango 的一段路线</td>
-<td>一般移动硬件上的系统可用性</td>
-<td>在所有局部精度指标上胜过 Tango</td>
-</tr>
-</tbody></table></div>
+<h3 id="结果怎样避免把不同证据合成一个分数">结果：怎样避免把不同证据合成一个分数</h3>
+<p><strong><a href="#rc-92-figure-11">图 11–14</a>。</strong> OKVIS、纯 VIO、含回环系统；回环能约束累计位置漂移；不能据此推出：局部 VIO 在每个姿态分量都更好。</p>
+<!-- figure-ref-v6:start:rc-92-figure-11 -->
+<figure class="reading-evidence-figure" id="rc-92-figure-11"><a href="/robot-classic/assets/figure-refs-v6/092-fig-11.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/092-fig-11.png" width="640" height="441" alt="原论文图11：MH03序列中VINS、回环VINS、OKVIS和真值的轨迹比较" loading="lazy"></a><figcaption>Tong Qin、Peiliang Li、Shaojie Shen（2017），图 11，PDF 第 12 页；<a href="https://arxiv.org/pdf/1708.03852#page=12" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：轨迹在同一平面坐标比较，回环后的全局修正与局部里程计漂移需区分。</p>
+<!-- figure-ref-v6:end:rc-92-figure-11 -->
+
+<!-- figure-ref-v6:start:rc-92-figure-12 -->
+<figure class="reading-evidence-figure" id="rc-92-figure-12"><a href="/robot-classic/assets/figure-refs-v6/092-fig-12.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/092-fig-12.png" width="589" height="634" alt="原论文图12：MH03序列各轴平移误差及随路程变化的平移误差" loading="lazy"></a><figcaption>Tong Qin、Peiliang Li、Shaojie Shen（2017），图 12，PDF 第 12 页；<a href="https://arxiv.org/pdf/1708.03852#page=12" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：上三幅横轴为时间、底图横轴为距离；不能将同一图上的不同横轴误读成同一采样序列。</p>
+<!-- figure-ref-v6:end:rc-92-figure-12 -->
+
+<!-- figure-ref-v6:start:rc-92-figure-13 -->
+<figure class="reading-evidence-figure" id="rc-92-figure-13"><a href="/robot-classic/assets/figure-refs-v6/092-fig-13.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/092-fig-13.png" width="640" height="438" alt="原论文图13：MH05困难序列中多种估计器与真值的平面轨迹" loading="lazy"></a><figcaption>Tong Qin、Peiliang Li、Shaojie Shen（2017），图 13，PDF 第 12 页；<a href="https://arxiv.org/pdf/1708.03852#page=12" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：在相同坐标轴看局部偏差与全局回环；单条轨迹没有表达跨重复运行的置信区间。</p>
+<!-- figure-ref-v6:end:rc-92-figure-13 -->
+
+<!-- figure-ref-v6:start:rc-92-figure-14 -->
+<figure class="reading-evidence-figure" id="rc-92-figure-14"><a href="/robot-classic/assets/figure-refs-v6/092-fig-14.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/092-fig-14.png" width="640" height="387" alt="原论文图14：MH05序列的平移和旋转误差随行进距离变化" loading="lazy"></a><figcaption>Tong Qin、Peiliang Li、Shaojie Shen（2017），图 14，PDF 第 12 页；<a href="https://arxiv.org/pdf/1708.03852#page=12" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：上下图单位不同；应同时比较平移与旋转，避免只据一种误差宣称全面更准确。</p>
+<!-- figure-ref-v6:end:rc-92-figure-14 -->
+
+<p><strong><a href="#rc-92-figure-17">图 17</a>–<a href="#rc-92-figure-19">图 19</a>。</strong> 室内外回环前后轨迹；系统模块能改善长期一致性；不能据此推出：无真值路段的逐时刻绝对精度。</p>
+<!-- figure-ref-v6:start:rc-92-final-source-gap-note -->
+<p><span id="rc-92-figure-18"></span><p class="figure-reference-note">尚未内嵌：<a href="https://arxiv.org/pdf/1708.03852#page=14" target="_blank" rel="noopener noreferrer">图 18</a>。剩余轨迹图叠加 Google 地图背景。官方 Geo Guidelines 允许特定教育/研究展示，但要求真实 Google 及数据提供商署名；当前原图未能核清完整提供商署名，不能自行猜造，因此保留入口并明确记录这一可核验性缺口。</p></p>
+<!-- figure-ref-v6:end:rc-92-final-source-gap-note -->
+
+
+
+
+
+<!-- figure-ref-v6:start:rc-92-figure-19 -->
+<figure class="reading-evidence-figure" id="rc-92-figure-19"><a href="/robot-classic/assets/figure-refs-v6/092-fig-19.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/092-fig-19.png" width="640" height="673" alt="原论文图19：混合室内外序列中OKVIS、无回环VINS和回环VINS三种轨迹" loading="lazy"></a><figcaption>Tong Qin、Peiliang Li、Shaojie Shen（2017），图 19，PDF 第 14 页；<a href="https://arxiv.org/pdf/1708.03852#page=14" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：红框指出跟踪丢失或错误估计区域；回环修正的全局一致性与局部跟踪稳定性是不同问题。</p>
+<!-- figure-ref-v6:end:rc-92-figure-19 -->
+
+
+
+<p><strong><a href="https://arxiv.org/pdf/1708.03852#page=14">表 I</a>。</strong> 长程实验中不同模块时间；计算可以分线程、分频率组织；不能据此推出：每帧所有模块均耗时相同或串行相加。</p>
+<p><strong><a href="#rc-92-figure-22">图 22</a>–<a href="#rc-92-figure-23">图 23</a>。</strong> 无人机轨迹与 OptiTrack；无回环局部估计可用于该飞行反馈；不能据此推出：任意高速动作和光照都能稳定控制。</p>
+<!-- figure-ref-v6:start:rc-92-figure-22 -->
+<figure class="reading-evidence-figure" id="rc-92-figure-22"><a href="/robot-classic/assets/figure-refs-v6/092-fig-22.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/092-fig-22.png" width="640" height="550" alt="原论文图22：机载无回环VINS与OptiTrack真值的三维轨迹" loading="lazy"></a><figcaption>Tong Qin、Peiliang Li、Shaojie Shen（2017），图 22，PDF 第 15 页；<a href="https://arxiv.org/pdf/1708.03852#page=15" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：三根坐标轴均以米计；轨迹重叠是该次机载实验的结果，不能替代更长序列的漂移统计。</p>
+<!-- figure-ref-v6:end:rc-92-figure-22 -->
+
+<!-- figure-ref-v6:start:rc-92-figure-23 -->
+<figure class="reading-evidence-figure" id="rc-92-figure-23"><a href="/robot-classic/assets/figure-refs-v6/092-fig-23.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/092-fig-23.png" width="1293" height="685" alt="原论文图23：无回环VINS相对OptiTrack的位置、姿态及对应误差时间序列" loading="lazy"></a><figcaption>Tong Qin、Peiliang Li、Shaojie Shen（2017），图 23，PDF 第 16 页；<a href="https://arxiv.org/pdf/1708.03852#page=16" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：每一组同时保留估计量与误差；姿态角突变要联系角度表示和对应误差一起检查。</p>
+<!-- figure-ref-v6:end:rc-92-figure-23 -->
+
+<p><strong><a href="#rc-92-figure-25">图 25</a>。</strong> 手机 AR 与 Tango 的一段路线；一般移动硬件上的系统可用性；不能据此推出：在所有局部精度指标上胜过 Tango。</p>
+<!-- figure-ref-v6:start:rc-92-figure-25-reviewed -->
+<figure class="reading-evidence-figure" id="rc-92-figure-25"><a href="/robot-classic/assets/figure-refs-v6/092-fig-25-reviewed.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/092-fig-25-reviewed.png" width="640" height="625" alt="手机VINS和Tango在起点、开门干扰及终点的九面板比较" loading="lazy"></a><figcaption>原论文图摘引：Tong Qin、Peiliang Li、Shaojie Shen，VINS-Mono: A Robust and Versatile Monocular Visual-Inertial State Estimator，2017 年预印本，2018 年期刊发表，图 25，PDF 第 16 页；<a href="https://arxiv.org/pdf/1708.03852#page=16" target="_blank" rel="noopener noreferrer">原文与图注</a>。局部裁切；原版权保留。点击图片可放大。</figcaption></figure>
+
+<p>读图：左列是 VINS-Mobile 的 AR 画面，中列是 VINS-Mono 轨迹，右列是 Tango 轨迹；三行依次为起点、开门和结束。开门时 Tango 的偏航与轨迹明显跳变；走完约 264 m 后，VINS 通过闭环与四自由度位姿图优化回到起点，虚拟方块仍注册在原位置，而 Tango 最后一圈仍有漂移。作者同时承认 Tango 的局部状态估计更准确，这一例不能当作所有精度指标的全面领先。</p>
+<!-- figure-ref-v6:end:rc-92-figure-25-reviewed -->
+
+
 <p>无人机路线总长 61.97 m，最终漂移约 0.18 m，论文给出约 0.29% 的终点相对漂移。这个百分比的分母是路线长度，不是每一帧误差的平均值，更不是 ATE 降低 99.71%。</p>
-<p>表 I 中窗口优化约 50 ms、运行频率 10 Hz；高频反馈则利用最新结果做惯性传播。两者能同时成立。作者还明确表示 Tango 的局部估计更准确，因此手机回程案例不能改写成全面精度领先。</p>
-<h2 id="7贡献与局限系统完整性也是研究对象">7．贡献与局限：系统完整性也是研究对象</h2>
+<p><a href="https://arxiv.org/pdf/1708.03852#page=14">表 I</a> 中窗口优化约 50 ms、运行频率 10 Hz；高频反馈则利用最新结果做惯性传播。两者能同时成立。作者还明确表示 Tango 的局部估计更准确，因此手机回程案例不能改写成全面精度领先。</p>
+<h2 id="五保留运动激励标定和失效处理边界">五、保留运动激励、标定和失效处理边界</h2>
 <p>本篇的价值来自已有组件的改进与系统整合，包括偏置修正的预积分、初始化、特征级重定位、四自由度图以及可运行实现。不能把所有组件都视为本篇首次发明，也不能因为用了已有方法就忽略集成中的困难。</p>
 <p>局限包括初始化退化、纹理与光照失效、边缘化近似、回环误检，以及外参与时间条件对结果的影响。作者设计了失败检测与重启，但重启不等于恢复失效期间所有丢失信息。</p>
 <p><strong>本文分析</strong>：定位系统真正影响机器人任务的还包括输出延迟、跳变和恢复时间。ATE 较低的系统若输出严重滞后，仍可能不适合快速反馈；回环修正后的全局位姿若直接进入控制器，也需要处理坐标修正。这些不是本篇已完成的统一对照实验。</p>
-<h2 id="8自构例子与前置概念">8．自构例子与前置概念</h2>
-<p><strong>自构例子，未运行</strong>：拿着手机绕桌子一圈。前半圈相机提供桌角的相对几何，IMU 帮助估计有单位的运动；暂时看向白墙时，惯性传播维持短时间预测，但误差增大；回到桌子前，匹配旧桌角提供回环约束，修正长期漂移。如果开始只绕手机光心旋转，则无法把“拿手机走了一圈”的正常初始化结论直接照搬。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>单目惯性优化难以启动</td>
-<td>视觉 SfM 与预积分对齐</td>
-<td>先恢复合理尺度、重力与速度初值</td>
-<td>第 V 节；公开序列与系统实验</td>
-<td>需要视差和激励</td>
-</tr>
-<tr>
-<td>局部估计不断累计漂移</td>
-<td>特征级重定位加四自由度图</td>
-<td>旧地点观测约束长期自由漂移</td>
-<td>图 11–19</td>
-<td>回环信息条件额外，误检仍需处理</td>
-</tr>
-<tr>
-<td>全量优化难以高频输出</td>
-<td>滑窗、边缘化和惯性传播分工</td>
-<td>控制计算规模并降低输出等待</td>
-<td>表 I、无人机应用</td>
-<td>高频预测不等于高频全量优化</td>
-</tr>
-</tbody></table></div>
-<h2 id="9读懂了吗三个问题与答案">9．读懂了吗？三个问题与答案</h2>
+<h2 id="六追问若长路线误差改善只在加入回环后出现应该怎样定位收益来源">六、追问：若长路线误差改善只在加入回环后出现，应该怎样定位收益来源？</h2>
+<details>
+<summary>若长路线误差改善只在加入回环后出现，应该怎样定位收益来源？</summary>
+
+<p><strong>参考答案</strong>：固定局部VIO配置，分别评估启用和关闭回环的结果，并检查回环发生前后的误差变化。这样才能区分局部融合、长期约束与恢复机制。完整系统更好，不等于每一个局部估计步骤都单独优于对照。</p>
+</details>
+
+<h2 id="七比较视觉惯性系统的恢复与地图管理">七、比较视觉惯性系统的恢复与地图管理</h2>
+<ul>
+<li><strong>平行路线</strong>：<a href="098-orbslam3.html">ORB-SLAM3：跟踪丢了以后，地图还能继续生长吗</a>。视觉惯性与多地图组织采取另一套系统设计，不能只按IMU有无等同。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <h3 id="问题一为什么加入-imu-后仍然需要专门初始化">问题一：为什么加入 IMU 后，仍然需要专门初始化？</h3>
 <p><strong>答案</strong>：IMU 并不直接提供准确位置；加速度包含重力、偏置和运动成分。若尺度、重力与偏置初值错误，非线性融合可能收敛到错误解释。初始化通过视觉轨迹与惯性约束对齐提供起点，而且运动不足时应继续等待，不能强行宣布尺度已知。</p>
 <h3 id="问题二四自由度图优化是否意味着机器人只做四自由度运动">问题二：四自由度图优化是否意味着机器人只做四自由度运动？</h3>
@@ -265,19 +283,15 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 
 **论文**：Tong Qin、Peiliang Li、Shaojie Shen，*VINS-Mono: A Robust and Versatile Monocular Visual-Inertial State Estimator*，2017 年预印本，2018 年期刊发表。[原文](https://arxiv.org/html/1708.03852) · [PDF](https://arxiv.org/pdf/1708.03852) · [官方代码](https://github.com/HKUST-Aerial-Robotics/VINS-Mono)。
 
-**阅读范围**：核对正文的方法、系统流程、实验与官方项目说明，并对 PDF 第 7 页式 23 做视觉复核；未执行官方程序，未逐项复算 IMU 雅可比。后文小例子与简化公式用于教学。
+### 先接住前作的问题
 
-## 一分钟理解：不是给相机加一只 IMU 就结束了
+[流形预积分](083-imu-preintegration.md)解决了惯性测量如何高效进入优化，却没有单独完成整套系统的启动与恢复；VINS-Mono承接预积分并组合视觉SfM、滑窗和回环。
+
+## 一、问题设定：单目和IMU怎样完成可信启动并持续恢复定位
 
 单目相机能从图像变化推断运动，却很难直接知道一段位移究竟是一米还是十米。IMU 有物理单位，能补充快速运动信息，但积分会受偏置影响而漂移。二者互补，却需要合适的初始尺度、重力方向和偏置，才能放进同一个优化问题。
 
-VINS-Mono 把这件事扩展成完整系统：初始化、局部视觉惯性优化、故障恢复、回环重定位、全局位姿图，以及不同频率的输出。它的重要性既在数学建模，也在这些模块能否持续配合。
-
-实验支持的是一套系统能在公开序列、较长手持路线、无人机与手机应用中运行。作者也明确指出，纯 VIO 与 OKVIS 的精度接近；加入回环后的系统优势，不应全部归因于局部估计器更精确。
-
-**一句话**：在具有足够视觉结构和运动激励的单目惯性定位中，通过初始化、滑窗优化及回环协作，改善系统的启动、持续定位与长期漂移，代价是标定、非线性计算和多模块管理，且不能消除所有退化与失效。
-
-## 1．背景与状态：估计什么，缺什么
+### 背景与状态：估计什么，缺什么
 
 这是在线状态估计，没有强化学习策略、奖励和训练回合。输入是连续图像、陀螺仪与加速度计数据；输出是位置、速度、姿态，以及用于修正测量的偏置等状态。
 
@@ -293,7 +307,9 @@ $$
 
 与只融合两个独立位姿输出的松耦合方案相比，紧耦合直接让特征观测和惯性测量共同约束状态。它保留的信息更丰富，但也更依赖测量模型、时间对应和初值。
 
-## 2．初始化：先找到一个可信的起点
+## 二、连接尺度重力初始化、预积分与视觉残差
+
+### 初始化：先找到一个可信的起点
 
 第 V 节先进行视觉 SfM，得到只有相对尺度的相机轨迹与特征，再与 IMU 预积分对齐。过程包括陀螺仪偏置校准、速度与尺度估计，以及重力方向细化。
 
@@ -301,7 +317,71 @@ $$
 
 一个容易漏掉的细节是：初始化阶段不同时强行估计全部惯性偏置。作者说明短时间内加速度偏置与重力耦合，因而先忽略加速度偏置，随后在非线性估计中处理。这是对可观测性的工程选择，不是认为加速度计没有偏置。
 
-## 3．局部估计：三类证据一起优化
+### 消去初速度后，尺度信息从哪里出现
+
+先做一个只保留尺度的教学化简：固定姿态，已知并扣除重力及加速度偏置，忽略相机—IMU 杆臂，沿一个水平方向以等时间间隔 $\Delta t$ 观测恒加速度运动。令视觉位置为 $\bar p_k$，真实位置为 $p_k=s\bar p_k$，未知尺度 $s&gt;0$。相邻位移相减消去初速度，有
+
+$$s(\bar p_{k+2}-2\bar p_{k+1}+\bar p_k)=a\Delta t^2,$$
+
+其中 $a$ 是 IMU 给出的该方向米制加速度。**原创手算：** $\Delta t=1$ s，视觉位置为 $0,1,3$ 个任意单位，IMU 加速度为 $2\,\mathrm{m/s^2}$，则视觉二阶差分为 1，尺度为每视觉单位 2 m。
+
+若视觉位置换成 $0,1,2$，IMU 同时给出零加速度，方程退化为 $0=0$，任何正尺度都成立；“移动了很远”不等于“有足够加速度激励”。再把未知加速度偏置 $b_a$ 放回第一例，测得的比力经重力补偿后只给出 $s+b_a=2$（数值采用上述单位），一段固定姿态恒加速度数据无法独立确定两者。真实系统靠更多姿态和运动变化增加区分能力。
+
+这解释了[原文V-B](https://arxiv.org/html/1708.03852)为什么先忽略短窗里难以分离的加速度偏置，再做重力切平面细化并进入完整非线性优化。本文例子不是论文初始化实现的替代公式，也不将 EuRoC 成功运行解释为所有恒速或纯旋转输入都能启动。
+
+### 长期运行：局部窗口之外还需要什么
+
+回环首先检索旧地点，再做几何检查。匹配通过后，旧关键帧的特征可以作为额外约束加入当前窗口；重定位时旧帧位姿固定，而历史全局图在另一个线程中优化。
+
+全局图主要优化三维位置和偏航角，共四个自由度。理由是正常视觉惯性条件下重力提供横滚与俯仰参照，长期自由漂移的方向与纯单目不同。这里的可观测性并不意味着横滚和俯仰没有噪声或估计误差。
+
+高频输出不代表每次都完成了完整滑窗优化。IMU 前向传播、轻量运动优化、全窗口优化和回环图优化有不同成本与频率。
+
+初始化先确定可联合估计的起点，局部窗口和长期图才有一致参照。下面检查各模块何时接管，再拆开纯VIO与回环收益。
+
+## 三、运行滑窗和全局回环，检查各频率输出
+
+```text
+输入：带时间戳图像、IMU、相机模型与外参初值
+持续接收数据：
+    跟踪视觉角点；累计两帧之间的 IMU 预积分
+    若尚未初始化：
+        检查特征与视差；运行视觉 SfM
+        对齐视觉轨迹与 IMU，估计尺度、速度、重力与初始陀螺偏置
+        条件不足时继续等待新观测
+    否则：
+        优化窗口内状态、偏置、外参与特征深度
+        根据关键帧状态边缘化或丢弃相应测量
+        检测异常；必要时重新初始化并建立新的图段
+    并行检索回环、几何验证、紧耦合重定位与四自由度图优化
+    用最新优化结果加 IMU 前向传播提供高频输出
+输出：局部状态估计及经过回环修正的全局轨迹
+```
+
+### 自构例子与前置概念
+
+**自构例子，未运行**：拿着手机绕桌子一圈。前半圈相机提供桌角的相对几何，IMU 帮助估计有单位的运动；暂时看向白墙时，惯性传播维持短时间预测，但误差增大；回到桌子前，匹配旧桌角提供回环约束，修正长期漂移。如果开始只绕手机光心旋转，则无法把“拿手机走了一圈”的正常初始化结论直接照搬。
+
+五个前置概念：
+
+1. **尺度模糊**：单目几何可以整体缩放而保持相同投影。
+2. **预积分**：把一段高频惯性信息浓缩为帧间约束及其不确定性。
+3. **紧耦合**：不同传感器的原始测量残差共同约束状态。
+4. **边缘化**：消去旧变量并将其信息压缩成当前优化的先验。
+5. **可观测性**：测量和运动是否足以区分不同状态解释。
+
+## 四、把纯VIO精度与加入回环后的系统结果拆开
+
+&lt;!-- figure-ref-v6:start:rc-92-figure-17-anchor --&gt;
+&lt;span id=&quot;rc-92-figure-17&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-92-figure-17-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/092-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/092-evidence.png&quot; width=&quot;781&quot; height=&quot;873&quot; alt=&quot;Fig. 17：三条室内轨迹依次比较 OKVIS、无回环 VINS 和含回环 VINS&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文结果图／表摘引：Tong Qin、Peiliang Li、Shaojie Shen（2017），Fig. 17，PDF 第 13 页；&lt;a href=&quot;https://arxiv.org/pdf/1708.03852#page=13&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：三条室内轨迹依次比较 OKVIS、无回环 VINS 和含回环 VINS。闭环后的起终点更一致表明全局约束发挥作用，不能由首尾闭合推断中间每一时刻都同样准确。
+
+### 局部估计：三类证据一起优化
+
+纯 VIO、加入回环的系统和高频惯性传播用了不同信息与时序；回环后的误差改善不能全部归因于局部预积分。
 
 将原文式 22 写成更易读的形式：
 
@@ -345,32 +425,7 @@ $$
 
 其定义可在 [Ceres 官方损失函数文档](https://ceres-solver.readthedocs.io/latest/nnls_modeling.html) 核对。这个版本差异不等于已经证明原实验代码使用了错误损失；论文排版和实际实现需要分别检查。
 
-## 4．长期运行：局部窗口之外还需要什么
-
-回环首先检索旧地点，再做几何检查。匹配通过后，旧关键帧的特征可以作为额外约束加入当前窗口；重定位时旧帧位姿固定，而历史全局图在另一个线程中优化。
-
-全局图主要优化三维位置和偏航角，共四个自由度。理由是正常视觉惯性条件下重力提供横滚与俯仰参照，长期自由漂移的方向与纯单目不同。这里的可观测性并不意味着横滚和俯仰没有噪声或估计误差。
-
-```text
-输入：带时间戳图像、IMU、相机模型与外参初值
-持续接收数据：
-    跟踪视觉角点；累计两帧之间的 IMU 预积分
-    若尚未初始化：
-        检查特征与视差；运行视觉 SfM
-        对齐视觉轨迹与 IMU，估计尺度、速度、重力与初始陀螺偏置
-        条件不足时继续等待新观测
-    否则：
-        优化窗口内状态、偏置、外参与特征深度
-        根据关键帧状态边缘化或丢弃相应测量
-        检测异常；必要时重新初始化并建立新的图段
-    并行检索回环、几何验证、紧耦合重定位与四自由度图优化
-    用最新优化结果加 IMU 前向传播提供高频输出
-输出：局部状态估计及经过回环修正的全局轨迹
-```
-
-高频输出不代表每次都完成了完整滑窗优化。IMU 前向传播、轻量运动优化、全窗口优化和回环图优化有不同成本与频率。
-
-## 5．实验设计与比较条件
+### 实验设计与比较条件
 
 | 实验 | 数据与设备 | 对比和指标 | 应当控制的解释 |
 |---|---|---|---|
@@ -384,21 +439,82 @@ $$
 
 公开序列比较还规定了对齐方式：先丢弃部分初始输出，再用随后一段进行对齐，最后比较余下输出。对齐使用多少轨迹会影响误差，因此复现必须保留该口径。
 
-## 6．结果：怎样避免把不同证据合成一个分数
+### 结果：怎样避免把不同证据合成一个分数
 
-| 图表 | 比较什么 → 观察到什么 | 支持的结论 | 不能推出的结论 |
-|---|---|---|---|
-| 图 11–14 | OKVIS、纯 VIO、含回环系统 | 回环能约束累计位置漂移 | 局部 VIO 在每个姿态分量都更好 |
-| 图 17–19 | 室内外回环前后轨迹 | 系统模块能改善长期一致性 | 无真值路段的逐时刻绝对精度 |
-| 表 I | 长程实验中不同模块时间 | 计算可以分线程、分频率组织 | 每帧所有模块均耗时相同或串行相加 |
-| 图 22–23 | 无人机轨迹与 OptiTrack | 无回环局部估计可用于该飞行反馈 | 任意高速动作和光照都能稳定控制 |
-| 图 25 | 手机 AR 与 Tango 的一段路线 | 一般移动硬件上的系统可用性 | 在所有局部精度指标上胜过 Tango |
+**[图 11–14](#rc-92-figure-11)。** OKVIS、纯 VIO、含回环系统；回环能约束累计位置漂移；不能据此推出：局部 VIO 在每个姿态分量都更好。
+
+&lt;!-- figure-ref-v6:start:rc-92-figure-11 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-92-figure-11&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/092-fig-11.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/092-fig-11.png&quot; width=&quot;640&quot; height=&quot;441&quot; alt=&quot;原论文图11：MH03序列中VINS、回环VINS、OKVIS和真值的轨迹比较&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Tong Qin、Peiliang Li、Shaojie Shen（2017），图 11，PDF 第 12 页；&lt;a href=&quot;https://arxiv.org/pdf/1708.03852#page=12&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：轨迹在同一平面坐标比较，回环后的全局修正与局部里程计漂移需区分。
+&lt;!-- figure-ref-v6:end:rc-92-figure-11 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-92-figure-12 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-92-figure-12&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/092-fig-12.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/092-fig-12.png&quot; width=&quot;589&quot; height=&quot;634&quot; alt=&quot;原论文图12：MH03序列各轴平移误差及随路程变化的平移误差&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Tong Qin、Peiliang Li、Shaojie Shen（2017），图 12，PDF 第 12 页；&lt;a href=&quot;https://arxiv.org/pdf/1708.03852#page=12&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：上三幅横轴为时间、底图横轴为距离；不能将同一图上的不同横轴误读成同一采样序列。
+&lt;!-- figure-ref-v6:end:rc-92-figure-12 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-92-figure-13 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-92-figure-13&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/092-fig-13.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/092-fig-13.png&quot; width=&quot;640&quot; height=&quot;438&quot; alt=&quot;原论文图13：MH05困难序列中多种估计器与真值的平面轨迹&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Tong Qin、Peiliang Li、Shaojie Shen（2017），图 13，PDF 第 12 页；&lt;a href=&quot;https://arxiv.org/pdf/1708.03852#page=12&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：在相同坐标轴看局部偏差与全局回环；单条轨迹没有表达跨重复运行的置信区间。
+&lt;!-- figure-ref-v6:end:rc-92-figure-13 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-92-figure-14 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-92-figure-14&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/092-fig-14.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/092-fig-14.png&quot; width=&quot;640&quot; height=&quot;387&quot; alt=&quot;原论文图14：MH05序列的平移和旋转误差随行进距离变化&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Tong Qin、Peiliang Li、Shaojie Shen（2017），图 14，PDF 第 12 页；&lt;a href=&quot;https://arxiv.org/pdf/1708.03852#page=12&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：上下图单位不同；应同时比较平移与旋转，避免只据一种误差宣称全面更准确。
+&lt;!-- figure-ref-v6:end:rc-92-figure-14 --&gt;
+
+**[图 17](#rc-92-figure-17)–[图 19](#rc-92-figure-19)。** 室内外回环前后轨迹；系统模块能改善长期一致性；不能据此推出：无真值路段的逐时刻绝对精度。
+
+&lt;!-- figure-ref-v6:start:rc-92-final-source-gap-note --&gt;
+&lt;span id=&quot;rc-92-figure-18&quot;&gt;&lt;/span&gt;&lt;p class=&quot;figure-reference-note&quot;&gt;尚未内嵌：&lt;a href=&quot;https://arxiv.org/pdf/1708.03852#page=14&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;图 18&lt;/a&gt;。剩余轨迹图叠加 Google 地图背景。官方 Geo Guidelines 允许特定教育/研究展示，但要求真实 Google 及数据提供商署名；当前原图未能核清完整提供商署名，不能自行猜造，因此保留入口并明确记录这一可核验性缺口。&lt;/p&gt;
+&lt;!-- figure-ref-v6:end:rc-92-final-source-gap-note --&gt;
+
+
+
+
+
+&lt;!-- figure-ref-v6:start:rc-92-figure-19 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-92-figure-19&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/092-fig-19.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/092-fig-19.png&quot; width=&quot;640&quot; height=&quot;673&quot; alt=&quot;原论文图19：混合室内外序列中OKVIS、无回环VINS和回环VINS三种轨迹&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Tong Qin、Peiliang Li、Shaojie Shen（2017），图 19，PDF 第 14 页；&lt;a href=&quot;https://arxiv.org/pdf/1708.03852#page=14&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：红框指出跟踪丢失或错误估计区域；回环修正的全局一致性与局部跟踪稳定性是不同问题。
+&lt;!-- figure-ref-v6:end:rc-92-figure-19 --&gt;
+
+
+
+**[表 I](https://arxiv.org/pdf/1708.03852#page=14)。** 长程实验中不同模块时间；计算可以分线程、分频率组织；不能据此推出：每帧所有模块均耗时相同或串行相加。
+
+**[图 22](#rc-92-figure-22)–[图 23](#rc-92-figure-23)。** 无人机轨迹与 OptiTrack；无回环局部估计可用于该飞行反馈；不能据此推出：任意高速动作和光照都能稳定控制。
+
+&lt;!-- figure-ref-v6:start:rc-92-figure-22 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-92-figure-22&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/092-fig-22.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/092-fig-22.png&quot; width=&quot;640&quot; height=&quot;550&quot; alt=&quot;原论文图22：机载无回环VINS与OptiTrack真值的三维轨迹&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Tong Qin、Peiliang Li、Shaojie Shen（2017），图 22，PDF 第 15 页；&lt;a href=&quot;https://arxiv.org/pdf/1708.03852#page=15&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：三根坐标轴均以米计；轨迹重叠是该次机载实验的结果，不能替代更长序列的漂移统计。
+&lt;!-- figure-ref-v6:end:rc-92-figure-22 --&gt;
+
+&lt;!-- figure-ref-v6:start:rc-92-figure-23 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-92-figure-23&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/092-fig-23.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/092-fig-23.png&quot; width=&quot;1293&quot; height=&quot;685&quot; alt=&quot;原论文图23：无回环VINS相对OptiTrack的位置、姿态及对应误差时间序列&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Tong Qin、Peiliang Li、Shaojie Shen（2017），图 23，PDF 第 16 页；&lt;a href=&quot;https://arxiv.org/pdf/1708.03852#page=16&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：每一组同时保留估计量与误差；姿态角突变要联系角度表示和对应误差一起检查。
+&lt;!-- figure-ref-v6:end:rc-92-figure-23 --&gt;
+
+**[图 25](#rc-92-figure-25)。** 手机 AR 与 Tango 的一段路线；一般移动硬件上的系统可用性；不能据此推出：在所有局部精度指标上胜过 Tango。
+
+&lt;!-- figure-ref-v6:start:rc-92-figure-25-reviewed --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-92-figure-25&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/092-fig-25-reviewed.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/092-fig-25-reviewed.png&quot; width=&quot;640&quot; height=&quot;625&quot; alt=&quot;手机VINS和Tango在起点、开门干扰及终点的九面板比较&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图摘引：Tong Qin、Peiliang Li、Shaojie Shen，VINS-Mono: A Robust and Versatile Monocular Visual-Inertial State Estimator，2017 年预印本，2018 年期刊发表，图 25，PDF 第 16 页；&lt;a href=&quot;https://arxiv.org/pdf/1708.03852#page=16&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。局部裁切；原版权保留。点击图片可放大。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：左列是 VINS-Mobile 的 AR 画面，中列是 VINS-Mono 轨迹，右列是 Tango 轨迹；三行依次为起点、开门和结束。开门时 Tango 的偏航与轨迹明显跳变；走完约 264 m 后，VINS 通过闭环与四自由度位姿图优化回到起点，虚拟方块仍注册在原位置，而 Tango 最后一圈仍有漂移。作者同时承认 Tango 的局部状态估计更准确，这一例不能当作所有精度指标的全面领先。
+&lt;!-- figure-ref-v6:end:rc-92-figure-25-reviewed --&gt;
+
 
 无人机路线总长 61.97 m，最终漂移约 0.18 m，论文给出约 0.29% 的终点相对漂移。这个百分比的分母是路线长度，不是每一帧误差的平均值，更不是 ATE 降低 99.71%。
 
-表 I 中窗口优化约 50 ms、运行频率 10 Hz；高频反馈则利用最新结果做惯性传播。两者能同时成立。作者还明确表示 Tango 的局部估计更准确，因此手机回程案例不能改写成全面精度领先。
+[表 I](https://arxiv.org/pdf/1708.03852#page=14) 中窗口优化约 50 ms、运行频率 10 Hz；高频反馈则利用最新结果做惯性传播。两者能同时成立。作者还明确表示 Tango 的局部估计更准确，因此手机回程案例不能改写成全面精度领先。
 
-## 7．贡献与局限：系统完整性也是研究对象
+## 五、保留运动激励、标定和失效处理边界
 
 本篇的价值来自已有组件的改进与系统整合，包括偏置修正的预积分、初始化、特征级重定位、四自由度图以及可运行实现。不能把所有组件都视为本篇首次发明，也不能因为用了已有方法就忽略集成中的困难。
 
@@ -406,25 +522,20 @@ $$
 
 **本文分析**：定位系统真正影响机器人任务的还包括输出延迟、跳变和恢复时间。ATE 较低的系统若输出严重滞后，仍可能不适合快速反馈；回环修正后的全局位姿若直接进入控制器，也需要处理坐标修正。这些不是本篇已完成的统一对照实验。
 
-## 8．自构例子与前置概念
+## 六、追问：若长路线误差改善只在加入回环后出现，应该怎样定位收益来源？
 
-**自构例子，未运行**：拿着手机绕桌子一圈。前半圈相机提供桌角的相对几何，IMU 帮助估计有单位的运动；暂时看向白墙时，惯性传播维持短时间预测，但误差增大；回到桌子前，匹配旧桌角提供回环约束，修正长期漂移。如果开始只绕手机光心旋转，则无法把“拿手机走了一圈”的正常初始化结论直接照搬。
+&lt;details&gt;
+&lt;summary&gt;若长路线误差改善只在加入回环后出现，应该怎样定位收益来源？&lt;/summary&gt;
 
-五个前置概念：
+**参考答案**：固定局部VIO配置，分别评估启用和关闭回环的结果，并检查回环发生前后的误差变化。这样才能区分局部融合、长期约束与恢复机制。完整系统更好，不等于每一个局部估计步骤都单独优于对照。
 
-1. **尺度模糊**：单目几何可以整体缩放而保持相同投影。
-2. **预积分**：把一段高频惯性信息浓缩为帧间约束及其不确定性。
-3. **紧耦合**：不同传感器的原始测量残差共同约束状态。
-4. **边缘化**：消去旧变量并将其信息压缩成当前优化的先验。
-5. **可观测性**：测量和运动是否足以区分不同状态解释。
+&lt;/details&gt;
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 单目惯性优化难以启动 | 视觉 SfM 与预积分对齐 | 先恢复合理尺度、重力与速度初值 | 第 V 节；公开序列与系统实验 | 需要视差和激励 |
-| 局部估计不断累计漂移 | 特征级重定位加四自由度图 | 旧地点观测约束长期自由漂移 | 图 11–19 | 回环信息条件额外，误检仍需处理 |
-| 全量优化难以高频输出 | 滑窗、边缘化和惯性传播分工 | 控制计算规模并降低输出等待 | 表 I、无人机应用 | 高频预测不等于高频全量优化 |
+## 七、比较视觉惯性系统的恢复与地图管理
 
-## 9．读懂了吗？三个问题与答案
+- **平行路线**：[ORB-SLAM3：跟踪丢了以后，地图还能继续生长吗](098-orbslam3.md)。视觉惯性与多地图组织采取另一套系统设计，不能只按IMU有无等同。
+
+## 八、自测与参考答案
 
 ### 问题一：为什么加入 IMU 后，仍然需要专门初始化？
 
