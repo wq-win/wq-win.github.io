@@ -42,26 +42,30 @@
                 <span class="text-gray-500">DAPO：让长推理强化学习真正训练起来的四处修改</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="d9efe4629370341ed3bed812b9f3dc0d28520a70ade82b190e4e5d455b3c71d1"><h1>097｜DAPO：让长推理强化学习真正训练起来的四处修改</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="35b01a7ebb1fdab4d3a3534f26867c80010e72d42d31d4d3df41c49870117da4"><h1>097｜DAPO：让长推理强化学习真正训练起来的四处修改</h1>
 <p><a href="index.html">返回目录</a> · <a href="00-timeline.html">发展时间线</a></p>
-<p><strong>论文</strong>：Yu 等，<em>DAPO: An Open-Source LLM Reinforcement Learning System at Scale</em>，2025。<a href="https://arxiv.org/abs/2503.14476">原文</a> · <a href="https://arxiv.org/html/2503.14476v1">正文 v1</a> · <a href="https://dapo-sia.github.io/">作者项目页</a> · <a href="https://github.com/volcengine/verl">训练框架</a>。以下依据 v1 的公式、算法、训练动态和主表；没有独立复现训练，后续版本结果不混入本文。</p>
-<h2 id="一一分钟理解">一、一分钟理解</h2>
-<p>同样写着 GRPO，两个训练程序可能得到很不一样的模型。原因不一定在大公式：如果一批题全部答对或全部答错，就没有组内比较信号；如果长答案每个 token 的梯度被过度稀释，重复文本可能难以抑制；如果答案只是被长度上限截断，却被当成数学错误惩罚，奖励也会混入噪声。</p>
-<p>DAPO 针对这些问题调整裁剪上下界、动态筛选有效题组、采用 token 级损失平均，并改进超长回答处理。在 Qwen2.5-32B 基础模型上，报告的 AIME 2024 平均正确率从朴素 GRPO 的 30 提高到 50。</p>
-<p>一句话总结：在可验证数学任务的长推理 RL 中，通过修改更新约束、采样分布、损失权重和长度奖励，改善训练效果与稳定性，代价是额外采样以及对任务、验证器和预算的依赖。</p>
+<p><strong>论文</strong>：Yu 等，<em>DAPO: An Open-Source LLM Reinforcement Learning System at Scale</em>，2025。<a href="https://arxiv.org/abs/2503.14476">原文</a> · <a href="https://arxiv.org/html/2503.14476v1">正文 v1</a> · <a href="https://dapo-sia.github.io/">作者项目页</a> · <a href="https://github.com/volcengine/verl">训练框架</a>。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="086-deepseekmath.html">DeepSeekMath</a>以同题奖励差代替价值网络，本篇直接继承GRPO，追问全对全错、损失归约和截断处理如何削弱信号。<a href="094-r1.html">R1</a>提供长推理历史对照，但步数更少不自动等于训练算力更省。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>策略熵</strong> 描述输出分布的分散程度；<strong>重要性比率</strong> 比较新旧策略对已采动作的概率；<strong>组相对优势</strong> 使用同题候选作基线；<strong>损失归约</strong> 决定不同样本与 token 的权重；<strong>奖励塑形</strong> 在任务结果之外加入辅助反馈。</p>
-<h2 id="二问题设定与瓶颈">二、问题设定与瓶颈</h2>
-<p>这是在线、无模型、单语言策略的强化学习。状态是问题与已生成前缀，动作是 token，回答结束或达到上限后获得结果奖励。作者从 Qwen2.5-32B 基础模型出发，使用约 17K 道整理后的数学题。</p>
+<h2 id="一问题设定同样grpo公式下学习信号会在哪些实现环节消失">一、问题设定：同样GRPO公式下，学习信号会在哪些实现环节消失</h2>
+<p>这是在线、无模型、单语言策略RL：状态是题目和前缀，动作是token，回答结束或到上限后得到结果奖励。起点为Qwen2.5-32B基础模型，约17K道整理数学题；问题是如何让有效比较信号真正进入更新，而非只保留同名目标公式。</p>
 <p>数据来源包括 AoPS 与竞赛题。作者将答案改成整数形式，以减少表达式解析与等价判断的错误。例如把最终形式为分式或根式的题改成询问若干系数之和。这能简化验收，但改题是否保留唯一解、形式约束是否充分，仍需检查；整数奖励不等于没有数据错误。</p>
 <p>正确答案奖励为 1，错误为 -1。组内标准化后，关注的是同题不同尝试的相对表现。完整方法去掉参考策略 KL 惩罚，允许较大行为变化；这个选择适用于作者的数学实验，不是对通用偏好训练中 KL 作用的普遍否定。</p>
-<h2 id="三四项修改分别改变什么">三、四项修改分别改变什么</h2>
+<h2 id="二分开裁剪有效题组token权重与长度奖励">二、分开裁剪、有效题组、token权重与长度奖励</h2>
 <h3 id="1-非对称裁剪给成功的低概率动作多一点空间">1. 非对称裁剪：给成功的低概率动作多一点空间</h3>
 <p>定义 token 概率比 <span class="reading-math" data-tex="\rho_{i,t}=\pi_\theta(o_{i,t}|q,o_{i,&lt;t})/\pi_{old}(o_{i,t}|q,o_{i,&lt;t})"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ρ</mi><mrow><mi>i</mi><mo separator="true">,</mo><mi>t</mi></mrow></msub><mo>=</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>o</mi><mrow><mi>i</mi><mo separator="true">,</mo><mi>t</mi></mrow></msub><mi mathvariant="normal">∣</mi><mi>q</mi><mo separator="true">,</mo><msub><mi>o</mi><mrow><mi>i</mi><mo separator="true">,</mo><mo>&lt;</mo><mi>t</mi></mrow></msub><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><msub><mi>π</mi><mrow><mi>o</mi><mi>l</mi><mi>d</mi></mrow></msub><mo stretchy="false">(</mo><msub><mi>o</mi><mrow><mi>i</mi><mo separator="true">,</mo><mi>t</mi></mrow></msub><mi mathvariant="normal">∣</mi><mi>q</mi><mo separator="true">,</mo><msub><mi>o</mi><mrow><mi>i</mi><mo separator="true">,</mo><mo>&lt;</mo><mi>t</mi></mrow></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\rho_{i,t}=\pi_\theta(o_{i,t}|q,o_{i,&lt;t})/\pi_{old}(o_{i,t}|q,o_{i,&lt;t})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">ρ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mpunct mtight">,</span><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">/</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mpunct mtight">,</span><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>。DAPO 将裁剪区间改成 <span class="reading-math" data-tex="[1-\epsilon_{low},1+\epsilon_{high}]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">[</mo><mn>1</mn><mo>−</mo><msub><mi>ϵ</mi><mrow><mi>l</mi><mi>o</mi><mi>w</mi></mrow></msub><mo separator="true">,</mo><mn>1</mn><mo>+</mo><msub><mi>ϵ</mi><mrow><mi>h</mi><mi>i</mi><mi>g</mi><mi>h</mi></mrow></msub><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[1-\epsilon_{low},1+\epsilon_{high}]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8389em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">ϵ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">ϵ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">hi</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="mord mathnormal mtight">h</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">]</span></span></span></span></span>，实验用 <span class="reading-math" data-tex="\epsilon_{low}=0.2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ϵ</mi><mrow><mi>l</mi><mi>o</mi><mi>w</mi></mrow></msub><mo>=</mo><mn>0.2</mn></mrow><annotation encoding="application/x-tex">\epsilon_{low}=0.2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">ϵ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.2</span></span></span></span></span>、<span class="reading-math" data-tex="\epsilon_{high}=0.28"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ϵ</mi><mrow><mi>h</mi><mi>i</mi><mi>g</mi><mi>h</mi></mrow></msub><mo>=</mo><mn>0.28</mn></mrow><annotation encoding="application/x-tex">\epsilon_{high}=0.28</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">ϵ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">hi</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="mord mathnormal mtight">h</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.28</span></span></span></span></span>。</p>
 <p>对于正优势 token，较高上界让提高其概率的目标在更大区间继续起作用。论文用 0.01 与 0.9 的旧概率说明相对裁剪对小概率动作的绝对增量更小。必须补充：PPO 裁剪约束的是替代目标，不是参数更新后的概率硬边界；0.9 乘 1.2 得到 1.08 也不是一个合法的新概率。</p>
 <h3 id="2-动态采样补足有比较信号的题组">2. 动态采样：补足有比较信号的题组</h3>
 <p>每题采样 <span class="reading-math" data-tex="G"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span></span></span></span></span> 个回答，若正确数为零或 <span class="reading-math" data-tex="G"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span></span></span></span></span>，该题组被排除，继续采样直到有效批次填满。若标准化奖励全相同，常规实现中的优势没有有效比较信号；保留足够多混合成败的题，能避免批次里真正参与更新的样本不断变少。</p>
 <p>这不是“删除所有答对答案”。被保留的是整道题组，其中正确和错误回答都参与相对更新。它也改变了实际训练分布：更偏向当前模型有一定成功机会、但尚未完全掌握的题；极难题可能被长期排除。</p>
+<h4>动态采样不是均匀删题，而是在改变课程分布</h4>
+<p>假设固定策略对题目 <span class="reading-math" data-tex="q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi></mrow><annotation encoding="application/x-tex">q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span></span></span></span> 的单次正确概率为 <span class="reading-math" data-tex="p_q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mi>q</mi></msub></mrow><annotation encoding="application/x-tex">p_q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，同组 <span class="reading-math" data-tex="G"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span></span></span></span></span> 个回答条件独立。只有全错或全对会被筛除，所以题组的保留概率为</p>
+<p><span class="reading-math" data-tex="a_G(p_q)=1-(1-p_q)^G-p_q^G."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>a</mi><mi>G</mi></msub><mo stretchy="false">(</mo><msub><mi>p</mi><mi>q</mi></msub><mo stretchy="false">)</mo><mo>=</mo><mn>1</mn><mo>−</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><msub><mi>p</mi><mi>q</mi></msub><msup><mo stretchy="false">)</mo><mi>G</mi></msup><mo>−</mo><msubsup><mi>p</mi><mi>q</mi><mi>G</mi></msubsup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">a_G(p_q)=1-(1-p_q)^G-p_q^G.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">G</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1774em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">G</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.2744em;vertical-align:-0.3831em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">G</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3831em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>两项分别是全错、全对的概率。若原始抽题分布为 <span class="reading-math" data-tex="d(q)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo stretchy="false">(</mo><mi>q</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">d(q)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">d</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mclose">)</span></span></span></span></span>，反复抽取直到获得有效组，则保留题目的边际分布正比于 <span class="reading-math" data-tex="d(q)a_G(p_q)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo stretchy="false">(</mo><mi>q</mi><mo stretchy="false">)</mo><msub><mi>a</mi><mi>G</mi></msub><mo stretchy="false">(</mo><msub><mi>p</mi><mi>q</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">d(q)a_G(p_q)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathnormal">d</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">G</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>。这条式子描述选择效应，不是作者额外训练的难度预测器；实际有限采样、相关生成和变化中的策略都会影响近似。</p>
+<p><strong>原创教学核算。</strong> 用实验的 <span class="reading-math" data-tex="G=16"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi><mo>=</mo><mn>16</mn></mrow><annotation encoding="application/x-tex">G=16</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">16</span></span></span></span></span>，<span class="reading-math" data-tex="p_q=0.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mi>q</mi></msub><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">p_q=0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span> 时保留概率约0.99997，几乎每组都有效；<span class="reading-math" data-tex="p_q=0.01"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mi>q</mi></msub><mo>=</mo><mn>0.01</mn></mrow><annotation encoding="application/x-tex">p_q=0.01</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.01</span></span></span></span></span> 或0.99时只有约0.14854。若反复采样同样成功率的题，平均约 <span class="reading-math" data-tex="1/0.14854=6.73"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mn>0.14854</mn><mo>=</mo><mn>6.73</mn></mrow><annotation encoding="application/x-tex">1/0.14854=6.73</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/0.14854</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">6.73</span></span></span></span></span> 组才得到一组有效数据。生成不是免费发生的：这相当于期望约108条回答换16条有效组内回答，还没计长度差异。</p>
+<p>公式揭示它同时淡化极难与极易题，而非只跳过已经掌握的题。论文<a href="#llm-v6-097-figure-6">图6</a>在所测同步系统仍报告更快收敛，说明额外采样成本可能被减少无效更新和调度特性抵消；不能由该实例推成保留率趋近零时仍然高效。复现应该同时记录抽到的题分布与保留的题分布，才知道课程是否悄悄只剩中等难度。</p>
 <h3 id="3-token-级平均不要让长序列的每一步自动变轻">3. Token 级平均：不要让长序列的每一步自动变轻</h3>
 <p>朴素做法先对每条回答取平均，再对回答取平均。DAPO 改为汇总全部有效 token：</p>
 <p><span class="reading-math" data-tex="J=\mathbb E\left[\frac{1}{\sum_i L_i}\sum_i\sum_{t=1}^{L_i}
@@ -80,6 +84,10 @@
 -1,&amp;L&gt;20480.
 \end{cases}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">L</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:4.32em;vertical-align:-1.91em;"></span><span class="minner"><span class="mopen"><span class="delimsizing mult"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:2.35em;"><span style="top:-2.2em;"><span class="pstrut" style="height:3.15em;"></span><span class="delimsizinginner delim-size4"><span>⎩</span></span></span><span style="top:-2.192em;"><span class="pstrut" style="height:3.15em;"></span><span style="height:0.316em;width:0.8889em;"><svg xmlns="http://www.w3.org/2000/svg" width="0.8889em" height="0.316em" style="width:0.8889em" viewBox="0 0 888.89 316" preserveAspectRatio="xMinYMin"><path d="M384 0 H504 V316 H384z M384 0 H504 V316 H384z"/></svg></span></span><span style="top:-3.15em;"><span class="pstrut" style="height:3.15em;"></span><span class="delimsizinginner delim-size4"><span>⎨</span></span></span><span style="top:-4.292em;"><span class="pstrut" style="height:3.15em;"></span><span style="height:0.316em;width:0.8889em;"><svg xmlns="http://www.w3.org/2000/svg" width="0.8889em" height="0.316em" style="width:0.8889em" viewBox="0 0 888.89 316" preserveAspectRatio="xMinYMin"><path d="M384 0 H504 V316 H384z M384 0 H504 V316 H384z"/></svg></span></span><span style="top:-4.6em;"><span class="pstrut" style="height:3.15em;"></span><span class="delimsizinginner delim-size4"><span>⎧</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.85em;"><span></span></span></span></span></span></span><span class="mord"><span class="mtable"><span class="col-align-l"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:2.41em;"><span style="top:-4.41em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord">0</span><span class="mpunct">,</span></span></span><span style="top:-2.97em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord">−</span><span class="mopen">(</span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">16384</span><span class="mclose">)</span><span class="mord">/4096</span><span class="mpunct">,</span></span></span><span style="top:-1.53em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord">−</span><span class="mord">1</span><span class="mpunct">,</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.91em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:1em;"></span><span class="col-align-l"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:2.41em;"><span style="top:-4.41em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord">16384</span><span class="mpunct">,</span></span></span><span style="top:-2.97em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord">16384</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&lt;</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord">20480</span><span class="mpunct">,</span></span></span><span style="top:-1.53em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord">20480.</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.91em;"><span></span></span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span></span></p>
 <p>这是给定预算下的偏好，不是数学真值。错误原因的区分能降低奖励噪声，但过严长度惩罚也可能不利于真正需要长推导的题。</p>
+<p><strong>自构例子。</strong> 两条回答分别长 100 和 1000 token。先对回答平均时，短回答每 token 的系数是 <span class="reading-math" data-tex="1/200"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mn>200</mn></mrow><annotation encoding="application/x-tex">1/200</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/200</span></span></span></span></span>，长回答是 <span class="reading-math" data-tex="1/2000"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mn>2000</mn></mrow><annotation encoding="application/x-tex">1/2000</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/2000</span></span></span></span></span>；改成全 token 平均后，两者都是 <span class="reading-math" data-tex="1/1100"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mn>1100</mn></mrow><annotation encoding="application/x-tex">1/1100</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/1100</span></span></span></span></span>。这是权重重分配，并不是在长回答里新增了更准确的监督。</p>
+<h3 id="裁剪上界不是训练后概率的硬上限">裁剪上界不是训练后概率的硬上限</h3>
+<p>取正优势1、旧概率0.1，当前比率1.4时，未裁剪项1.4、上界裁剪项1.28，目标选较小者1.28，对这条样本的该分支不再提供继续推高的梯度。共享参数仍受其它token更新影响，所以更新后概率未必恰好停在0.128；必须把代理目标平台与参数可行域分开。</p>
+<h2 id="三固定旧策略采样并记入被丢弃题组的成本">三、固定旧策略采样并记入被丢弃题组的成本</h2>
 <pre><code class="language-text">输入：基础策略、数学问题与整数答案、目标有效批次
 在本轮采样期间固定旧策略
 重复抽取问题，每题生成 16 条回答：
@@ -93,7 +101,8 @@
 同时记录验证正确率、熵、截断率及全部采样 token
 输出：更新后的推理策略
 </code></pre>
-<h2 id="四实验如何验证">四、实验如何验证</h2>
+<h2 id="四用累计消融与动态曲线辨别组件交互">四、用累计消融与动态曲线辨别组件交互</h2>
+<p>累计表给的是在已有组件上的增量，熵与长度曲线解释训练动态；动态采样的废弃回答也必须计入总生成预算。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -142,37 +151,50 @@
 <td>32 次回答重复有助减少采样波动；正文未给多个独立完整训练种子的主表置信区间</td>
 </tr>
 </tbody></table></div>
-<h2 id="五结果看累计表也看训练动态">五、结果：看累计表，也看训练动态</h2>
-<p><strong>证据 1：表 1，整体配方。</strong> GRPO 为 30，加入超长过滤后 36，再加 Clip-Higher 为 38，软长度惩罚后 41，token 级损失后 42，动态采样后 50。这是逐步累计实验，新增收益依赖已有组件；不能说动态采样在任何 GRPO 上都必定增加八分，也不能据此忽略组件交互。</p>
-<p><strong>证据 2：图 2，熵塌缩。</strong> 对照展示 Clip-Higher 后策略熵与准确率更有利的训练轨迹。它支持作者设置中探索退化被缓解，不是熵越大越好。图 7 和正文也指出过高熵可能对应乱码、重复与无效探索。</p>
-<p><strong>证据 3：图 4、图 5，长度与奖励。</strong> token 级平均和超长处理使训练动态改善。尤其是截断样本过滤，不需要先发明复杂奖励模型，便能降低一种确定存在的标注混淆。但长度曲线健康只是诊断信号，不能代替独立正确率。</p>
-<p><strong>证据 4：图 6，动态采样效率。</strong> 作者报告额外采样没有显著拖慢该同步系统，并更快达到目标表现。解释涉及长尾回答主导生成等待时间，因此硬件利用与调度很重要；换成不同异步系统或更低有效组比例，结论可能改变。</p>
-<p><strong>证据 5：图 1 与 §4.3，步数与泛化。</strong> 作者比较 50 分与 R1-Zero-Qwen-32B 的 47 分，并称使用约一半训练步数。每步采样与更新量不同，不能将其写成成本减少一半。§4.3 还指出训练奖励与验证正确率相关性可能很低，直接反对“奖励曲线涨了就说明泛化变好”的理解。</p>
-<h2 id="六贡献与局限">六、贡献与局限</h2>
+<p><strong>证据 1：<a href="https://arxiv.org/html/2503.14476v1#S4.T1">表1</a>，整体配方。</strong> GRPO 为 30，加入超长过滤后 36，再加 Clip-Higher 为 38，软长度惩罚后 41，token 级损失后 42，动态采样后 50。这是逐步累计实验，新增收益依赖已有组件；不能说动态采样在任何 GRPO 上都必定增加八分，也不能据此忽略组件交互。</p>
+<p><strong>证据 2：<a href="#llm-v6-097-figure-2">图2</a>，熵塌缩。</strong> 对照展示 Clip-Higher 后策略熵与准确率更有利的训练轨迹。它支持作者设置中探索退化被缓解，不是熵越大越好。<a href="#llm-v6-097-figure-7">图7</a> 和正文也指出过高熵可能对应乱码、重复与无效探索。 熵、长度、奖励与验证准确率是分开的监控量；先看每幅图的纵轴再判断变化，尤其不能用训练奖励上涨替代留出题正确率。</p>
+<!-- figure-ref-v6:start:097-f7-4 -->
+<p><a id="llm-v6-097-figure-7"></a></p>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/097-dapo-f7-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/097-dapo-f7-v6.png" width="2424" height="1624" alt="DAPO训练过程中回答长度、奖励、熵和平均概率的四组曲线" loading="lazy"></a><figcaption>原文图形摘引：Yu 等，2025，图7，PDF第10页；<a href="https://arxiv.org/html/2503.14476v1#S4.F7" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:097-f7-4 -->
+
+<!-- figure-ref-v6:start:097-f2-3-anchor -->
+<p><a id="llm-v6-097-figure-2"></a></p>
+<!-- figure-ref-v6:end:097-f2-3-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/097-dapo-f2.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/097-dapo-f2.png" width="2224" height="733" alt="DAPO启用Clip-Higher后的AIME准确率和生成策略熵曲线" loading="lazy"></a><figcaption>原实验图摘引：Yu 等，2025，图2；<a href="https://arxiv.org/html/2503.14476v1#S2.F2" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据 3：<a href="#llm-v6-097-figure-4">图4</a>、<a href="#llm-v6-097-figure-5">图5</a>，长度与奖励。</strong> token 级平均和超长处理使训练动态改善。尤其是截断样本过滤，不需要先发明复杂奖励模型，便能降低一种确定存在的标注混淆。但长度曲线健康只是诊断信号，不能代替独立正确率。</p>
+<!-- figure-ref-v6:start:097-f5-6 -->
+<p><a id="llm-v6-097-figure-5"></a></p>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/097-dapo-f5-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/097-dapo-f5-v6.png" width="2424" height="800" alt="DAPO超长回答过滤对AIME准确率和生成熵的影响" loading="lazy"></a><figcaption>原文图形摘引：Yu 等，2025，图5，PDF第7页；<a href="https://arxiv.org/html/2503.14476v1#S3.F5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:097-f5-6 -->
+
+<!-- figure-ref-v6:start:097-f4-5 -->
+<p><a id="llm-v6-097-figure-4"></a></p>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/097-dapo-f4-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/097-dapo-f4-v6.png" width="2424" height="800" alt="DAPO是否使用token级损失时生成熵及平均回答长度的变化" loading="lazy"></a><figcaption>原文图形摘引：Yu 等，2025，图4，PDF第6页；<a href="https://arxiv.org/html/2503.14476v1#S3.F4" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:097-f4-5 -->
+
+<p><strong>证据 4：<a href="#llm-v6-097-figure-6">图6</a>，动态采样效率。</strong> 作者报告额外采样没有显著拖慢该同步系统，并更快达到目标表现。解释涉及长尾回答主导生成等待时间，因此硬件利用与调度很重要；换成不同异步系统或更低有效组比例，结论可能改变。</p>
+<!-- figure-ref-v6:start:097-f6-1-anchor -->
+<p><a id="llm-v6-097-figure-6"></a></p>
+<!-- figure-ref-v6:end:097-f6-1-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/097-dapo-f6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/097-dapo-f6.png" width="1600" height="800" alt="DAPO启用动态采样前后达到相近AIME表现所需训练步数" loading="lazy"></a><figcaption>原实验图摘引：Yu 等，2025，图6；<a href="https://arxiv.org/html/2503.14476v1#S4.F6" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据 5：<a href="#llm-v6-097-figure-1">图1</a> 与 §4.3，步数与泛化。</strong> 作者比较 50 分与 R1-Zero-Qwen-32B 的 47 分，并称使用约一半训练步数。每步采样与更新量不同，不能将其写成成本减少一半。§4.3 还指出训练奖励与验证正确率相关性可能很低，直接反对“奖励曲线涨了就说明泛化变好”的理解。</p>
+<!-- figure-ref-v6:start:097-f1-7 -->
+<p><a id="llm-v6-097-figure-1"></a></p>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/097-dapo-f1-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/097-dapo-f1-v6.png" width="1800" height="720" alt="DAPO训练步数与AIME2024平均、任一及共识正确率" loading="lazy"></a><figcaption>原文图形摘引：Yu 等，2025，图1，PDF第1页；<a href="https://arxiv.org/html/2503.14476v1#S0.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:097-f1-7 -->
+
+<h2 id="五可验证数学与奖励边界限制配方泛化">五、可验证数学与奖励边界限制配方泛化</h2>
 <p>DAPO 的贡献是把长期推理 RL 的几个实现选择明确写成可检查的配方，同时提供代码与数据入口。新意既包括目标函数权重，也包括样本选择与奖励处理，不只是一个算法缩写。</p>
 <p>数学数据的易验收性是成功条件之一，迁移到开放式对话需要重新设计反馈。动态采样降低无信号更新，却可能漏掉需要课程或示范才能突破的难题。去除 KL 容许偏离，也需要检查通用能力是否受损；v1 的窄主评估不足以回答所有遗忘问题。</p>
 <p>本文的分析是，这些修改共同处理“学习信号在哪里损失了”。优秀实现应把原始采样数、有效题比例、截断率、总 token、更新数与验证成绩一起记录，才能区分优化更有效和只是使用了更多样本。</p>
-<h2 id="七建立理解">七、建立理解</h2>
-<p><strong>自构例子。</strong> 两条回答分别长 100 和 1000 token。先对回答平均时，短回答每 token 的系数是 <span class="reading-math" data-tex="1/200"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mn>200</mn></mrow><annotation encoding="application/x-tex">1/200</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/200</span></span></span></span></span>，长回答是 <span class="reading-math" data-tex="1/2000"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mn>2000</mn></mrow><annotation encoding="application/x-tex">1/2000</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/2000</span></span></span></span></span>；改成全 token 平均后，两者都是 <span class="reading-math" data-tex="1/1100"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mn>1100</mn></mrow><annotation encoding="application/x-tex">1/1100</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/1100</span></span></span></span></span>。这是权重重分配，并不是在长回答里新增了更准确的监督。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>熵塌缩、无信号题组、长回答梯度稀释、截断误罚</td>
-<td>非对称裁剪、动态采样、token 平均、软超长处理</td>
-<td>保留有效探索与比较信号，明确预算对奖励的影响</td>
-<td>表 1 的 30→50 与图 2/4/5/6</td>
-<td>额外采样与训练分布偏移；主验证集中于 AIME；步数不是总成本</td>
-</tr>
-</tbody></table></div>
-<h2 id="八自测与答案">八、自测与答案</h2>
+<h2 id="六将训练信号账本与部署推理账本分开核算">六、将训练信号账本与部署推理账本分开核算</h2>
+<p>用<a href="100-tts-protocol.html">推理评估协议</a>继续核算最终部署，但先保留本篇训练账本：被丢弃题组、长回答和奖励检查都花了资源。训练收敛步数与用户一次回答成本不能相互替代。</p>
+<h2 id="七自测与答案">七、自测与答案</h2>
 <p><strong>1. 动态采样为什么保留“同题有对有错”，而不是只保留正确回答？</strong></p>
 <p>答：组相对优势需要比较。全对或全错时结果奖励没有相对差异；混合成败同时提供提高成功轨迹、抑制失败轨迹的信号。只保留正确答案会破坏这种组内比较。</p>
 <p><strong>2. Clip-Higher 是否保证新策略概率不超过旧概率的 1.28 倍？</strong></p>
@@ -188,25 +210,21 @@
 
 [返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
 
-**论文**：Yu 等，*DAPO: An Open-Source LLM Reinforcement Learning System at Scale*，2025。[原文](https://arxiv.org/abs/2503.14476) · [正文 v1](https://arxiv.org/html/2503.14476v1) · [作者项目页](https://dapo-sia.github.io/) · [训练框架](https://github.com/volcengine/verl)。以下依据 v1 的公式、算法、训练动态和主表；没有独立复现训练，后续版本结果不混入本文。
+**论文**：Yu 等，*DAPO: An Open-Source LLM Reinforcement Learning System at Scale*，2025。[原文](https://arxiv.org/abs/2503.14476) · [正文 v1](https://arxiv.org/html/2503.14476v1) · [作者项目页](https://dapo-sia.github.io/) · [训练框架](https://github.com/volcengine/verl)。
 
-## 一、一分钟理解
+### 先接住前作的问题
 
-同样写着 GRPO，两个训练程序可能得到很不一样的模型。原因不一定在大公式：如果一批题全部答对或全部答错，就没有组内比较信号；如果长答案每个 token 的梯度被过度稀释，重复文本可能难以抑制；如果答案只是被长度上限截断，却被当成数学错误惩罚，奖励也会混入噪声。
+[DeepSeekMath](086-deepseekmath.md)以同题奖励差代替价值网络，本篇直接继承GRPO，追问全对全错、损失归约和截断处理如何削弱信号。[R1](094-r1.md)提供长推理历史对照，但步数更少不自动等于训练算力更省。
 
-DAPO 针对这些问题调整裁剪上下界、动态筛选有效题组、采用 token 级损失平均，并改进超长回答处理。在 Qwen2.5-32B 基础模型上，报告的 AIME 2024 平均正确率从朴素 GRPO 的 30 提高到 50。
+## 一、问题设定：同样GRPO公式下，学习信号会在哪些实现环节消失
 
-一句话总结：在可验证数学任务的长推理 RL 中，通过修改更新约束、采样分布、损失权重和长度奖励，改善训练效果与稳定性，代价是额外采样以及对任务、验证器和预算的依赖。
-
-## 二、问题设定与瓶颈
-
-这是在线、无模型、单语言策略的强化学习。状态是问题与已生成前缀，动作是 token，回答结束或达到上限后获得结果奖励。作者从 Qwen2.5-32B 基础模型出发，使用约 17K 道整理后的数学题。
+这是在线、无模型、单语言策略RL：状态是题目和前缀，动作是token，回答结束或到上限后得到结果奖励。起点为Qwen2.5-32B基础模型，约17K道整理数学题；问题是如何让有效比较信号真正进入更新，而非只保留同名目标公式。
 
 数据来源包括 AoPS 与竞赛题。作者将答案改成整数形式，以减少表达式解析与等价判断的错误。例如把最终形式为分式或根式的题改成询问若干系数之和。这能简化验收，但改题是否保留唯一解、形式约束是否充分，仍需检查；整数奖励不等于没有数据错误。
 
 正确答案奖励为 1，错误为 -1。组内标准化后，关注的是同题不同尝试的相对表现。完整方法去掉参考策略 KL 惩罚，允许较大行为变化；这个选择适用于作者的数学实验，不是对通用偏好训练中 KL 作用的普遍否定。
 
-## 三、四项修改分别改变什么
+## 二、分开裁剪、有效题组、token权重与长度奖励
 
 ### 1. 非对称裁剪：给成功的低概率动作多一点空间
 
@@ -219,6 +237,18 @@ DAPO 针对这些问题调整裁剪上下界、动态筛选有效题组、采用
 每题采样 $G$ 个回答，若正确数为零或 $G$，该题组被排除，继续采样直到有效批次填满。若标准化奖励全相同，常规实现中的优势没有有效比较信号；保留足够多混合成败的题，能避免批次里真正参与更新的样本不断变少。
 
 这不是“删除所有答对答案”。被保留的是整道题组，其中正确和错误回答都参与相对更新。它也改变了实际训练分布：更偏向当前模型有一定成功机会、但尚未完全掌握的题；极难题可能被长期排除。
+
+#### 动态采样不是均匀删题，而是在改变课程分布
+
+假设固定策略对题目 $q$ 的单次正确概率为 $p_q$，同组 $G$ 个回答条件独立。只有全错或全对会被筛除，所以题组的保留概率为
+
+$$a_G(p_q)=1-(1-p_q)^G-p_q^G.$$
+
+两项分别是全错、全对的概率。若原始抽题分布为 $d(q)$，反复抽取直到获得有效组，则保留题目的边际分布正比于 $d(q)a_G(p_q)$。这条式子描述选择效应，不是作者额外训练的难度预测器；实际有限采样、相关生成和变化中的策略都会影响近似。
+
+**原创教学核算。** 用实验的 $G=16$，$p_q=0.5$ 时保留概率约0.99997，几乎每组都有效；$p_q=0.01$ 或0.99时只有约0.14854。若反复采样同样成功率的题，平均约 $1/0.14854=6.73$ 组才得到一组有效数据。生成不是免费发生的：这相当于期望约108条回答换16条有效组内回答，还没计长度差异。
+
+公式揭示它同时淡化极难与极易题，而非只跳过已经掌握的题。论文[图6](#llm-v6-097-figure-6)在所测同步系统仍报告更快收敛，说明额外采样成本可能被减少无效更新和调度特性抵消；不能由该实例推成保留率趋近零时仍然高效。复现应该同时记录抽到的题分布与保留的题分布，才知道课程是否悄悄只剩中等难度。
 
 ### 3. Token 级平均：不要让长序列的每一步自动变轻
 
@@ -245,6 +275,14 @@ $$
 
 这是给定预算下的偏好，不是数学真值。错误原因的区分能降低奖励噪声，但过严长度惩罚也可能不利于真正需要长推导的题。
 
+**自构例子。** 两条回答分别长 100 和 1000 token。先对回答平均时，短回答每 token 的系数是 $1/200$，长回答是 $1/2000$；改成全 token 平均后，两者都是 $1/1100$。这是权重重分配，并不是在长回答里新增了更准确的监督。
+
+### 裁剪上界不是训练后概率的硬上限
+
+取正优势1、旧概率0.1，当前比率1.4时，未裁剪项1.4、上界裁剪项1.28，目标选较小者1.28，对这条样本的该分支不再提供继续推高的梯度。共享参数仍受其它token更新影响，所以更新后概率未必恰好停在0.128；必须把代理目标平台与参数可行域分开。
+
+## 三、固定旧策略采样并记入被丢弃题组的成本
+
 ```text
 输入：基础策略、数学问题与整数答案、目标有效批次
 在本轮采样期间固定旧策略
@@ -260,7 +298,9 @@ $$
 输出：更新后的推理策略
 ```
 
-## 四、实验如何验证
+## 四、用累计消融与动态曲线辨别组件交互
+
+累计表给的是在已有组件上的增量，熵与长度曲线解释训练动态；动态采样的废弃回答也必须计入总生成预算。
 
 | 项目 | v1 设置与解释 |
 |---|---|
@@ -275,19 +315,51 @@ $$
 | 预算限制 | 跨报告比较给训练步数，不能确认完整等 token、等算力或等调参预算 |
 | 不确定性 | 32 次回答重复有助减少采样波动；正文未给多个独立完整训练种子的主表置信区间 |
 
-## 五、结果：看累计表，也看训练动态
+**证据 1：[表1](https://arxiv.org/html/2503.14476v1#S4.T1)，整体配方。** GRPO 为 30，加入超长过滤后 36，再加 Clip-Higher 为 38，软长度惩罚后 41，token 级损失后 42，动态采样后 50。这是逐步累计实验，新增收益依赖已有组件；不能说动态采样在任何 GRPO 上都必定增加八分，也不能据此忽略组件交互。
 
-**证据 1：表 1，整体配方。** GRPO 为 30，加入超长过滤后 36，再加 Clip-Higher 为 38，软长度惩罚后 41，token 级损失后 42，动态采样后 50。这是逐步累计实验，新增收益依赖已有组件；不能说动态采样在任何 GRPO 上都必定增加八分，也不能据此忽略组件交互。
+**证据 2：[图2](#llm-v6-097-figure-2)，熵塌缩。** 对照展示 Clip-Higher 后策略熵与准确率更有利的训练轨迹。它支持作者设置中探索退化被缓解，不是熵越大越好。[图7](#llm-v6-097-figure-7) 和正文也指出过高熵可能对应乱码、重复与无效探索。 熵、长度、奖励与验证准确率是分开的监控量；先看每幅图的纵轴再判断变化，尤其不能用训练奖励上涨替代留出题正确率。
 
-**证据 2：图 2，熵塌缩。** 对照展示 Clip-Higher 后策略熵与准确率更有利的训练轨迹。它支持作者设置中探索退化被缓解，不是熵越大越好。图 7 和正文也指出过高熵可能对应乱码、重复与无效探索。
+&lt;!-- figure-ref-v6:start:097-f7-4 --&gt;
+&lt;a id=&quot;llm-v6-097-figure-7&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/097-dapo-f7-v6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/097-dapo-f7-v6.png&quot; width=&quot;2424&quot; height=&quot;1624&quot; alt=&quot;DAPO训练过程中回答长度、奖励、熵和平均概率的四组曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原文图形摘引：Yu 等，2025，图7，PDF第10页；&lt;a href=&quot;https://arxiv.org/html/2503.14476v1#S4.F7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:097-f7-4 --&gt;
 
-**证据 3：图 4、图 5，长度与奖励。** token 级平均和超长处理使训练动态改善。尤其是截断样本过滤，不需要先发明复杂奖励模型，便能降低一种确定存在的标注混淆。但长度曲线健康只是诊断信号，不能代替独立正确率。
+&lt;!-- figure-ref-v6:start:097-f2-3-anchor --&gt;
+&lt;a id=&quot;llm-v6-097-figure-2&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:097-f2-3-anchor --&gt;
 
-**证据 4：图 6，动态采样效率。** 作者报告额外采样没有显著拖慢该同步系统，并更快达到目标表现。解释涉及长尾回答主导生成等待时间，因此硬件利用与调度很重要；换成不同异步系统或更低有效组比例，结论可能改变。
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/097-dapo-f2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/097-dapo-f2.png&quot; width=&quot;2224&quot; height=&quot;733&quot; alt=&quot;DAPO启用Clip-Higher后的AIME准确率和生成策略熵曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原实验图摘引：Yu 等，2025，图2；&lt;a href=&quot;https://arxiv.org/html/2503.14476v1#S2.F2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-**证据 5：图 1 与 §4.3，步数与泛化。** 作者比较 50 分与 R1-Zero-Qwen-32B 的 47 分，并称使用约一半训练步数。每步采样与更新量不同，不能将其写成成本减少一半。§4.3 还指出训练奖励与验证正确率相关性可能很低，直接反对“奖励曲线涨了就说明泛化变好”的理解。
+**证据 3：[图4](#llm-v6-097-figure-4)、[图5](#llm-v6-097-figure-5)，长度与奖励。** token 级平均和超长处理使训练动态改善。尤其是截断样本过滤，不需要先发明复杂奖励模型，便能降低一种确定存在的标注混淆。但长度曲线健康只是诊断信号，不能代替独立正确率。
 
-## 六、贡献与局限
+&lt;!-- figure-ref-v6:start:097-f5-6 --&gt;
+&lt;a id=&quot;llm-v6-097-figure-5&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/097-dapo-f5-v6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/097-dapo-f5-v6.png&quot; width=&quot;2424&quot; height=&quot;800&quot; alt=&quot;DAPO超长回答过滤对AIME准确率和生成熵的影响&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原文图形摘引：Yu 等，2025，图5，PDF第7页；&lt;a href=&quot;https://arxiv.org/html/2503.14476v1#S3.F5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:097-f5-6 --&gt;
+
+&lt;!-- figure-ref-v6:start:097-f4-5 --&gt;
+&lt;a id=&quot;llm-v6-097-figure-4&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/097-dapo-f4-v6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/097-dapo-f4-v6.png&quot; width=&quot;2424&quot; height=&quot;800&quot; alt=&quot;DAPO是否使用token级损失时生成熵及平均回答长度的变化&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原文图形摘引：Yu 等，2025，图4，PDF第6页；&lt;a href=&quot;https://arxiv.org/html/2503.14476v1#S3.F4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:097-f4-5 --&gt;
+
+**证据 4：[图6](#llm-v6-097-figure-6)，动态采样效率。** 作者报告额外采样没有显著拖慢该同步系统，并更快达到目标表现。解释涉及长尾回答主导生成等待时间，因此硬件利用与调度很重要；换成不同异步系统或更低有效组比例，结论可能改变。
+
+&lt;!-- figure-ref-v6:start:097-f6-1-anchor --&gt;
+&lt;a id=&quot;llm-v6-097-figure-6&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:097-f6-1-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/097-dapo-f6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/097-dapo-f6.png&quot; width=&quot;1600&quot; height=&quot;800&quot; alt=&quot;DAPO启用动态采样前后达到相近AIME表现所需训练步数&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原实验图摘引：Yu 等，2025，图6；&lt;a href=&quot;https://arxiv.org/html/2503.14476v1#S4.F6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+**证据 5：[图1](#llm-v6-097-figure-1) 与 §4.3，步数与泛化。** 作者比较 50 分与 R1-Zero-Qwen-32B 的 47 分，并称使用约一半训练步数。每步采样与更新量不同，不能将其写成成本减少一半。§4.3 还指出训练奖励与验证正确率相关性可能很低，直接反对“奖励曲线涨了就说明泛化变好”的理解。
+
+&lt;!-- figure-ref-v6:start:097-f1-7 --&gt;
+&lt;a id=&quot;llm-v6-097-figure-1&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/097-dapo-f1-v6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/097-dapo-f1-v6.png&quot; width=&quot;1800&quot; height=&quot;720&quot; alt=&quot;DAPO训练步数与AIME2024平均、任一及共识正确率&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原文图形摘引：Yu 等，2025，图1，PDF第1页；&lt;a href=&quot;https://arxiv.org/html/2503.14476v1#S0.F1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:097-f1-7 --&gt;
+
+## 五、可验证数学与奖励边界限制配方泛化
+
+五个前置概念：**策略熵** 描述输出分布的分散程度；**重要性比率** 比较新旧策略对已采动作的概率；**组相对优势** 使用同题候选作基线；**损失归约** 决定不同样本与 token 的权重；**奖励塑形** 在任务结果之外加入辅助反馈。
 
 DAPO 的贡献是把长期推理 RL 的几个实现选择明确写成可检查的配方，同时提供代码与数据入口。新意既包括目标函数权重，也包括样本选择与奖励处理，不只是一个算法缩写。
 
@@ -295,17 +367,11 @@ DAPO 的贡献是把长期推理 RL 的几个实现选择明确写成可检查�
 
 本文的分析是，这些修改共同处理“学习信号在哪里损失了”。优秀实现应把原始采样数、有效题比例、截断率、总 token、更新数与验证成绩一起记录，才能区分优化更有效和只是使用了更多样本。
 
-## 七、建立理解
+## 六、将训练信号账本与部署推理账本分开核算
 
-**自构例子。** 两条回答分别长 100 和 1000 token。先对回答平均时，短回答每 token 的系数是 $1/200$，长回答是 $1/2000$；改成全 token 平均后，两者都是 $1/1100$。这是权重重分配，并不是在长回答里新增了更准确的监督。
+用[推理评估协议](100-tts-protocol.md)继续核算最终部署，但先保留本篇训练账本：被丢弃题组、长回答和奖励检查都花了资源。训练收敛步数与用户一次回答成本不能相互替代。
 
-五个前置概念：**策略熵** 描述输出分布的分散程度；**重要性比率** 比较新旧策略对已采动作的概率；**组相对优势** 使用同题候选作基线；**损失归约** 决定不同样本与 token 的权重；**奖励塑形** 在任务结果之外加入辅助反馈。
-
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 熵塌缩、无信号题组、长回答梯度稀释、截断误罚 | 非对称裁剪、动态采样、token 平均、软超长处理 | 保留有效探索与比较信号，明确预算对奖励的影响 | 表 1 的 30→50 与图 2/4/5/6 | 额外采样与训练分布偏移；主验证集中于 AIME；步数不是总成本 |
-
-## 八、自测与答案
+## 七、自测与答案
 
 **1. 动态采样为什么保留“同题有对有错”，而不是只保留正确回答？**
 

@@ -42,19 +42,17 @@
                 <span class="text-gray-500">知识蒸馏：让学生学习教师的概率关系，而不只复制答案</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="91d679349105b2482968c857b6b4d749821946152da28edcecce08f08b061943"><h1>010｜知识蒸馏：让学生学习教师的概率关系，而不只复制答案</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="73fd5858b86388a1b079c44d47dbf5de25ec2ef6dbabef995eef8c535b3256d8"><h1>010｜知识蒸馏：让学生学习教师的概率关系，而不只复制答案</h1>
 <p><a href="index.html">目录</a> · <a href="009-adam.html">上一篇</a> · <a href="011-bpe.html">下一篇</a></p>
 <p><strong>论文</strong>：Geoffrey Hinton、Oriol Vinyals、Jeff Dean，<em>Distilling the Knowledge in a Neural Network</em>，2015。<a href="https://arxiv.org/abs/1503.02531">原文</a> · <a href="https://arxiv.org/pdf/1503.02531">PDF</a>。本文以温度软目标、MNIST 和语音实验为主；语言模型中的序列蒸馏是后续应用，不把它与原论文分类蒸馏混为一谈。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>教师把图片判成数字 3，但它也可能给 8 较高概率、给数字 1 极低概率。一个硬标签只告诉学生“正确类是 3”，软分布还传递哪些类别更容易混淆。蒸馏让较小或较便宜的学生拟合这些概率关系，从而把教师或集成模型的部分能力转移到单模型。</p>
-<p>提高 softmax 温度会让分布更平缓，使非最高类别的信息更可见。论文展示分类和语音系统的转移效果。它并非保证学生超过教师，也不是教师生成任何内容都值得学习；成本降低主要发生在部署阶段，教师训练和生成软目标仍然需要资源。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="003-rnnlm.html">RNNLM</a>的模型组合展示了互补预测信息，却留下部署时运行多个模型的代价。本篇借这个共同问题切到分类蒸馏：能否把教师的概率关系交给一个便宜学生？这是系统问题的教学联系，原论文实验以 MNIST 与语音为主，并非对 RNNLM 架构的直接修改。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>理解本篇需要掌握 logits、温度、交叉熵、教师冻结与模型容量。它们分别对应分布前的分数、平滑尺度、匹配目标、监督来源和可表达信息上限。能把这五项讲清楚，才不会把蒸馏理解成简单“抄答案”。</p>
-<h2 id="背景集成有用但执行昂贵">背景：集成有用，但执行昂贵</h2>
-<p>多个模型集成可以平均个体误差，却要求推理时运行多个网络。若直接训练一个同样规模的学生只拟合硬标签，它未必重现集成的决策结构。蒸馏把教师输出作为额外监督，使学生接触教师在训练中学到的类间关系。</p>
-<p>“知识”在这里首先是预测分布里的规律，而不是一个可独立列出的事实数据库。教师可能掌握有用归纳偏置，也可能包含错误和偏见。学生拟合分布的能力又受容量和迁移数据覆盖限制，所以转移不是无损复制。</p>
+<h2 id="一问题设定便宜学生怎样接收集成模型的类别混淆结构">一、问题设定：便宜学生怎样接收集成模型的类别混淆结构</h2>
+<p>多个模型集成能平均部分个体误差，却要求推理时运行多个网络。若教师把数字3判得最像3、同时更容易与8而非1混淆，只给学生硬标签会抹去这层关系。本篇问的是：一个较小学生能否从完整软分布学到集成决策结构，并把主要成本留在训练阶段？</p>
 <p>迁移数据可以有标签，也可以仅由输入与教师软输出构成。有硬标签时，可以同时保留真实监督，防止完全跟随教师错误。使用未标注数据并不意味着没有监督来源，教师训练所用的知识与资源仍然存在。</p>
-<h2 id="方法温度和两个目标">方法：温度和两个目标</h2>
+<h2 id="二从温度分布推导软硬目标与梯度尺度">二、从温度分布推导软硬目标与梯度尺度</h2>
 <p>教师 logits 为 <span class="reading-math" data-tex="z^T"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>z</mi><mi>T</mi></msup></mrow><annotation encoding="application/x-tex">z^T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8413em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span></span></span></span></span>，学生 logits 为 <span class="reading-math" data-tex="z^S"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>z</mi><mi>S</mi></msup></mrow><annotation encoding="application/x-tex">z^S</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8413em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05764em;">S</span></span></span></span></span></span></span></span></span></span></span></span>，温度为 <span class="reading-math" data-tex="\tau"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>τ</mi></mrow><annotation encoding="application/x-tex">\tau</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span></span></span></span></span>：</p>
 <p><span class="reading-math" data-tex="p_i^{(\tau)}=\frac{e^{z_i^T/\tau}}{\sum_j e^{z_j^T/\tau}},\qquad
 q_i^{(\tau)}=\frac{e^{z_i^S/\tau}}{\sum_j e^{z_j^S/\tau}}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msubsup><mi>p</mi><mi>i</mi><mrow><mo stretchy="false">(</mo><mi>τ</mi><mo stretchy="false">)</mo></mrow></msubsup><mo>=</mo><mfrac><msup><mi>e</mi><mrow><msubsup><mi>z</mi><mi>i</mi><mi>T</mi></msubsup><mi mathvariant="normal">/</mi><mi>τ</mi></mrow></msup><mrow><munder><mo>∑</mo><mi>j</mi></munder><msup><mi>e</mi><mrow><msubsup><mi>z</mi><mi>j</mi><mi>T</mi></msubsup><mi mathvariant="normal">/</mi><mi>τ</mi></mrow></msup></mrow></mfrac><mo separator="true">,</mo><mspace width="2em"/><msubsup><mi>q</mi><mi>i</mi><mrow><mo stretchy="false">(</mo><mi>τ</mi><mo stretchy="false">)</mo></mrow></msubsup><mo>=</mo><mfrac><msup><mi>e</mi><mrow><msubsup><mi>z</mi><mi>i</mi><mi>S</mi></msubsup><mi mathvariant="normal">/</mi><mi>τ</mi></mrow></msup><mrow><munder><mo>∑</mo><mi>j</mi></munder><msup><mi>e</mi><mrow><msubsup><mi>z</mi><mi>j</mi><mi>S</mi></msubsup><mi mathvariant="normal">/</mi><mi>τ</mi></mrow></msup></mrow></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">p_i^{(\tau)}=\frac{e^{z_i^T/\tau}}{\sum_j e^{z_j^T/\tau}},\qquad
@@ -66,6 +64,14 @@ q_i^{(\tau)}=\frac{e^{z_i^S/\tau}}{\sum_j e^{z_j^S/\tau}}.</annotation></semanti
 <p><span class="reading-math" data-tex="H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>H</mi></mrow><annotation encoding="application/x-tex">H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span></span></span> 是交叉熵，<span class="reading-math" data-tex="y"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">y</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span></span></span></span> 是真实硬标签，<span class="reading-math" data-tex="\lambda"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi></mrow><annotation encoding="application/x-tex">\lambda</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">λ</span></span></span></span></span> 控制软硬监督的权重。教师通常冻结，学生更新；软目标双方使用相同温度，普通预测时再回到温度 1。若无硬标签，可只保留软目标项。</p>
 <p><span class="reading-math" data-tex="\tau^2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>τ</mi><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">\tau^2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span></span> 补偿温度增大带来的梯度尺度变化，使调温度时两项相对影响不至于无意大幅改变。它不是关于信息量的神秘常数，而是由 softmax 梯度近似推导出的尺度修正。</p>
 <p>高温极限下，在逐样本 logits 做适当中心化等条件下，分布匹配与 logits 差的平方拟合相关。条件非常重要：softmax 对所有 logits 同加常数不敏感，直接无条件声称“蒸馏等价于 MSE”并不准确。</p>
+<h3 id="温度平方不是额外知识而是链式法则">温度平方不是额外知识，而是链式法则</h3>
+<p>令学生logit为 <span class="reading-math" data-tex="z_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>z</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">z_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，教师为 <span class="reading-math" data-tex="v_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>v</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">v_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。这里 <span class="reading-math" data-tex="p,q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo separator="true">,</mo><mi>q</mi></mrow><annotation encoding="application/x-tex">p,q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span></span></span></span> 分别为同一温度 <span class="reading-math" data-tex="\tau&gt;0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>τ</mi><mo>&gt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\tau&gt;0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span> 下的教师、学生分布，<span class="reading-math" data-tex="K"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>K</mi></mrow><annotation encoding="application/x-tex">K</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">K</span></span></span></span></span> 是类别数，横线表示对所有类别求平均。软交叉熵梯度是 <span class="reading-math" data-tex="(q_i-p_i)/\tau"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><msub><mi>q</mi><mi>i</mi></msub><mo>−</mo><msub><mi>p</mi><mi>i</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mi>τ</mi></mrow><annotation encoding="application/x-tex">(q_i-p_i)/\tau</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span></span></span></span></span>；当温度远大于logit尺度时，<span class="reading-math" data-tex="q_i\approx1/K+(z_i-\bar z)/(K\tau)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>q</mi><mi>i</mi></msub><mo>≈</mo><mn>1</mn><mi mathvariant="normal">/</mi><mi>K</mi><mo>+</mo><mo stretchy="false">(</mo><msub><mi>z</mi><mi>i</mi></msub><mo>−</mo><mover accent="true"><mi>z</mi><mo>ˉ</mo></mover><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mi>K</mi><mi>τ</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">q_i\approx1/K+(z_i-\bar z)/(K\tau)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6776em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/</span><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">/</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mclose">)</span></span></span></span></span>。两分布相减再除一次温度，得到梯度约为 <span class="reading-math" data-tex="[(z_i-\bar z)-(v_i-\bar v)]/(K\tau^2)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">[</mo><mo stretchy="false">(</mo><msub><mi>z</mi><mi>i</mi></msub><mo>−</mo><mover accent="true"><mi>z</mi><mo>ˉ</mo></mover><mo stretchy="false">)</mo><mo>−</mo><mo stretchy="false">(</mo><msub><mi>v</mi><mi>i</mi></msub><mo>−</mo><mover accent="true"><mi>v</mi><mo>ˉ</mo></mover><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mi>K</mi><msup><mi>τ</mi><mn>2</mn></msup><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">[(z_i-\bar z)-(v_i-\bar v)]/(K\tau^2)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="mclose">)]</span><span class="mord">/</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>。乘 <span class="reading-math" data-tex="\tau^2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>τ</mi><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">\tau^2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span></span> 才保持高温近似中的尺度。中心化不可省略，因为将所有logit同加常数并不改变softmax。</p>
+<p><strong>教学反例。</strong> 教师logit为 <span class="reading-math" data-tex="(2,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>2</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(2,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span>，学生为 <span class="reading-math" data-tex="(12,10)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>12</mn><mo separator="true">,</mo><mn>10</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(12,10)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">12</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">10</span><span class="mclose">)</span></span></span></span></span>。两者任何相同温度下的概率完全一致，蒸馏交叉熵梯度为零；直接计算未中心化MSE却得到每维100的平方误差。若另一个学生为 <span class="reading-math" data-tex="(1,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span>，虽然第一类仍是答案，概率关系并未匹配。蒸馏学的是分布形状，既不要求绝对logit相等，也不等于只模仿最高类。</p>
+<p>构造三类问题，硬标签为第一类。两个教师分布分别为 <span class="reading-math" data-tex="(0.9,0.09,0.01)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0.9</mn><mo separator="true">,</mo><mn>0.09</mn><mo separator="true">,</mo><mn>0.01</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0.9,0.09,0.01)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.9</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.09</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.01</span><span class="mclose">)</span></span></span></span></span> 和 <span class="reading-math" data-tex="(0.9,0.01,0.09)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0.9</mn><mo separator="true">,</mo><mn>0.01</mn><mo separator="true">,</mo><mn>0.09</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0.9,0.01,0.09)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.9</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.01</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.09</span><span class="mclose">)</span></span></span></span></span>，最高概率和硬答案相同，但混淆结构不同。学生只学硬标签无法区分二者，拟合软目标则会受到不同梯度影响。</p>
+<h3 id="把学生的一步梯度接到非最高类">把学生的一步梯度接到非最高类</h3>
+<p>温度设为1、学生暂时给三类各三分之一概率。对正文的两个教师，第二类梯度分别为1/3−0.09和1/3−0.01，下降方向相同而力度不同；第三类恰好交换。硬标签训练会对两类给相同梯度，软目标才保留“哪一种错误更像”的区别。教师若判断失真，这个差异也会被传给学生。</p>
+<p>教法联系：<a href="https://lilianweng.github.io/posts/2023-01-10-inference-optimization/">Lilian Weng的Large Transformer Model Inference Optimization</a>。算例为本文自构。</p>
+<h2 id="三冻结教师分别记录迁移训练和学生部署成本">三、冻结教师，分别记录迁移训练和学生部署成本</h2>
 <pre><code class="language-text">输入：冻结教师或教师集成、迁移输入、可选硬标签
 初始化学生参数
 重复训练：
@@ -78,8 +84,10 @@ q_i^{(\tau)}=\frac{e^{z_i^S/\tau}}{\sum_j e^{z_j^S/\tau}}.</annotation></semanti
     更新学生参数
 部署：仅运行学生，使用约定的正常预测温度
 </code></pre>
-<p>数学上匹配输出分布；机制上让部署模型利用更丰富监督；实验上观察分类错误、帧准确率或 WER。学生模型大小、单次推理成本和总训练成本是不同量，不能用一个“压缩率”替代全部。</p>
-<h2 id="实验与证据">实验与证据</h2>
+<h2 id="四对照-mnist语音指标与迁移集覆盖条件">四、对照 MNIST、语音指标与迁移集覆盖条件</h2>
+<p>学生模型大小、单次推理成本和总训练成本是不同量，不能用一个“压缩率”替代全部。</p>
+<p>输出分布匹配是否有效，要同时看教师、硬标签学生和蒸馏学生；特殊测试集调偏置条件不能省略。</p>
+<p><strong>一个需要保留的实验条件。</strong> §3删除迁移集中的数字3后，再提高该类输出偏置得到更好成绩，偏置值是在测试集上优化的。因此这项探针可以说明软目标传递跨类别信息，却不能把调整后的数字当成严格未触及测试标签的部署泛化成绩。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -116,37 +124,29 @@ q_i^{(\tau)}=\frac{e^{z_i^S/\tau}}{\sum_j e^{z_j^S/\tau}}.</annotation></semanti
 <td>独立教师用于集成，不等同于每个学生配置有完整置信区间</td>
 </tr>
 </tbody></table></div>
-<p>**证据一，第 2 节与第 2.1 节。**温度分布、梯度尺度和高温近似说明机制。它们支持为何软目标可提供不同监督，不证明温度越高越好。</p>
-<p>**证据二，第 3 节 MNIST。**文中教师有 67 个测试错误，较小硬标签模型为 146，蒸馏学生为 74。学生结构与正则方式具有具体设置，因此这一结果说明有效转移，不能直接概括为任意小模型都能达到教师性能。</p>
-<p>**证据三，表 1 语音结果。**基线帧准确率 58.9%、WER 10.9%；10 模型集成为 61.1%、10.7%；蒸馏单模型为 60.8%、10.7%。帧指标改善更明显，WER 的变化较小，说明代理训练目标与最终系统指标并不一一对应。</p>
-<p>表 5 进一步讨论减少学生迁移数据时的软目标价值，但教师使用过更完整训练数据。若只说“学生用 3% 数据就接近全数据表现”，却不说明软标签来自全数据教师，就会把知识来源从成本账本中抹去。</p>
-<h2 id="教学例子软标签多提供了什么">教学例子：软标签多提供了什么</h2>
-<p>构造三类问题，硬标签为第一类。两个教师分布分别为 <span class="reading-math" data-tex="(0.9,0.09,0.01)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0.9</mn><mo separator="true">,</mo><mn>0.09</mn><mo separator="true">,</mo><mn>0.01</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0.9,0.09,0.01)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.9</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.09</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.01</span><span class="mclose">)</span></span></span></span></span> 和 <span class="reading-math" data-tex="(0.9,0.01,0.09)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0.9</mn><mo separator="true">,</mo><mn>0.01</mn><mo separator="true">,</mo><mn>0.09</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0.9,0.01,0.09)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.9</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.01</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.09</span><span class="mclose">)</span></span></span></span></span>，最高概率和硬答案相同，但混淆结构不同。学生只学硬标签无法区分二者，拟合软目标则会受到不同梯度影响。</p>
+<p><strong>证据一，第 2 节与第 2.1 节。</strong>温度分布、梯度尺度和高温近似说明机制。它们支持为何软目标可提供不同监督，不证明温度越高越好。</p>
+<p><strong>证据二，第 3 节 MNIST。</strong>文中教师有 67 个测试错误，较小硬标签模型为 146，蒸馏学生为 74。学生结构与正则方式具有具体设置，因此这一结果说明有效转移，不能直接概括为任意小模型都能达到教师性能。</p>
+<p><strong>证据三，<a href="#llm-v6-010-table-1">表1</a> 语音结果。</strong>基线帧准确率 58.9%、WER 10.9%；10 模型集成为 61.1%、10.7%；蒸馏单模型为 60.8%、10.7%。帧指标改善更明显，WER 的变化较小，说明代理训练目标与最终系统指标并不一一对应。</p>
+<!-- figure-ref-v6:start:010-t1-1-anchor -->
+<p><a id="llm-v6-010-table-1"></a></p>
+<!-- figure-ref-v6:end:010-t1-1-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/010-distillation-t1.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/010-distillation-t1.png" width="1344" height="300" alt="教师集成、基线和蒸馏学生的帧准确率与词错误率" loading="lazy"></a><figcaption>实验结果表摘引：Geoffrey Hinton、Oriol Vinyals、Jeff Dean，2015，表1，PDF第5页；<a href="https://arxiv.org/pdf/1503.02531#page=5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><a href="https://arxiv.org/html/1503.02531#S6.T5">表5</a> 进一步讨论减少学生迁移数据时的软目标价值，但教师使用过更完整训练数据。若只说“学生用 3% 数据就接近全数据表现”，却不说明软标签来自全数据教师，就会把知识来源从成本账本中抹去。</p>
+<h2 id="五学生容量和教师错误限制了转移内容">五、学生容量和教师错误限制了转移内容</h2>
 <p>如果第二类确实与第一类在输入特征上相近，这种结构可能帮助泛化；如果教师只是系统性混淆某个人群或罕见模式，学生也可能继承错误。软监督更丰富，不等于所有丰富信息都正确。</p>
 <p>再让学生只有极低容量，无法同时表达教师所有细节。它必须选择拟合哪些模式，温度便影响哪些概率差异更受重视。论文观察到容量与合适温度有关，这与“知识完整装进更小模型”的无损压缩想象不同。</p>
-<h2 id="与语言模型蒸馏的联系">与语言模型蒸馏的联系</h2>
-<p>将相同思想用于语言模型，可以拟合每个位置的词分布，也可以只训练教师生成的完整答案。前者保留更细的概率监督，后者更容易在只提供文本输出的接口中实施；二者可获得的信息和成本不同，不能统称后就假设完全等价。</p>
-<p>教师生成的推理轨迹还可能包含错误中间步骤。即便最终答案正确，学生也可能学习无效或不忠实的过程。因此后续推理蒸馏需要过滤、验证与独立评估，而原分类论文不自动提供这些保障。</p>
-<h2 id="贡献与边界">贡献与边界</h2>
-<p>蒸馏把昂贵训练和便宜部署拆开，并强调预测分布中的非最高类别信息。代价是教师成本、迁移数据覆盖以及容量限制；作者关于 specialist 集成的进一步讨论也不是今天稀疏 MoE 的同义词。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>强教师或集成推理昂贵，硬标签丢失类别混淆结构</td>
-<td>用温度软目标及可选硬标签训练学生</td>
-<td>学生从非最高类别的相对概率获得更丰富监督</td>
-<td>§3 MNIST、表1语音、表5迁移数据分析</td>
-<td>教师与软目标生成仍需资源，学生受容量和数据覆盖限制，也可能继承教师错误</td>
-</tr>
-</tbody></table></div>
+<p>代价是教师成本、迁移数据覆盖以及容量限制；作者关于 specialist 集成的进一步讨论也不是今天稀疏 MoE 的同义词。</p>
+<h2 id="六把本篇机制再推进一步">六、把本篇机制再推进一步</h2>
+<details>
+<summary>1. 两个教师硬预测相同但次高类别不同，是否能用同一份硬标签蒸馏重现它们？</summary>
+
+<p><strong>参考答案</strong>：不能重现这种差异。硬标签丢掉非最高类别的相对概率，而软目标会给学生不同梯度。若接口只返回文本或类别，就无法假装获得完整分布监督；后续采用生成答案的蒸馏可以有用，但应单独说明它保留和丢失的信息。</p>
+</details>
+
+<h2 id="七从分类分布匹配走向语言模型轨迹监督">七、从分类分布匹配走向语言模型轨迹监督</h2>
+<p>学生节省的是部署资源，教师与迁移数据仍有前期成本。用<a href="042-switch.html">Switch Transformer</a>的稀疏教师蒸馏继续核对“教师增益保留比例”；用<a href="074-qlora.html">QLoRA</a>比较另一种压缩与适配组合，勿把两类成本混成一个压缩率。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 为什么软目标可能比硬标签提供更多训练信息？</strong></p>
 <p>它同时描述非最高类别之间的相对关系，同样硬答案的输入可以有不同混淆结构。学生由此获得更多梯度约束。但信息来自教师，错误关系也可能传递，所以丰富不等于正确。</p>
@@ -165,21 +165,17 @@ q_i^{(\tau)}=\frac{e^{z_i^S/\tau}}{\sum_j e^{z_j^S/\tau}}.</annotation></semanti
 
 **论文**：Geoffrey Hinton、Oriol Vinyals、Jeff Dean，*Distilling the Knowledge in a Neural Network*，2015。[原文](https://arxiv.org/abs/1503.02531) · [PDF](https://arxiv.org/pdf/1503.02531)。本文以温度软目标、MNIST 和语音实验为主；语言模型中的序列蒸馏是后续应用，不把它与原论文分类蒸馏混为一谈。
 
-## 一分钟理解
+### 先接住前作的问题
 
-教师把图片判成数字 3，但它也可能给 8 较高概率、给数字 1 极低概率。一个硬标签只告诉学生“正确类是 3”，软分布还传递哪些类别更容易混淆。蒸馏让较小或较便宜的学生拟合这些概率关系，从而把教师或集成模型的部分能力转移到单模型。
+[RNNLM](003-rnnlm.md)的模型组合展示了互补预测信息，却留下部署时运行多个模型的代价。本篇借这个共同问题切到分类蒸馏：能否把教师的概率关系交给一个便宜学生？这是系统问题的教学联系，原论文实验以 MNIST 与语音为主，并非对 RNNLM 架构的直接修改。
 
-提高 softmax 温度会让分布更平缓，使非最高类别的信息更可见。论文展示分类和语音系统的转移效果。它并非保证学生超过教师，也不是教师生成任何内容都值得学习；成本降低主要发生在部署阶段，教师训练和生成软目标仍然需要资源。
+## 一、问题设定：便宜学生怎样接收集成模型的类别混淆结构
 
-## 背景：集成有用，但执行昂贵
-
-多个模型集成可以平均个体误差，却要求推理时运行多个网络。若直接训练一个同样规模的学生只拟合硬标签，它未必重现集成的决策结构。蒸馏把教师输出作为额外监督，使学生接触教师在训练中学到的类间关系。
-
-“知识”在这里首先是预测分布里的规律，而不是一个可独立列出的事实数据库。教师可能掌握有用归纳偏置，也可能包含错误和偏见。学生拟合分布的能力又受容量和迁移数据覆盖限制，所以转移不是无损复制。
+多个模型集成能平均部分个体误差，却要求推理时运行多个网络。若教师把数字3判得最像3、同时更容易与8而非1混淆，只给学生硬标签会抹去这层关系。本篇问的是：一个较小学生能否从完整软分布学到集成决策结构，并把主要成本留在训练阶段？
 
 迁移数据可以有标签，也可以仅由输入与教师软输出构成。有硬标签时，可以同时保留真实监督，防止完全跟随教师错误。使用未标注数据并不意味着没有监督来源，教师训练所用的知识与资源仍然存在。
 
-## 方法：温度和两个目标
+## 二、从温度分布推导软硬目标与梯度尺度
 
 教师 logits 为 $z^T$，学生 logits 为 $z^S$，温度为 $\tau$：
 
@@ -201,6 +197,22 @@ $\tau^2$ 补偿温度增大带来的梯度尺度变化，使调温度时两项�
 
 高温极限下，在逐样本 logits 做适当中心化等条件下，分布匹配与 logits 差的平方拟合相关。条件非常重要：softmax 对所有 logits 同加常数不敏感，直接无条件声称“蒸馏等价于 MSE”并不准确。
 
+### 温度平方不是额外知识，而是链式法则
+
+令学生logit为 $z_i$，教师为 $v_i$。这里 $p,q$ 分别为同一温度 $\tau&gt;0$ 下的教师、学生分布，$K$ 是类别数，横线表示对所有类别求平均。软交叉熵梯度是 $(q_i-p_i)/\tau$；当温度远大于logit尺度时，$q_i\approx1/K+(z_i-\bar z)/(K\tau)$。两分布相减再除一次温度，得到梯度约为 $[(z_i-\bar z)-(v_i-\bar v)]/(K\tau^2)$。乘 $\tau^2$ 才保持高温近似中的尺度。中心化不可省略，因为将所有logit同加常数并不改变softmax。
+
+**教学反例。** 教师logit为 $(2,0)$，学生为 $(12,10)$。两者任何相同温度下的概率完全一致，蒸馏交叉熵梯度为零；直接计算未中心化MSE却得到每维100的平方误差。若另一个学生为 $(1,0)$，虽然第一类仍是答案，概率关系并未匹配。蒸馏学的是分布形状，既不要求绝对logit相等，也不等于只模仿最高类。
+
+构造三类问题，硬标签为第一类。两个教师分布分别为 $(0.9,0.09,0.01)$ 和 $(0.9,0.01,0.09)$，最高概率和硬答案相同，但混淆结构不同。学生只学硬标签无法区分二者，拟合软目标则会受到不同梯度影响。
+
+### 把学生的一步梯度接到非最高类
+
+温度设为1、学生暂时给三类各三分之一概率。对正文的两个教师，第二类梯度分别为1/3−0.09和1/3−0.01，下降方向相同而力度不同；第三类恰好交换。硬标签训练会对两类给相同梯度，软目标才保留“哪一种错误更像”的区别。教师若判断失真，这个差异也会被传给学生。
+
+教法联系：[Lilian Weng的Large Transformer Model Inference Optimization](https://lilianweng.github.io/posts/2023-01-10-inference-optimization/)。算例为本文自构。
+
+## 三、冻结教师，分别记录迁移训练和学生部署成本
+
 ```text
 输入：冻结教师或教师集成、迁移输入、可选硬标签
 初始化学生参数
@@ -215,9 +227,13 @@ $\tau^2$ 补偿温度增大带来的梯度尺度变化，使调温度时两项�
 部署：仅运行学生，使用约定的正常预测温度
 ```
 
-数学上匹配输出分布；机制上让部署模型利用更丰富监督；实验上观察分类错误、帧准确率或 WER。学生模型大小、单次推理成本和总训练成本是不同量，不能用一个“压缩率”替代全部。
+## 四、对照 MNIST、语音指标与迁移集覆盖条件
 
-## 实验与证据
+学生模型大小、单次推理成本和总训练成本是不同量，不能用一个“压缩率”替代全部。
+
+输出分布匹配是否有效，要同时看教师、硬标签学生和蒸馏学生；特殊测试集调偏置条件不能省略。
+
+**一个需要保留的实验条件。** §3删除迁移集中的数字3后，再提高该类输出偏置得到更好成绩，偏置值是在测试集上优化的。因此这项探针可以说明软目标传递跨类别信息，却不能把调整后的数字当成严格未触及测试标签的部署泛化成绩。
 
 | 项目 | 原文设置 |
 |---|---|
@@ -233,33 +249,38 @@ $\tau^2$ 补偿温度增大带来的梯度尺度变化，使调温度时两项�
 
 **证据二，第 3 节 MNIST。**文中教师有 67 个测试错误，较小硬标签模型为 146，蒸馏学生为 74。学生结构与正则方式具有具体设置，因此这一结果说明有效转移，不能直接概括为任意小模型都能达到教师性能。
 
-**证据三，表 1 语音结果。**基线帧准确率 58.9%、WER 10.9%；10 模型集成为 61.1%、10.7%；蒸馏单模型为 60.8%、10.7%。帧指标改善更明显，WER 的变化较小，说明代理训练目标与最终系统指标并不一一对应。
+**证据三，[表1](#llm-v6-010-table-1) 语音结果。**基线帧准确率 58.9%、WER 10.9%；10 模型集成为 61.1%、10.7%；蒸馏单模型为 60.8%、10.7%。帧指标改善更明显，WER 的变化较小，说明代理训练目标与最终系统指标并不一一对应。
 
-表 5 进一步讨论减少学生迁移数据时的软目标价值，但教师使用过更完整训练数据。若只说“学生用 3% 数据就接近全数据表现”，却不说明软标签来自全数据教师，就会把知识来源从成本账本中抹去。
+&lt;!-- figure-ref-v6:start:010-t1-1-anchor --&gt;
+&lt;a id=&quot;llm-v6-010-table-1&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:010-t1-1-anchor --&gt;
 
-## 教学例子：软标签多提供了什么
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/010-distillation-t1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/010-distillation-t1.png&quot; width=&quot;1344&quot; height=&quot;300&quot; alt=&quot;教师集成、基线和蒸馏学生的帧准确率与词错误率&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Geoffrey Hinton、Oriol Vinyals、Jeff Dean，2015，表1，PDF第5页；&lt;a href=&quot;https://arxiv.org/pdf/1503.02531#page=5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-构造三类问题，硬标签为第一类。两个教师分布分别为 $(0.9,0.09,0.01)$ 和 $(0.9,0.01,0.09)$，最高概率和硬答案相同，但混淆结构不同。学生只学硬标签无法区分二者，拟合软目标则会受到不同梯度影响。
+[表5](https://arxiv.org/html/1503.02531#S6.T5) 进一步讨论减少学生迁移数据时的软目标价值，但教师使用过更完整训练数据。若只说“学生用 3% 数据就接近全数据表现”，却不说明软标签来自全数据教师，就会把知识来源从成本账本中抹去。
+
+## 五、学生容量和教师错误限制了转移内容
 
 如果第二类确实与第一类在输入特征上相近，这种结构可能帮助泛化；如果教师只是系统性混淆某个人群或罕见模式，学生也可能继承错误。软监督更丰富，不等于所有丰富信息都正确。
 
 再让学生只有极低容量，无法同时表达教师所有细节。它必须选择拟合哪些模式，温度便影响哪些概率差异更受重视。论文观察到容量与合适温度有关，这与“知识完整装进更小模型”的无损压缩想象不同。
 
-## 与语言模型蒸馏的联系
-
-将相同思想用于语言模型，可以拟合每个位置的词分布，也可以只训练教师生成的完整答案。前者保留更细的概率监督，后者更容易在只提供文本输出的接口中实施；二者可获得的信息和成本不同，不能统称后就假设完全等价。
-
-教师生成的推理轨迹还可能包含错误中间步骤。即便最终答案正确，学生也可能学习无效或不忠实的过程。因此后续推理蒸馏需要过滤、验证与独立评估，而原分类论文不自动提供这些保障。
-
-## 贡献与边界
-
-蒸馏把昂贵训练和便宜部署拆开，并强调预测分布中的非最高类别信息。代价是教师成本、迁移数据覆盖以及容量限制；作者关于 specialist 集成的进一步讨论也不是今天稀疏 MoE 的同义词。
+代价是教师成本、迁移数据覆盖以及容量限制；作者关于 specialist 集成的进一步讨论也不是今天稀疏 MoE 的同义词。
 
 理解本篇需要掌握 logits、温度、交叉熵、教师冻结与模型容量。它们分别对应分布前的分数、平滑尺度、匹配目标、监督来源和可表达信息上限。能把这五项讲清楚，才不会把蒸馏理解成简单“抄答案”。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 强教师或集成推理昂贵，硬标签丢失类别混淆结构 | 用温度软目标及可选硬标签训练学生 | 学生从非最高类别的相对概率获得更丰富监督 | §3 MNIST、表1语音、表5迁移数据分析 | 教师与软目标生成仍需资源，学生受容量和数据覆盖限制，也可能继承教师错误 |
+## 六、把本篇机制再推进一步
+
+&lt;details&gt;
+&lt;summary&gt;1. 两个教师硬预测相同但次高类别不同，是否能用同一份硬标签蒸馏重现它们？&lt;/summary&gt;
+
+**参考答案**：不能重现这种差异。硬标签丢掉非最高类别的相对概率，而软目标会给学生不同梯度。若接口只返回文本或类别，就无法假装获得完整分布监督；后续采用生成答案的蒸馏可以有用，但应单独说明它保留和丢失的信息。
+
+&lt;/details&gt;
+
+## 七、从分类分布匹配走向语言模型轨迹监督
+
+学生节省的是部署资源，教师与迁移数据仍有前期成本。用[Switch Transformer](042-switch.md)的稀疏教师蒸馏继续核对“教师增益保留比例”；用[QLoRA](074-qlora.md)比较另一种压缩与适配组合，勿把两类成本混成一个压缩率。
 
 ## 自测与参考答案
 

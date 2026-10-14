@@ -2,25 +2,21 @@
 
 [返回目录](README.md) · [上一篇：LoRA](047-lora.md) · [下一篇：TruthfulQA](049-truthfulqa.md)
 
-论文：Mark Chen等，*Evaluating Large Language Models Trained on Code*，2021。[原始论文v2](https://arxiv.org/pdf/2107.03374v2) · [HumanEval官方数据与评估代码](https://github.com/openai/human-eval)。依据§2评估、§3代码训练、§4监督适配与§6限制；未执行模型生成代码，也未复现训练。本篇讨论2021研究模型，不把它等同于后来同名产品。
+论文：Mark Chen等，*Evaluating Large Language Models Trained on Code*，2021。[原始论文v2](https://arxiv.org/pdf/2107.03374v2) · [HumanEval官方数据与评估代码](https://github.com/openai/human-eval)。本篇讨论2021研究模型，不把它等同于后来同名产品。
 
-## 一分钟理解
+### 先接住前作的问题
 
-代码与普通文本不同：两个写法完全不同的函数，可能做同一件事；一个几乎照抄答案的函数，也可能因为边界条件错误而失败。Codex一方面把GPT继续训练在代码上，另一方面提出HumanEval，用测试执行结果衡量函数是否满足题意。
+[GPT-3](035-gpt3.md)提供文本生成骨干，但代码可运行且有边界条件，词面相似不足以判对。本篇继续训练代码域并引入HumanEval执行评价；未解问题同时包括候选能否生成正确程序，以及系统能否从中选出来。
 
-它还展示了一个后来不断出现的主题：多采样可以提高“候选集合里至少有一个正确答案”的概率，但谁能挑出正确答案，是另一项能力。pass@100很高不代表随手交给用户的一段代码也有同样成功率。
+## 一、问题设定：代码文本相似之外，怎样衡量实现是否满足函数规格
 
-一句话：在自然语言说明到Python函数的合成任务中，通过代码专门训练和多候选采样，提高测试通过率，代价是训练与采样计算，以及正确性仍受测试覆盖和候选选择器限制。
-
-## 问题设定与训练路线
-
-HumanEval输入包括函数签名、docstring和必要上下文，输出为函数实现。164道手写问题覆盖算法、数学与语言理解。任务是独立函数合成，不能直接代表跨文件修改、依赖配置或真实仓库修复。
+HumanEval给出函数签名、docstring和必要上下文，要求生成实现；164道手写题覆盖算法、数学和语言理解。不同写法可能功能相同，近似照抄也可能漏边界，因此采用执行测试；单函数合成仍不代表跨文件仓库修复。
 
 基础Codex从GPT系列权重开始，对GitHub Python代码继续做下一token预测。作者也实验从头训练，最终质量没有观察到明确收益差，但预训练初始化收敛更快，所以后续采用它。不能把“从语言模型开始”写成已证明最终编程能力必需的条件。
 
 Codex-S再使用独立函数及说明做监督适配：约10K竞赛/面试题与约40K从持续集成运行中收集的函数问题是过滤前来源。训练只在参考实现token计算损失；测试用于筛选训练问题质量和评估生成结果，原文没有以测试奖励做在线策略优化。
 
-## 数学目标与pass@k
+## 二、由候选组合数推导pass@k覆盖估计
 
 代码继续训练仍最小化：
 
@@ -39,6 +35,20 @@ $$
 
 分式是“全部抽到失败实现”的概率，最后跨题求平均。论文用每题200个样本估计 $k\le100$，减少直接每题只抽 $k$ 次的方差。对每题成功率先做简单估计，再代入 $1-(1-\hat p)^k$ 会产生偏差；先把所有题合并成一个成功率，还会丢掉难度差异。
 
+### pass@k估计的是候选里有没有，并不负责选出来
+
+n次采样有c次通过测试，从这n个样本均匀取k个而全错的组合数为 $\binom{n-c}{k}$，总组合数为 $\binom nk$；一减便得到论文的估计量。它需要固定问题、采样协议和测试判定。用经验pass@1直接代入 $1-(1-\hat p)^k$ 会引入非线性估计偏差；跨题还应先分别计算再平均，不能把所有题的样本混成一个成功率。
+
+**教学算例。** n=10、c=2、k=3时，估计值为 $1-\binom83/\binom{10}3=1-56/120\approx53.3\%$；代入法得到 $1-0.8^3=48.8\%$。即使候选集含正确程序，部署时若无法识别它，实际交付成功率仍可能低。通过有限测试也不是满足所有输入规格的证明。
+
+再看一个估计示例：$n=10,c=2,k=2$，则得分为 $1-\binom82/\binom{10}2=17/45\approx0.378$。这是从有限样本估计候选成功的教学计算，不是某个HumanEval题的实测值。
+
+### 把候选覆盖和最终交付写成两个事件
+
+设100道题中有70道的候选池包含正确程序，而实际选择器只在其中50道选对，最终成功率是50%，选择器在可解候选池上的条件成功率为50/70。把70%报给单提交用户，就等于偷偷给了oracle选择。测试预算变化时，覆盖和条件选中率应各画一条曲线。
+
+## 三、代码域训练后固定采样、测试与候选选择协议
+
 ```text
 输入：待测模型、独立函数题及隐藏测试、温度 T、n、k
 每道题：
@@ -54,7 +64,9 @@ $$
 
 代码围栏是评估流程，不是建议直接在工作环境执行未知代码。原文将隔离执行作为评估基础设施，原因是运行、超时和依赖失败本来就会影响指标。
 
-## 实验设置
+## 四、区分raw、filtered、oracle与实际单提交成绩
+
+候选覆盖、基于概率的排序和知道测试结果的oracle要分线读；过滤后pass@1仍需记原始采样预算。
 
 | 项目 | 原始设置与含义 |
 |---|---|
@@ -69,35 +81,60 @@ $$
 
 人类手写减少直接复制基准的风险，但“手写”并不证明所有算法和题型前所未见。测试通过意味着符合这些测试，不是形式化证明所有可能输入均正确。
 
-## 五组证据，避免混淆数字
+**自构例子：** 函数要求返回不大于 $n$ 的偶数，模型写 `range(n)`，大多数奇数输入测试可能通过，但偶数边界会漏掉 $n$。参考答案的BLEU可能很高；补一个边界测试才发现问题。若5个候选中1个正确，pass@5为成功，但没有可靠测试时选择器仍可能返回另4个之一。
 
-**证据一：表1。** Codex-12B的pass@1为28.81%，pass@10为46.81%，pass@100为72.31%；GPT-J 6B为11.62%、15.74%、27.74%。这是专门代码训练后更强功能合成能力的证据，但模型大小、代码量与训练分布都不同，并非只改变一个变量的消融。
+**证据一：[表1](https://arxiv.org/html/2107.03374v2#S3.T1)。** Codex-12B的pass@1为28.81%，pass@10为46.81%，pass@100为72.31%；GPT-J 6B为11.62%、15.74%、27.74%。这是专门代码训练后更强功能合成能力的证据，但模型大小、代码量与训练分布都不同，并非只改变一个变量的消融。
 
-**证据二：图1与图5–6。** 图1明确所有样本温度0.8，摘要和部分展示使用的基础模型100样本数值约70.2%；表1在相应采样配置下为72.31%。不能把不同温度口径的数字当成相互矛盾的同一次实验，也不能把各个k最优配置说成固定一套采样策略。图5说明大k通常更受益于多样性，而单样本更需要高概率正确实现。
+**证据二：[图1](#llm-v6-048-figure-1)与[图5](#llm-v6-048-figure-5)、[图6](#llm-v6-048-figure-6)。** [图1](#llm-v6-048-figure-1)明确所有样本温度0.8，摘要和部分展示使用的基础模型100样本数值约70.2%；[表1](https://arxiv.org/html/2107.03374v2#S3.T1)在相应采样配置下为72.31%。不能把不同温度口径的数字当成相互矛盾的同一次实验，也不能把各个k最优配置说成固定一套采样策略。[图5](#llm-v6-048-figure-5)说明大k通常更受益于多样性，而单样本更需要高概率正确实现。 pass@k 图中的 k 是候选数；单提交选择图的 oracle 已知道测试是否通过。可部署排序线与 oracle 覆盖线之间的差距才是选择器问题。
 
-**证据三：图1与图7、图10。** 固定图1口径下，Codex-S单样本约37.7%，100候选中按平均对数概率选择约44.5%，若用测试挑出正确候选则约77.5%。44.5与77.5之间的差距就是选择能力缺口；潜在正确代码已经存在于集合，不表示系统能无测试地识别它。
+<!-- figure-ref-v6:start:048-f6-4 -->
+<a id="llm-v6-048-figure-6"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/048-codex-f6-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/048-codex-f6-v6.png" width="939" height="629" alt="Codex模型参数量与pass@1、pass@100的关系" loading="lazy"></a><figcaption>原文图形摘引：Mark Chen等，2021，图6，PDF第5页；<a href="https://arxiv.org/html/2107.03374v2#S3.F6" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:048-f6-4 -->
 
-**证据四：图8。** 正确与错误程序的BLEU分布明显重叠，支持文本相似度不适合作为唯一代码正确性指标。换变量名或改写循环可能不改变功能，漏掉一个等号却可能改变边界行为，因此需要执行式评价。不过测试自身也要覆盖边界，不能把BLEU的局限变成测试集完美的结论。
+<!-- figure-ref-v6:start:048-f1-2 -->
+<a id="llm-v6-048-figure-1"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/048-codex-f1-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/048-codex-f1-v6.png" width="939" height="629" alt="Codex与Codex-S在不同模型规模和候选排序方法下的通过率" loading="lazy"></a><figcaption>原文图形摘引：Mark Chen等，2021，图1，PDF第2页；<a href="https://arxiv.org/html/2107.03374v2#S1.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:048-f1-2 -->
 
-**证据五：表2，APPS。** Codex在入门题raw pass@1为4.14%，raw pass@1000为25.02%；经过题面公开样例过滤后的pass@1为22.78%。这里“filtered pass@1”已经花费1000候选预算，不是只生成一个答案。更难竞赛题即使raw pass@1000也仅3.23%，说明HumanEval成绩不能代表所有编程任务。
+<!-- figure-ref-v6:start:048-f5-3-anchor -->
+<a id="llm-v6-048-figure-5"></a>
+<!-- figure-ref-v6:end:048-f5-3-anchor -->
 
-## 贡献、失败与教学例子
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/048-codex-f5.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/048-codex-f5.png" width="899" height="1143" alt="Codex采样温度、候选数量与pass@k之间的关系" loading="lazy"></a><figcaption>原实验图摘引：Mark Chen等，2021，图5；<a href="https://arxiv.org/html/2107.03374v2#S3.F5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+**证据三：[图1](#llm-v6-048-figure-1)与[图7](#llm-v6-048-figure-7)、[图10](#llm-v6-048-figure-10)。** 固定[图1](#llm-v6-048-figure-1)口径下，Codex-S单样本约37.7%，100候选中按平均对数概率选择约44.5%，若用测试挑出正确候选则约77.5%。44.5与77.5之间的差距就是选择能力缺口；潜在正确代码已经存在于集合，不表示系统能无测试地识别它。
+
+<!-- figure-ref-v6:start:048-f10-6 -->
+<a id="llm-v6-048-figure-10"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/048-codex-f10-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/048-codex-f10-v6.png" width="917" height="1293" alt="Codex-S与Codex在模型规模及候选排序上的两组对照" loading="lazy"></a><figcaption>原文图形摘引：Mark Chen等，2021，图10，PDF第9页；<a href="https://arxiv.org/html/2107.03374v2#S4.F10" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:048-f10-6 -->
+
+<!-- figure-ref-v6:start:048-f7-5 -->
+<a id="llm-v6-048-figure-7"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/048-codex-f7-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/048-codex-f7-v6.png" width="939" height="779" alt="Codex候选数量增加时五种候选排序方法的通过率" loading="lazy"></a><figcaption>原文图形摘引：Mark Chen等，2021，图7，PDF第6页；<a href="https://arxiv.org/html/2107.03374v2#S3.F7" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:048-f7-5 -->
+
+**证据四：[图8](#llm-v6-048-figure-8)。** 正确与错误程序的BLEU分布明显重叠，支持文本相似度不适合作为唯一代码正确性指标。换变量名或改写循环可能不改变功能，漏掉一个等号却可能改变边界行为，因此需要执行式评价。不过测试自身也要覆盖边界，不能把BLEU的局限变成测试集完美的结论。
+
+<!-- figure-ref-v6:start:048-f8-7 -->
+<a id="llm-v6-048-figure-8"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/048-codex-f8-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/048-codex-f8-v6.png" width="951" height="932" alt="四个HumanEval问题中正确与错误程序的BLEU分数分布" loading="lazy"></a><figcaption>原文图形摘引：Mark Chen等，2021，图8，PDF第6页；<a href="https://arxiv.org/html/2107.03374v2#S3.F8" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:048-f8-7 -->
+
+**证据五：[表2](https://arxiv.org/html/2107.03374v2#S3.T2)，APPS。** Codex在入门题raw pass@1为4.14%，raw pass@1000为25.02%；经过题面公开样例过滤后的pass@1为22.78%。这里“filtered pass@1”已经花费1000候选预算，不是只生成一个答案。更难竞赛题即使raw pass@1000也仅3.23%，说明HumanEval成绩不能代表所有编程任务。
+
+## 五、有限测试和选择器限制仍留下交付失败
 
 贡献包含领域训练、独立函数监督数据整理、可执行基准和低方差pass@k估计。它没有提出全新Transformer结构。更长期的思想是将“生成分布覆盖”和“验证选择能力”拆开衡量，这对后续推理时扩展与代码Agent都重要。
 
 作者讨论长操作链、变量绑定和说明理解的困难；多个局部合理步骤不一定组合成正确程序。Code-S的训练问题还会剔除模型100次都解不出的题，因而可能偏向当前模型能够覆盖的分布。这是过滤设计带来的选择效应，不应被称为自动得到均匀难度的理想数据。
 
-**自构例子：** 函数要求返回不大于 $n$ 的偶数，模型写 `range(n)`，大多数奇数输入测试可能通过，但偶数边界会漏掉 $n$。参考答案的BLEU可能很高；补一个边界测试才发现问题。若5个候选中1个正确，pass@5为成功，但没有可靠测试时选择器仍可能返回另4个之一。
-
-再看一个估计示例：$n=10,c=2,k=2$，则得分为 $1-\binom82/\binom{10}2=17/45\approx0.378$。这是从有限样本估计候选成功的教学计算，不是某个HumanEval题的实测值。
-
 五个前置概念：**自回归代码模型**逐token预测程序；**功能正确性**由程序行为判断；**pass@k**测候选集合至少一个通过；**采样温度**调节分布多样性；**候选排序**决定实际返回哪段代码。最后两个环节与模型权重一起决定系统表现。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 通用文本模型代码能力弱 | 大规模代码训练与函数监督适配 | 学习代码分布及说明—实现关系 | 表1、图10 | 数据和训练成本，短函数不代表真实仓库 |
-| 文本匹配无法判定程序语义 | HumanEval与测试执行 | 比较功能而非表面表达 | §2、图8 | 测试覆盖有限、执行环境影响结果 |
-| 单次采样错失可用解 | 多候选及pass@k | 扩大正确解覆盖 | 图5–7、APPS表2 | 预算增加，可靠选择器仍是瓶颈 |
+## 六、从单函数执行走向仓库修复与选择协议
+
+单函数通过测试之后，[SWE-bench](081-swebench.md)把问题扩展到真实仓库定位和回归；[PAL](063-pal.md)把代码当作解题中间表示。二者借用执行能力，但任务成功条件不同。
 
 ## 自测与答案
 

@@ -42,15 +42,11 @@
                 <span class="text-gray-500">PPO：裁剪替代目标到底限制了什么</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="2dca6f10017e893226b1cf03433d45cd465ee0dd46262a7b9da9cdeb32aa2c02"><h1>第 27 天｜PPO：裁剪替代目标到底限制了什么</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="5648f74a41ffd0446b021fdf6133ee2d094d4f31e708e30d38ed50eefbe5205f"><h1>第 27 天｜PPO：裁剪替代目标到底限制了什么</h1>
 <p><a href="index.html">系列首页</a> · <a href="26-her.html">上一篇</a> · <a href="28-c51.html">下一篇</a></p>
 <p><strong>原论文与版本</strong>：Schulman 等，<em>Proximal Policy Optimization Algorithms</em>，2017。<a href="https://arxiv.org/pdf/1707.06347v2">PDF</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p><strong>研究问题</strong>：在稳定性与实现成本间折中</p>
-<p><strong>旧方法卡点</strong>：TRPO 求解复杂，普通多轮策略梯度可能过度利用旧样本</p>
-<p><strong>作者主张</strong>：采用概率比裁剪或 KL 惩罚，让策略更新更易实现</p>
-<p><strong>论文证据</strong>：§6 在控制与 Atari 比较中展示有效的训练配方</p>
-<p><strong>一句话</strong>：在on-policy 采样、随机策略优化，通常搭配 Actor–Critic中，作者通过“采用概率比裁剪或 KL 惩罚，让策略更新更易实现”应对“在稳定性与实现成本间折中”这一问题；证据边界或代价是：裁剪不构成所有动作概率或 KL 的硬约束。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="14-trpo.html">TRPO</a>用概率比替代目标和KL限制控制策略变化，但求自然方向与回溯的实现成本较高。PPO直接延续这一保守更新动机，改变样本替代目标的形状，以便做多轮小批量一阶优化。<a href="15-gae.html">GAE</a>可以提供优势权重，二者是估计器与优化器的组合。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <ol>
 <li><strong>概率比</strong>：新旧策略对同一动作的相对倾向。</li>
@@ -59,8 +55,8 @@
 <li><strong>价值目标</strong>：训练 Critic 的回归量。</li>
 <li><strong>熵</strong>：动作分布的不确定程度。</li>
 </ol>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
-<p>本篇将“在稳定性与实现成本间折中”放在on-policy 采样、随机策略优化，通常搭配 Actor–Critic的边界内研究。TRPO 求解复杂，普通多轮策略梯度可能过度利用旧样本。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<h2 id="一问题设定不解信赖域子问题怎样抑制旧数据上的过度更新">一、问题设定：不解信赖域子问题，怎样抑制旧数据上的过度更新</h2>
+<p>同一批旧策略样本多训练几轮，可以提高利用率，却也可能越来越偏离产生它们的策略。PPO-Clip希望让已经朝有利方向改动过多的样本不再提供额外奖励；关键问题是目标在哪一侧被截平，以及这是否真能禁止概率比越界。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -89,13 +85,23 @@
 <td>环境终止与采样截断</td>
 </tr>
 </tbody></table></div>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
-<p>先冻结 π_old 采样，再在同一批数据上优化若干轮。正优势样本概率增加太多时，其继续增加的目标收益被截平；负优势样本则对概率降低过多的方向截平。这是局部样本目标的形状改变，不是把策略概率直接钳制。</p>
-<h3 id="关键公式与符号">关键公式与符号</h3>
+<h2 id="二按优势正负展开裁剪替代目标">二、按优势正负展开裁剪替代目标</h2>
+<p>旧策略采样后冻结优势，使用 <span class="reading-math" data-tex="r_t=\pi_\theta(a_t|s_t)/\pi_{old}(a_t|s_t)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>r</mi><mi>t</mi></msub><mo>=</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>a</mi><mi>t</mi></msub><mi mathvariant="normal">∣</mi><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><msub><mi>π</mi><mrow><mi>o</mi><mi>l</mi><mi>d</mi></mrow></msub><mo stretchy="false">(</mo><msub><mi>a</mi><mi>t</mi></msub><mi mathvariant="normal">∣</mi><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">r_t=\pi_\theta(a_t|s_t)/\pi_{old}(a_t|s_t)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">/</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span> 衡量新策略对已见动作的改变。</p>
+<p>必须分正负优势：当A&gt;0，目标为 <span class="reading-math" data-tex="A\min(r,1+\epsilon)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi><mi>min</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>r</mi><mo separator="true">,</mo><mn>1</mn><mo>+</mo><mi>ϵ</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">A\min(r,1+\epsilon)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">A</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">min</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">ϵ</span><span class="mclose">)</span></span></span></span></span>，只截平“继续提高好动作概率”的收益；当A&lt;0，目标为 <span class="reading-math" data-tex="A\max(r,1-\epsilon)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi><mi>max</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>r</mi><mo separator="true">,</mo><mn>1</mn><mo>−</mo><mi>ϵ</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">A\max(r,1-\epsilon)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">A</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">max</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">ϵ</span><span class="mclose">)</span></span></span></span></span>，只截平“继续降低坏动作概率”的收益。朝坏方向移动仍受惩罚。min并非装饰，去掉它会改变算法。</p>
+<p>π_old必须固定到下一轮重新采样，而不是每个小批次更新成当前策略，否则比率的分母不再对应实际生成分布。</p>
+<h3 id="分清概率比clip操作和外层min">分清概率比、clip操作和外层min</h3>
 <p><span class="reading-math" data-tex="L^{clip}=E[\min(\rho A,\operatorname{clip}(\rho,1-\epsilon,1+\epsilon)A)]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>L</mi><mrow><mi>c</mi><mi>l</mi><mi>i</mi><mi>p</mi></mrow></msup><mo>=</mo><mi>E</mi><mo stretchy="false">[</mo><mi>min</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>ρ</mi><mi>A</mi><mo separator="true">,</mo><mi mathvariant="normal">clip</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>ρ</mi><mo separator="true">,</mo><mn>1</mn><mo>−</mo><mi>ϵ</mi><mo separator="true">,</mo><mn>1</mn><mo>+</mo><mi>ϵ</mi><mo stretchy="false">)</mo><mi>A</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L^{clip}=E[\min(\rho A,\operatorname{clip}(\rho,1-\epsilon,1+\epsilon)A)].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8991em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">c</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight">p</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mopen">[</span><span class="mop">min</span><span class="mopen">(</span><span class="mord mathnormal">ρ</span><span class="mord mathnormal">A</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mord mathrm">clip</span></span><span class="mopen">(</span><span class="mord mathnormal">ρ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8389em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ϵ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">ϵ</span><span class="mclose">)</span><span class="mord mathnormal">A</span><span class="mclose">)]</span><span class="mord">.</span></span></span></span></span></span>
 ρ 是新旧概率比，A 是冻结优势。Actor 最大化它，完整训练通常另有价值回归和熵项；原论文也研究自适应 KL 惩罚版本。</p>
-<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
-<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<h3 id="换成log概率坐标看哪一项真的停止推动">换成log概率坐标，看哪一项真的停止推动</h3>
+<p>固定旧概率与优势，令 <span class="reading-math" data-tex="\ell=\log\pi_\theta(a\mid s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">ℓ</mi><mo>=</mo><mi>log</mi><mo>⁡</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>a</mi><mo>∣</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\ell=\log\pi_\theta(a\mid s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">ℓ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span>，则 <span class="reading-math" data-tex="\rho=\exp(\ell-\ell_{old})"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ρ</mi><mo>=</mo><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi mathvariant="normal">ℓ</mi><mo>−</mo><msub><mi mathvariant="normal">ℓ</mi><mrow><mi>o</mi><mi>l</mi><mi>d</mi></mrow></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\rho=\exp(\ell-\ell_{old})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ρ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">exp</span><span class="mopen">(</span><span class="mord">ℓ</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord">ℓ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，所以未裁剪分支对 <span class="reading-math" data-tex="\ell"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">ℓ</mi></mrow><annotation encoding="application/x-tex">\ell</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">ℓ</span></span></span></span></span> 的导数是 <span class="reading-math" data-tex="\rho A"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ρ</mi><mi>A</mi></mrow><annotation encoding="application/x-tex">\rho A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ρ</span><span class="mord mathnormal">A</span></span></span></span></span>。远离折点时，单样本裁剪目标满足</p>
+<p><span class="reading-math" data-tex="\frac{\partial L^{clip}}{\partial\ell}=\begin{cases}0,&amp;A&gt;0,\ \rho&gt;1+\epsilon,\\0,&amp;A&lt;0,\ \rho&lt;1-\epsilon,\\\rho A,&amp;\text{其余未截平区域}.\end{cases}"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mfrac><mrow><mi mathvariant="normal">∂</mi><msup><mi>L</mi><mrow><mi>c</mi><mi>l</mi><mi>i</mi><mi>p</mi></mrow></msup></mrow><mrow><mi mathvariant="normal">∂</mi><mi mathvariant="normal">ℓ</mi></mrow></mfrac><mo>=</mo><mrow><mo fence="true">{</mo><mtable rowspacing="0.36em" columnalign="left left" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mn>0</mn><mo separator="true">,</mo></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>A</mi><mo>&gt;</mo><mn>0</mn><mo separator="true">,</mo><mtext> </mtext><mi>ρ</mi><mo>&gt;</mo><mn>1</mn><mo>+</mo><mi>ϵ</mi><mo separator="true">,</mo></mrow></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mn>0</mn><mo separator="true">,</mo></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>A</mi><mo>&lt;</mo><mn>0</mn><mo separator="true">,</mo><mtext> </mtext><mi>ρ</mi><mo>&lt;</mo><mn>1</mn><mo>−</mo><mi>ϵ</mi><mo separator="true">,</mo></mrow></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>ρ</mi><mi>A</mi><mo separator="true">,</mo></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mtext>其余未截平区域</mtext><mi mathvariant="normal">.</mi></mrow></mstyle></mtd></mtr></mtable></mrow></mrow><annotation encoding="application/x-tex">\frac{\partial L^{clip}}{\partial\ell}=\begin{cases}0,&amp;A&gt;0,\ \rho&gt;1+\epsilon,\\0,&amp;A&lt;0,\ \rho&lt;1-\epsilon,\\\rho A,&amp;\text{其余未截平区域}.\end{cases}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.2121em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.5261em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord">ℓ</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">c</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">i</span><span class="mord mathnormal mtight">p</span></span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:4.32em;vertical-align:-1.91em;"></span><span class="minner"><span class="mopen"><span class="delimsizing mult"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:2.35em;"><span style="top:-2.2em;"><span class="pstrut" style="height:3.15em;"></span><span class="delimsizinginner delim-size4"><span>⎩</span></span></span><span style="top:-2.192em;"><span class="pstrut" style="height:3.15em;"></span><span style="height:0.316em;width:0.8889em;"><svg xmlns="http://www.w3.org/2000/svg" width="0.8889em" height="0.316em" style="width:0.8889em" viewBox="0 0 888.89 316" preserveAspectRatio="xMinYMin"><path d="M384 0 H504 V316 H384z M384 0 H504 V316 H384z"/></svg></span></span><span style="top:-3.15em;"><span class="pstrut" style="height:3.15em;"></span><span class="delimsizinginner delim-size4"><span>⎨</span></span></span><span style="top:-4.292em;"><span class="pstrut" style="height:3.15em;"></span><span style="height:0.316em;width:0.8889em;"><svg xmlns="http://www.w3.org/2000/svg" width="0.8889em" height="0.316em" style="width:0.8889em" viewBox="0 0 888.89 316" preserveAspectRatio="xMinYMin"><path d="M384 0 H504 V316 H384z M384 0 H504 V316 H384z"/></svg></span></span><span style="top:-4.6em;"><span class="pstrut" style="height:3.15em;"></span><span class="delimsizinginner delim-size4"><span>⎧</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.85em;"><span></span></span></span></span></span></span><span class="mord"><span class="mtable"><span class="col-align-l"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:2.41em;"><span style="top:-4.41em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord">0</span><span class="mpunct">,</span></span></span><span style="top:-2.97em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord">0</span><span class="mpunct">,</span></span></span><span style="top:-1.53em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord mathnormal">ρ</span><span class="mord mathnormal">A</span><span class="mpunct">,</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.91em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:1em;"></span><span class="col-align-l"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:2.41em;"><span style="top:-4.41em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">ρ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord mathnormal">ϵ</span><span class="mpunct">,</span></span></span><span style="top:-2.97em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&lt;</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">ρ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&lt;</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord mathnormal">ϵ</span><span class="mpunct">,</span></span></span><span style="top:-1.53em;"><span class="pstrut" style="height:3.008em;"></span><span class="mord"><span class="mord text"><span class="mord cjk_fallback">其余未截平区域</span></span><span class="mord">.</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.91em;"><span></span></span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span></span></p>
+<p>这是对一个样本贡献的导数；总参数梯度还要乘 <span class="reading-math" data-tex="\nabla_\theta\log\pi_\theta(a\mid s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="normal">∇</mi><mi>θ</mi></msub><mi>log</mi><mo>⁡</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>a</mi><mo>∣</mo><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\nabla_\theta\log\pi_\theta(a\mid s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord">∇</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span> 并累加其他样本；这里的score是log概率对参数的梯度，不是奖励评分。这样既能看见“有利方向走够后不再奖励”，也能定位为什么共享参数仍可能改变它的概率。折点处由实现选择次梯度。</p>
+<p>分正负优势阅读的顺序参考<a href="https://spinningup.openai.com/en/latest/algorithms/ppo.html">Spinning Up PPO讲解</a>，共享网络的影响结合<a href="https://lilianweng.github.io/posts/2018-04-08-policy-gradient/#ppo">Lilian Weng策略梯度综述</a>；分段导数是对<a href="https://arxiv.org/pdf/1707.06347v2#page=3">原论文式(7)</a>的教学展开。</p>
+<h3 id="分别验算好方向截平与坏方向惩罚">分别验算好方向截平与坏方向惩罚</h3>
+<p>以下是可手算的教学构造，不是论文实验。</p>
+<p>ε=0.2。A=2、r=1.4时，未裁剪项2.8，裁剪项2.4，取2.4，继续增加r不再奖励。A=−2、r=0.6时，两项−1.2和−1.6，取−1.6，继续降低r不再获益。</p>
+<p>反方向也要算：A=−2、r=1.4时取−2.8而非−2.4，坏动作变常见仍被惩罚。概率比已经是1.4这件事本身没有被禁止，足以反驳“clip把概率比硬锁在0.8到1.2”。</p>
+<h2 id="三固定旧概率与优势再做多轮小批量更新">三、固定旧概率与优势再做多轮小批量更新</h2>
 <pre><code class="language-text">重复：
   π_old ← 当前策略冻结副本
   用 π_old 收集 rollout 并保存 old_logprob
@@ -108,29 +114,8 @@
   丢弃本轮 on-policy 数据，重新采样
 输出：策略与价值网络
 </code></pre>
-<p><strong>实现要点</strong>：π_old 不是 RLHF 的参考 π_ref；裁剪区间也不是直接概率边界。代码省略原文具体价值权重与调参表。</p>
-<h3 id="三种优化要分开">三种“优化”要分开</h3>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>层次</th>
-<th>这里具体是什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>数学目标／训练损失</td>
-<td>最大化裁剪优势替代目标；另加价值回归与熵项</td>
-</tr>
-<tr>
-<td>机制改变</td>
-<td>采用概率比裁剪或 KL 惩罚，让策略更新更易实现</td>
-</tr>
-<tr>
-<td>评价改善的指标</td>
-<td>回报、采样效率与训练便利性</td>
-</tr>
-</tbody></table></div>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<p><strong>实现要点</strong>：π_old 不是 RLHF 的参考 π_ref。代码省略原文具体价值权重与调参表。</p>
+<h2 id="四读目标对照与不同控制预算">四、读目标对照与不同控制预算</h2>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -160,84 +145,69 @@
 </tr>
 <tr>
 <td>随机性与不确定性</td>
-<td>随机重复与区间须逐图看，本文未完整核实</td>
+<td>§6.1为7环境×3种子共21次归一汇总；其他图按自身协议</td>
 </tr>
 <tr>
 <td>实际验证的假设</td>
 <td>简化优化是否保持实用性能</td>
 </tr>
 </tbody></table></div>
-<p><strong>实验解读（本文分析）</strong>：裁剪不构成所有动作概率或 KL 的硬约束。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>证据定位</th>
-<th>比较什么／观察到什么</th>
-<th>支持什么</th>
-<th>不能证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>图1</td>
-<td>正负优势下裁剪形状</td>
-<td>解释目标机制</td>
-<td>不证明硬 KL 约束</td>
-</tr>
-<tr>
-<td>图2／§6.1</td>
-<td>不同 surrogate 行为与结果</td>
-<td>检验目标选择</td>
-<td>不能代替全部实现消融</td>
-</tr>
-<tr>
-<td>图3／§6.2</td>
-<td>连续控制学习曲线</td>
-<td>支持原文预算内效果</td>
-<td>非所有任务优于 TRPO</td>
-</tr>
-<tr>
-<td>§6.4</td>
-<td>Atari比较</td>
-<td>展示离散动作适用性</td>
-<td>不代表一个模型通吃任务</td>
-</tr>
-</tbody></table></div>
-<p><strong>结论边界</strong>：§6 在控制与 Atari 比较中展示有效的训练配方。裁剪不构成所有动作概率或 KL 的硬约束。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p><strong>作者贡献</strong>是实用替代目标及经验比较。<strong>本文分析</strong>：共享参数会让未采样动作也改变，某样本梯度被裁平不意味着整个网络停止改变它。学习率、epoch 数、优势处理和终止逻辑都可左右结果。</p>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<h3 id="教学例子">教学例子</h3>
-<p>以下是教学推演，不是原论文实验。</p>
-<p>A=2，ρ=1.5，ε=0.2，未裁剪收益3，裁剪后为2.4，min取2.4。若 A=−2，ρ=1.5，则取−3，仍惩罚增加坏动作概率；不能不看 A 符号就决定哪一侧饱和。</p>
-<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
-<ol>
-<li>为何 ratio 超出区间后仍可能有梯度？</li>
-<li>多轮更新时如何检测策略漂移？</li>
-<li>为什么换终止处理可比换优化器影响更大？</li>
-</ol>
-<h2 id="方法与证据总结">方法与证据总结</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据／理论证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>在稳定性与实现成本间折中</td>
-<td>采用概率比裁剪或 KL 惩罚，让策略更新更易实现</td>
-<td>削弱反复利用同一旧样本导致的某些过大更新</td>
-<td>§6 在控制与 Atari 比较中展示有效的训练配方</td>
-<td>裁剪不构成所有动作概率或 KL 的硬约束</td>
-</tr>
-</tbody></table></div>
-<h2 id="资料与阅读范围">资料与阅读范围</h2>
-<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
-<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<p><strong>实验解读（本文分析）</strong>：§6.1每个设置运行7环境×3种子，归一化后汇总21次结果；表1比较clip、固定KL、自适应KL及无惩罚目标。它使用独立价值网络且不加熵，不应把后来某库全部默认技巧归为这张表的原因。<a href="#rl-27-figure-3">图3</a>控制任务预算100万步，Humanoid展示另用更大预算，不能与前图按同一训练成本比较。</p>
+<h3 id="不要把后来代码库技巧倒写入表1">不要把后来代码库技巧倒写入表1</h3>
+<!-- inline-evidence-v2:start -->
+
+<!-- figure-ref-v6:start:anchor-rl-27-figure-3 -->
+<p><span id="rl-27-figure-3"></span></p>
+<!-- figure-ref-v6:end:anchor-rl-27-figure-3 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/27-ppo-figure-3.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/27-ppo-figure-3.png" width="1374" height="576" alt="PPO及多种策略优化方法在七项MuJoCo任务上一百万步的学习曲线" loading="lazy"></a><figcaption>原论文图形摘引；Schulman等，2017，Figure 3, PDF第7页；仅图形区域。<a href="https://arxiv.org/pdf/1707.06347v2#page=7" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>七个任务面板横轴都到一百万环境时间步，纵轴是该任务回报，越高越好；Reacher的负分也按“较不负更好”读。紫线是PPO-Clip，青线是TRPO，其他颜色对应不同基线。比较应先看同任务的早期速度与后期表现：例如有的任务很快饱和，有的仍有明显波动，不能因PPO在若干面板较高就推成每个任务始终领先。</p>
+<!-- inline-evidence-v2:end -->
+
+
+<p><a href="#rl-27-figure-1">图1</a>画单样本裁剪目标：横轴是新旧概率比，左右面板分别为正负优势，平坦区的方向并不相同。<a href="#rl-27-figure-2">图2</a>沿一次更新方向插值比较替代目标，展示它是优化诱导而不是硬KL投影。Atari部分另在§6.4，不能把连续和离散任务的汇总当作同一训练模型。</p>
+<!-- figure-ref-v6:start:rl-27-figure-2 -->
+<figure class="reading-evidence-figure" id="rl-27-figure-2"><a href="/rl/assets/reference-v6/27-figure-2.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/27-figure-2.png" width="1095" height="402" alt="横轴沿一次实际策略更新的方向线性插值，1对应这次更新后的参数。红色裁剪目标在附近转折而KL仍继续增加，说明这是局部优化形状的示例，不能读作全局KL约束。" loading="lazy"></a><figcaption>原论文图形摘引｜Schulman等，2017，图2，PDF第4页。<a href="https://arxiv.org/pdf/1707.06347v2#page=4" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。</figcaption></figure>
+
+<p>横轴沿一次实际策略更新的方向线性插值，1对应这次更新后的参数。红色裁剪目标在附近转折而KL仍继续增加，说明这是局部优化形状的示例，不能读作全局KL约束。</p>
+<!-- figure-ref-v6:end:rl-27-figure-2 -->
+
+<!-- figure-ref-v6:start:rl-27-figure-1 -->
+<figure class="reading-evidence-figure" id="rl-27-figure-1"><a href="/rl/assets/reference-v6/27-figure-1.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/27-figure-1.png" width="987" height="459" alt="优势为正时，过度增大动作概率后目标变平；优势为负时，过度减小概率后目标变平。两侧仍保留不利方向的惩罚，所以裁剪目标并不是把概率比硬限制在区间内。" loading="lazy"></a><figcaption>原论文图形摘引｜Schulman等，2017，图1，PDF第3页。<a href="https://arxiv.org/pdf/1707.06347v2#page=3" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。</figcaption></figure>
+
+<p>优势为正时，过度增大动作概率后目标变平；优势为负时，过度减小概率后目标变平。两侧仍保留不利方向的惩罚，所以裁剪目标并不是把概率比硬限制在区间内。</p>
+<!-- figure-ref-v6:end:rl-27-figure-1 -->
+
+<h2 id="五裁剪单样本收益没有形成全局硬约束">五、裁剪单样本收益没有形成全局硬约束</h2>
+<p>共享参数、未采样动作及价值或熵损失都可能推动已截平样本的概率，因此ε没有给全局KL硬上限。学习率、epoch数、优势处理和终止逻辑共同决定漂移，实际KL与clip fraction仍需监测。</p>
+<h2 id="六继续追问共享参数kl与优势噪声">六、继续追问：共享参数、KL与优势噪声</h2>
+<details>
+<summary>1. 为何 ratio 超出区间后仍可能有梯度？</summary>
+
+<p>裁剪只去掉使目标过度乐观的方向：正优势且 ratio 超上界、负优势且 ratio 低于下界时，对该样本的裁剪分支可平坦；相反方向仍有梯度。共享参数、其他样本以及价值/熵损失也会改变该动作概率。因此 ratio 超界不代表所有梯度为零，PPO 也没有把每个动作概率投影回硬区间。</p>
+</details>
+
+<details>
+<summary>2. 多轮更新时如何检测策略漂移？</summary>
+
+<p>每轮测当前策略相对采样旧策略的经验 KL、ratio 分位数、clip fraction、熵及替代目标，并关注按状态或提示分组的尾部。可预先设 KL early stopping 与最大 epoch；这只是经验防护，样本外状态仍可能漂移。必须保留同一批数据收集时的旧 log-prob，不能每轮覆盖分母而掩盖累计变化。</p>
+</details>
+
+<details>
+<summary>3. 为什么换终止处理可比换优化器影响更大？</summary>
+
+<p>终止处理决定价值目标：真正终止应置零，时间截断若任务继续则应自举，同时不能跨重置递推 GAE。错误处理会系统性改写许多样本的回报和优势，尤其长时域、正值尾部明显时，比替换优化器造成的局部更新差异更大。比较算法前应统一环境包装器、time-limit mask、最后观测和奖励尺度，再做优化器消融。</p>
+</details>
+
+<h2 id="七从固定优势走向语言模型的组内基线">七、从固定优势走向语言模型的组内基线</h2>
+<ul>
+<li><p><strong>优势模块回看</strong>：<a href="15-gae.html">GAE</a>。裁剪只改变怎样使用优势，价值误差与尾部处理仍由估计器负责。</p>
+</li>
+<li><p><strong>后作模块承接</strong>：<a href="52-grpo.html">GRPO</a>。语言模型继续使用裁剪概率比，但把优势基线改为同题采样组，采样单位与归一化会带来新的问题。</p>
+</li>
+<li><p><a href="https://arxiv.org/pdf/1707.06347v2">原论文与图表入口</a>。§2—4目标；§6.1表1；§6.2<a href="#rl-27-figure-3">图3</a>；§6.3预算。</p>
+</li>
+</ul>
 <h2 id="自测两题">自测两题</h2>
 <p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
 <p><strong>问题 1</strong>：优势为正和为负时，裁剪分别限制什么？</p>
@@ -256,21 +226,13 @@
 
 **原论文与版本**：Schulman 等，*Proximal Policy Optimization Algorithms*，2017。[PDF](https://arxiv.org/pdf/1707.06347v2)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：在稳定性与实现成本间折中
+[TRPO](14-trpo.md)用概率比替代目标和KL限制控制策略变化，但求自然方向与回溯的实现成本较高。PPO直接延续这一保守更新动机，改变样本替代目标的形状，以便做多轮小批量一阶优化。[GAE](15-gae.md)可以提供优势权重，二者是估计器与优化器的组合。
 
-**旧方法卡点**：TRPO 求解复杂，普通多轮策略梯度可能过度利用旧样本
+## 一、问题设定：不解信赖域子问题，怎样抑制旧数据上的过度更新
 
-**作者主张**：采用概率比裁剪或 KL 惩罚，让策略更新更易实现
-
-**论文证据**：§6 在控制与 Atari 比较中展示有效的训练配方
-
-**一句话**：在on-policy 采样、随机策略优化，通常搭配 Actor–Critic中，作者通过“采用概率比裁剪或 KL 惩罚，让策略更新更易实现”应对“在稳定性与实现成本间折中”这一问题；证据边界或代价是：裁剪不构成所有动作概率或 KL 的硬约束。
-
-## 二、研究背景与问题定义
-
-本篇将“在稳定性与实现成本间折中”放在on-policy 采样、随机策略优化，通常搭配 Actor–Critic的边界内研究。TRPO 求解复杂，普通多轮策略梯度可能过度利用旧样本。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+同一批旧策略样本多训练几轮，可以提高利用率，却也可能越来越偏离产生它们的策略。PPO-Clip希望让已经朝有利方向改动过多的样本不再提供额外奖励；关键问题是目标在哪一侧被截平，以及这是否真能禁止概率比越界。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -280,18 +242,39 @@
 | 奖励或学习信号 | 环境奖励；应用到LLM时需另定义 |
 | 终止／边界 | 环境终止与采样截断 |
 
-## 三、方法：到底改了什么
+## 二、按优势正负展开裁剪替代目标
 
-先冻结 π_old 采样，再在同一批数据上优化若干轮。正优势样本概率增加太多时，其继续增加的目标收益被截平；负优势样本则对概率降低过多的方向截平。这是局部样本目标的形状改变，不是把策略概率直接钳制。
+旧策略采样后冻结优势，使用 $r_t=\pi_\theta(a_t|s_t)/\pi_{old}(a_t|s_t)$ 衡量新策略对已见动作的改变。
 
-### 关键公式与符号
+必须分正负优势：当A&gt;0，目标为 $A\min(r,1+\epsilon)$，只截平“继续提高好动作概率”的收益；当A&lt;0，目标为 $A\max(r,1-\epsilon)$，只截平“继续降低坏动作概率”的收益。朝坏方向移动仍受惩罚。min并非装饰，去掉它会改变算法。
+
+π_old必须固定到下一轮重新采样，而不是每个小批次更新成当前策略，否则比率的分母不再对应实际生成分布。
+
+### 分清概率比、clip操作和外层min
 
 $$L^{clip}=E[\min(\rho A,\operatorname{clip}(\rho,1-\epsilon,1+\epsilon)A)].$$
 ρ 是新旧概率比，A 是冻结优势。Actor 最大化它，完整训练通常另有价值回归和熵项；原论文也研究自适应 KL 惩罚版本。
 
-### 输入 → 处理 → 输出：教学伪代码
+### 换成log概率坐标，看哪一项真的停止推动
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+固定旧概率与优势，令 $\ell=\log\pi_\theta(a\mid s)$，则 $\rho=\exp(\ell-\ell_{old})$，所以未裁剪分支对 $\ell$ 的导数是 $\rho A$。远离折点时，单样本裁剪目标满足
+
+$$\frac{\partial L^{clip}}{\partial\ell}=\begin{cases}0,&amp;A&gt;0,\ \rho&gt;1+\epsilon,\\0,&amp;A&lt;0,\ \rho&lt;1-\epsilon,\\\rho A,&amp;\text{其余未截平区域}.\end{cases}$$
+
+这是对一个样本贡献的导数；总参数梯度还要乘 $\nabla_\theta\log\pi_\theta(a\mid s)$ 并累加其他样本；这里的score是log概率对参数的梯度，不是奖励评分。这样既能看见“有利方向走够后不再奖励”，也能定位为什么共享参数仍可能改变它的概率。折点处由实现选择次梯度。
+
+分正负优势阅读的顺序参考[Spinning Up PPO讲解](https://spinningup.openai.com/en/latest/algorithms/ppo.html)，共享网络的影响结合[Lilian Weng策略梯度综述](https://lilianweng.github.io/posts/2018-04-08-policy-gradient/#ppo)；分段导数是对[原论文式(7)](https://arxiv.org/pdf/1707.06347v2#page=3)的教学展开。
+
+### 分别验算好方向截平与坏方向惩罚
+
+以下是可手算的教学构造，不是论文实验。
+
+ε=0.2。A=2、r=1.4时，未裁剪项2.8，裁剪项2.4，取2.4，继续增加r不再奖励。A=−2、r=0.6时，两项−1.2和−1.6，取−1.6，继续降低r不再获益。
+
+反方向也要算：A=−2、r=1.4时取−2.8而非−2.4，坏动作变常见仍被惩罚。概率比已经是1.4这件事本身没有被禁止，足以反驳“clip把概率比硬锁在0.8到1.2”。
+
+## 三、固定旧概率与优势再做多轮小批量更新
+
 
 ```text
 重复：
@@ -307,17 +290,9 @@ $$L^{clip}=E[\min(\rho A,\operatorname{clip}(\rho,1-\epsilon,1+\epsilon)A)].$$
 输出：策略与价值网络
 ```
 
-**实现要点**：π_old 不是 RLHF 的参考 π_ref；裁剪区间也不是直接概率边界。代码省略原文具体价值权重与调参表。
+**实现要点**：π_old 不是 RLHF 的参考 π_ref。代码省略原文具体价值权重与调参表。
 
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | 最大化裁剪优势替代目标；另加价值回归与熵项 |
-| 机制改变 | 采用概率比裁剪或 KL 惩罚，让策略更新更易实现 |
-| 评价改善的指标 | 回报、采样效率与训练便利性 |
-
-## 四、实验如何验证方法
+## 四、读目标对照与不同控制预算
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
@@ -326,33 +301,43 @@ $$L^{clip}=E[\min(\rho A,\operatorname{clip}(\rho,1-\epsilon,1+\epsilon)A)].$$
 | 对比基线 | 不同替代目标、A2C/ACER/TRPO等按实验分别比较 |
 | 训练预算与资源 | 部分 MuJoCo 曲线为1百万步；各平台预算并不相同 |
 | 指标及其含义 | 回报、采样效率与训练便利性 |
-| 随机性与不确定性 | 随机重复与区间须逐图看，本文未完整核实 |
+| 随机性与不确定性 | §6.1为7环境×3种子共21次归一汇总；其他图按自身协议 |
 | 实际验证的假设 | 简化优化是否保持实用性能 |
 
-**实验解读（本文分析）**：裁剪不构成所有动作概率或 KL 的硬约束。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+**实验解读（本文分析）**：§6.1每个设置运行7环境×3种子，归一化后汇总21次结果；表1比较clip、固定KL、自适应KL及无惩罚目标。它使用独立价值网络且不加熵，不应把后来某库全部默认技巧归为这张表的原因。[图3](#rl-27-figure-3)控制任务预算100万步，Humanoid展示另用更大预算，不能与前图按同一训练成本比较。
 
-## 五、结果：证据到底有多强
+### 不要把后来代码库技巧倒写入表1
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 图1 | 正负优势下裁剪形状 | 解释目标机制 | 不证明硬 KL 约束 |
-| 图2／§6.1 | 不同 surrogate 行为与结果 | 检验目标选择 | 不能代替全部实现消融 |
-| 图3／§6.2 | 连续控制学习曲线 | 支持原文预算内效果 | 非所有任务优于 TRPO |
-| §6.4 | Atari比较 | 展示离散动作适用性 | 不代表一个模型通吃任务 |
+&lt;!-- inline-evidence-v2:start --&gt;
 
-**结论边界**：§6 在控制与 Atari 比较中展示有效的训练配方。裁剪不构成所有动作概率或 KL 的硬约束。
+&lt;!-- figure-ref-v6:start:anchor-rl-27-figure-3 --&gt;
+&lt;span id=&quot;rl-27-figure-3&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:anchor-rl-27-figure-3 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/papers/27-ppo-figure-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/27-ppo-figure-3.png&quot; width=&quot;1374&quot; height=&quot;576&quot; alt=&quot;PPO及多种策略优化方法在七项MuJoCo任务上一百万步的学习曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引；Schulman等，2017，Figure 3, PDF第7页；仅图形区域。&lt;a href=&quot;https://arxiv.org/pdf/1707.06347v2#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-## 六、贡献、代价与局限
+七个任务面板横轴都到一百万环境时间步，纵轴是该任务回报，越高越好；Reacher的负分也按“较不负更好”读。紫线是PPO-Clip，青线是TRPO，其他颜色对应不同基线。比较应先看同任务的早期速度与后期表现：例如有的任务很快饱和，有的仍有明显波动，不能因PPO在若干面板较高就推成每个任务始终领先。
 
-**作者贡献**是实用替代目标及经验比较。**本文分析**：共享参数会让未采样动作也改变，某样本梯度被裁平不意味着整个网络停止改变它。学习率、epoch 数、优势处理和终止逻辑都可左右结果。
 
-## 七、帮助建立理解
+&lt;!-- inline-evidence-v2:end --&gt;
 
-### 教学例子
 
-以下是教学推演，不是原论文实验。
+[图1](#rl-27-figure-1)画单样本裁剪目标：横轴是新旧概率比，左右面板分别为正负优势，平坦区的方向并不相同。[图2](#rl-27-figure-2)沿一次更新方向插值比较替代目标，展示它是优化诱导而不是硬KL投影。Atari部分另在§6.4，不能把连续和离散任务的汇总当作同一训练模型。
 
-A=2，ρ=1.5，ε=0.2，未裁剪收益3，裁剪后为2.4，min取2.4。若 A=−2，ρ=1.5，则取−3，仍惩罚增加坏动作概率；不能不看 A 符号就决定哪一侧饱和。
+&lt;!-- figure-ref-v6:start:rl-27-figure-2 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-27-figure-2&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/27-figure-2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/27-figure-2.png&quot; width=&quot;1095&quot; height=&quot;402&quot; alt=&quot;横轴沿一次实际策略更新的方向线性插值，1对应这次更新后的参数。红色裁剪目标在附近转折而KL仍继续增加，说明这是局部优化形状的示例，不能读作全局KL约束。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜Schulman等，2017，图2，PDF第4页。&lt;a href=&quot;https://arxiv.org/pdf/1707.06347v2#page=4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt; · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。&lt;/figcaption&gt;&lt;/figure&gt;
+
+横轴沿一次实际策略更新的方向线性插值，1对应这次更新后的参数。红色裁剪目标在附近转折而KL仍继续增加，说明这是局部优化形状的示例，不能读作全局KL约束。
+&lt;!-- figure-ref-v6:end:rl-27-figure-2 --&gt;
+
+&lt;!-- figure-ref-v6:start:rl-27-figure-1 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-27-figure-1&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/27-figure-1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/27-figure-1.png&quot; width=&quot;987&quot; height=&quot;459&quot; alt=&quot;优势为正时，过度增大动作概率后目标变平；优势为负时，过度减小概率后目标变平。两侧仍保留不利方向的惩罚，所以裁剪目标并不是把概率比硬限制在区间内。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜Schulman等，2017，图1，PDF第3页。&lt;a href=&quot;https://arxiv.org/pdf/1707.06347v2#page=3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt; · 点图放大。原版权保留，仅摘引供本段具体评论的图形区域。&lt;/figcaption&gt;&lt;/figure&gt;
+
+优势为正时，过度增大动作概率后目标变平；优势为负时，过度减小概率后目标变平。两侧仍保留不利方向的惩罚，所以裁剪目标并不是把概率比硬限制在区间内。
+&lt;!-- figure-ref-v6:end:rl-27-figure-1 --&gt;
+
+## 五、裁剪单样本收益没有形成全局硬约束
+
+共享参数、未采样动作及价值或熵损失都可能推动已截平样本的概率，因此ε没有给全局KL硬上限。学习率、epoch数、优势处理和终止逻辑共同决定漂移，实际KL与clip fraction仍需监测。
 
 ### 五个前置概念
 
@@ -362,23 +347,35 @@ A=2，ρ=1.5，ε=0.2，未裁剪收益3，裁剪后为2.4，min取2.4。若 A=�
 4. **价值目标**：训练 Critic 的回归量。
 5. **熵**：动作分布的不确定程度。
 
-### 三个值得继续追问的问题
+## 六、继续追问：共享参数、KL与优势噪声
 
-1. 为何 ratio 超出区间后仍可能有梯度？
-2. 多轮更新时如何检测策略漂移？
-3. 为什么换终止处理可比换优化器影响更大？
+&lt;details&gt;
+&lt;summary&gt;1. 为何 ratio 超出区间后仍可能有梯度？&lt;/summary&gt;
 
-## 方法与证据总结
+裁剪只去掉使目标过度乐观的方向：正优势且 ratio 超上界、负优势且 ratio 低于下界时，对该样本的裁剪分支可平坦；相反方向仍有梯度。共享参数、其他样本以及价值/熵损失也会改变该动作概率。因此 ratio 超界不代表所有梯度为零，PPO 也没有把每个动作概率投影回硬区间。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| 在稳定性与实现成本间折中 | 采用概率比裁剪或 KL 惩罚，让策略更新更易实现 | 削弱反复利用同一旧样本导致的某些过大更新 | §6 在控制与 Atari 比较中展示有效的训练配方 | 裁剪不构成所有动作概率或 KL 的硬约束 |
+&lt;/details&gt;
 
-## 资料与阅读范围
+&lt;details&gt;
+&lt;summary&gt;2. 多轮更新时如何检测策略漂移？&lt;/summary&gt;
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+每轮测当前策略相对采样旧策略的经验 KL、ratio 分位数、clip fraction、熵及替代目标，并关注按状态或提示分组的尾部。可预先设 KL early stopping 与最大 epoch；这只是经验防护，样本外状态仍可能漂移。必须保留同一批数据收集时的旧 log-prob，不能每轮覆盖分母而掩盖累计变化。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;3. 为什么换终止处理可比换优化器影响更大？&lt;/summary&gt;
+
+终止处理决定价值目标：真正终止应置零，时间截断若任务继续则应自举，同时不能跨重置递推 GAE。错误处理会系统性改写许多样本的回报和优势，尤其长时域、正值尾部明显时，比替换优化器造成的局部更新差异更大。比较算法前应统一环境包装器、time-limit mask、最后观测和奖励尺度，再做优化器消融。
+
+&lt;/details&gt;
+
+## 七、从固定优势走向语言模型的组内基线
+
+- **优势模块回看**：[GAE](15-gae.md)。裁剪只改变怎样使用优势，价值误差与尾部处理仍由估计器负责。
+- **后作模块承接**：[GRPO](52-grpo.md)。语言模型继续使用裁剪概率比，但把优势基线改为同题采样组，采样单位与归一化会带来新的问题。
+
+- [原论文与图表入口](https://arxiv.org/pdf/1707.06347v2)。§2—4目标；§6.1表1；§6.2[图3](#rl-27-figure-3)；§6.3预算。
 
 ## 自测两题
 

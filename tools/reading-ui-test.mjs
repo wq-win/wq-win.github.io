@@ -4,8 +4,8 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 // Dependency-free site; only this optional DOM test uses happy-dom.
-// npm install --prefix /tmp/mylog-reading-tests --no-save happy-dom
-// HAPPY_DOM_PATH=/tmp/mylog-reading-tests/node_modules/happy-dom node tools/reading-ui-test.mjs
+// npm ci
+// node tools/reading-ui-test.mjs
 const require = createRequire(import.meta.url);
 let dependency = process.env.HAPPY_DOM_PATH;
 try {
@@ -25,7 +25,7 @@ async function setup(width = 1440, slug = '01-actor-critic') {
   const w = new Window({url: 'https://example.test/rl/' + slug + '.html', width, height: 1000, settings: {disableJavaScriptFileLoading: true, disableCSSFileLoading: true}});
   w.innerWidth = width;
   w.HTMLElement.prototype.scrollIntoView = function () {};
-  w.document.write('<html><head><style>' + css + '</style></head><body><main><article class="article-content rl-body"><div>outside</div><div id="article-body"><h1>Actor</h1><p>Actor and Critic, Actor &amp; Critic. <code>Actor TD</code><a href="#x">TD</a> CATD TD3 and $Q$.</p><h2>方法</h2><p>时序差分 TD 和 TD 的反馈。</p><h3>关键公式</h3><p><span class="katex"><span class="katex-html">Q</span><math><annotation encoding="application/x-tex">Q(s,a)</annotation></math></span></p><h2>总结</h2><p>Q means nothing without context here. <em>Actor</em></p></div><div id="article-pager"></div></article></main></body></html>');
+  w.document.write('<html><head><style>' + css + '</style></head><body><div id="site-header"><header class="site-header">site navigation</header></div><main><article class="article-content rl-body"><div>outside</div><div id="article-body"><h1>Actor</h1><p>Actor and Critic, Actor &amp; Critic. <code>Actor TD</code><a href="#x">TD</a> CATD TD3 and $Q$.</p><h2>方法</h2><p>时序差分 TD 和 TD 的反馈。</p><h3>关键公式</h3><p><span class="katex"><span class="katex-html">Q</span><math><annotation encoding="application/x-tex">Q(s,a)</annotation></math></span></p><h2>总结</h2><p>Q means nothing without context here. <em>Actor</em></p></div><div id="article-pager"></div></article></main></body></html>');
   w.GLOSSARY = [
     {id:'actor',term:'Actor',zh:'行动者',en:'Actor',aliases:[],purpose:'选择动作',definition:'定义',example:'例子'},
     {id:'critic',term:'Critic',zh:'评价者',en:'Critic',aliases:[],definition:'评价'},
@@ -86,6 +86,46 @@ let bottom=0; for(const note of d.querySelectorAll('.rg-margin-note')) {ok(Numbe
 state.destroy(); ok(body.textContent===before, 'destroy restores exact text');ok(d.querySelectorAll('.rg-layout,dialog,.rg-term-trigger').length===0,'destroy cleans DOM');await w.happyDOM.close();
 ({w,d,body,state}=await setup(390));ok(!d.querySelector('.rg-toc-disclosure').open,'mobile TOC collapsed');ok(!d.querySelector('.rg-symbols-disclosure').open,'mobile symbols collapsed');d.querySelector('.rg-toc-disclosure').open=true;d.querySelector('.rg-toc a').click();ok(!d.querySelector('.rg-toc-disclosure').open,'TOC closes on mobile navigation');d.querySelector('.rg-term-trigger').click();ok(d.querySelector('dialog').open,'mobile glossary dialog');await w.happyDOM.close();
 
+
+// Header rectangles are mocked deliberately: this verifies our positioning logic,
+// not an actual CSS/layout engine. Test the reported 950px case and both breakpoints.
+for (const width of [950, 390, 1440]) {
+  const {w,d,state} = await setup(width);
+  const header=d.querySelector('header.site-header'),layout=d.querySelector('.rg-layout'),rail=d.querySelector('.rg-left-rail');
+  let headerRect={top:0,bottom:68,height:68};
+  header.getBoundingClientRect=()=>headerRect;
+  rail.getBoundingClientRect=()=>({height:86,top:68,bottom:154});
+  for(const summary of rail.querySelectorAll('summary'))summary.getBoundingClientRect=()=>({bottom:154,height:42});
+  state.refresh();
+  ok(layout.style.getPropertyValue('--rg-sticky-top')==='68px',width+' visible header reserves its measured height');
+  ok(layout.style.getPropertyValue('--rg-anchor-offset')===(width<1280?'170px':'84px'),width+' anchor avoids compact toolbar as well as header');
+  headerRect={top:-110,bottom:-42,height:68};w.dispatchEvent(new w.Event('scroll'));await new Promise(r=>setTimeout(r,30));
+  ok(layout.style.getPropertyValue('--rg-sticky-top')==='0px',width+' scroll-away header leaves no phantom 92px gap');
+  headerRect={top:-44,bottom:24,height:68};state.refresh();
+  ok(layout.style.getPropertyValue('--rg-sticky-top')==='24px',width+' partially visible header reserves only visible bottom');
+  header.style.visibility='hidden';await new Promise(r=>setTimeout(r,30));
+  ok(layout.style.getPropertyValue('--rg-sticky-top')==='0px',width+' hidden header frees top through observer');
+  header.style.visibility='visible';header.style.display='none';state.refresh();
+  ok(layout.style.getPropertyValue('--rg-sticky-top')==='0px',width+' display-none header frees top');
+  header.style.display='block';header.style.opacity='0';state.refresh();
+  ok(layout.style.getPropertyValue('--rg-sticky-top')==='0px',width+' transparent hidden header frees top');
+  header.style.opacity='1';headerRect={top:0,bottom:104,height:104};w.dispatchEvent(new w.Event('resize'));await new Promise(r=>setTimeout(r,30));
+  ok(layout.style.getPropertyValue('--rg-sticky-top')==='104px',width+' resize reads changed header height');
+  if(width<1280){
+    w.innerHeight=320;state.refresh();
+    ok(d.querySelector('.rg-toc').style.maxHeight==='147px',width+' popup constrained to remaining viewport');
+    d.querySelector('.rg-toc-disclosure').open=true;await new Promise(r=>setTimeout(r,30));
+    d.querySelector('.rg-symbols-disclosure').open=true;await new Promise(r=>setTimeout(r,30));
+    ok(!d.querySelector('.rg-toc-disclosure').open,width+' opening symbols closes TOC');
+    d.querySelector('.rg-symbols-disclosure summary').dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    ok(!d.querySelector('.rg-symbols-disclosure').open,width+' Escape closes expanded toolbar');
+  }
+  state.destroy();header.style.visibility='hidden';w.dispatchEvent(new w.Event('scroll'));await new Promise(r=>setTimeout(r,30));
+  ok(!d.querySelector('.rg-layout'),width+' teardown releases toolbar and geometry callbacks');
+  await w.happyDOM.close();
+}
+ok(!css.includes('--rg-sticky-top: 92px')&&!css.includes('--rg-sticky-top: 76px'),'no fixed desktop/mobile header guesses remain');
+ok(css.includes('top: calc(100% + 7px)'),'popup follows actual summary height');
 
 // Check the actual static article markup and the production shared reference data.
 for (const [series, slug] of [

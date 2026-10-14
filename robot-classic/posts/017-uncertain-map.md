@@ -4,19 +4,15 @@
 
 **论文**：Randall C. Smith、Peter Cheeseman，*On the Representation and Estimation of Spatial Uncertainty*，IJRR，1986，5(4):56–68。[原始出版入口](https://doi.org/10.1177/027836498600500404) · [MIT 托管的原稿全文](https://people.csail.mit.edu/brooks/idocs/Smith_Cheeseman.pdf)。
 
-**阅读范围**：读取完整可解析正文，包含第 3 节变换合成、第 4 节融合、第 5 节网络化简、第 6 节移动机器人例子与第 7 节讨论。采用期刊印刷页码定位；扫描末尾附录页与正文共同计入 PDF 页数。
+### 先接住前作的问题
 
-## 一分钟理解：坐标变换也会带着误差旅行
+[Kalman滤波](002-kalman.md)提供估计与协方差递推，本篇直接采用其融合思想，并加入空间变换的一阶误差传播。
+
+## 一、问题设定：带误差的空间关系串联后应报告怎样的不确定性
 
 机器人知道自己走了多远，但轮子可能打滑；相机知道目标大概在哪里，但像素定位有噪声。把这些关系串起来，最后得到的位置应该附带怎样的不确定性？看到一个熟悉目标之后，又该怎样减少这种不确定性？
 
-论文将近似坐标变换表示为名义位置与误差协方差，提供合成、求逆和融合操作。这些运算让机器人能够在行动之前估计：当前信息是否足够支持穿门或对准相机等任务。
-
-原文以独立 Monte Carlo 模拟检查近似质量，同时给出非高斯形状导致置信椭圆不准确的情况。它的意义不只是“画一个椭圆”，而是明确哪些信息经过什么坐标关系传播。
-
-一句话：**在由多段有误差的空间关系构成的机器人任务中，通过名义变换、协方差传播与测量融合，量化相对位置可靠性，代价是一阶近似、相关性及分布形状限制必须被认真检查。**
-
-## 场景与问题定义
+### 场景与问题定义
 
 正文主要推导二维位置加航向 $(x,y,\theta)$。一条边表示两个坐标系之间的近似关系，可以来自运动、测量或零件公差。沿路径合成关系相当于从一个坐标系推到另一个；平行关系则意味着有多个信息来源估计同一相对位姿。
 
@@ -24,7 +20,9 @@
 
 核心假设包括误差较小、一阶线性化足够准确，以及独立性被正确处理。第 3 节说明系统性非零均值误差不在其基本模型中，应通过标定处理；若误差相关，应保留非零交叉协方差。不能把“默认独立”当成现实世界天然成立的性质。
 
-## 三种运算：合成、反向、融合
+## 二、对合成、求逆和融合进行一阶误差传播
+
+### 三种运算：合成、反向、融合
 
 设两段平面变换 $a=(x_a,y_a,\theta_a)$ 与 $b=(x_b,y_b,\theta_b)$，复合为
 
@@ -40,6 +38,22 @@ $$P_c\approx J_aP_aJ_a^T+J_bP_bJ_b^T+J_aP_{ab}J_b^T+J_bP_{ab}^TJ_a^T.$$
 
 融合则针对同一量的多个估计。对两个独立、同坐标表达的线性估计，用教学记号写成 $K=P_1(P_1+P_2)^{-1}$，$\mu=\mu_1+K(\mu_2-\mu_1)$，$P=(I-K)P_1$。矩阵增益按方向分配信任，不是简单取算术平均。
 
+最后两步是结合原文限制写出的教学保护规则。原文讨论的串并联与 Delta–Y 化简并不能处理任意网络。不要把它误说成现代完整图 SLAM 求解器。
+
+相关性不仅会让融合过度自信，也可能让相对位置被估得过于悲观。原创一维例中，两个地标都借用同一个有误差的原点，估计误差写作 $\delta a=u+e_1,\delta b=u+e_2$；令三个量独立且方差为 $4,1,1$。于是 $P_a=P_b=5$，交叉协方差为4。地标间距离 $b-a$ 的方差是
+
+$$\operatorname{Var}(b-a)=5+5-2\times4=2,$$
+
+共同原点误差被抵消。丢掉相关项却会得到10。反过来，两次同一位置估计若也含这份共同误差，它们平均后的方差是 $(5+5+2\times4)/4=4.5$，错误独立化会报告2.5。这说明交叉协方差不是“加个保险系数”，而是记录误差从何而来。
+
+合成中的方向耦合也可逐项检查。上式 $c=a\oplus b$ 对 $\theta_a$ 的位置导数为 $(-\sin\theta_a x_b-\cos\theta_a y_b,\;\cos\theta_a x_b-\sin\theta_a y_b)$。在 $\theta_a=0,b=(L,0,0)$ 时就是 $(0,L)$，故朝向方差贡献为横向 $L^2\sigma_\theta^2$。这个中间项解释了后文5米行程的例子，也说明角度不确定性不能只在最终地图上另画一条角度误差条。
+
+第3节明确允许用非零交叉块处理已知相关的成对关系，第4节融合则明说使用静态[Kalman](002-kalman.md)方程，属于直接继承；[占据栅格](025-occupancy.md)对每个空间单元维护占据概率，是并行的地图表示。两者可以组合，但地标关系的协方差不会自动补齐栅格之间或连续观测之间的相关性。
+
+合成与求逆会旋转并耦合误差，融合还要避免共享观测被重复计数。穿门例子会固定位置误差大小，只改变方向，检查任务风险为何不同。
+
+## 三、实现坐标与协方差运算，用穿门风险作检查
+
 ```text
 输入：两目标坐标系及它们之间的近似变换网络
 统一所有边的方向、坐标与角度约定
@@ -51,25 +65,7 @@ $$P_c\approx J_aP_aJ_a^T+J_bP_bJ_b^T+J_aP_{ab}J_b^T+J_bP_{ab}^TJ_a^T.$$
 输出：所需相对变换、协方差及近似成立条件
 ```
 
-最后两步是结合原文限制写出的教学保护规则。原文讨论的串并联与 Delta–Y 化简并不能处理任意网络。不要把它误说成现代完整图 SLAM 求解器。
-
-## 证据与实验设定
-
-| 原文位置 | 比较什么 | 观察与支持 | 不能推出什么 |
-|---|---|---|---|
-| 第 3 节，图 1、式 (1)–(4) | 多段变换及误差合成 | 位置与角度误差可统一传播 | 一阶近似对任意角误差精确 |
-| 第 3 节，图 2、式 (5)–(6) | 关系反向 | 均值与协方差需一起变换 | 取负号就足够 |
-| 第 4 节，式 (8)–(10) | 平行估计融合 | 独立信息降低估计方差 | 重复信息也能同样降方差 |
-| 第 5 节，图 3、4 | 网络化简 | 明确存在不能简单约化的图 | 已解决任意拓扑联合估计 |
-| 第 6 节，图 5 | 解析近似与随机模拟 | 小误差下较吻合，大角误差出现弯月分布 | 协方差准确就代表分布高斯 |
-
-Monte Carlo 使用关系误差的高斯采样。原文第 64 页报告所测试情形中，均值和协方差分量相对误差通常小于 1%，但角度标准差较大时会偏离；文中以超过约 6 度作为其例子的提示。这不是所有机器人可通用的阈值。
-
-原文图 5 还叠加了 90% 置信轮廓。最值得读的是弯月状样本与椭圆不匹配的部分：二阶矩近似可能尚可，高斯概率解释却已经失效。采样总数与随机种子在已核对实验段落中未确认，不作补填。
-
-这里没有训练预算或算法调参排名。实验的直接假设是“分析传播是否接近模拟分布”，并不是“机器人穿门成功率是否超过另一种导航方法”。穿门属于应用动机，不能当作已报告的实物任务成绩。
-
-## 自构例子：相同位置误差，不同穿门风险
+### 自构例子：相同位置误差，不同穿门风险
 
 机器人宽 0.6 米，门宽 0.8 米，居中时每侧只剩 0.1 米。若横向位置标准差为 0.02 米，与 0.10 米的情况相比，平均位置虽然相同，越界概率却明显不同。计算时还需把门位置误差和机器人朝向纳入，而不能只看机器人中心的单个标准差。
 
@@ -77,7 +73,67 @@ Monte Carlo 使用关系误差的高斯采样。原文第 64 页报告所测试�
 
 最后考虑重复读取同一张图像得到两份完全相同定位结果。如果错误地把它们当作独立，融合后协方差会缩小，实际信息却没有增加。自信程度因此被人为提高；这正是后来 SLAM 中保持关联和避免重复计数的重要动机。
 
-## 贡献与限制
+## 四、对照Monte Carlo与非高斯反例读置信图
+
+
+<!-- figure-ref-v6:start:rc-17-figure-5-anchor -->
+<span id="rc-17-figure-5"></span>
+<!-- figure-ref-v6:end:rc-17-figure-5-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/017-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/017-evidence.png" width="1397" height="963" alt="Fig. 5：上方近似椭圆的点云与下方弯月状点云要对照着看：角度不确定性经非线性坐标变换后，分布形状可能脱离高斯族" loading="lazy"></a><figcaption>原论文结果图／表摘引：Randall C. Smith、Peter Cheeseman（1986），Fig. 5，PDF 第 10 页；<a href="https://people.csail.mit.edu/brooks/idocs/Smith_Cheeseman.pdf#page=10" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+读图：上方近似椭圆的点云与下方弯月状点云要对照着看：角度不确定性经非线性坐标变换后，分布形状可能脱离高斯族。协方差接近并不等于置信椭圆的概率解释仍准确。
+
+原图中的误差云与椭圆应一并看：前者来自分布传播，后者只保留二阶近似，二者形状一致需要额外分布条件。
+
+**第 3 节，[图 1](#rc-17-figure-1)、式 (1)–(4)。** 多段变换及误差合成；位置与角度误差可统一传播；不能据此推出：一阶近似对任意角误差精确。
+
+<!-- figure-ref-v6:start:rc-17-figure-1 -->
+<figure class="reading-evidence-figure" id="rc-17-figure-1"><a href="/robot-classic/assets/figure-refs-v6/017-fig-1.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/017-fig-1.png" width="606" height="537" alt="图1：世界坐标W与机器人位置L1至L4之间的变换链及不确定性椭圆" loading="lazy"></a><figcaption>Randall C. Smith、Peter Cheeseman（1986），图 1，PDF 第 2 页；<a href="https://people.csail.mit.edu/brooks/idocs/Smith_Cheeseman.pdf#page=2" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/017-fig-1.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：沿实线读相邻位姿的变换，再对照相对世界坐标的虚线；椭圆表达的是关系的不确定性，不能只把各段均值相加。
+<!-- figure-ref-v6:end:rc-17-figure-1 -->
+
+**第 3 节，[图 2](#rc-17-figure-2)、式 (5)–(6)。** 关系反向；均值与协方差需一起变换；不能据此推出：取负号就足够。
+
+<!-- figure-ref-v6:start:rc-17-figure-2 -->
+<figure class="reading-evidence-figure" id="rc-17-figure-2"><a href="/robot-classic/assets/figure-refs-v6/017-fig-2.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/017-fig-2.png" width="596" height="239" alt="图2：两种三角形变换合成，第二种需要先反向B" loading="lazy"></a><figcaption>Randall C. Smith、Peter Cheeseman（1986），图 2，PDF 第 5 页；<a href="https://people.csail.mit.edu/brooks/idocs/Smith_Cheeseman.pdf#page=5" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/017-fig-2.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：两幅三角形的端点相同，但B的方向不同；右图必须先求反向关系，再进行合成，反向操作也必须传播协方差。
+<!-- figure-ref-v6:end:rc-17-figure-2 -->
+
+**第 4 节，式 (8)–(10)。** 平行估计融合；独立信息降低估计方差；不能据此推出：重复信息也能同样降方差。
+
+**第 5 节，[图 3](#rc-17-figure-3)、4。** 网络化简；明确存在不能简单约化的图；不能据此推出：已解决任意拓扑联合估计。
+
+<!-- figure-ref-v6:start:rc-17-figure-3 -->
+<figure class="reading-evidence-figure" id="rc-17-figure-3"><a href="/robot-classic/assets/figure-refs-v6/017-fig-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/017-fig-3.png" width="304" height="310" alt="图3：带横向边C的四节点变换网络" loading="lazy"></a><figcaption>Randall C. Smith、Peter Cheeseman（1986），图 3，PDF 第 7 页；<a href="https://people.csail.mit.edu/brooks/idocs/Smith_Cheeseman.pdf#page=7" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/017-fig-3.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：横向的C把两条路径耦合起来；仅靠串联合成与并联合并，无法把这个桥式网络直接压缩成任意两点的一条关系。
+<!-- figure-ref-v6:end:rc-17-figure-3 -->
+
+<!-- figure-ref-v6:start:rc-17-figure-4 -->
+<figure class="reading-evidence-figure" id="rc-17-figure-4"><a href="/robot-classic/assets/figure-refs-v6/017-fig-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/017-fig-4.png" width="311" height="372" alt="图4：桥式关系图的三角形到Y形变换" loading="lazy"></a><figcaption>Randall C. Smith、Peter Cheeseman（1986），图 4，PDF 第 8 页；<a href="https://people.csail.mit.edu/brooks/idocs/Smith_Cheeseman.pdf#page=8" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/017-fig-4.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：对照虚线的三角关系与中心新增的Y形分支；这是网络约化的具体构造，图形变简单不等于已经解决任意拓扑的联合估计。
+<!-- figure-ref-v6:end:rc-17-figure-4 -->
+
+**第 6 节，[图 5](#rc-17-figure-5)。** 解析近似与随机模拟；小误差下较吻合，大角误差出现弯月分布；不能据此推出：协方差准确就代表分布高斯。
+
+<!-- figure-ref-v6:start:rc-17-links-92 -->
+本页定位：[图 5内嵌图](#rc-17-figure-5)。
+<!-- figure-ref-v6:end:rc-17-links-92 -->
+
+Monte Carlo 使用关系误差的高斯采样。原文第 64 页报告所测试情形中，均值和协方差分量相对误差通常小于 1%，但角度标准差较大时会偏离；文中以超过约 6 度作为其例子的提示。这不是所有机器人可通用的阈值。
+
+原文[图 5](#rc-17-figure-5) 还叠加了 90% 置信轮廓。最值得读的是弯月状样本与椭圆不匹配的部分：二阶矩近似可能尚可，高斯概率解释却已经失效。采样总数与随机种子在已核对实验段落中未确认，不作补填。
+
+<!-- figure-ref-v6:start:rc-17-links-96 -->
+本页定位：[图 5内嵌图](#rc-17-figure-5)。
+<!-- figure-ref-v6:end:rc-17-links-96 -->
+
+这里没有训练预算或算法调参排名。实验的直接假设是“分析传播是否接近模拟分布”，并不是“机器人穿门成功率是否超过另一种导航方法”。穿门属于应用动机，不能当作已报告的实物任务成绩。
+
+## 五、保留相关性，辨认一阶近似失效
 
 贡献是建立空间关系的概率运算语言：不仅求一个位置，还能预测新运动或新传感会怎样改变知识。它把几何链与估计问题联系起来，为后续随机地图和 SLAM 提供基础。
 
@@ -87,11 +143,21 @@ Monte Carlo 使用关系误差的高斯采样。原文第 64 页报告所测试�
 
 五个前置概念：**协方差**描述二阶误差结构；**雅可比传播**是局部线性近似；**交叉相关**记录共享误差来源；**数据融合**结合对同一量的不同信息；**置信区域**需要分布假设才能解释概率。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 位姿链缺少可靠性描述 | 近似变换及协方差运算 | 显式传播和融合空间知识 | 图 5 与 Monte Carlo 比较 | 小误差近似、相关性、非高斯和网络限制 |
+## 六、追问：两点各自位置误差都很大，它们的相对距离误差能很小吗？
 
-## 自测与参考答案
+<details>
+<summary>两点各自位置误差都很大，它们的相对距离误差能很小吗？</summary>
+
+**参考答案**：用一维教学模型 $x_a=\bar x_a+c+\epsilon_a$、$x_b=\bar x_b+c+\epsilon_b$ 表示共同平移误差 $c$。相减后 $c$ 消失；一般地，$\operatorname{Var}(x_b-x_a)=P_{bb}+P_{aa}-P_{ab}-P_{ba}$。若删掉交叉项，就会把本来会抵消的共同误差也算进相对量。这个协方差验算借助[Särkkä的随机变量与滤波表示](https://users.aalto.fi/~ssarkka/pub/cup_book_online_20131111.pdf#page=74)，对应本文保留空间相关性的机制。
+
+</details>
+
+## 七、追踪联合地图相关性，或改变空间表示
+
+- **直接继承**：[SLAM 的收敛结构：地图为什么能越走越确定](044-slam-convergence.md)。在联合机器人与地标状态中追踪相关性，并分析地图收敛的条件。
+- **平行路线**：[Occupancy Grid：地图不只记录哪里有墙，还记录有多确定](025-occupancy.md)。用栅格占据概率记录空间证据，表示对象与坐标误差椭圆不同。
+
+## 八、自测与参考答案
 
 **1．均值与协方差都估计准确，为什么 90% 椭圆仍可能不准确？**
 

@@ -4,17 +4,13 @@
 
 **原论文**：*Deep Reinforcement Learning in a Handful of Trials using Probabilistic Dynamics Models*，Kurtland Chua 等，2018。[论文](https://arxiv.org/abs/1805.12114)。
 
-## 一、一分钟理解：规划时不要只相信一条未来
+### 先接住前作的问题
+
+[PILCO](007-pilco.md)已经把模型不确定性带入控制，但高斯过程和矩匹配有扩展及分布近似限制。PETS用概率网络集成与粒子轨迹保留多种未来，再在线搜索动作；它共享概率控制问题，不是简单将高斯过程替换成一个网络。
+
+## 一、问题设定：模型未知与环境随机怎样共同进入规划
 
 神经网络预测“推一下，物体会到这里”，规划器就可能专挑模型最乐观的动作。但数据少时，这个预测也许只是猜测；即使模型已充分学习，摩擦和执行噪声仍会让结果不同。PETS 为这两种不确定性分别留出表达方式，再让多条可能的未来参与动作选择。
-
-其名称展开为 Probabilistic Ensembles with Trajectory Sampling：多个概率动力学网络组成集成，粒子轨迹传播未来，CEM 搜索高回报动作序列。它没有必须训练的 Actor，决策直接来自模型预测控制。
-
-作者报告在 HalfCheetah 达到比较性能所需样本相对 SAC 少约八倍、相对 PPO 少约 125 倍。这是原文特定基准和曲线口径的结果，不是任意机器人任务的倍率，更不是运行时间加速比。
-
-一句话：在连续控制中，通过同时建模数据随机性与模型未知性，并在规划中传播它们，改善模型驱动学习的数据效率，代价是部署时反复执行大量预测与动作搜索。
-
-## 二、背景：两种不知道有什么不同
 
 **偶然不确定性**来自系统或测量随机性，例如同样控制信号导致略有不同的接触结果；更多同类数据不一定让这种随机性消失。**认知不确定性**来自数据不足，不同模型都能解释现有数据，却对未见动作产生不同预测；进一步采样可能缩小这种分歧。
 
@@ -22,7 +18,9 @@
 
 场景是单智能体、在线数据聚合、模型驱动控制。四个任务都在 MuJoCo 仿真：摆杆摆起、七自由度 PR2 到达、PR2 推物、HalfCheetah。状态与动作连续，使用任务奖励评价预测轨迹；任务状态由模拟器提供，不是从 RGB 视频学到的潜在状态。没有真实 PR2 硬件实验可以从这里直接引用。
 
-## 三、方法：模型是什么，规划怎样使用它
+## 二、用概率集成和粒子轨迹评价候选动作
+
+其名称展开为 Probabilistic Ensembles with Trajectory Sampling：多个概率动力学网络组成集成，粒子轨迹传播未来，CEM 搜索高回报动作序列。它没有必须训练的 Actor，决策直接来自模型预测控制。
 
 ### 1. 每个网络输出一个分布
 
@@ -74,7 +72,17 @@ CEM 先采样一批动作序列，保留回报较高者，用这些“精英”�
 
 模型训练目标是预测似然，规划目标是任务期望回报，CEM 是求解后者的无梯度优化器。PETS 没有在损失里直接惩罚所有不确定性，也没有专门最大化信息增益。作者把利用认知不确定性进行定向探索留给后续研究。
 
-教学伪代码：
+选取一个状态增量分量 $\Delta s$，令 $b$ 为均匀抽取的集成成员、$\mu_b,\Sigma_b$ 为其预测均值和方差，则总方差可拆为 $\operatorname{Var}(\Delta s)=E_b[\Sigma_b]+\operatorname{Var}_b(\mu_b)$。第一项是模型内部噪声，第二项是模型间分歧。教学设定：两个模型均值−1和1、各自方差0.1，总方差为1.1；若只平均均值再保留0.1，会漏掉主要风险。
+
+TS∞让每条粒子保留同一模型，也保留“某个可能世界持续偏左”的时间关联。它因此与[PILCO](007-pilco.md)中的时间相关性缺口形成直接教学对照，但粒子再多也不能修复所有模型共同遗漏的接触模式。原文传播方式消融应读成同一模型族内的近似比较，不能推成严格的Bayes校准证明。[原文§5.1](https://arxiv.org/html/1805.12114)
+
+### 一个“两条未来不能平均”的例子
+
+自构例子，未运行：机器人向物体侧面推进，低摩擦模型预测物体向左滑开，高摩擦模型预测停在原处。若只传播平均位置，规划器可能想象出一个两种物理情况都不会出现的中间位置，进而选择错误的第二步。粒子保留两个分支，对每个分支分别计算后续奖励，避免在平均幻象中规划。
+
+## 三、让粒子未来参与CEM并只执行首个动作
+
+每条候选动作序列要在多个可能未来中评价，粒子传播方式决定是否保留模型分歧。选出序列后只执行首步，真实新状态再进入下一轮搜索。
 
 ~~~text
 先用随机控制器采集一个回合
@@ -92,7 +100,18 @@ CEM 先采样一批动作序列，保留回报较高者，用这些“精英”�
     回合结束后重新训练动力学模型
 ~~~
 
-## 四、实验：模型选择与传播方式分开检验
+## 四、分开模型类型、传播方式与样本预算
+
+作者报告在 HalfCheetah 达到比较性能所需样本相对 SAC 少约八倍、相对 PPO 少约 125 倍。这是原文特定基准和曲线口径的结果，不是任意机器人任务的倍率，更不是运行时间加速比。
+
+**原图怎么读：** [图3，原论文图注与图像](#paper-029-pets-figure-3)。曲线按图注汇总“至今最高回报”，不是每个训练时刻的原始策略表现；高而平的曲线可能隐藏后续退步。比较稳定性需要另外查看逐次评估。
+
+
+<!-- figure-ref-v6:start:e129264c0fa4-anchor -->
+<a id="paper-029-pets-figure-3"></a>
+<!-- figure-ref-v6:end:e129264c0fa4-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/029-pets-s7-f3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/029-pets-s7-f3.png" width="1824" height="901" alt="Deep Reinforcement Learning in a Handful of Trials using Probabilistic Dynamics Models，图3：曲线按图注汇总“至今最高回报”，不是每个训练时刻的原始策略表现；高而平的曲线可能隐藏后续退步。比较稳定性需要另外查看逐次评估。" loading="lazy"></a><figcaption>实验图原图摘引：Kurtland Chua 等，2018，HTML S7.F3，图3。<a href="https://arxiv.org/html/1805.12114v2#S7.F3" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
 
 | 维度 | 原文设置 |
 |---|---|
@@ -101,31 +120,61 @@ CEM 先采样一批动作序列，保留回报较高者，用这些“精英”�
 | 传播 | 均值 E、矩匹配 MM、分布采样 DS、轨迹采样 TS1/TS∞ |
 | 网络 | 三个隐藏层，通常每层 500，HalfCheetah 每层 250，swish |
 | 数据规模 | 主结果在少于十万时间步或一百回合范围内学习 |
-| 重复与曲线 | 图 3 对十次实验的“历史最好回报”求平均 |
+| 重复与曲线 | [图3](#paper-029-pets-figure-3) 对十次实验的“历史最好回报”求平均 |
 | 对照 | PPO、DDPG、SAC、确定性模型驱动方法、多个 GP 方案 |
 | SAC 数据 | 来自作者提供数据，而非声称所有算法在同一脚本重跑 |
 | 额外实验 | 动作噪声、规划长度、CEM 与随机搜索、线性模型 |
 | 成本范围 | 交互步数明确，全部硬件耗时及等调参预算未逐项确认 |
 
-图 3 中一步代表 0.01 秒模拟物理时间，Cartpole 为 0.02 秒；它不是计算一次决策只花 0.01 秒。作者讨论实时控制需要快速优化，但不能用物理步长反推实际吞吐。
+[图3](#paper-029-pets-figure-3) 中一步代表 0.01 秒模拟物理时间，Cartpole 为 0.02 秒；它不是计算一次决策只花 0.01 秒。作者讨论实时控制需要快速优化，但不能用物理步长反推实际吞吐。
 
 附录 A.8 为隔离优化器效果，直接用真实仿真动力学评价 CEM 与随机搜索：都使用 2500 个候选样本，CEM 分五轮各 500，随机搜索一次采 2500。这个实验支持搜索器的作用，不是概率模型本身的消融。
 
-## 五、五处证据与正确的结论强度
+### 五处证据与正确的结论强度
 
 | 位置 | 观察 | 支持什么，不能证明什么 |
 |---|---|---|
-| 图 3 | 少量数据下达到较高的历史最好回报 | 支持数据效率，不能证明每轮当前策略同样稳定 |
-| 图 4 | 概率集成通常强于只含一种不确定性的模型 | 支持两类表达共同有用，Cartpole 有例外 |
-| 附录图 A.8 | 长规划对不同模型传播方式影响不同 | 支持控制误差累积的重要性，不存在所有任务通用最优长度 |
-| 附录图 A.9、A.12 | 加动作噪声后概率模型更稳健 | 支持所测噪声类型，不是任意接触不确定性的保证 |
-| 附录图 A.11 | 同候选数量下 CEM 优于纯随机搜索 | 说明提升不能全部归功于网络集成 |
+| [图3](#paper-029-pets-figure-3) | 少量数据下达到较高的历史最好回报 | 支持数据效率，不能证明每轮当前策略同样稳定 |
+| [图4](#paper-029-pets-figure-4) | 概率集成通常强于只含一种不确定性的模型 | 支持两类表达共同有用，Cartpole 有例外 |
+| 附录[图A.8](#paper-029-pets-figure-A.8) | 长规划对不同模型传播方式影响不同 | 支持控制误差累积的重要性，不存在所有任务通用最优长度 |
+| 附录[图A.9](#paper-029-pets-figure-A.9)、A.12 | 加动作噪声后概率模型更稳健 | 支持所测噪声类型，不是任意接触不确定性的保证 |
+| 附录[图A.11](#paper-029-pets-figure-A.11) | 同候选数量下 CEM 优于纯随机搜索 | 说明提升不能全部归功于网络集成 |
 
-图 3 绘制“截至当前见过的最大回报”，所以曲线单调向上不表示学习没有退化。若某方法早期偶然出现一次高回报，后来表现下降，这种画法仍保留高值。它适合展示已达到能力，但评估部署可靠性还应看当前模型的独立重复回报。
+<!-- figure-ref-v6:start:1763d5f82123 -->
+<a id="paper-029-pets-figure-4"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/029-pets-v6-figure-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/029-pets-v6-figure-4.png" width="2132" height="811" alt="Deep Reinforcement Learning in a Handful of Trials using Probabilistic Dynamics Models，图4：读图对应本段的“概率集成通常强于只含一种不确定性的模型”；支持两类表达共同有用，Cartpole 有例外。" loading="lazy"></a><figcaption>原图摘引：Kurtland Chua 等，2018，HTML S7.F4，图4。<a href="https://arxiv.org/html/1805.12114v2#S7.F4" target="_blank" rel="noopener noreferrer">核对原文</a>。读图对应本段的“概率集成通常强于只含一种不确定性的模型”；支持两类表达共同有用，Cartpole 有例外。</figcaption></figure>
+<!-- figure-ref-v6:end:1763d5f82123 -->
+<!-- figure-ref-v6:start:a454a5dc64b5 -->
+<a id="paper-029-pets-figure-A.8"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/029-pets-v6-figure-A.8.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/029-pets-v6-figure-A.8.png" width="1584" height="872" alt="Deep Reinforcement Learning in a Handful of Trials using Probabilistic Dynamics Models，图A.8：四个面板分别固定已收集的1、10、40、80次试验，再改变MPC时域。长时域并非统一更好；阴影是5次重复的5至95百分位范围，不能当标准误。" loading="lazy"></a><figcaption>原图摘引：Kurtland Chua 等，2018，PDF第15页，图A.8。<a href="https://arxiv.org/pdf/1805.12114v2#page=15" target="_blank" rel="noopener noreferrer">核对原文</a>。四个面板分别固定已收集的1、10、40、80次试验，再改变MPC时域。长时域并非统一更好；阴影是5次重复的5至95百分位范围，不能当标准误。<a href="https://arxiv.org/html/1805.12114v2#A1.F8" target="_blank" rel="noopener noreferrer">原引用入口 </a></figcaption></figure>
+<!-- figure-ref-v6:end:a454a5dc64b5 -->
+<!-- figure-ref-v6:start:f4cddb62453d -->
+<a id="paper-029-pets-figure-A.9"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/029-pets-v6-figure-A.9.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/029-pets-v6-figure-A.9.png" width="816" height="412" alt="Deep Reinforcement Learning in a Handful of Trials using Probabilistic Dynamics Models，图A.9：横轴为动作噪声标准差占动作范围的比例，纵轴为回报；三条曲线比较不同不确定性建模方法。随噪声增加总体回报降低，概率传播的优势仍受具体任务设置限制。" loading="lazy"></a><figcaption>原图摘引：Kurtland Chua 等，2018，PDF第15页，图A.9。<a href="https://arxiv.org/pdf/1805.12114v2#page=15" target="_blank" rel="noopener noreferrer">核对原文</a>。横轴为动作噪声标准差占动作范围的比例，纵轴为回报；三条曲线比较不同不确定性建模方法。随噪声增加总体回报降低，概率传播的优势仍受具体任务设置限制。<a href="https://arxiv.org/html/1805.12114v2#A1.F9" target="_blank" rel="noopener noreferrer">原引用入口 </a></figcaption></figure>
+<!-- figure-ref-v6:end:f4cddb62453d -->
+<!-- figure-ref-v6:start:eea61311958c -->
+<a id="paper-029-pets-figure-A.12"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/029-pets-v6-figure-A.12.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/029-pets-v6-figure-A.12.png" width="1584" height="1092" alt="Deep Reinforcement Learning in a Handful of Trials using Probabilistic Dynamics Models，图A.12：六个面板逐一比较建模与传播组合，每个面板蓝线为无噪声、红线为动作范围10%的噪声。比较同一面板内的均值和波动，PE-DS、PE-TS1与PE-TS∞后期波动收窄更明显。" loading="lazy"></a><figcaption>原图摘引：Kurtland Chua 等，2018，PDF第17页，图A.12。<a href="https://arxiv.org/pdf/1805.12114v2#page=17" target="_blank" rel="noopener noreferrer">核对原文</a>。六个面板逐一比较建模与传播组合，每个面板蓝线为无噪声、红线为动作范围10%的噪声。比较同一面板内的均值和波动，PE-DS、PE-TS1与PE-TS∞后期波动收窄更明显。<a href="https://arxiv.org/html/1805.12114v2#A1.F12" target="_blank" rel="noopener noreferrer">原引用入口 </a></figcaption></figure>
+<!-- figure-ref-v6:end:eea61311958c -->
+<!-- figure-ref-v6:start:2ccdbd1416c5 -->
+<a id="paper-029-pets-figure-A.11"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/029-pets-v6-figure-A.11.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/029-pets-v6-figure-A.11.png" width="880" height="436" alt="Deep Reinforcement Learning in a Handful of Trials using Probabilistic Dynamics Models，图A.11：在已知真动力学的半猎豹环境中比较CEM与随机射击，二者均使用2500候选样本预算。误差条很宽，表示跨随机种子的5至95百分位，不能只凭柱高忽略波动。" loading="lazy"></a><figcaption>原图摘引：Kurtland Chua 等，2018，PDF第16页，图A.11。<a href="https://arxiv.org/pdf/1805.12114v2#page=16" target="_blank" rel="noopener noreferrer">核对原文</a>。在已知真动力学的半猎豹环境中比较CEM与随机射击，二者均使用2500候选样本预算。误差条很宽，表示跨随机种子的5至95百分位，不能只凭柱高忽略波动。<a href="https://arxiv.org/html/1805.12114v2#A1.F11" target="_blank" rel="noopener noreferrer">原引用入口 </a></figcaption></figure>
+<!-- figure-ref-v6:end:2ccdbd1416c5 -->
 
-作者的 HalfCheetah 八倍与 125 倍样本差，是其报告的特定比较，本文不再从压缩曲线重新拟合精确阈值。不能把这些倍率推广到 Cartpole，因为低维任务上 GP-MM 略好。图 4 还提示模型类型的影响通常大于传播方式的精细差别，避免把结论过度归因于 TS∞ 这一个选择。
 
-## 六、贡献与边界：不确定性有用，但不是护身符
+[图3](#paper-029-pets-figure-3) 绘制“截至当前见过的最大回报”，所以曲线单调向上不表示学习没有退化。若某方法早期偶然出现一次高回报，后来表现下降，这种画法仍保留高值。它适合展示已达到能力，但评估部署可靠性还应看当前模型的独立重复回报。
+
+作者的 HalfCheetah 八倍与 125 倍样本差，是其报告的特定比较，本文不再从压缩曲线重新拟合精确阈值。不能把这些倍率推广到 Cartpole，因为低维任务上 GP-MM 略好。[图4](#paper-029-pets-figure-4) 还提示模型类型的影响通常大于传播方式的精细差别，避免把结论过度归因于 TS∞ 这一个选择。
+
+原机制图表补充定位：[图1](#paper-029-pets-figure-1)。
+
+<!-- figure-ref-v6:start:ed65c8c98db6 -->
+<a id="paper-029-pets-figure-1"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/029-pets-v6-figure-1.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/029-pets-v6-figure-1.png" width="2132" height="328" alt="Deep Reinforcement Learning in a Handful of Trials using Probabilistic Dynamics Models，图1：左图用模型集成及各模型的预测分布表达不确定性，中图把粒子沿未来轨迹传播，右图展示滚动时域重规划。三块分别对应动力学模型、传播方法和MPC，不能把模型集成本身当成完整规划器。" loading="lazy"></a><figcaption>原图摘引：Kurtland Chua 等，2018，HTML S1.F1，左图用模型集成及各模型的预测分布表达不确定性，中图把粒子沿未来轨迹传播，右图展示滚动时域重规划。三块分别对应动力学模型、传播方法和MPC，不能把模型集成本身当成完整规划器。<a href="https://arxiv.org/html/1805.12114v2#S1.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。左图用模型集成及各模型的预测分布表达不确定性，中图把粒子沿未来轨迹传播，右图展示滚动时域重规划。三块分别对应动力学模型、传播方法和MPC，不能把模型集成本身当成完整规划器。</figcaption></figure>
+<!-- figure-ref-v6:end:ed65c8c98db6 -->
+
+
+## 五、有不确定性输出不等于主动探索保证
 
 论文明确承认集成、概率网络和 MPC 都有先例；贡献在于系统组合、比较与证明这种组合在若干基准上能同时兼顾数据效率和较高性能。这里的“证明”是实验论证，没有任意系统的全局性能定理。
 
@@ -133,22 +182,19 @@ CEM 先采样一批动作序列，保留回报较高者，用这些“精英”�
 
 本文的分析是：高维动作序列搜索仍很昂贵，长时任务的信用分配也受规划窗口限制。高斯输出可能不适合单一步骤的复杂多峰接触，集成分歧不保证发现共同偏差。任务奖励若错误，模型准确只会帮助更有效地优化错误目标。
 
-## 七、一个“两条未来不能平均”的例子
-
-自构例子，未运行：机器人向物体侧面推进，低摩擦模型预测物体向左滑开，高摩擦模型预测停在原处。若只传播平均位置，规划器可能想象出一个两种物理情况都不会出现的中间位置，进而选择错误的第二步。粒子保留两个分支，对每个分支分别计算后续奖励，避免在平均幻象中规划。
+### 五个前置概念
 
 五个前置概念：**异方差**表示噪声大小依赖输入；**Bootstrap**用重采样构建多模型；**粒子传播**以样本表示未来分布；**CEM**迭代聚焦较好的候选解；**MPC**利用新观测不断重规划。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 证据 | 代价与局限 |
-|---|---|---|---|---|
-| 少数据网络过拟合 | 概率模型集成 | 表达噪声与知识不足 | 图 4 | 校准不保证 |
-| 平均未来失真 | 多粒子轨迹传播 | 保留不同可能结果 | 图 1、A.7 | 多次前向计算 |
-| 随机动作搜索低效 | CEM | 聚焦高回报区域 | 图 A.11 | 仍可能局部最优 |
-| 长时模型误差 | 只执行首步再规划 | 经常用真实状态纠偏 | 算法 1 | 部署计算持续存在 |
+### 追问：增加集成成员却不增加数据多样性，是否必然改进不确定性估计？
 
-阅读范围：核对[完整方法、实验与附录](https://arxiv.org/html/1805.12114)，未独立复现。正文讨论均为原始状态控制实验，不将其等同于后来的视频世界模型。
+参考答案：不必然。成员共享训练样本、结构偏差或优化结果时，数量增加也可能仍共同犯错。应观察留出转移的预测校准、成员分歧与规划回报，并固定总计算预算比较成员数和粒子数。模型分歧是对未知性的近似表示，不能只凭网络数量认定它覆盖了真实系统误差。
 
-## 八、三个问题及答案
+## 六、沿机制关系继续读
+
+与[PILCO](007-pilco.md)是平行概率模型控制方法；[MBPO](033-mbpo.md)则使用模型生成短经验来训练策略，属于模块与计算分工的后续变化，执行时不必沿用PETS的在线CEM。
+
+## 七、自测三题与参考答案
 
 **问题1：一个概率网络输出很大方差，就一定代表缺少数据吗？**
 
@@ -161,4 +207,3 @@ CEM 先采样一批动作序列，保留回报较高者，用这些“精英”�
 **问题3：既然模型能衡量不确定性，PETS 是否主动选择最有学习价值的动作？**
 
 答案：原算法主要最大化模型下的期望任务回报，并没有显式信息增益目标。区分认知与偶然不确定性让主动探索成为可能，但不能把未来方向写成已经实现的机制。
-

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Build committed progressive-enhancement HTML from untouched historical sources.
+/* Build committed progressive-enhancement HTML from canonical article sources.
  * Dependencies are versioned locally. Run: python3 tools/reading-source.py && node tools/build-reading.cjs
  */
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),crypto=require('node:crypto');
@@ -20,9 +20,13 @@ function move(text,m){
  return prefix+label+moved+'\n\n'+before.slice(prefix.length)+after;
 }
 function mathTokens(text){
- const math=[];
+ const math=[],attributes=[];
  // Protect fenced code and inline code before handling TeX delimiters.
- const code=[];text=text.replace(/```[^\n]*\n[\s\S]*?```|`[^`\n]+`/g,s=>`CODEPROTECTED${code.push(s)-1}TOKEN`);
+ const code=[];text=text.replace(/(^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\2[ \t]*(?:\n|$))|`[^`\n]+`|<(?:pre|code)\b[^>]*>[\s\S]*?<\/(?:pre|code)>/gim,s=>`CODEPROTECTED${code.push(s)-1}TOKEN`);
+ // Attribute values are metadata, not prose TeX. Preserve them through both
+ // math/emphasis parsing so an alt such as "$0.89\\pm0.06$" cannot inject a
+ // rendered span into the quoted HTML attribute or corrupt the figure markup.
+ text=text.replace(/<[A-Za-z][\w:-]*(?:\s+(?:[^>"']|"[^"]*"|'[^']*')*)?\/?>/g,tag=>tag.replace(/(["'])([\s\S]*?)\1/g,(whole,quote,value)=>quote+`READINGATTRTOKEN${attributes.push(value)-1}END`+quote));
  text=text.replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$([^$\n]+?)\$/g,(whole,a,b,c,d)=>{
   const tex=(a??b??c??d).trim(),display=a!==undefined||b!==undefined;
   let html;try{html=katex.renderToString(tex,{displayMode:display,throwOnError:true,output:'htmlAndMathml',strict:'ignore',macros:{'\\dddot':'\\overset{\\scriptscriptstyle\\cdots}{#1}'}});}catch(error){
@@ -31,19 +35,42 @@ function mathTokens(text){
   }
   math.push({tex,display,html,original:whole});return `READINGMATHTOKEN${math.length-1}END`;
  });
- text=text.replace(/CODEPROTECTED(\d+)TOKEN/g,(_,n)=>code[n]);return {text,math};
+ text=text.replace(/CODEPROTECTED(\d+)TOKEN/g,(_,n)=>code[n]);return {text,math,attributes};
 }
-function render(text,slugMap){
- const linked=text.replace(/\]\(([^)\s]+?)\.md\)/g,(_,file)=>{
-  const name=file.split('/').pop();return `](${name==='README'?'index':(slugMap[name+'.md']||slugMap[name]||name)}.html)`;
+function normalizeStrong(text){
+ // CommonMark's punctuation flanking rules leave **中文句子。**正文 literal.
+ // These canonical notes use that form intentionally. Normalize only paired
+ // prose markers, after math is stashed and while code remains protected.
+ const protectedCode=[];
+ let safe=text.replace(/(^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\2[ \t]*(?:\n|$))|`[^`\n]+`|<(?:pre|code)\b[^>]*>[\s\S]*?<\/(?:pre|code)>/gim,s=>`STRONGCODETOKEN${protectedCode.push(s)-1}END`);
+ safe=safe.replace(/(?<![\\*])\*\*([^*\n]+?)\*\*(?!\*)/g,'<strong>$1</strong>');
+ return safe.replace(/STRONGCODETOKEN(\d+)END/g,(_,n)=>protectedCode[n]);
+}
+function render(text,slugMap,series){
+ // Marked parses emphasis inside inline HTML <code>; retain literal code islands.
+ const htmlCode=[];text=text.replace(/<code\b[^>]*>[\s\S]*?<\/code>/gi,s=>`READINGHTMLCODETOKEN${htmlCode.push(s)-1}END`);
+ const linked=text.replace(/\]\(([^)\s]+?)\.md(#[^)\s]+)?\)/g,(_,file,fragment='')=>{
+  // Resolve links in Markdown source space before translating to public URLs.
+  // In particular, ../.. /other-series/posts links must not be flattened into
+  // the current series, as they were in the original same-series-only renderer.
+  if(/^(?:[a-z]+:|\/\/)/i.test(file))return `](${file}.md${fragment})`;
+  const name=file.split('/').pop();let targetSeries=series;
+  const cross=file.match(/(?:^|\/)(rl|llm|robot-learn|robot-classic)\/posts\//);
+  if(cross)targetSeries=cross[1];
+  const map=targetSeries&&targetSeries!==series?catalog(targetSeries).map:slugMap;
+  const slug=name==='README'?'index':(map[name+'.md']||map[name]||name);
+  const prefix=targetSeries&&series&&targetSeries!==series?'../'+targetSeries+'/':'';
+  return `](${prefix}${slug}.html${fragment})`;
  });
- const {text:prepared,math}=mathTokens(linked);
+ const {text:prepared,math,attributes}=mathTokens(linked);
  const renderer=new marked.Renderer();const code=renderer.code.bind(renderer);
  renderer.code=function(token,info,escaped){const is=typeof token==='object';const value=is?token.text:token,lang=is?token.lang:info;
   if(String(lang||'').trim()==='mermaid')return `<div class="mermaid">${esc(value)}</div>`;
   return code(token,info,escaped);
  };
- let html=marked.parse(prepared,{gfm:true,breaks:false,renderer}).replace(/READINGMATHTOKEN(\d+)END/g,(_,n)=>`<span class="reading-math" data-tex="${esc(math[n].tex)}">${math[n].html}</span>`);
+ let html=marked.parse(normalizeStrong(prepared),{gfm:true,breaks:false,renderer}).replace(/READINGMATHTOKEN(\d+)END/g,(_,n)=>`<span class="reading-math" data-tex="${esc(math[n].tex)}">${math[n].html}</span>`);
+ html=html.replace(/READINGATTRTOKEN(\d+)END/g,(_,n)=>attributes[n]);
+ html=html.replace(/READINGHTMLCODETOKEN(\d+)END/g,(_,n)=>htmlCode[n]);
  const used={};html=html.replace(/<(h[23])>([\s\S]*?)<\/\1>/g,(_,tag,content)=>{
   const plain=content.replace(/<[^>]*>/g,'').replace(/&[^;]+;/g,'').trim();const base=plain.toLowerCase().replace(/\s+/g,'-').replace(/[^\w\u4e00-\u9fff-]/g,'')||'section';let id=base,n=1;while(used[id])id=base+'-'+(++n);used[id]=true;
   return `<${tag} id="${id}">${content}</${tag}>`;
@@ -68,22 +95,20 @@ function build(){
  const report=[];
  for(const series of ['rl','llm','robot-learn','robot-classic']){
   const {posts,map}=catalog(series);
-  const paperTemplate=fs.readFileSync(path.join(root,series,posts.find(p=>p.day===1).slug+'.html'),'utf8');
   for(const post of posts){
-   const key=series+'/'+post.slug,m=byKey.get(key);if(!m)continue;
-   const raw=fs.readFileSync(path.join(root,m.source));if(hash(raw)!==m.sourceSha256)throw new Error(key+' canonical source changed');const source=raw.toString().replaceAll('\r\n','\n');
-   const moved=move(source,m),{html:rendered,math}=render(moved,map);
-   const body=`<div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="${m.sourceSha256}">${rendered}</div>`;
-   const file=path.join(root,key+'.html');fs.writeFileSync(file,inject(fs.readFileSync(file,'utf8'),body,source,m.sourceSha256));
-   report.push({key,sourceSha256:m.sourceSha256,mathExpressions:math.length,unrenderedMath:math.filter(x=>x.html.includes('reading-math-source')).map(x=>x.tex)});
+   const key=series+'/'+post.slug,m=byKey.get(key);
+   const raw=fs.readFileSync(path.join(root,m?.source||series+'/posts/'+post.file));
+   const sourceHash=hash(raw);if(m&&sourceHash!==m.sourceSha256)throw new Error(key+' canonical source changed');const source=raw.toString().replaceAll('\r\n','\n');
+   const moved=move(source,m),{html:rendered,math}=render(moved,map,series);
+   const body=`<div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="${sourceHash}">${rendered}</div>`;
+   const file=path.join(root,key+'.html');
+   const title=source.match(/^# (.+)$/m)?.[1]||post.title;
+   const template=fs.readFileSync(file,'utf8').replace(/<title>[\s\S]*?<\/title>/,`<title>${esc(title)} | MyLog</title>`).replace(/(<span class="text-gray-500">)[\s\S]*?(<\/span>)/,`$1${esc(post.cardTitle||title)}$2`);
+   fs.writeFileSync(file,inject(template,body,source,sourceHash));
+   report.push({key,kind:m?'paper':post.kind||'auxiliary',sourceSha256:sourceHash,mathExpressions:math.length,unrenderedMath:math.filter(x=>x.html.includes('reading-math-source')).map(x=>x.tex)});
   }
-  const guideFile=path.join(root,series,'posts/00-reading-guide.md');if(!fs.existsSync(guideFile))continue;
-  const raw=fs.readFileSync(guideFile),source=raw.toString().replaceAll('\r\n','\n'),title=source.match(/^# (.+)$/m)[1];
-  const {html:rendered,math}=render(source,map);const body=`<div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="${hash(raw)}">${rendered}</div>`;
-  let template=paperTemplate.replace(/<title>[\s\S]*?<\/title>/,`<title>${esc(title)} | MyLog</title>`).replace(/slug: "[^"]+"/, 'slug: "00-reading-guide"').replace(/const currentSlug = "[^"]+"/, 'const currentSlug = "00-reading-guide"').replace(/(<span class="text-gray-500">)[\s\S]*?(<\/span>)/,`$1${esc(title)}$2`);
-  fs.writeFileSync(path.join(root,series,'00-reading-guide.html'),inject(template,body,source,hash(raw)));
  }
  fs.writeFileSync(path.join(root,'data/reading-build-report.json'),JSON.stringify(report,null,2)+'\n');
- console.log(`Built ${report.length} papers; preserved ${report.reduce((s,x)=>s+x.mathExpressions,0)} TeX expressions. Original-source render fallbacks: ${report.reduce((s,x)=>s+x.unrenderedMath.length,0)}.`);
+ console.log(`Built ${report.length} article and guide pages; rendered ${report.reduce((s,x)=>s+x.mathExpressions,0)} TeX expressions. Source render fallbacks: ${report.reduce((s,x)=>s+x.unrenderedMath.length,0)}.`);
 }
-module.exports={move,render,mathTokens,catalog,esc};if(require.main===module)build();
+module.exports={move,render,mathTokens,normalizeStrong,catalog,esc};if(require.main===module)build();

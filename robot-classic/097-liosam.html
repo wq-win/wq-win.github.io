@@ -42,21 +42,20 @@
                 <span class="text-gray-500">LIO-SAM：让激光、惯性、GPS 与回环共同解释运动</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="228cd3a1a26ba3bcdca693440d396125e0be928b80b6201bcc0262ac7c24eaf7"><h1>097｜LIO-SAM：让激光、惯性、GPS 与回环共同解释运动</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="594b8f2b1b6ab1d8ad84908da3c9a9564b71a0227faf92e3bf56b950b7c0c199"><h1>097｜LIO-SAM：让激光、惯性、GPS 与回环共同解释运动</h1>
 <p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="096-teaser.html">上一篇</a> · <a href="098-orbslam3.html">下一篇</a></p>
 <p><strong>论文</strong>：Tixiao Shan 等，<em>LIO-SAM: Tightly-coupled Lidar Inertial Odometry via Smoothing and Mapping</em>，IROS 2020。<a href="https://arxiv.org/html/2007.00258">论文正文</a> · <a href="https://arxiv.org/pdf/2007.00258">PDF</a> · <a href="https://github.com/TixiaoShan/LIO-SAM">官方代码与运行说明</a>。</p>
-<p><strong>阅读范围</strong>：已核对方法与实验正文，并对 PDF 第 4–5 页的公式和实验表作视觉复核；官方仓库作为实现补充，不能把后续分支能力全部归入原论文。没有运行传感器数据或独立复现指标。</p>
-<h2 id="一分钟理解两种传感器互相纠错">一分钟理解：两种传感器互相纠错</h2>
-<p>激光雷达告诉机器人“周围表面在哪里”，IMU 告诉它“刚才转了多快、加速了多少”。激光几何比较稳定，但一帧扫描不是同时拍摄；IMU 更新快，却会累积偏差。单纯把两个输出平均，无法充分利用这种互补关系。</p>
-<p>LIO-SAM 把多种观测写成约束，让相邻运动、当前扫描和历史位置共同约束轨迹。它还接纳 GPS 与回环，使长时间累积的漂移有机会被校正。核心贡献是融合架构与实时实现，并非发明一种新的激光特征或新的 IMU 传感器。</p>
-<p>一句话：在机器人移动建图中，通过紧耦合惯性与激光约束，并接入全局位置和回环信息，改善快速运动与长程漂移，代价是标定、时间同步和额外观测质量必须可靠。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="095-legoloam.html">LeGO-LOAM</a>利用地面和特征改善雷达里程计，但惯性初值与全局漂移校正仍需更紧密连接；LIO-SAM 承接雷达建图路线，并组合<a href="083-imu-preintegration.html">预积分</a>与<a href="068-isam2.html">iSAM2</a>。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念是：<strong>因子图</strong>把状态和观测关系分开表示；<strong>预积分</strong>将高频惯性数据形成区间约束；<strong>外参</strong>描述传感器之间的刚体关系；<strong>可观测性</strong>判断哪些状态能被数据确定；<strong>回环</strong>利用重访建立跨时间约束。</p>
-<h2 id="为什么一帧点云可能是一张歪地图">为什么一帧点云可能是一张歪地图</h2>
+<h2 id="一问题设定扫描时序与惯性偏差怎样进入同一轨迹约束">一、问题设定：扫描时序与惯性偏差怎样进入同一轨迹约束</h2>
+<p>激光雷达告诉机器人“周围表面在哪里”，IMU 告诉它“刚才转了多快、加速了多少”。激光几何比较稳定，但一帧扫描不是同时拍摄；IMU 更新快，却会累积偏差。单纯把两个输出平均，无法充分利用这种互补关系。</p>
+<h3 id="为什么一帧点云可能是一张歪地图">为什么一帧点云可能是一张歪地图</h3>
 <p>下面是自构情景：雷达转一圈需要 0.1 秒，机器人在这段时间转了 10 度。扫描开始和结束时，墙面点在不同的传感器坐标系里。若当作同一瞬间的数据叠在一起，平墙就可能被描成弯墙。</p>
 <p>“去畸变”是根据每个点的采样时刻，把点搬回共同参考时刻。它不同于后续地图配准：前者修正扫描内部运动，后者估计扫描相对地图的位置。如果输入时间字段错误，后端优化面对的就是一份有系统变形的几何观测。</p>
 <p>状态可写成 <span class="reading-math" data-tex="x_i=(R_i,p_i,v_i,b_i)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mi>i</mi></msub><mo>=</mo><mo stretchy="false">(</mo><msub><mi>R</mi><mi>i</mi></msub><mo separator="true">,</mo><msub><mi>p</mi><mi>i</mi></msub><mo separator="true">,</mo><msub><mi>v</mi><mi>i</mi></msub><mo separator="true">,</mo><msub><mi>b</mi><mi>i</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">x_i=(R_i,p_i,v_i,b_i)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>：姿态、位置、速度和 IMU 偏置。任务是估计状态序列与地图，不是学习一个动作策略。没有奖励函数，也没有环境交互训练预算。</p>
-<h2 id="方法把传感器误差放在同一个账本中">方法：把传感器误差放在同一个账本中</h2>
+<h2 id="二连接预积分激光gps与回环因子">二、连接预积分、激光、GPS与回环因子</h2>
 <h3 id="概率目标与因子图">概率目标与因子图</h3>
 <p>为了说明因子图，使用通用高斯观测模型的教学形式：</p>
 <p><span class="reading-math" data-tex="X^*=\arg\min_X\left[
@@ -84,6 +83,13 @@ M347 1759 V0 H263 V1759 v0 v1759 h84z"/></svg></span></span></span><span class="
 <p><span class="reading-math" data-tex="r_k=n_k^T(Rp_k+t-q_k)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>r</mi><mi>k</mi></msub><mo>=</mo><msubsup><mi>n</mi><mi>k</mi><mi>T</mi></msubsup><mo stretchy="false">(</mo><mi>R</mi><msub><mi>p</mi><mi>k</mi></msub><mo>+</mo><mi>t</mi><mo>−</mo><msub><mi>q</mi><mi>k</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">r_k=n_k^T(Rp_k+t-q_k).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1413em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6984em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">t</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="n_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>n</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">n_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 为地图平面的单位法向，<span class="reading-math" data-tex="q_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>q</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">q_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是平面上的点。它衡量变换后点沿法向偏离多少，而不要求两个传感器恰好采到同一个物理点。点到线约束则检查点偏离一条局部边缘的程度。</p>
 <p>论文沿用这类几何特征，用关键帧及局部子地图控制计算规模。保留全部历史原始点并不必然更准确：冗余点会增加计算，旧的错误对应还可能妨碍当前估计。关键在于留下足够约束，而不是只追求地图点数。</p>
+<h3 id="一个-gps-因子怎样改变之前的状态">一个 GPS 因子怎样改变之前的状态</h3>
+<p><strong>原创一维因子图。</strong> 固定初始位置 <span class="reading-math" data-tex="p_0=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mn>0</mn></msub><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">p_0=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，两个里程计增量都测为 1 m、方差都为 <span class="reading-math" data-tex="1\,\mathrm{m^2}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mtext> </mtext><msup><mi mathvariant="normal">m</mi><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">1\,\mathrm{m^2}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathrm">m</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathrm mtight">2</span></span></span></span></span></span></span></span></span></span></span></span>；GPS 只在末端给出位置 0 m，方差记为 <span class="reading-math" data-tex="\gamma\,\mathrm{m^2}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi><mtext> </mtext><msup><mi mathvariant="normal">m</mi><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">\gamma\,\mathrm{m^2}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0085em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathrm">m</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathrm mtight">2</span></span></span></span></span></span></span></span></span></span></span></span>。这不是现实路线参数，而是展示信息传播的最小例子。忽略共同的常数因子，目标为</p>
+<p><span class="reading-math" data-tex="E=(p_1-1)^2+(p_2-p_1-1)^2+\frac{p_2^2}{\gamma}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>E</mi><mo>=</mo><mo stretchy="false">(</mo><msub><mi>p</mi><mn>1</mn></msub><mo>−</mo><mn>1</mn><msup><mo stretchy="false">)</mo><mn>2</mn></msup><mo>+</mo><mo stretchy="false">(</mo><msub><mi>p</mi><mn>2</mn></msub><mo>−</mo><msub><mi>p</mi><mn>1</mn></msub><mo>−</mo><mn>1</mn><msup><mo stretchy="false">)</mo><mn>2</mn></msup><mo>+</mo><mfrac><msubsup><mi>p</mi><mn>2</mn><mn>2</mn></msubsup><mi>γ</mi></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">E=(p_1-1)^2+(p_2-p_1-1)^2+\frac{p_2^2}{\gamma}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.3715em;vertical-align:-0.8804em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.4911em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-2.4519em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2481em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8804em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>对两个位置求导，有 <span class="reading-math" data-tex="2p_1-p_2=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><msub><mi>p</mi><mn>1</mn></msub><mo>−</mo><msub><mi>p</mi><mn>2</mn></msub><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">2p_1-p_2=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8389em;vertical-align:-0.1944em;"></span><span class="mord">2</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span> 和 <span class="reading-math" data-tex="(1+1/\gamma)p_2-p_1-1=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo>+</mo><mn>1</mn><mi mathvariant="normal">/</mi><mi>γ</mi><mo stretchy="false">)</mo><msub><mi>p</mi><mn>2</mn></msub><mo>−</mo><msub><mi>p</mi><mn>1</mn></msub><mo>−</mo><mn>1</mn><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">(1+1/\gamma)p_2-p_1-1=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/</span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，解得</p>
+<p><span class="reading-math" data-tex="p_1=\frac{\gamma}{\gamma+2},\qquad p_2=\frac{2\gamma}{\gamma+2}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>p</mi><mn>1</mn></msub><mo>=</mo><mfrac><mi>γ</mi><mrow><mi>γ</mi><mo>+</mo><mn>2</mn></mrow></mfrac><mo separator="true">,</mo><mspace width="2em"/><msub><mi>p</mi><mn>2</mn></msub><mo>=</mo><mfrac><mrow><mn>2</mn><mi>γ</mi></mrow><mrow><mi>γ</mi><mo>+</mo><mn>2</mn></mrow></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">p_1=\frac{\gamma}{\gamma+2},\qquad p_2=\frac{2\gamma}{\gamma+2}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.988em;vertical-align:-0.8804em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.1076em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">2</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8804em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.2019em;vertical-align:-0.8804em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">2</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">2</span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8804em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>当 <span class="reading-math" data-tex="\gamma=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\gamma=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>，得到 <span class="reading-math" data-tex="(p_1,p_2)=(1/3,2/3)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><msub><mi>p</mi><mn>1</mn></msub><mo separator="true">,</mo><msub><mi>p</mi><mn>2</mn></msub><mo stretchy="false">)</mo><mo>=</mo><mo stretchy="false">(</mo><mn>1</mn><mi mathvariant="normal">/</mi><mn>3</mn><mo separator="true">,</mo><mn>2</mn><mi mathvariant="normal">/</mi><mn>3</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(p_1,p_2)=(1/3,2/3)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1/3</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">2/3</span><span class="mclose">)</span></span></span></span></span>；GPS 不仅改变最后一个点，也经相邻因子改变历史位置。若 <span class="reading-math" data-tex="\gamma=100"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi><mo>=</mo><mn>100</mn></mrow><annotation encoding="application/x-tex">\gamma=100</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">100</span></span></span></span></span>，得到约 <span class="reading-math" data-tex="(0.9804,1.9608)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0.9804</mn><mo separator="true">,</mo><mn>1.9608</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0.9804,1.9608)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.9804</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1.9608</span><span class="mclose">)</span></span></span></span></span>，结果更接近原里程计的 <span class="reading-math" data-tex="(1,2)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>2</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1,2)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">2</span><span class="mclose">)</span></span></span></span></span>。因此全局修正不是把最后一个位置硬设为 GPS，再将前面轨迹原样留下。</p>
+<p><a href="https://arxiv.org/html/2007.00258">原文III-D</a>按位置协方差比较决定是否加入 GPS 因子。这个门槛控制冗余和可信度，却不能单靠一个很小的协方差排除系统性 GPS 偏差。Campus 中新增 GPS、再新增回环后首尾误差改变，体现的是新增约束及其信息传播；该例和实验都不能将更小首尾误差自动解释为每个中间状态同幅改善。</p>
 <h3 id="相对位姿要取逆不能直接转置">相对位姿要取逆，不能直接转置</h3>
 <p>若 <span class="reading-math" data-tex="T_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">T_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 把第 <span class="reading-math" data-tex="i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span></span> 帧坐标变到世界，则正确的齐次相对变换为：</p>
 <p><span class="reading-math" data-tex="T_{ij}=T_i^{-1}T_j,
@@ -94,6 +100,8 @@ M347 1759 V0 H263 V1759 v0 v1759 h84z"/></svg></span></span></span><span class="
 \begin{bmatrix}R&amp;t\\0&amp;1\end{bmatrix}^{-1}
 =\begin{bmatrix}R^T&amp;-R^Tt\\0&amp;1\end{bmatrix}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.604em;vertical-align:-0.95em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.433em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.267em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">[</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em;"></span><span class="arraycolsep" style="width:0.5em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">t</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">]</span></span></span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:1.654em;"><span style="top:-3.9029em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4013em;vertical-align:-0.9507em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">[</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.4507em;"><span style="top:-3.6093em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span></span></span><span style="top:-2.4093em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.9507em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em;"></span><span class="arraycolsep" style="width:0.5em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.4507em;"><span style="top:-3.6093em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">−</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span><span class="mord mathnormal">t</span></span></span><span style="top:-2.4093em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.9507em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
 <p>原文式 (12) 显示为转置符号，PDF 第 4 页也如此。按本文齐次变换约定，不能直接照写成 <span class="reading-math" data-tex="T_i^TT_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>T</mi><mi>i</mi><mi>T</mi></msubsup><msub><mi>T</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">T_i^TT_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1274em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-2.4413em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2587em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>；只有旋转矩阵的逆等于转置。这里指出的是表达与实现时应检查的数学边界，不能据此断言官方系统计算了错误相对位姿。</p>
+<p>惯性先帮助扫描时序补偿，激光与全局因子再校正轨迹。下面按信息来源检查更新，再分开评价额外传感器带来的收益。</p>
+<h2 id="三交替去畸变和估计检查约束信息来源">三、交替去畸变和估计，检查约束信息来源</h2>
 <pre><code class="language-text">输入：带逐点时间的激光数据、IMU、标定参数；可选 GPS
 缓冲并对齐传感器时间
 使用惯性运动预测，对扫描逐点去畸变
@@ -105,7 +113,15 @@ M347 1759 V0 H263 V1759 v0 v1759 h84z"/></svg></span></span></span><span class="
 增量更新地图相关估计，输出位姿和地图
 </code></pre>
 <p>这是流程伪代码。回环候选生成与几何验证是两个环节；空间上接近并不必然意味着观测到同一个场景。</p>
-<h2 id="实验准确性提升是否用了更多信息">实验：准确性提升是否用了更多信息</h2>
+<h2 id="四按是否使用gps回环与惯性读精度结果">四、按是否使用GPS回环与惯性读精度结果</h2>
+<!-- figure-ref-v6:start:rc-97-figure-4-anchor -->
+<p><span id="rc-97-figure-4"></span></p>
+<!-- figure-ref-v6:end:rc-97-figure-4-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/097-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/097-evidence.png" width="1571" height="517" alt="Fig. 4：卫星参考与三种地图同列显示，在 Walking 数据中比较建筑边缘是否反复重影；这组结果没有使用 GPS" loading="lazy"></a><figcaption>原论文结果图／表摘引：Tixiao Shan 等（2020），Fig. 4，PDF 第 6 页；<a href="https://arxiv.org/pdf/2007.00258#page=6" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：卫星参考与三种地图同列显示，在 Walking 数据中比较建筑边缘是否反复重影；这组结果没有使用 GPS。LIO-SAM 更整齐是此序列的定性证据，不能由地图观感得出每个时刻的定位误差。</p>
+<h3 id="实验准确性提升是否用了更多信息">实验：准确性提升是否用了更多信息</h3>
+<p>GPS、回环和 IMU 辅助改变了信息条件；首尾闭合误差不能替代全程真值，原始 LIO-SAM 与后续分支能力分开。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -115,11 +131,11 @@ M347 1759 V0 H263 V1759 v0 v1759 h84z"/></svg></span></span></span><span class="
 </thead>
 <tbody><tr>
 <td>平台</td>
-<td>手持设备、地面车与船，见图 2</td>
+<td>手持设备、地面车与船，见<a href="https://arxiv.org/pdf/2007.00258#page=4">图 2</a></td>
 </tr>
 <tr>
 <td>数据</td>
-<td>表 I 包含 Rotation、Walking、Campus、Park、Amsterdam 五组</td>
+<td><a href="https://arxiv.org/pdf/2007.00258#page=5">表 I</a> 包含 Rotation、Walking、Campus、Park、Amsterdam 五组</td>
 </tr>
 <tr>
 <td>输入比较</td>
@@ -146,39 +162,55 @@ M347 1759 V0 H263 V1759 v0 v1759 h84z"/></svg></span></span></span><span class="
 <td>原文所示结果不能直接提供跨随机种子的置信区间；完整调参预算未核实</td>
 </tr>
 </tbody></table></div>
+<!-- figure-ref-v6:start:rc-97-final-source-gap-note -->
+<p><span id="rc-97-figure-2"></span><span id="rc-97-figure-5"></span><p class="figure-reference-note">尚未内嵌：<a href="https://arxiv.org/pdf/2007.00258#page=4" target="_blank" rel="noopener noreferrer">图 2</a>、<a href="https://arxiv.org/pdf/2007.00258#page=7" target="_blank" rel="noopener noreferrer">图 5</a>。平台组合照片对当前因子图与误差评论不是必要数据；另一个复合图含校园轨迹及 Google Earth 底图叠加，后者未核清完整 Google/数据提供商署名。只展示轨迹面板不能算整幅图已完成，故保留完整图入口。</p></p>
+<!-- figure-ref-v6:end:rc-97-final-source-gap-note -->
+
+
+
+
+
+
+
 <p>三项证据应连起来读：</p>
 <ol>
-<li><strong>图 3–4：快速运动。</strong> 比较地图结构是否保持。它展示这些数据上的配准稳定性，但视觉上更整齐不能替代逐时刻真值误差。</li>
-<li><strong>表 II：增量加入全局约束。</strong> Campus 的 LIO-odom、LIO-GPS、LIO-SAM 首尾误差分别为 9.44、6.87、0.12 米。它支持额外位置和回环约束的作用；不支持“仅靠改了局部配准就提高到同样水平”。</li>
-<li><strong>图 5–6：GPS 可用性与轨迹形状。</strong> 它们帮助判断修正发生在什么位置。把回到起点的位置拉近，并不能保证中间每一段轨迹都同等准确。</li>
+<li><strong><a href="#rc-97-figure-3">图 3</a>–<a href="#rc-97-figure-4">图 4</a>：快速运动。</strong> 比较地图结构是否保持。它展示这些数据上的配准稳定性，但视觉上更整齐不能替代逐时刻真值误差。</li>
 </ol>
-<p>此外，表 I 与 §IV-A/B 对 Rotation、Walking 的最大角速度存在互换：表中为 213.9 与 133.7 度/秒，正文相反。PDF 第 5 页可见这一差异，具体归属应查原始数据澄清，不宜用其中一个数字制造精确的鲁棒性上限。</p>
-<h2 id="原理有效的前提与实现代价">原理有效的前提与实现代价</h2>
+<!-- figure-ref-v6:start:rc-97-figure-3 -->
+<figure class="reading-evidence-figure" id="rc-97-figure-3"><a href="/robot-classic/assets/figure-refs-v6/097-fig-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/097-fig-3.png" width="640" height="649" alt="原论文图3：旋转测试的实景、LOAM地图和LIO-SAM地图" loading="lazy"></a><figcaption>Tixiao Shan 等（2020），图 3，PDF 第 5 页；<a href="https://arxiv.org/pdf/2007.00258#page=5" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：上图给出场景结构，下两图检查旋转时几何是否保持一致；这是困难运动下的定性比较。</p>
+<!-- figure-ref-v6:end:rc-97-figure-3 -->
+<ol start="2">
+<li><strong><a href="https://arxiv.org/pdf/2007.00258#page=5">表 II</a>：增量加入全局约束。</strong> Campus 的 LIO-odom、LIO-GPS、LIO-SAM 首尾误差分别为 9.44、6.87、0.12 米。它支持额外位置和回环约束的作用；不支持“仅靠改了局部配准就提高到同样水平”。</li>
+<li><strong><a href="https://arxiv.org/pdf/2007.00258#page=7">图 5–6</a>：GPS 可用性与轨迹形状。</strong> 它们帮助判断修正发生在什么位置。把回到起点的位置拉近，并不能保证中间每一段轨迹都同等准确。</li>
+</ol>
+<!-- figure-ref-v6:start:rc-97-figure-6 -->
+<figure class="reading-evidence-figure" id="rc-97-figure-6"><a href="/robot-classic/assets/figure-refs-v6/097-fig-6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/097-fig-6.png" width="640" height="795" alt="原论文图6：公园数据中多种估计轨迹及LIO-SAM地图配准结果" loading="lazy"></a><figcaption>Tixiao Shan 等（2020），图 6，PDF 第 7 页；<a href="https://arxiv.org/pdf/2007.00258#page=7" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：上图的GPS可用区间与各方法轨迹一起读，下图仅提供地理背景；地图对齐不等于逐点真值评估。</p>
+<!-- figure-ref-v6:end:rc-97-figure-6 -->
+
+<p>此外，<a href="https://arxiv.org/pdf/2007.00258#page=5">表 I</a> 与 §IV-A/B 对 Rotation、Walking 的最大角速度存在互换：表中为 213.9 与 133.7 度/秒，正文相反。PDF 第 5 页可见这一差异，具体归属应查原始数据澄清，不宜用其中一个数字制造精确的鲁棒性上限。</p>
+<h3 id="用一个小实验建立理解">用一个小实验建立理解</h3>
+<p><strong>自构、未运行</strong>：在同一段闭环数据上，分别启用 IMU+激光、再加 GPS、再加回环。保留相同前端参数，记录全轨迹误差、首尾误差、处理延迟、回环接受情况。接着只给 IMU 时间加一个小偏移，观察哪种指标最先恶化。</p>
+<p>这个实验能区分三个问题：融合增加了什么信息；闭环指标是否掩盖途中形变；好算法是否被错误的输入时间破坏。若只保存最终地图截图，几乎无法回答后两个问题。</p>
+<h2 id="五保留时间同步标定与异常全局观测风险">五、保留时间同步、标定与异常全局观测风险</h2>
 <p>作者提供了紧耦合融合与不同信息来源的实验；下面是应用层分析。长期漂移不是“优化还不够努力”，也可能是缺少能观测该方向的信号。长走廊、稀少结构、水面或大量运动物体，都可能削弱几何约束。IMU 能撑过短期退化，却不能永远补上不存在的绝对位置观测。</p>
 <p>官方运行说明明确要求逐点时间和相应点云通道，并讨论 IMU 姿态、外参及同步条件。原始分支的传感器支持范围不应扩写成“任意雷达与 IMU 即插即用”。两个错误时钟之间的固定延迟，可能被优化器误解释成运动或偏置；这是一种模型错误，不只是随机噪声变大。</p>
 <p>同样要分开局部高频里程计和全局回环校正：后者可能使地图坐标中的轨迹调整。把这种调整直接送给需要连续速度的控制器，可能产生不必要的跳变。系统集成应明确控制使用哪个坐标系、哪种输出和怎样的更新语义。</p>
-<h2 id="用一个小实验建立理解">用一个小实验建立理解</h2>
-<p><strong>自构、未运行</strong>：在同一段闭环数据上，分别启用 IMU+激光、再加 GPS、再加回环。保留相同前端参数，记录全轨迹误差、首尾误差、处理延迟、回环接受情况。接着只给 IMU 时间加一个小偏移，观察哪种指标最先恶化。</p>
-<p>这个实验能区分三个问题：融合增加了什么信息；闭环指标是否掩盖途中形变；好算法是否被错误的输入时间破坏。若只保存最终地图截图，几乎无法回答后两个问题。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>点云运动畸变、惯性漂移与长程误差相互影响</td>
-<td>预积分和激光紧耦合，关键帧局部地图，GPS/回环因子</td>
-<td>几何校正惯性偏置，高频运动辅助配准，全局信息约束漂移</td>
-<td>图3–6及表II，需按输入配置解释</td>
-<td>同步标定敏感；退化几何和错回环仍有风险；首尾误差不代表全程精度</td>
-</tr>
-</tbody></table></div>
-<h2 id="读懂了吗三问三答">读懂了吗：三问三答</h2>
+<h2 id="六追问加入gps后漂移变小怎样验证不是把额外全局信息误称为激光前端改进">六、追问：加入GPS后漂移变小，怎样验证不是把额外全局信息误称为激光前端改进？</h2>
+<details>
+<summary>加入GPS后漂移变小，怎样验证不是把额外全局信息误称为激光前端改进？</summary>
+
+<p><strong>参考答案</strong>：固定前端与局部因子，分别比较有无GPS及其覆盖区间，再单独测试去畸变和扫描匹配。全局约束能够改善整条轨迹，但不证明每帧激光估计独立变准。实验还应报告GPS质量及异常处理条件。</p>
+</details>
+
+<h2 id="七比较因子图平滑与迭代滤波">七、比较因子图平滑与迭代滤波</h2>
+<ul>
+<li><strong>平行路线</strong>：<a href="099-fastlio2.html">FAST-LIO2：直接用点云定位，为什么先要解决地图更新</a>。用迭代滤波和增量地图实现激光惯性里程计，系统全局能力不同。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <h3 id="1为什么不能把-imu-去畸变直接等同于紧耦合">1．为什么不能把 IMU 去畸变直接等同于紧耦合？</h3>
 <p><strong>答</strong>：去畸变可以只是预处理，使用一次惯性预测后就不再更新偏置。紧耦合强调不同传感器残差共同约束状态，激光信息还能反馈到惯性状态和偏置。要看估计依赖关系，不能只看系统接了几种传感器。</p>
 <h3 id="2首尾误差从数米降到厘米能说明整段轨迹都达到厘米精度吗">2．首尾误差从数米降到厘米，能说明整段轨迹都达到厘米精度吗？</h3>
@@ -196,17 +228,15 @@ M347 1759 V0 H263 V1759 v0 v1759 h84z"/></svg></span></span></span><span class="
 
 **论文**：Tixiao Shan 等，*LIO-SAM: Tightly-coupled Lidar Inertial Odometry via Smoothing and Mapping*，IROS 2020。[论文正文](https://arxiv.org/html/2007.00258) · [PDF](https://arxiv.org/pdf/2007.00258) · [官方代码与运行说明](https://github.com/TixiaoShan/LIO-SAM)。
 
-**阅读范围**：已核对方法与实验正文，并对 PDF 第 4–5 页的公式和实验表作视觉复核；官方仓库作为实现补充，不能把后续分支能力全部归入原论文。没有运行传感器数据或独立复现指标。
+### 先接住前作的问题
 
-## 一分钟理解：两种传感器互相纠错
+[LeGO-LOAM](095-legoloam.md)利用地面和特征改善雷达里程计，但惯性初值与全局漂移校正仍需更紧密连接；LIO-SAM 承接雷达建图路线，并组合[预积分](083-imu-preintegration.md)与[iSAM2](068-isam2.md)。
+
+## 一、问题设定：扫描时序与惯性偏差怎样进入同一轨迹约束
 
 激光雷达告诉机器人“周围表面在哪里”，IMU 告诉它“刚才转了多快、加速了多少”。激光几何比较稳定，但一帧扫描不是同时拍摄；IMU 更新快，却会累积偏差。单纯把两个输出平均，无法充分利用这种互补关系。
 
-LIO-SAM 把多种观测写成约束，让相邻运动、当前扫描和历史位置共同约束轨迹。它还接纳 GPS 与回环，使长时间累积的漂移有机会被校正。核心贡献是融合架构与实时实现，并非发明一种新的激光特征或新的 IMU 传感器。
-
-一句话：在机器人移动建图中，通过紧耦合惯性与激光约束，并接入全局位置和回环信息，改善快速运动与长程漂移，代价是标定、时间同步和额外观测质量必须可靠。
-
-## 为什么一帧点云可能是一张歪地图
+### 为什么一帧点云可能是一张歪地图
 
 下面是自构情景：雷达转一圈需要 0.1 秒，机器人在这段时间转了 10 度。扫描开始和结束时，墙面点在不同的传感器坐标系里。若当作同一瞬间的数据叠在一起，平墙就可能被描成弯墙。
 
@@ -214,7 +244,7 @@ LIO-SAM 把多种观测写成约束，让相邻运动、当前扫描和历史位
 
 状态可写成 $x_i=(R_i,p_i,v_i,b_i)$：姿态、位置、速度和 IMU 偏置。任务是估计状态序列与地图，不是学习一个动作策略。没有奖励函数，也没有环境交互训练预算。
 
-## 方法：把传感器误差放在同一个账本中
+## 二、连接预积分、激光、GPS与回环因子
 
 ### 概率目标与因子图
 
@@ -252,6 +282,20 @@ $n_k$ 为地图平面的单位法向，$q_k$ 是平面上的点。它衡量变�
 
 论文沿用这类几何特征，用关键帧及局部子地图控制计算规模。保留全部历史原始点并不必然更准确：冗余点会增加计算，旧的错误对应还可能妨碍当前估计。关键在于留下足够约束，而不是只追求地图点数。
 
+### 一个 GPS 因子怎样改变之前的状态
+
+**原创一维因子图。** 固定初始位置 $p_0=0$，两个里程计增量都测为 1 m、方差都为 $1\,\mathrm{m^2}$；GPS 只在末端给出位置 0 m，方差记为 $\gamma\,\mathrm{m^2}$。这不是现实路线参数，而是展示信息传播的最小例子。忽略共同的常数因子，目标为
+
+$$E=(p_1-1)^2+(p_2-p_1-1)^2+\frac{p_2^2}{\gamma}.$$
+
+对两个位置求导，有 $2p_1-p_2=0$ 和 $(1+1/\gamma)p_2-p_1-1=0$，解得
+
+$$p_1=\frac{\gamma}{\gamma+2},\qquad p_2=\frac{2\gamma}{\gamma+2}.$$
+
+当 $\gamma=1$，得到 $(p_1,p_2)=(1/3,2/3)$；GPS 不仅改变最后一个点，也经相邻因子改变历史位置。若 $\gamma=100$，得到约 $(0.9804,1.9608)$，结果更接近原里程计的 $(1,2)$。因此全局修正不是把最后一个位置硬设为 GPS，再将前面轨迹原样留下。
+
+[原文III-D](https://arxiv.org/html/2007.00258)按位置协方差比较决定是否加入 GPS 因子。这个门槛控制冗余和可信度，却不能单靠一个很小的协方差排除系统性 GPS 偏差。Campus 中新增 GPS、再新增回环后首尾误差改变，体现的是新增约束及其信息传播；该例和实验都不能将更小首尾误差自动解释为每个中间状态同幅改善。
+
 ### 相对位姿要取逆，不能直接转置
 
 若 $T_i$ 把第 $i$ 帧坐标变到世界，则正确的齐次相对变换为：
@@ -264,6 +308,10 @@ T_{ij}=T_i^{-1}T_j,
 $$
 
 原文式 (12) 显示为转置符号，PDF 第 4 页也如此。按本文齐次变换约定，不能直接照写成 $T_i^TT_j$；只有旋转矩阵的逆等于转置。这里指出的是表达与实现时应检查的数学边界，不能据此断言官方系统计算了错误相对位姿。
+
+惯性先帮助扫描时序补偿，激光与全局因子再校正轨迹。下面按信息来源检查更新，再分开评价额外传感器带来的收益。
+
+## 三、交替去畸变和估计，检查约束信息来源
 
 ```text
 输入：带逐点时间的激光数据、IMU、标定参数；可选 GPS
@@ -279,12 +327,23 @@ $$
 
 这是流程伪代码。回环候选生成与几何验证是两个环节；空间上接近并不必然意味着观测到同一个场景。
 
-## 实验：准确性提升是否用了更多信息
+## 四、按是否使用GPS回环与惯性读精度结果
+
+&lt;!-- figure-ref-v6:start:rc-97-figure-4-anchor --&gt;
+&lt;span id=&quot;rc-97-figure-4&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-97-figure-4-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/097-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/097-evidence.png&quot; width=&quot;1571&quot; height=&quot;517&quot; alt=&quot;Fig. 4：卫星参考与三种地图同列显示，在 Walking 数据中比较建筑边缘是否反复重影；这组结果没有使用 GPS&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文结果图／表摘引：Tixiao Shan 等（2020），Fig. 4，PDF 第 6 页；&lt;a href=&quot;https://arxiv.org/pdf/2007.00258#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：卫星参考与三种地图同列显示，在 Walking 数据中比较建筑边缘是否反复重影；这组结果没有使用 GPS。LIO-SAM 更整齐是此序列的定性证据，不能由地图观感得出每个时刻的定位误差。
+
+### 实验：准确性提升是否用了更多信息
+
+GPS、回环和 IMU 辅助改变了信息条件；首尾闭合误差不能替代全程真值，原始 LIO-SAM 与后续分支能力分开。
 
 | 检查项 | 原文设置或阅读边界 |
 |---|---|
-| 平台 | 手持设备、地面车与船，见图 2 |
-| 数据 | 表 I 包含 Rotation、Walking、Campus、Park、Amsterdam 五组 |
+| 平台 | 手持设备、地面车与船，见[图 2](https://arxiv.org/pdf/2007.00258#page=4) |
+| 数据 | [表 I](https://arxiv.org/pdf/2007.00258#page=5) 包含 Rotation、Walking、Campus、Park、Amsterdam 五组 |
 | 输入比较 | LIO-odom 无 GPS/回环；LIO-GPS 加 GPS；完整 LIO-SAM 使用可用因子 |
 | 基线 | LOAM、LIOM，以及上述融合配置 |
 | 运行约束 | §IV 要求 LOAM/LIO-SAM 实时；允许 LIOM 更长处理时间 |
@@ -292,23 +351,37 @@ $$
 | 主要指标 | 地图与轨迹可视化、首尾平移误差；首尾误差不是完整轨迹 ATE |
 | 重复与调参 | 原文所示结果不能直接提供跨随机种子的置信区间；完整调参预算未核实 |
 
+&lt;!-- figure-ref-v6:start:rc-97-final-source-gap-note --&gt;
+&lt;span id=&quot;rc-97-figure-2&quot;&gt;&lt;/span&gt;&lt;span id=&quot;rc-97-figure-5&quot;&gt;&lt;/span&gt;&lt;p class=&quot;figure-reference-note&quot;&gt;尚未内嵌：&lt;a href=&quot;https://arxiv.org/pdf/2007.00258#page=4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;图 2&lt;/a&gt;、&lt;a href=&quot;https://arxiv.org/pdf/2007.00258#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;图 5&lt;/a&gt;。平台组合照片对当前因子图与误差评论不是必要数据；另一个复合图含校园轨迹及 Google Earth 底图叠加，后者未核清完整 Google/数据提供商署名。只展示轨迹面板不能算整幅图已完成，故保留完整图入口。&lt;/p&gt;
+&lt;!-- figure-ref-v6:end:rc-97-final-source-gap-note --&gt;
+
+
+
+
+
+
+
 三项证据应连起来读：
 
-1. **图 3–4：快速运动。** 比较地图结构是否保持。它展示这些数据上的配准稳定性，但视觉上更整齐不能替代逐时刻真值误差。
-2. **表 II：增量加入全局约束。** Campus 的 LIO-odom、LIO-GPS、LIO-SAM 首尾误差分别为 9.44、6.87、0.12 米。它支持额外位置和回环约束的作用；不支持“仅靠改了局部配准就提高到同样水平”。
-3. **图 5–6：GPS 可用性与轨迹形状。** 它们帮助判断修正发生在什么位置。把回到起点的位置拉近，并不能保证中间每一段轨迹都同等准确。
+1. **[图 3](#rc-97-figure-3)–[图 4](#rc-97-figure-4)：快速运动。** 比较地图结构是否保持。它展示这些数据上的配准稳定性，但视觉上更整齐不能替代逐时刻真值误差。
 
-此外，表 I 与 §IV-A/B 对 Rotation、Walking 的最大角速度存在互换：表中为 213.9 与 133.7 度/秒，正文相反。PDF 第 5 页可见这一差异，具体归属应查原始数据澄清，不宜用其中一个数字制造精确的鲁棒性上限。
+&lt;!-- figure-ref-v6:start:rc-97-figure-3 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-97-figure-3&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/097-fig-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/097-fig-3.png&quot; width=&quot;640&quot; height=&quot;649&quot; alt=&quot;原论文图3：旋转测试的实景、LOAM地图和LIO-SAM地图&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Tixiao Shan 等（2020），图 3，PDF 第 5 页；&lt;a href=&quot;https://arxiv.org/pdf/2007.00258#page=5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-## 原理有效的前提与实现代价
+读图：上图给出场景结构，下两图检查旋转时几何是否保持一致；这是困难运动下的定性比较。
+&lt;!-- figure-ref-v6:end:rc-97-figure-3 --&gt;
+2. **[表 II](https://arxiv.org/pdf/2007.00258#page=5)：增量加入全局约束。** Campus 的 LIO-odom、LIO-GPS、LIO-SAM 首尾误差分别为 9.44、6.87、0.12 米。它支持额外位置和回环约束的作用；不支持“仅靠改了局部配准就提高到同样水平”。
+3. **[图 5–6](https://arxiv.org/pdf/2007.00258#page=7)：GPS 可用性与轨迹形状。** 它们帮助判断修正发生在什么位置。把回到起点的位置拉近，并不能保证中间每一段轨迹都同等准确。
 
-作者提供了紧耦合融合与不同信息来源的实验；下面是应用层分析。长期漂移不是“优化还不够努力”，也可能是缺少能观测该方向的信号。长走廊、稀少结构、水面或大量运动物体，都可能削弱几何约束。IMU 能撑过短期退化，却不能永远补上不存在的绝对位置观测。
+&lt;!-- figure-ref-v6:start:rc-97-figure-6 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-97-figure-6&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/097-fig-6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/097-fig-6.png&quot; width=&quot;640&quot; height=&quot;795&quot; alt=&quot;原论文图6：公园数据中多种估计轨迹及LIO-SAM地图配准结果&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Tixiao Shan 等（2020），图 6，PDF 第 7 页；&lt;a href=&quot;https://arxiv.org/pdf/2007.00258#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-官方运行说明明确要求逐点时间和相应点云通道，并讨论 IMU 姿态、外参及同步条件。原始分支的传感器支持范围不应扩写成“任意雷达与 IMU 即插即用”。两个错误时钟之间的固定延迟，可能被优化器误解释成运动或偏置；这是一种模型错误，不只是随机噪声变大。
+读图：上图的GPS可用区间与各方法轨迹一起读，下图仅提供地理背景；地图对齐不等于逐点真值评估。
+&lt;!-- figure-ref-v6:end:rc-97-figure-6 --&gt;
 
-同样要分开局部高频里程计和全局回环校正：后者可能使地图坐标中的轨迹调整。把这种调整直接送给需要连续速度的控制器，可能产生不必要的跳变。系统集成应明确控制使用哪个坐标系、哪种输出和怎样的更新语义。
+此外，[表 I](https://arxiv.org/pdf/2007.00258#page=5) 与 §IV-A/B 对 Rotation、Walking 的最大角速度存在互换：表中为 213.9 与 133.7 度/秒，正文相反。PDF 第 5 页可见这一差异，具体归属应查原始数据澄清，不宜用其中一个数字制造精确的鲁棒性上限。
 
-## 用一个小实验建立理解
+### 用一个小实验建立理解
 
 **自构、未运行**：在同一段闭环数据上，分别启用 IMU+激光、再加 GPS、再加回环。保留相同前端参数，记录全轨迹误差、首尾误差、处理延迟、回环接受情况。接着只给 IMU 时间加一个小偏移，观察哪种指标最先恶化。
 
@@ -316,11 +389,28 @@ $$
 
 五个前置概念是：**因子图**把状态和观测关系分开表示；**预积分**将高频惯性数据形成区间约束；**外参**描述传感器之间的刚体关系；**可观测性**判断哪些状态能被数据确定；**回环**利用重访建立跨时间约束。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 点云运动畸变、惯性漂移与长程误差相互影响 | 预积分和激光紧耦合，关键帧局部地图，GPS/回环因子 | 几何校正惯性偏置，高频运动辅助配准，全局信息约束漂移 | 图3–6及表II，需按输入配置解释 | 同步标定敏感；退化几何和错回环仍有风险；首尾误差不代表全程精度 |
+## 五、保留时间同步、标定与异常全局观测风险
 
-## 读懂了吗：三问三答
+作者提供了紧耦合融合与不同信息来源的实验；下面是应用层分析。长期漂移不是“优化还不够努力”，也可能是缺少能观测该方向的信号。长走廊、稀少结构、水面或大量运动物体，都可能削弱几何约束。IMU 能撑过短期退化，却不能永远补上不存在的绝对位置观测。
+
+官方运行说明明确要求逐点时间和相应点云通道，并讨论 IMU 姿态、外参及同步条件。原始分支的传感器支持范围不应扩写成“任意雷达与 IMU 即插即用”。两个错误时钟之间的固定延迟，可能被优化器误解释成运动或偏置；这是一种模型错误，不只是随机噪声变大。
+
+同样要分开局部高频里程计和全局回环校正：后者可能使地图坐标中的轨迹调整。把这种调整直接送给需要连续速度的控制器，可能产生不必要的跳变。系统集成应明确控制使用哪个坐标系、哪种输出和怎样的更新语义。
+
+## 六、追问：加入GPS后漂移变小，怎样验证不是把额外全局信息误称为激光前端改进？
+
+&lt;details&gt;
+&lt;summary&gt;加入GPS后漂移变小，怎样验证不是把额外全局信息误称为激光前端改进？&lt;/summary&gt;
+
+**参考答案**：固定前端与局部因子，分别比较有无GPS及其覆盖区间，再单独测试去畸变和扫描匹配。全局约束能够改善整条轨迹，但不证明每帧激光估计独立变准。实验还应报告GPS质量及异常处理条件。
+
+&lt;/details&gt;
+
+## 七、比较因子图平滑与迭代滤波
+
+- **平行路线**：[FAST-LIO2：直接用点云定位，为什么先要解决地图更新](099-fastlio2.md)。用迭代滤波和增量地图实现激光惯性里程计，系统全局能力不同。
+
+## 八、自测与参考答案
 
 ### 1．为什么不能把 IMU 去畸变直接等同于紧耦合？
 

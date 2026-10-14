@@ -42,15 +42,11 @@
                 <span class="text-gray-500">A3C：用多个环境的异步经验稳定深度学习</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="fa3439dcaacbdecd241a3fbf56fa14b3eafbf89589c71d6cfebf3eaee583a6b0"><h1>第 22 天｜A3C：用多个环境的异步经验稳定深度学习</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="516bb7a817c12cf636324a643c921ecc945294e123d16df7c8031f140f79338f"><h1>第 22 天｜A3C：用多个环境的异步经验稳定深度学习</h1>
 <p><a href="index.html">系列首页</a> · <a href="21-alphago.html">上一篇</a> · <a href="23-gail.html">下一篇</a></p>
 <p><strong>原论文与版本</strong>：<em>Asynchronous Methods for Deep Reinforcement Learning</em>，2016。<a href="https://arxiv.org/abs/1602.01783">原论文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p><strong>研究问题</strong>：深度RL的相关样本与训练吞吐</p>
-<p><strong>旧方法卡点</strong>：单一环境经验相关，replay增加存储和机制复杂度</p>
-<p><strong>作者主张</strong>：多个worker独立交互并异步更新共享Actor–Critic</p>
-<p><strong>论文证据</strong>：控制与Atari实验显示CPU并发的实用表现</p>
-<p><strong>一句话</strong>：在异步多worker、通常近似on-policy的单智能体学习中，作者通过“多个worker独立交互并异步更新共享Actor–Critic”应对“深度RL的相关样本与训练吞吐”这一问题；证据边界或代价是：异步梯度有滞后，部分调参比较不完全对等。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="01-actor-critic.html">早期Actor–Critic</a>分开行动与评价，<a href="16-dqn.html">DQN</a>用回放缓和连续数据相关性。A3C选择另一种训练组织：让多个环境副本同时产生多步轨迹并异步更新共享网络。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <ol>
 <li><strong>Worker</strong>：独立采样与局部计算的进程。</li>
@@ -59,8 +55,8 @@
 <li><strong>参数滞后</strong>：采样或求梯度时参数已过时。</li>
 <li><strong>墙钟时间</strong>：真实经过的训练时间。</li>
 </ol>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
-<p>本篇将“深度RL的相关样本与训练吞吐”放在异步多worker、通常近似on-policy的单智能体学习的边界内研究。单一环境经验相关，replay增加存储和机制复杂度。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<h2 id="一问题设定并行采样提高吞吐后旧梯度还对应哪个策略">一、问题设定：并行采样提高吞吐后，旧梯度还对应哪个策略</h2>
+<p>一个worker采样期间，其他worker已经可能改了共享参数。并行能带来多样轨迹与更高吞吐，也让梯度到达时变旧。A3C要在这个系统条件下构造Actor与Critic的多步目标，并区分墙钟改善、样本效率和策略滞后。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -89,13 +85,20 @@
 <td>短unroll截断需bootstrap，真终止不bootstrap</td>
 </tr>
 </tbody></table></div>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
-<p>多个worker不是博弈中的多个智能体，而是同一个任务的采样副本。它们不同的状态轨迹缓解短期相关性，多步回报加Critic减少等待。局部参数计算梯度后应用到共享参数，更新时共享网络可能已经变化。</p>
-<h3 id="关键公式与符号">关键公式与符号</h3>
+<h2 id="二由多步回报同时驱动策略与评价">二、由多步回报同时驱动策略与评价</h2>
+<p>异步框架把采样和更新分散到多个环境副本。每个worker拉取参数，采一小段轨迹，计算多步目标，再把梯度送到共享网络；其他worker可能已修改共享参数，所以这是含滞后的异步优化，不是严格同步批量梯度。</p>
+<p>A3C的Actor使用优势加权log概率，Critic回归n步回报，熵项鼓励行为多样。多步目标在真实终止时停止bootstrap，在尚未结束的片段末端使用V。不同worker的轨迹多样性缓解连续帧相关性，因此可不依赖DQN式经验回放；这并不证明回放永远无用。</p>
+<p>还要区分论文的框架与具体A3C算法：原文也包含异步一步Q、SARSA和n步Q。多个worker是同一任务的独立采样副本，不是MADDPG那种彼此影响环境的多个决策主体。</p>
+<h3 id="用片段末端价值连接n步回报">用片段末端价值连接n步回报</h3>
 <p><span class="reading-math" data-tex="R_t=\sum_{k=0}^{n-1}\gamma^kr_{t+k}+\gamma^nV(s_{t+n}),\quad A_t=R_t-V(s_t)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>R</mi><mi>t</mi></msub><mo>=</mo><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>0</mn></mrow><mrow><mi>n</mi><mo>−</mo><mn>1</mn></mrow></munderover><msup><mi>γ</mi><mi>k</mi></msup><msub><mi>r</mi><mrow><mi>t</mi><mo>+</mo><mi>k</mi></mrow></msub><mo>+</mo><msup><mi>γ</mi><mi>n</mi></msup><mi>V</mi><mo stretchy="false">(</mo><msub><mi>s</mi><mrow><mi>t</mi><mo>+</mo><mi>n</mi></mrow></msub><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="1em"/><msub><mi>A</mi><mi>t</mi></msub><mo>=</mo><msub><mi>R</mi><mi>t</mi></msub><mo>−</mo><mi>V</mi><mo stretchy="false">(</mo><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">R_t=\sum_{k=0}^{n-1}\gamma^kr_{t+k}+\gamma^nV(s_{t+n}),\quad A_t=R_t-V(s_t).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.1032em;vertical-align:-1.3021em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8011em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mrel mtight">=</span><span class="mord mtight">0</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3021em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span>
 Actor 用 logπ×停止梯度的 A，再加熵；Critic回归R。真正终止处末端值为零。</p>
-<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
-<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<h3 id="片段采样的两种时间边界">片段采样的两种时间边界</h3>
+<p>n步目标中的n是当前片段实际可用的转移数，不是固定worker总运行时长；若中途真终止，就用已收到奖励收尾。梯度滞后则发生在计算完成到共享参数接收之间，是另一种时间差。</p>
+<h3 id="算清片段结束与真正终止的区别">算清片段结束与真正终止的区别</h3>
+<p>以下是可手算的教学构造，不是论文实验。</p>
+<p>两步奖励(1,2)，末端未终止且V=3，γ=0.9。第二步目标<span class="reading-math" data-tex="R_1=2+0.9\times3=4.7"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>R</mi><mn>1</mn></msub><mo>=</mo><mn>2</mn><mo>+</mo><mn>0.9</mn><mo>×</mo><mn>3</mn><mo>=</mo><mn>4.7</mn></mrow><annotation encoding="application/x-tex">R_1=2+0.9\times3=4.7</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">0.9</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">3</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">4.7</span></span></span></span></span>，第一步<span class="reading-math" data-tex="R_0=1+0.9\times4.7=5.23"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>R</mi><mn>0</mn></msub><mo>=</mo><mn>1</mn><mo>+</mo><mn>0.9</mn><mo>×</mo><mn>4.7</mn><mo>=</mo><mn>5.23</mn></mrow><annotation encoding="application/x-tex">R_0=1+0.9\times4.7=5.23</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">0.9</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">4.7</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">5.23</span></span></span></span></span>。若V(s₀)=4，Actor用优势1.23。</p>
+<p>若末端是真终止，R₀应变2.8。即使计算完全正确，worker送回梯度时参数若已变化，它仍是旧局部策略下的估计；这就是异步吞吐与滞后的折中。</p>
+<h2 id="三在各worker采片段并异步提交梯度">三、在各worker采片段并异步提交梯度</h2>
 <pre><code class="language-text">启动多个worker，共享θ,w
 每个worker反复：
   同步本地参数←共享参数
@@ -109,28 +112,7 @@ Actor 用 logπ×停止梯度的 A，再加熵；Critic回归R。真正终止处
 输出：共享策略
 </code></pre>
 <p><strong>实现要点</strong>：异步梯度有滞后，部分调参比较不完全对等。</p>
-<h3 id="三种优化要分开">三种“优化”要分开</h3>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>层次</th>
-<th>这里具体是什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>数学目标／训练损失</td>
-<td>n步优势策略梯度加熵；价值网络回归n步目标</td>
-</tr>
-<tr>
-<td>机制改变</td>
-<td>多个worker独立交互并异步更新共享Actor–Critic</td>
-</tr>
-<tr>
-<td>评价改善的指标</td>
-<td>分数与墙钟学习速度</td>
-</tr>
-</tbody></table></div>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<h2 id="四分别读墙钟调参预算与固定参数成绩">四、分别读墙钟、调参预算与固定参数成绩</h2>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -152,7 +134,7 @@ Actor 用 logπ×停止梯度的 A，再加熵；Critic回归R。真正终止处
 </tr>
 <tr>
 <td>训练预算与资源</td>
-<td>图1异步方法16CPU核，DQN为K40GPU</td>
+<td><a href="#rl-22-figure-1">图1</a>异步方法16CPU核，DQN为K40GPU</td>
 </tr>
 <tr>
 <td>指标及其含义</td>
@@ -160,78 +142,69 @@ Actor 用 logπ×停止梯度的 A，再加熵；Critic回归R。真正终止处
 </tr>
 <tr>
 <td>随机性与不确定性</td>
-<td>图1异步取50组学习率实验中最佳5组；DQN固定超参5种子</td>
+<td><a href="#rl-22-figure-1">图1</a>异步取50组学习率实验中最佳5组；DQN固定超参5种子</td>
 </tr>
 <tr>
 <td>实际验证的假设</td>
 <td>异步采样是否改善相关性和计算利用</td>
 </tr>
 </tbody></table></div>
-<p><strong>实验解读（本文分析）</strong>：异步梯度有滞后，部分调参比较不完全对等。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>证据定位</th>
-<th>比较什么／观察到什么</th>
-<th>支持什么</th>
-<th>不能证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>方法：异步框架（具体图表编号本文未核实）</td>
-<td>worker独立采样共享更新</td>
-<td>说明去相关与并行来源</td>
-<td>不意味着无策略滞后</td>
-</tr>
-<tr>
-<td>图1</td>
-<td>不同硬件上的学习速度</td>
-<td>实际系统表现</td>
-<td>调参预算不完全公平</td>
-</tr>
-<tr>
-<td>表1</td>
-<td>57游戏human-start归一化成绩</td>
-<td>跨游戏汇总</td>
-<td>不等于单模型多任务</td>
-</tr>
-</tbody></table></div>
-<p><strong>结论边界</strong>：控制与Atari实验显示CPU并发的实用表现。异步梯度有滞后，部分调参比较不完全对等。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p><strong>作者实验</strong>展示无需经典replay也能有效训练。<strong>本文分析</strong>：异步不可重复的更新顺序影响复现；最佳5组曲线不能当随机5次训练的无偏均值。后续IMPALA明确处理actor与learner分离后的策略滞后。</p>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<h3 id="教学例子">教学例子</h3>
-<p>以下是教学推演，不是原论文实验。</p>
-<p>worker A还在使用θ0，worker B已经把共享参数改成θ1。A的梯度随后应用到θ1，梯度来自旧策略；不同worker的轨迹去相关，并没有自动消除这类off-policy偏差。</p>
-<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
-<ol>
-<li>加倍worker后真实交互量和时间怎样变化？</li>
-<li>最佳超参数曲线应怎样公平比较？</li>
-<li>异步和同步A2C有哪些统计与系统差异？</li>
-</ol>
-<h2 id="方法与证据总结">方法与证据总结</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据／理论证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>深度RL的相关样本与训练吞吐</td>
-<td>多个worker独立交互并异步更新共享Actor–Critic</td>
-<td>独立环境轨迹缓解相关性，并行处理增加吞吐</td>
-<td>控制与Atari实验显示CPU并发的实用表现</td>
-<td>异步梯度有滞后，部分调参比较不完全对等</td>
-</tr>
-</tbody></table></div>
-<h2 id="资料与阅读范围">资料与阅读范围</h2>
-<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
-<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<p><strong>实验解读（本文分析）</strong>：<a href="#rl-22-figure-1">图1</a>以16核CPU对比K40 GPU，并且异步曲线取50次学习率实验中最佳5个，DQN是固定超参数的5种子；不能把它说成完全同等调参预算。57游戏表1另有固定超参数的human-start评估。系统墙钟速度、样本效率及跨种子稳健性应分别读。</p>
+<h3 id="核对16核cpu与k40及最佳学习率选择">核对16核CPU与K40及最佳学习率选择</h3>
+<!-- inline-evidence-v2:start -->
+
+<!-- figure-ref-v6:start:anchor-rl-22-figure-1 -->
+<p><span id="rl-22-figure-1"></span></p>
+<!-- figure-ref-v6:end:anchor-rl-22-figure-1 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/22-a3c-figure-1.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/22-a3c-figure-1.png" width="1600" height="361" alt="A3C等异步算法与DQN在五项Atari游戏中的墙钟时间学习曲线" loading="lazy"></a><figcaption>原论文图形摘引；Mnih等，2016，Figure 1；原HTML图形。<a href="https://arxiv.org/html/1602.01783v2#S5.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>图中横轴单位是小时，纵轴是各游戏分数，越高越好；每个面板纵轴范围不同。黄线A3C与粉线n-step Q比较时，不只是worker数量，还改变了策略/价值更新；绿线一步Q与橙线一步SARSA又在目标策略上不同。因此这张图同时呈现系统和算法组合效果，CPU上的曲线更快不能直接换算成更少环境样本。</p>
+<!-- inline-evidence-v2:end -->
+
+
+<p><a href="#rl-22-figure-1">图1</a>的横轴墙钟时间回答系统速度，但异步方法使用16个CPU核心，而DQN使用K40 GPU；异步曲线还是50组试验中选出的最好5组，DQN则是固定超参数的5种子，选择预算不同。<a href="#rl-22-figure-3">图3</a>以所有线程总帧数比较样本效率，<a href="#rl-22-figure-4">图4</a>再以小时比较训练速度，应结合二者判断并行收益。表1的57游戏human-start汇总是每游戏分别训练，不能读成一个多任务模型。 <a href="https://arxiv.org/html/1602.01783">查看原文</a>。</p>
+<!-- figure-ref-v6:start:rl-22-figure-4 -->
+<figure class="reading-evidence-figure" id="rl-22-figure-4"><a href="/rl/assets/reference-v6/22-figure-4.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/22-figure-4.png" width="2600" height="1469" alt="面板任务与方法顺序沿用上一图，但横轴换成训练小时。更多actor-learner通常更快达到相同分数，幅度却不等于同比例节省环境数据，读者应把它与帧数轴那一图分开。" loading="lazy"></a><figcaption>原论文图形摘引｜Mnih等，2016，图4（完整面板）。<a href="https://arxiv.org/html/1602.01783v2#S5.F4" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留；多面板仅重新排版，未改数据。</figcaption></figure>
+
+<p>面板任务与方法顺序沿用上一图，但横轴换成训练小时。更多actor-learner通常更快达到相同分数，幅度却不等于同比例节省环境数据，读者应把它与帧数轴那一图分开。</p>
+<!-- figure-ref-v6:end:rl-22-figure-4 -->
+
+<!-- figure-ref-v6:start:rl-22-figure-3 -->
+<figure class="reading-evidence-figure" id="rl-22-figure-3"><a href="/rl/assets/reference-v6/22-figure-3.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/22-figure-3.png" width="2600" height="1467" alt="三排分别是单步Q、n步Q与A3C，五列是同一组游戏。横轴epoch按所有线程合计400万帧计，因而比较的是数据效率；各曲线是三个最佳学习率的平均，不能当成无调参的随机种子平均。" loading="lazy"></a><figcaption>原论文图形摘引｜Mnih等，2016，图3（完整面板）。<a href="https://arxiv.org/html/1602.01783v2#S5.F3" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留；多面板仅重新排版，未改数据。</figcaption></figure>
+
+<p>三排分别是单步Q、n步Q与A3C，五列是同一组游戏。横轴epoch按所有线程合计400万帧计，因而比较的是数据效率；各曲线是三个最佳学习率的平均，不能当成无调参的随机种子平均。</p>
+<!-- figure-ref-v6:end:rl-22-figure-3 -->
+
+<h2 id="五异步吞吐不能消除参数滞后">五、异步吞吐不能消除参数滞后</h2>
+<p>异步更新顺序影响复现，滞后梯度也不因轨迹多样而消失。最佳50组中的5组不能当作随机5次训练的无偏均值；系统墙钟、样本效率和固定参数稳健性必须分别报告。</p>
+<h2 id="六继续追问终止worker数量与同步">六、继续追问：终止、worker数量与同步</h2>
+<details>
+<summary>1. 加倍worker后真实交互量和时间怎样变化？</summary>
+
+<p>加倍 worker 可能提高单位时间的环境步数，但每步策略滞后、通信争用和计算效率也会变化。相同墙钟下真实样本通常更多；相同总帧数下则未必更快或更好。应同时报告所有 worker 合计帧数、每秒吞吐、达到目标回报的时间及平均参数滞后，避免用“每个worker的步数”隐藏总交互。</p>
+</details>
+
+<details>
+<summary>2. 最佳超参数曲线应怎样公平比较？</summary>
+
+<p>必须匹配超参数试验次数、范围与筛选数据，并清楚区分随机种子均值和从许多试验里挑出的最好若干。若一方固定超参数做5种子，另一方从50组里选前5，曲线差别包含模型选择优势。更公平的做法是用相同验证预算选配置，再用未参与选择的种子报告均值与区间，并把调参成本纳入总预算。</p>
+</details>
+
+<details>
+<summary>3. 异步和同步A2C有哪些统计与系统差异？</summary>
+
+<p>A3C 允许 worker 在不同参数版本上计算梯度并异步写入，能减少等待慢环境的空闲，但带来陈旧梯度、执行顺序差异与复现困难。同步 A2C 按批收集后统一更新，梯度对应较一致的参数快照，却可能被慢 worker 拖住，批量与探索多样性也不同。比较应控制总样本、batch规模、优化器及硬件，不能把名称不同当作唯一变量。</p>
+</details>
+
+<h2 id="七沿采样学习分离继续处理离策略误差">七、沿采样学习分离继续处理离策略误差</h2>
+<ul>
+<li><p><strong>直接系统承接</strong>：<a href="32-impala.html">IMPALA</a>。采样者与学习器进一步分离会加重策略滞后，V-trace显式处理行为与当前策略的差异。</p>
+</li>
+<li><p><strong>奖励模块组合</strong>：<a href="24-icm.html">ICM</a>。并行采样仍可能拿不到稀疏任务奖励，好奇心模块为Actor–Critic补充探索信号。</p>
+</li>
+<li><p><a href="https://arxiv.org/html/1602.01783">原论文与图表入口</a>。§4异步框架；§5.1<a href="#rl-22-figure-1">图1</a>与表1；补充优化设置。</p>
+</li>
+</ul>
 <h2 id="自测两题">自测两题</h2>
 <p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
 <p><strong>问题 1</strong>：为什么多个并行环境可以缓解样本相关性？</p>
@@ -250,21 +223,13 @@ Actor 用 logπ×停止梯度的 A，再加熵；Critic回归R。真正终止处
 
 **原论文与版本**：*Asynchronous Methods for Deep Reinforcement Learning*，2016。[原论文](https://arxiv.org/abs/1602.01783)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：深度RL的相关样本与训练吞吐
+[早期Actor–Critic](01-actor-critic.md)分开行动与评价，[DQN](16-dqn.md)用回放缓和连续数据相关性。A3C选择另一种训练组织：让多个环境副本同时产生多步轨迹并异步更新共享网络。
 
-**旧方法卡点**：单一环境经验相关，replay增加存储和机制复杂度
+## 一、问题设定：并行采样提高吞吐后，旧梯度还对应哪个策略
 
-**作者主张**：多个worker独立交互并异步更新共享Actor–Critic
-
-**论文证据**：控制与Atari实验显示CPU并发的实用表现
-
-**一句话**：在异步多worker、通常近似on-policy的单智能体学习中，作者通过“多个worker独立交互并异步更新共享Actor–Critic”应对“深度RL的相关样本与训练吞吐”这一问题；证据边界或代价是：异步梯度有滞后，部分调参比较不完全对等。
-
-## 二、研究背景与问题定义
-
-本篇将“深度RL的相关样本与训练吞吐”放在异步多worker、通常近似on-policy的单智能体学习的边界内研究。单一环境经验相关，replay增加存储和机制复杂度。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+一个worker采样期间，其他worker已经可能改了共享参数。并行能带来多样轨迹与更高吞吐，也让梯度到达时变旧。A3C要在这个系统条件下构造Actor与Critic的多步目标，并区分墙钟改善、样本效率和策略滞后。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -274,18 +239,33 @@ Actor 用 logπ×停止梯度的 A，再加熵；Critic回归R。真正终止处
 | 奖励或学习信号 | 各任务环境奖励 |
 | 终止／边界 | 短unroll截断需bootstrap，真终止不bootstrap |
 
-## 三、方法：到底改了什么
+## 二、由多步回报同时驱动策略与评价
 
-多个worker不是博弈中的多个智能体，而是同一个任务的采样副本。它们不同的状态轨迹缓解短期相关性，多步回报加Critic减少等待。局部参数计算梯度后应用到共享参数，更新时共享网络可能已经变化。
+异步框架把采样和更新分散到多个环境副本。每个worker拉取参数，采一小段轨迹，计算多步目标，再把梯度送到共享网络；其他worker可能已修改共享参数，所以这是含滞后的异步优化，不是严格同步批量梯度。
 
-### 关键公式与符号
+A3C的Actor使用优势加权log概率，Critic回归n步回报，熵项鼓励行为多样。多步目标在真实终止时停止bootstrap，在尚未结束的片段末端使用V。不同worker的轨迹多样性缓解连续帧相关性，因此可不依赖DQN式经验回放；这并不证明回放永远无用。
+
+还要区分论文的框架与具体A3C算法：原文也包含异步一步Q、SARSA和n步Q。多个worker是同一任务的独立采样副本，不是MADDPG那种彼此影响环境的多个决策主体。
+
+### 用片段末端价值连接n步回报
 
 $$R_t=\sum_{k=0}^{n-1}\gamma^kr_{t+k}+\gamma^nV(s_{t+n}),\quad A_t=R_t-V(s_t).$$
 Actor 用 logπ×停止梯度的 A，再加熵；Critic回归R。真正终止处末端值为零。
 
-### 输入 → 处理 → 输出：教学伪代码
+### 片段采样的两种时间边界
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+n步目标中的n是当前片段实际可用的转移数，不是固定worker总运行时长；若中途真终止，就用已收到奖励收尾。梯度滞后则发生在计算完成到共享参数接收之间，是另一种时间差。
+
+### 算清片段结束与真正终止的区别
+
+以下是可手算的教学构造，不是论文实验。
+
+两步奖励(1,2)，末端未终止且V=3，γ=0.9。第二步目标$R_1=2+0.9\times3=4.7$，第一步$R_0=1+0.9\times4.7=5.23$。若V(s₀)=4，Actor用优势1.23。
+
+若末端是真终止，R₀应变2.8。即使计算完全正确，worker送回梯度时参数若已变化，它仍是旧局部策略下的估计；这就是异步吞吐与滞后的折中。
+
+## 三、在各worker采片段并异步提交梯度
+
 
 ```text
 启动多个worker，共享θ,w
@@ -303,49 +283,52 @@ Actor 用 logπ×停止梯度的 A，再加熵；Critic回归R。真正终止处
 
 **实现要点**：异步梯度有滞后，部分调参比较不完全对等。
 
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | n步优势策略梯度加熵；价值网络回归n步目标 |
-| 机制改变 | 多个worker独立交互并异步更新共享Actor–Critic |
-| 评价改善的指标 | 分数与墙钟学习速度 |
-
-## 四、实验如何验证方法
+## 四、分别读墙钟、调参预算与固定参数成绩
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
 | 环境与任务 | 57 Atari、连续控制及3D环境 |
 | 数据来源与规模 | 多个独立环境并发采样 |
 | 对比基线 | DQN与其他异步价值／Actor–Critic方法 |
-| 训练预算与资源 | 图1异步方法16CPU核，DQN为K40GPU |
+| 训练预算与资源 | [图1](#rl-22-figure-1)异步方法16CPU核，DQN为K40GPU |
 | 指标及其含义 | 分数与墙钟学习速度 |
-| 随机性与不确定性 | 图1异步取50组学习率实验中最佳5组；DQN固定超参5种子 |
+| 随机性与不确定性 | [图1](#rl-22-figure-1)异步取50组学习率实验中最佳5组；DQN固定超参5种子 |
 | 实际验证的假设 | 异步采样是否改善相关性和计算利用 |
 
-**实验解读（本文分析）**：异步梯度有滞后，部分调参比较不完全对等。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+**实验解读（本文分析）**：[图1](#rl-22-figure-1)以16核CPU对比K40 GPU，并且异步曲线取50次学习率实验中最佳5个，DQN是固定超参数的5种子；不能把它说成完全同等调参预算。57游戏表1另有固定超参数的human-start评估。系统墙钟速度、样本效率及跨种子稳健性应分别读。
 
-## 五、结果：证据到底有多强
+### 核对16核CPU与K40及最佳学习率选择
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 方法：异步框架（具体图表编号本文未核实） | worker独立采样共享更新 | 说明去相关与并行来源 | 不意味着无策略滞后 |
-| 图1 | 不同硬件上的学习速度 | 实际系统表现 | 调参预算不完全公平 |
-| 表1 | 57游戏human-start归一化成绩 | 跨游戏汇总 | 不等于单模型多任务 |
+&lt;!-- inline-evidence-v2:start --&gt;
 
-**结论边界**：控制与Atari实验显示CPU并发的实用表现。异步梯度有滞后，部分调参比较不完全对等。
+&lt;!-- figure-ref-v6:start:anchor-rl-22-figure-1 --&gt;
+&lt;span id=&quot;rl-22-figure-1&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:anchor-rl-22-figure-1 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/papers/22-a3c-figure-1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/22-a3c-figure-1.png&quot; width=&quot;1600&quot; height=&quot;361&quot; alt=&quot;A3C等异步算法与DQN在五项Atari游戏中的墙钟时间学习曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引；Mnih等，2016，Figure 1；原HTML图形。&lt;a href=&quot;https://arxiv.org/html/1602.01783v2#S5.F1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-## 六、贡献、代价与局限
+图中横轴单位是小时，纵轴是各游戏分数，越高越好；每个面板纵轴范围不同。黄线A3C与粉线n-step Q比较时，不只是worker数量，还改变了策略/价值更新；绿线一步Q与橙线一步SARSA又在目标策略上不同。因此这张图同时呈现系统和算法组合效果，CPU上的曲线更快不能直接换算成更少环境样本。
 
-**作者实验**展示无需经典replay也能有效训练。**本文分析**：异步不可重复的更新顺序影响复现；最佳5组曲线不能当随机5次训练的无偏均值。后续IMPALA明确处理actor与learner分离后的策略滞后。
 
-## 七、帮助建立理解
+&lt;!-- inline-evidence-v2:end --&gt;
 
-### 教学例子
 
-以下是教学推演，不是原论文实验。
+[图1](#rl-22-figure-1)的横轴墙钟时间回答系统速度，但异步方法使用16个CPU核心，而DQN使用K40 GPU；异步曲线还是50组试验中选出的最好5组，DQN则是固定超参数的5种子，选择预算不同。[图3](#rl-22-figure-3)以所有线程总帧数比较样本效率，[图4](#rl-22-figure-4)再以小时比较训练速度，应结合二者判断并行收益。表1的57游戏human-start汇总是每游戏分别训练，不能读成一个多任务模型。 [查看原文](https://arxiv.org/html/1602.01783)。
 
-worker A还在使用θ0，worker B已经把共享参数改成θ1。A的梯度随后应用到θ1，梯度来自旧策略；不同worker的轨迹去相关，并没有自动消除这类off-policy偏差。
+&lt;!-- figure-ref-v6:start:rl-22-figure-4 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-22-figure-4&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/22-figure-4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/22-figure-4.png&quot; width=&quot;2600&quot; height=&quot;1469&quot; alt=&quot;面板任务与方法顺序沿用上一图，但横轴换成训练小时。更多actor-learner通常更快达到相同分数，幅度却不等于同比例节省环境数据，读者应把它与帧数轴那一图分开。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜Mnih等，2016，图4（完整面板）。&lt;a href=&quot;https://arxiv.org/html/1602.01783v2#S5.F4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt; · 点图放大。原版权保留；多面板仅重新排版，未改数据。&lt;/figcaption&gt;&lt;/figure&gt;
+
+面板任务与方法顺序沿用上一图，但横轴换成训练小时。更多actor-learner通常更快达到相同分数，幅度却不等于同比例节省环境数据，读者应把它与帧数轴那一图分开。
+&lt;!-- figure-ref-v6:end:rl-22-figure-4 --&gt;
+
+&lt;!-- figure-ref-v6:start:rl-22-figure-3 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-22-figure-3&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/22-figure-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/22-figure-3.png&quot; width=&quot;2600&quot; height=&quot;1467&quot; alt=&quot;三排分别是单步Q、n步Q与A3C，五列是同一组游戏。横轴epoch按所有线程合计400万帧计，因而比较的是数据效率；各曲线是三个最佳学习率的平均，不能当成无调参的随机种子平均。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜Mnih等，2016，图3（完整面板）。&lt;a href=&quot;https://arxiv.org/html/1602.01783v2#S5.F3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt; · 点图放大。原版权保留；多面板仅重新排版，未改数据。&lt;/figcaption&gt;&lt;/figure&gt;
+
+三排分别是单步Q、n步Q与A3C，五列是同一组游戏。横轴epoch按所有线程合计400万帧计，因而比较的是数据效率；各曲线是三个最佳学习率的平均，不能当成无调参的随机种子平均。
+&lt;!-- figure-ref-v6:end:rl-22-figure-3 --&gt;
+
+## 五、异步吞吐不能消除参数滞后
+
+异步更新顺序影响复现，滞后梯度也不因轨迹多样而消失。最佳50组中的5组不能当作随机5次训练的无偏均值；系统墙钟、样本效率和固定参数稳健性必须分别报告。
 
 ### 五个前置概念
 
@@ -355,23 +338,35 @@ worker A还在使用θ0，worker B已经把共享参数改成θ1。A的梯度随
 4. **参数滞后**：采样或求梯度时参数已过时。
 5. **墙钟时间**：真实经过的训练时间。
 
-### 三个值得继续追问的问题
+## 六、继续追问：终止、worker数量与同步
 
-1. 加倍worker后真实交互量和时间怎样变化？
-2. 最佳超参数曲线应怎样公平比较？
-3. 异步和同步A2C有哪些统计与系统差异？
+&lt;details&gt;
+&lt;summary&gt;1. 加倍worker后真实交互量和时间怎样变化？&lt;/summary&gt;
 
-## 方法与证据总结
+加倍 worker 可能提高单位时间的环境步数，但每步策略滞后、通信争用和计算效率也会变化。相同墙钟下真实样本通常更多；相同总帧数下则未必更快或更好。应同时报告所有 worker 合计帧数、每秒吞吐、达到目标回报的时间及平均参数滞后，避免用“每个worker的步数”隐藏总交互。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| 深度RL的相关样本与训练吞吐 | 多个worker独立交互并异步更新共享Actor–Critic | 独立环境轨迹缓解相关性，并行处理增加吞吐 | 控制与Atari实验显示CPU并发的实用表现 | 异步梯度有滞后，部分调参比较不完全对等 |
+&lt;/details&gt;
 
-## 资料与阅读范围
+&lt;details&gt;
+&lt;summary&gt;2. 最佳超参数曲线应怎样公平比较？&lt;/summary&gt;
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+必须匹配超参数试验次数、范围与筛选数据，并清楚区分随机种子均值和从许多试验里挑出的最好若干。若一方固定超参数做5种子，另一方从50组里选前5，曲线差别包含模型选择优势。更公平的做法是用相同验证预算选配置，再用未参与选择的种子报告均值与区间，并把调参成本纳入总预算。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;3. 异步和同步A2C有哪些统计与系统差异？&lt;/summary&gt;
+
+A3C 允许 worker 在不同参数版本上计算梯度并异步写入，能减少等待慢环境的空闲，但带来陈旧梯度、执行顺序差异与复现困难。同步 A2C 按批收集后统一更新，梯度对应较一致的参数快照，却可能被慢 worker 拖住，批量与探索多样性也不同。比较应控制总样本、batch规模、优化器及硬件，不能把名称不同当作唯一变量。
+
+&lt;/details&gt;
+
+## 七、沿采样学习分离继续处理离策略误差
+
+- **直接系统承接**：[IMPALA](32-impala.md)。采样者与学习器进一步分离会加重策略滞后，V-trace显式处理行为与当前策略的差异。
+- **奖励模块组合**：[ICM](24-icm.md)。并行采样仍可能拿不到稀疏任务奖励，好奇心模块为Actor–Critic补充探索信号。
+
+- [原论文与图表入口](https://arxiv.org/html/1602.01783)。§4异步框架；§5.1[图1](#rl-22-figure-1)与表1；补充优化设置。
 
 ## 自测两题
 

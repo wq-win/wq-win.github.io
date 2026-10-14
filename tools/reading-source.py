@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Locate exact existing prerequisites, without rewriting historical Markdown.
+"""Locate exact prerequisites in the current canonical Markdown edition.
 
 Only rendered order changes. This manifest records the removed span and insertion
 point for every paper so the renderer and independent preservation test can agree.
@@ -45,6 +45,18 @@ def locate(text,key):
   assert len(re.findall(r'^(?:\d\.|[-*]) ',nb,re.M))==5,(key,nb)
   e=ne
  return s,e,'existing-concept-block'
+def insertion_point(text,key,start):
+ """Place prerequisites at the narrative boundary, not after a legacy intro.
+
+ A bridge is unnumbered and precedes the first problem-setting section. Put
+ concepts between that bridge and the problem, before equations get deep.
+ This also works if the source already put concepts at that boundary.
+ """
+ headings=list(re.finditer(r'^## (.+)$',text,re.M))
+ assert len(headings)>1,key
+ problem=next((h for h in headings if re.match(r'一[、.]\s*问题设定[：:]',h.group(1))),None)
+ assert problem is not None,(key,'Missing the explicit problem-setting boundary')
+ return min(problem.start(),start),'before-problem-setting'
 def main():
  rows=[]
  for series,n in SERIES.items():
@@ -53,11 +65,9 @@ def main():
   for p in ps:
    raw=p.read_bytes();text=raw.decode().replace('\r\n','\n');key=series+'/'+p.stem
    start,end,kind=locate(text,key)
-   headings=list(re.finditer(r'^## (.+)$',text,re.M)); assert len(headings)>1,key
-   intro=next((i for i,h in enumerate(headings[:3]) if '分钟' in h.group()),0)
-   insert=headings[intro+1].start();assert insert<=start,(key,'already earlier?')
+   insert,insertion_kind=insertion_point(text,key,start)
    moved=text[start:end]
-   rows.append(dict(key=key,source=str(p.relative_to(ROOT)),sourceSha256=hashlib.sha256(raw).hexdigest(),start=start,end=end,insert=insert,kind=kind,moved=moved,movedSha256=hashlib.sha256(moved.encode()).hexdigest()))
+   rows.append(dict(key=key,source=str(p.relative_to(ROOT)),sourceSha256=hashlib.sha256(raw).hexdigest(),start=start,end=end,insert=insert,kind=kind,insertion_kind=insertion_kind,moved=moved,movedSha256=hashlib.sha256(moved.encode()).hexdigest()))
  out=ROOT/'data/reading-prerequisites.json';out.write_text(json.dumps(rows,ensure_ascii=False,indent=2)+'\n')
  print('Verified prerequisite locations:',len(rows))
 if __name__=='__main__':main()

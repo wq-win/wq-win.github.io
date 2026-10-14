@@ -4,21 +4,13 @@
 
 **原论文与版本**：Haarnoja 等，*Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor*，2018。[正文](https://arxiv.org/html/1801.01290v2)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：连续控制的探索与样本效率
+[DDPG](17-ddpg.md)通过带噪行为采数据，但其目标仍追求确定性动作的高Q。SAC沿平行的离策略Actor–Critic路线，把策略熵写进未来回报，因此连价值目标也必须改变。
 
-**旧方法卡点**：确定性动作可能过早收缩，on-policy数据复用不足
+## 一、问题设定：随机性怎样成为要优化的收益而非临时探索噪声
 
-**作者主张**：联合最大化回报与策略熵，使用 off-policy Actor–Critic
-
-**论文证据**：§5 连续控制实验与温度／目标更新分析支持可用性
-
-**一句话**：在off-policy、无模型、最大熵随机 Actor–Critic中，作者通过“联合最大化回报与策略熵，使用 off-policy Actor–Critic”应对“连续控制的探索与样本效率”这一问题；证据边界或代价是：熵系数改变任务折中，原始版本不自动调温度。
-
-## 二、研究背景与问题定义
-
-本篇将“连续控制的探索与样本效率”放在off-policy、无模型、最大熵随机 Actor–Critic的边界内研究。确定性动作可能过早收缩，on-policy数据复用不足。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+如果训练只奖励Q，外加噪声只是采样手段，最终优化仍可能压成单一动作。SAC让保留多种选择本身具有目标价值。于是Actor、Q和V必须使用同一熵约定，有界连续动作的log概率也必须按真实输出分布计算。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -28,19 +20,41 @@
 | 奖励或学习信号 | 环境奖励加熵的训练目标 |
 | 终止／边界 | 终止截断按任务处理 |
 
-## 三、方法：到底改了什么
+## 二、从最大熵目标得到soft价值与策略改进
 
-本篇固定原始 2018 论文版本：有独立 V 网络和目标 V，并使用双 Q；不能把后来省去 V、自动调 α 的版本冒充原文。随机 Actor 同时寻找高价值与足够多样的动作。Critic 评价的也是包含未来熵的 soft 回报。
+SAC首先改变优化目标：在未来回报中计入策略熵，而不是只在执行动作上额外加探索噪声。soft价值因此同时评价奖励与保留多种行动的收益；Actor与Critic必须使用相同的熵约定，否则学习的不是同一个目标。
 
-### 关键公式与符号
+对固定Q，优化 $\mathbb E_\pi[Q-\alpha\log\pi]$ 的理想策略满足 $\pi^*(a|s)\propto\exp(Q(s,a)/\alpha)$。把Actor投向这个Boltzmann分布，相当于最小化KL；配分函数不依赖Actor参数，可从梯度中去掉。连续动作时用重参数化采样，通过动作路径对Q求导，减少似然比估计的方差。
+
+本篇固定2018 v2：独立V与目标V、双Q取min、固定温度/奖励尺度。后来无独立V和自动温度的实现不能倒写为此版。tanh压缩动作后还要修正log概率的雅可比；漏掉它会同时扭曲熵与Actor损失。
+
+### 让V目标与Actor损失使用同一有界动作密度
 
 $$V(s)\approx E_{a\sim\pi}[\min_iQ_i(s,a)-\alpha\log\pi(a|s)],\quad y_Q=r+\gamma(1-d)V_{\bar\psi}(s').$$
 $$L_\pi=E[\alpha\log\pi_\theta(a|s)-\min_iQ_i(s,a)].$$
 重参数化 a=fθ(ε,s) 让动作路径可微；tanh 压缩后 log 概率必须包含雅可比修正。
 
-### 输入 → 处理 → 输出：教学伪代码
+雅可比修正不是一个额外奖励项。令未压缩动作 $u=\mu_\theta(s)+\sigma_\theta(s)\odot\epsilon,\ \epsilon\sim\mathcal N(0,I)$，$a=\tanh u$；[原文附录C，式(20)—(21)](https://arxiv.org/html/1801.01290v2#A3)由概率质量不变得到
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。`stop_gradient` 表示停止向目标量传播梯度。
+$$\log\pi_\theta(a\mid s)=\log p_\theta(u\mid s)-\sum_i\log(1-\tanh^2u_i).$$
+
+每个维度被压缩的比例为 $1-\tanh^2u_i$，故密度要除以这些比例的乘积，取log后成为减号。Actor损失和V目标里的log概率都应使用同一个有界动作密度；不能采样压缩后的动作，却仍把未压缩高斯的log概率当作策略熵。
+
+### 动作压缩为何在边界附近改变密度更大
+
+tanh的导数在 $|u|$ 很大时接近零：一段较宽的未压缩区间被挤到狭窄动作区间，因此密度要升高。log雅可比修正描述这项坐标变化，不是额外奖励或鼓励动作碰边。
+
+### 看奖励尺度怎样改变两动作概率
+
+以下是可手算的教学构造，不是论文实验。
+
+两动作Q=(2,0)，α=1，理想概率为$(e^2/(e^2+1),1/(e^2+1))\approx(0.881,0.119)$。α降至0.5则约(0.982,0.018)，更集中。
+
+若把奖励和Q都放大2倍却保持α不变，概率也变得更集中。这说明奖励尺度与温度共同决定折中；“最大熵”不意味着越随机越好。
+
+## 三、重参数化采样并修正tanh后的密度
+
+`stop_gradient` 表示停止向目标量传播梯度。
 
 ```text
 初始化随机Actor、两个Q、V与目标V、replay
@@ -59,15 +73,7 @@ $$L_\pi=E[\alpha\log\pi_\theta(a|s)-\min_iQ_i(s,a)].$$
 
 **实现要点**：熵系数改变任务折中，原始版本不自动调温度。
 
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | 最大化奖励加熵的soft回报；原版分别训练Q、V和随机Actor |
-| 机制改变 | 联合最大化回报与策略熵，使用 off-policy Actor–Critic |
-| 评价改善的指标 | 回报与样本效率 |
-
-## 四、实验如何验证方法
+## 四、读均值策略测试与奖励尺度敏感性
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
@@ -79,29 +85,44 @@ $$L_\pi=E[\alpha\log\pi_\theta(a|s)-\min_iQ_i(s,a)].$$
 | 随机性与不确定性 | 5种子；部分图阴影是最小—最大，不是95%CI |
 | 实际验证的假设 | 最大熵 off-policy 是否改善效率和稳健性 |
 
-**实验解读（本文分析）**：熵系数改变任务折中，原始版本不自动调温度。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+**实验解读（本文分析）**：§5[图1](#rl-30-figure-1)使用5种子，每1000环境步评估一次，阴影为最小—最大范围而非95%置信区间。SAC评价用均值动作，与训练随机策略不同；原文SQL评价保留随机性。[图3](#rl-30-figure-3)奖励尺度敏感性说明原版仍需调参，不能引用后来的自动调温度解释此版稳定性。
 
-## 五、结果：证据到底有多强
+### 阴影是五次运行的最小最大范围
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 图1 | 六任务学习曲线 | 支持所测任务性能 | 不建立永久算法排名 |
-| 图2 | 随机性与相关版本比较 | 检验策略形式影响 | 不证明随机性越大越好 |
-| 图3 | 奖励尺度／目标更新敏感性 | 显示超参数作用 | 不是无需调参的证据 |
+<!-- inline-evidence-v2:start -->
 
-**结论边界**：§5 连续控制实验与温度／目标更新分析支持可用性。熵系数改变任务折中，原始版本不自动调温度。
+<!-- figure-ref-v6:start:rl-30-figure-1 -->
+<span id="rl-30-figure-1"></span>
 
-## 六、贡献、代价与局限
+<p class="figure-source-links">原引用定位：<a href="https://arxiv.org/html/1801.01290#S4.F1" target="_blank" rel="noopener noreferrer">原文</a>。</p>
+<!-- figure-ref-v6:end:rl-30-figure-1 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/30-sac-figure-1.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/30-sac-figure-1.png" width="1800" height="900" alt="SAC与多种控制算法在六项MuJoCo任务中的回报学习曲线" loading="lazy"></a><figcaption>原论文图形摘引；Haarnoja等，2018，Figure 1；原HTML图形。<a href="https://arxiv.org/html/1801.01290v2#S4.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
 
-**作者贡献**是最大熵框架的实用 off-policy 实现。**本文分析**：高熵会降低精确动作任务中的即时收益；reward scale 改变与 α 的相对权重。比较确定评价动作与随机采样策略时，必须明确评估使用哪一个。
 
-## 七、帮助建立理解
+<!-- inline-evidence-v2:end -->
 
-### 教学例子
 
-以下是教学推演，不是原论文实验。
+[图1](#rl-30-figure-1)按六个连续控制任务画训练进展：横轴为百万环境步、纵轴为平均回报。Hopper只画到约100万步，而Humanoid画到约1000万步，不能把同样靠右的位置当作相同预算；[图2](#rl-30-figure-2)特别比较Humanoid中的随机与确定性变体，支持随机策略可改善所测配置的跨种子稳定性。[图3](#rl-30-figure-3)把评估动作选择、奖励尺度和目标平滑分开：均值动作评估改变实际执行策略，奖励尺度又改变熵与回报的相对权重。故这些敏感性曲线恰好说明原版不是无需调参，也不能据此替后续自动温度版背书。 [查看原文](https://arxiv.org/html/1801.01290)。
 
-两个动作Q为5与4.9，确定贪心只留前者；适当熵奖励允许两者保留概率，给后续探索留空间。如果第二动作灾难性地差，熵系数过大也会产生代价。
+<!-- figure-ref-v6:start:rl-30-figure-3 -->
+<span id="rl-30-figure-3"></span>
+
+<figure class="reading-evidence-figure"><a href="/rl/assets/reference-v6/30-sac-figure-3-full.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/30-sac-figure-3-full.png" width="1800" height="440" alt="原论文Figure 3：三列依次为(a)评估动作选择、(b)奖励尺度、(c)目标平滑系数。横轴均为环境步；只在同一列内比较控制变量，不能把奖励尺度实验解释为自动调温度。" loading="lazy"></a><figcaption>完整原图摘引｜Haarnoja等，2018，Figure 3；1801.01290v2，HTML S5.F3。<a href="https://arxiv.org/html/1801.01290v2#S5.F3" target="_blank" rel="noopener noreferrer">核对原文与图号</a>。原版权保留。原引用定位：<a href="https://arxiv.org/html/1801.01290#S5.F3" target="_blank" rel="noopener noreferrer">原文</a>。</figcaption></figure>
+
+读图提示：三列依次为(a)评估动作选择、(b)奖励尺度、(c)目标平滑系数。横轴均为环境步；只在同一列内比较控制变量，不能把奖励尺度实验解释为自动调温度。
+<!-- figure-ref-v6:end:rl-30-figure-3 -->
+
+<!-- figure-ref-v6:start:rl-30-figure-2 -->
+<span id="rl-30-figure-2"></span>
+
+<figure class="reading-evidence-figure"><a href="/rl/assets/reference-v6/30-sac-figure-2-full.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/30-sac-figure-2-full.png" width="1800" height="1350" alt="原论文Figure 2：Humanoid中的随机与确定性策略：浅线保留各次运行，粗线呈现总体趋势；应比较跨种子分散程度，不能把某一条红线的最高点当作稳定收益。" loading="lazy"></a><figcaption>完整原图摘引｜Haarnoja等，2018，Figure 2；1801.01290v2，HTML S5.F2。<a href="https://arxiv.org/html/1801.01290v2#S5.F2" target="_blank" rel="noopener noreferrer">核对原文与图号</a>。原版权保留。原引用定位：<a href="https://arxiv.org/html/1801.01290#S5.F2" target="_blank" rel="noopener noreferrer">原文</a>。</figcaption></figure>
+
+读图提示：Humanoid中的随机与确定性策略：浅线保留各次运行，粗线呈现总体趋势；应比较跨种子分散程度，不能把某一条红线的最高点当作稳定收益。
+<!-- figure-ref-v6:end:rl-30-figure-2 -->
+
+## 五、分清熵温度、奖励尺度与版本改动
+
+高熵可能牺牲精确动作任务的即时收益；reward scale与α的相对尺度决定折中，2018 v2并不自动调温度。测试使用均值动作还是随机采样，会改变被评价的策略，比较时必须统一口径。
 
 ### 五个前置概念
 
@@ -111,23 +132,37 @@ $$L_\pi=E[\alpha\log\pi_\theta(a|s)-\min_iQ_i(s,a)].$$
 4. **重参数化**：把随机动作写成可微函数与独立噪声。
 5. **雅可比修正**：变量变换后修正概率密度。
 
-### 三个值得继续追问的问题
+## 六、继续追问：动作密度、温度与评价策略
 
-1. 奖励整体乘10但 α 不变会怎样？
-2. 为什么评估用均值动作可能改变结论？
-3. 原始 SAC 与自动温度版有哪些训练对象不同？
+<details>
+<summary>1. 奖励整体乘10但 α 不变会怎样？</summary>
 
-## 方法与证据总结
+目标为回报加 $\alpha$ 倍熵时，奖励乘10而 $\alpha$ 不变，相当于相对原奖励把熵权重降到十分之一，最优折中一般更趋利用。若希望保持同一理想目标的相对权重，应同步放大 $\alpha$；但优化器步长、Q尺度和近似误差仍会改变训练动态。原版的奖励尺度调节因此不只是数值归一化。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| 连续控制的探索与样本效率 | 联合最大化回报与策略熵，使用 off-policy Actor–Critic | 回放提高复用率，熵项减少过早锁定单一动作 | §5 连续控制实验与温度／目标更新分析支持可用性 | 熵系数改变任务折中，原始版本不自动调温度 |
+</details>
 
-## 资料与阅读范围
+<details>
+<summary>2. 为什么评估用均值动作可能改变结论？</summary>
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+训练优化随机策略的熵正则目标，评估却可改用均值动作，二者是不同执行策略。对于经过 tanh 的高斯，tanh 均值参数通常也不等于动作分布的精确均值；多峰价值或边界饱和时，确定性动作可能更好或更差。比较必须统一是否采样、温度和测试次数，并分别报告随机执行和指定确定性执行。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+</details>
+
+<details>
+<summary>3. 原始 SAC 与自动温度版有哪些训练对象不同？</summary>
+
+2018早期 SAC 具有显式状态价值 V 网络和固定熵温度/奖励尺度设置；常用后续版本直接以目标 Q 和下一动作的 log-prob 构造目标，省去独立 V，并把温度作为满足目标熵约束的可学习变量。网络数量、目标更新、温度损失和超参数都不同。引用或复现时必须标明版本，不能把后续代码当原论文算法逐行对应。
+
+</details>
+
+## 七、比较同期双Q与后续技能学习组合
+
+- **同期平行与模块联系**：[TD3](31-td3.md)。两者都使用双Q最小目标管理估值误差，但确定性延迟更新与最大熵目标不同。
+- **目标模块组合**：[DIAYN](33-diayn.md)。无任务奖励的技能学习可把可区分性奖励与最大熵控制组合，仍需检查技能的下游用途。
+
+- [原论文与图表入口](https://arxiv.org/html/1801.01290)。soft策略改进；重参数化式11—13；双Q说明；§5[图1](#rl-30-figure-1)、[图2](#rl-30-figure-2)、[图3](#rl-30-figure-3)。
+
+- 教学阅读：[Policy Gradient Algorithms](https://lilianweng.github.io/posts/2018-04-08-policy-gradient/)。仅借用本节的解释顺序与接口视角；具体算法、版本和实验以本篇原论文为准。
 
 ## 自测两题
 

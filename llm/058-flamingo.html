@@ -39,23 +39,21 @@
                 <span class="text-gray-400">/</span>
                 <a href="index.html" class="text-primary hover:underline">大语言模型</a>
                 <span class="text-gray-400">/</span>
-                <span class="text-gray-500">058 · Flamingo：把图像和视频接入语言模型的上下文学习</span>
+                <span class="text-gray-500">Flamingo：把图像和视频接入语言模型的上下文学习</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="1da685ff5a790661b9ce9ac7d65ec6f32ebecfde9d6f186274bc14edf72980d0"><h1>058 · Flamingo：把图像和视频接入语言模型的上下文学习</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="7498fea5f59f7b062744f2b77854900302e874389c8981418b884d89a6adae85"><h1>058 · Flamingo：把图像和视频接入语言模型的上下文学习</h1>
 <p><a href="index.html">返回目录</a> · <a href="057-chinchilla.html">上一篇：Chinchilla</a> · <a href="059-flashattention.html">下一篇：FlashAttention</a></p>
-<p>论文：Jean-Baptiste Alayrac等，<em>Flamingo: a Visual Language Model for Few-Shot Learning</em>，2022。<a href="https://arxiv.org/abs/2204.14198">原始论文</a> · <a href="https://arxiv.org/html/2204.14198v2">v2全文</a>。阅读范围为方法、主结果与消融、附录A的提示和B的训练说明；未完整审计全部数据卡或视觉案例，未复现私有模型。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>CLIP可以比较图片与文字是否匹配，但它不能直接生成一段解释。纯语言模型会生成，却看不到图片。Flamingo把已经训练好的视觉编码器和语言模型冻结，用可训练的连接层让语言模型读取图像，再学习包含多张图片和文字的交错序列。</p>
-<p>新任务不一定需要微调：给几组“图片—回答”示例，再放入新图片和问题，模型便可模仿任务形式。最大模型建立在70B Chinchilla之上，总体约80B。</p>
-<p>一句话：在图像/视频描述与问答中，通过视觉压缩、门控交叉注意力和交错图文训练获得多模态少样本适配能力，代价是大规模预训练数据与计算，并且少样本能力不等于所有任务超越专门微调模型。</p>
+<p>论文：Jean-Baptiste Alayrac等，<em>Flamingo: a Visual Language Model for Few-Shot Learning</em>，2022。<a href="https://arxiv.org/abs/2204.14198">原始论文</a> · <a href="https://arxiv.org/html/2204.14198v2">v2全文</a>。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="043-clip.html">CLIP</a>给图文匹配分数，不能直接生成解释；<a href="057-chinchilla.html">Chinchilla</a>会生成文本，却没有视觉输入。本篇组合这两类能力，研究冻结预训练两端时，怎样通过可训练接口实现图文少样本生成。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>对比学习</strong>把匹配图文表示拉近；<strong>交叉注意力</strong>让一种表示读取另一种；<strong>冻结主干</strong>保持已有权重不更新；<strong>可学习查询</strong>用固定槽位汇聚可变长度特征；<strong>上下文学习</strong>在推理输入中示范任务而不改权重。</p>
-<h2 id="场景与问题定义">场景与问题定义</h2>
-<p>输入是一串文字、图片或视频，输出是文本。任务可以是开放描述、回答视觉问题，也可以通过候选答案概率做分类。本文不输出机器人连续动作，也没有环境奖励或策略优化；把视频理解成绩直接解释成可执行机器人控制能力，会跨越很大的任务差异。</p>
+<h2 id="一问题设定冻结视觉与语言两端怎样接收交错多图并生成回答">一、问题设定：冻结视觉与语言两端，怎样接收交错多图并生成回答</h2>
+<p>输入是交错的文字、图片或视频，输出是描述、问答文本，也可按候选答案概率分类。多张图片需要可控地接入语言上下文，测试示例则指定任务；本篇不输出机器人连续动作，也没有环境奖励或策略优化。</p>
 <p>困难有三层：视觉特征数量随分辨率和视频帧数变化；预训练语言模型没有视觉输入接口；训练和测试可能出现不同数量的图片。作者希望在保留已有视觉与语言知识的同时，训练一个适合交错输入的连接机制。</p>
 <p>“冻结”发生在多模态连接训练阶段。视觉模型此前已经用大规模图文对比学习训练，语言模型也经历了昂贵预训练。因此不能把Flamingo说成只花少量参数或32个例子就从零学会看图。</p>
-<h2 id="方法固定视觉槽位与门控连接">方法：固定视觉槽位与门控连接</h2>
+<h2 id="二压缩视觉槽位并用零初始化门控接入语言层">二、压缩视觉槽位并用零初始化门控接入语言层</h2>
 <h3 id="视觉编码与perceiver-resampler">视觉编码与Perceiver Resampler</h3>
 <p>视觉编码器采用NFNet-F6。图片变为二维空间特征，视频帧分别编码并加入时间信息，随后展平成特征序列。Perceiver Resampler用一组可学习查询读取这些特征，将不同长度输入压缩为固定64个视觉token。</p>
 <p>直觉上，64个查询像64个可学习的信息槽位，而不是手工规定“第一个看人物、第二个看背景”。压缩降低语言层读取视觉信息的成本，但也可能成为细粒度文字、空间关系或长视频的信息瓶颈。</p>
@@ -69,6 +67,14 @@
 \left[-\sum_\ell\log p(y_\ell\mid y_{&lt;\ell},x_{\le\ell})\right]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="script">L</mi><mo>=</mo><munder><mo>∑</mo><mi>m</mi></munder><msub><mi>λ</mi><mi>m</mi></msub><msub><mi mathvariant="double-struck">E</mi><mrow><mo stretchy="false">(</mo><mi>x</mi><mo separator="true">,</mo><mi>y</mi><mo stretchy="false">)</mo><mo>∼</mo><msub><mi>D</mi><mi>m</mi></msub></mrow></msub><mrow><mo fence="true">[</mo><mo>−</mo><munder><mo>∑</mo><mi mathvariant="normal">ℓ</mi></munder><mi>log</mi><mo>⁡</mo><mi>p</mi><mo stretchy="false">(</mo><msub><mi>y</mi><mi mathvariant="normal">ℓ</mi></msub><mo>∣</mo><msub><mi>y</mi><mrow><mo>&lt;</mo><mi mathvariant="normal">ℓ</mi></mrow></msub><mo separator="true">,</mo><msub><mi>x</mi><mrow><mo>≤</mo><mi mathvariant="normal">ℓ</mi></mrow></msub><mo stretchy="false">)</mo><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\mathcal L=\sum_m\lambda_m\mathbb E_{(x,y)\sim D_m}
 \left[-\sum_\ell\log p(y_\ell\mid y_{&lt;\ell},x_{\le\ell})\right].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathcal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.0521em;vertical-align:-1.3021em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">m</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">m</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.5198em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight">x</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">y</span><span class="mclose mtight">)</span><span class="mrel mtight">∼</span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:-0.0278em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">m</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3552em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size4">[</span></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">ℓ</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3021em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">ℓ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mtight">ℓ</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">≤</span><span class="mord mtight">ℓ</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2452em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size4">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="D_m"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>D</mi><mi>m</mi></msub></mrow><annotation encoding="application/x-tex">D_m</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">m</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>是不同图文/视频数据源，<span class="reading-math" data-tex="\lambda_m"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>λ</mi><mi>m</mi></msub></mrow><annotation encoding="application/x-tex">\lambda_m</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">m</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>控制其梯度权重；<span class="reading-math" data-tex="x_{\le\ell}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mrow><mo>≤</mo><mi mathvariant="normal">ℓ</mi></mrow></msub></mrow><annotation encoding="application/x-tex">x_{\le\ell}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6757em;vertical-align:-0.2452em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">≤</span><span class="mord mtight">ℓ</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2452em;"><span></span></span></span></span></span></span></span></span></span></span>表示当前文字之前的视觉输入。模型拟合条件文本概率，而非直接优化VQA准确率或CIDEr。不同数据源梯度累积后共同更新，避免简单轮流更新使训练目标偏移。</p>
+<h3 id="零门初始化为何不会把新接口永远关死">零门初始化为何不会把新接口永远关死</h3>
+<p>令插入块输出 <span class="reading-math" data-tex="h'=h+\tanh(\alpha)F(h,v)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>h</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>=</mo><mi>h</mi><mo>+</mo><mi>tanh</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>α</mi><mo stretchy="false">)</mo><mi>F</mi><mo stretchy="false">(</mo><mi>h</mi><mo separator="true">,</mo><mi>v</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">h&#x27;=h+\tanh(\alpha)F(h,v)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7519em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7519em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">h</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">tanh</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mclose">)</span><span class="mord mathnormal" style="margin-right:0.13889em;">F</span><span class="mopen">(</span><span class="mord mathnormal">h</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mclose">)</span></span></span></span></span>，其中 <span class="reading-math" data-tex="h,h'"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi><mo separator="true">,</mo><msup><mi>h</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup></mrow><annotation encoding="application/x-tex">h,h&#x27;</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9463em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">h</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7519em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span></span></span></span></span> 为插入前后的隐藏表示，<span class="reading-math" data-tex="F"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>F</mi></mrow><annotation encoding="application/x-tex">F</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">F</span></span></span></span></span> 为待训练视觉交互模块，<span class="reading-math" data-tex="v"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>v</mi></mrow><annotation encoding="application/x-tex">v</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span></span></span></span></span> 为视觉特征、<span class="reading-math" data-tex="\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span> 为可学习标量。α=0时，输出确实保持原语言模型；但 <span class="reading-math" data-tex="\partial h'/\partial\alpha=F(h,v)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∂</mi><msup><mi>h</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mi mathvariant="normal">/</mi><mi mathvariant="normal">∂</mi><mi>α</mi><mo>=</mo><mi>F</mi><mo stretchy="false">(</mo><mi>h</mi><mo separator="true">,</mo><mi>v</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\partial h&#x27;/\partial\alpha=F(h,v)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0019em;vertical-align:-0.25em;"></span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7519em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span></span></span></span></span><span class="mord">/</span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">F</span><span class="mopen">(</span><span class="mord mathnormal">h</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mclose">)</span></span></span></span></span>，门可先收到梯度，而F的参数梯度首步被零门压住。门打开后视觉模块逐步参与更新。这与完全删掉视觉分支不同，是温和接入新模态的优化路径。</p>
+<p>以下为自构例子：先给一张桌上红杯图片和回答“红色”，再给蓝杯图片和“蓝色”，最后给绿杯问“什么颜色”。视觉编码器提供内容，连接层把内容送入语言状态，示例文本说明目标是颜色而非长描述。</p>
+<p>若改成前两例都回答“可用于喝水”，模型会受到另一种任务示范。这说明上下文示例同时承担视觉证据和输出规则，但结果是否符合实际图片仍需要测试。可交换示例标签、遮挡杯子或加入无关图片，分别检查任务学习与视觉依赖；这些实验尚未运行。</p>
+<h3 id="零门首步还要看上游梯度与视觉方向">零门首步还要看上游梯度与视觉方向</h3>
+<p>对零初始化标量门，首步门梯度是上游向量与视觉分支输出的内积。若两者分别为(1,−1)与(2,2)，内积为0，门在这一样本上仍不更新；换成(2,1)才得到1。原公式说明门有可用梯度路径，不保证每个样本都使门打开；视觉分支权重首步受零门抑制则是另一件事。</p>
+<p>教法联系：<a href="https://jalammar.github.io/illustrated-transformer/">Jay Alammar的The Illustrated Transformer</a>。算例为本文自构。</p>
+<h2 id="三训练连接模块与交错序列固定最近图片掩码">三、训练连接模块与交错序列，固定最近图片掩码</h2>
 <pre><code class="language-text">输入：预训练视觉编码器、预训练语言模型、交错多模态数据
 冻结视觉和语言主干；初始化Resampler与门控交叉注意力
 训练时对各数据源：
@@ -80,7 +86,8 @@
     更新连接模块
 测试时：串联少量视觉/文本示例和新问题，生成或评分答案
 </code></pre>
-<h2 id="数据与实验预算">数据与实验预算</h2>
+<h2 id="四分开少样本任务微调和连接频率的代价">四、分开少样本、任务微调和连接频率的代价</h2>
+<p>先区分32样本推理与额外任务微调，再读门控和连接频率消融；不同输出指标不能混成一个准确率。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -126,37 +133,29 @@
 </tr>
 </tbody></table></div>
 <p>零样本口径需要单独看：开放生成任务使用两条去掉图片的任务文本示例，因此是零视觉示例，不是完全没有任务示例。闭合候选任务不一定需要这两条文字。RICES检索示例与提示集成也有额外标注池和推理成本，应与普通32样本上下文分开比较。</p>
-<h2 id="五组证据与可支持结论">五组证据与可支持结论</h2>
-<p><strong>证据一：表1的少样本增益与边界。</strong> 80B模型VQAv2从四样本63.1提高到32样本67.6，增加4.5个百分点；COCO CIDEr从103.2到113.8。它们分别是不同指标，后者不是113.8%准确率。32样本OKVQA57.8超过表中专门微调对照54.4，但VQAv2仍低于80.2，说明优势依赖任务。</p>
-<p><strong>证据二：表3的数据消融。</strong> 缩短训练的3B配置总体归一化分数70.7，去掉M3W降至53.4，去掉图文对为60.9；去掉视频文本后MSVDQA36.3降至34.5、VATEX53.4降至46.0。不同格式互补得到支持，但删数据也改变计算量，不能把差距全解释成唯一的数据结构因果效应。</p>
-<p><strong>证据三：表3的门控与冻结。</strong> 去掉零初始化tanh门控，总体分数70.7到66.5；解冻预训练语言主干的对照为62.7，单步时间从1.74秒变为2.42秒。这支持本训练预算下稳定保留预训练知识的设计，并不能证明所有多模态训练永远应该冻结语言模型。</p>
-<p><strong>证据四：表3的连接频率。</strong> 每层加连接的配置为1.74秒/步、70.7分；每四层加一次为1.02秒、68.8分。按表计算单步时间下降约41.4%，吞吐比约1.71倍；原文“加速66%”是另一种近似速度措辞，不应直接解读成耗时减少66%。这体现参数、速度与质量的实际取舍。</p>
-<p><strong>证据五：表2的微调上限。</strong> 在额外任务数据和权重更新下，VQAv2 test-dev达到82.0、VATEX达到84.2，而32样本分别67.6、65.1。说明预训练模型仍能从专门适配获益。两行的标注预算与训练方式不同，不能把微调结果作为无需更新权重的能力宣传。</p>
-<h2 id="贡献与局限">贡献与局限</h2>
-<p>Flamingo的重要贡献是把多模态上下文学习变成同一接口：图片和视频都可接入，少量示例通过文本序列指定任务。架构并非简单给语言模型附一张图片，而是压缩视觉长度、控制跨模态信息注入和匹配交错训练数据的组合。</p>
+<p><strong>证据一：<a href="https://arxiv.org/html/2204.14198v2#S3.T1">表1</a>的少样本增益与边界。</strong> 80B模型VQAv2从四样本63.1提高到32样本67.6，增加4.5个百分点；COCO CIDEr从103.2到113.8。它们分别是不同指标，后者不是113.8%准确率。32样本OKVQA57.8超过表中专门微调对照54.4，但VQAv2仍低于80.2，说明优势依赖任务。</p>
+<p><strong>证据二：<a href="#llm-v6-058-table-3">表3</a>的数据消融。</strong> 缩短训练的3B配置总体归一化分数70.7，去掉M3W降至53.4，去掉图文对为60.9；去掉视频文本后MSVDQA36.3降至34.5、VATEX53.4降至46.0。不同格式互补得到支持，但删数据也改变计算量，不能把差距全解释成唯一的数据结构因果效应。</p>
+<!-- figure-ref-v6:start:058-t3-2-anchor -->
+<p><a id="llm-v6-058-table-3"></a></p>
+<!-- figure-ref-v6:end:058-t3-2-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/058-flamingo-t3.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/058-flamingo-t3.png" width="1701" height="750" alt="Flamingo数据、门控、跨注意力、视觉编码器及冻结策略消融" loading="lazy"></a><figcaption>实验结果表摘引：Jean-Baptiste Alayrac等，2022，表3，PDF第8页；<a href="https://arxiv.org/pdf/2204.14198v2#page=8" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据三：<a href="#llm-v6-058-table-3">表3</a>的门控与冻结。</strong> 去掉零初始化tanh门控，总体分数70.7到66.5；解冻预训练语言主干的对照为62.7，单步时间从1.74秒变为2.42秒。这支持本训练预算下稳定保留预训练知识的设计，并不能证明所有多模态训练永远应该冻结语言模型。</p>
+<p><strong>证据四：<a href="#llm-v6-058-table-3">表3</a>的连接频率。</strong> 每层加连接的配置为1.74秒/步、70.7分；每四层加一次为1.02秒、68.8分。按表计算单步时间下降约41.4%，吞吐比约1.71倍；原文“加速66%”是另一种近似速度措辞，不应直接解读成耗时减少66%。这体现参数、速度与质量的实际取舍。</p>
+<p><strong>证据五：<a href="https://arxiv.org/html/2204.14198v2#S3.T2">表2</a>的微调上限。</strong> 在额外任务数据和权重更新下，VQAv2 test-dev达到82.0、VATEX达到84.2，而32样本分别67.6、65.1。说明预训练模型仍能从专门适配获益。两行的标注预算与训练方式不同，不能把微调结果作为无需更新权重的能力宣传。</p>
+<p><strong>教学算例。</strong> 一维h=2、F=3，门α=0时输出2；若损失希望输出5，则对α的梯度为 <span class="reading-math" data-tex="(2-5)\times3=-9"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>2</mn><mo>−</mo><mn>5</mn><mo stretchy="false">)</mo><mo>×</mo><mn>3</mn><mo>=</mo><mo>−</mo><mn>9</mn></mrow><annotation encoding="application/x-tex">(2-5)\times3=-9</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">5</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">3</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">−</span><span class="mord">9</span></span></span></span></span>，梯度下降会把α推向正值。后续F也开始学习。该例只说明接口可训练，不保证视觉内容被忠实使用；仍需遮挡或换图对照。</p>
+<h2 id="五视觉条件仍不能保证事实可靠或动作控制">五、视觉条件仍不能保证事实可靠或动作控制</h2>
+<p>架构并非简单给语言模型附一张图片，而是压缩视觉长度、控制跨模态信息注入和匹配交错训练数据的组合。</p>
 <p>模型仍继承语言模型的幻觉与偏差，可能输出与视觉证据不符的细节。低帧率与固定视觉槽位也限制细微动作和小字信息；视觉问答正确并不保证有精确定位或物理因果理解。分类任务和专门微调模型的差距也不能用开放生成优势掩盖。</p>
-<p>原文存在一处统计表述差异：主文与图2说六个任务超过微调最佳，表1图注写七个。本文不凭猜测统一计数，采用具体任务与行列数值作为证据；这也是阅读时保留版本和评价口径的原因。</p>
-<h2 id="一个多模态少样本例子">一个多模态少样本例子</h2>
-<p>以下为自构例子：先给一张桌上红杯图片和回答“红色”，再给蓝杯图片和“蓝色”，最后给绿杯问“什么颜色”。视觉编码器提供内容，连接层把内容送入语言状态，示例文本说明目标是颜色而非长描述。</p>
-<p>若改成前两例都回答“可用于喝水”，模型会受到另一种任务示范。这说明上下文示例同时承担视觉证据和输出规则，但结果是否符合实际图片仍需要测试。可交换示例标签、遮挡杯子或加入无关图片，分别检查任务学习与视觉依赖；这些实验尚未运行。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>视觉模型不生成语言，语言模型缺少视觉接口</td>
-<td>64槽位Resampler、门控交叉注意力、交错图文混合训练</td>
-<td>保留预训练能力，压缩视觉读取成本，学习多模态示例格式</td>
-<td>表1少样本结果；表3数据/门控/频率消融；表2微调对照</td>
-<td>私有大数据与计算；少样本有任务差异；零样本包含文本示例；幻觉与细节瓶颈</td>
-</tr>
-</tbody></table></div>
+<p>原文存在一处统计表述差异：主文与<a href="#llm-v6-058-figure-2">图2</a>说六个任务超过微调最佳，<a href="https://arxiv.org/html/2204.14198v2#S3.T1">表1</a>图注写七个。本文不凭猜测统一计数，采用具体任务与行列数值作为证据；这也是阅读时保留版本和评价口径的原因。 左图比较任务结果，右图考察模型大小与上下文示例数；32-shot 描述使用时的示范量，不包含通用图文预训练。</p>
+<!-- figure-ref-v6:start:058-f2-4 -->
+<p><a id="llm-v6-058-figure-2"></a></p>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/058-flamingo-f2-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/058-flamingo-f2-v6.png" width="1800" height="617" alt="Flamingo跨视觉语言任务的相对表现及少样本数量曲线" loading="lazy"></a><figcaption>原文图形摘引：Jean-Baptiste Alayrac等，2022，图2，PDF第3页；<a href="https://arxiv.org/html/2204.14198v2#S0.F2" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:058-f2-4 -->
+
+<h2 id="六对照冻结两端的另一种视觉桥接方式">六、对照冻结两端的另一种视觉桥接方式</h2>
+<p>门控交叉层并非冻结两端的唯一桥梁。<a href="066-blip2.html">BLIP-2</a>通过查询与两阶段对齐提供平行方案；比较时应控制视觉输入形式、可训练参数和上下文示例能力，而非只比总模型大小。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 两个主干冻结，为什么仍需要大量训练？</strong></p>
 <p>答案：冻结只省去主干参数更新，连接层仍需学习视觉特征与语言状态的对应，以及多图任务格式。主干前向计算仍在，新增模块也不小；此前视觉和语言预训练成本更不能忽略。</p>
@@ -173,25 +172,21 @@
 
 [返回目录](README.md) · [上一篇：Chinchilla](057-chinchilla.md) · [下一篇：FlashAttention](059-flashattention.md)
 
-论文：Jean-Baptiste Alayrac等，*Flamingo: a Visual Language Model for Few-Shot Learning*，2022。[原始论文](https://arxiv.org/abs/2204.14198) · [v2全文](https://arxiv.org/html/2204.14198v2)。阅读范围为方法、主结果与消融、附录A的提示和B的训练说明；未完整审计全部数据卡或视觉案例，未复现私有模型。
+论文：Jean-Baptiste Alayrac等，*Flamingo: a Visual Language Model for Few-Shot Learning*，2022。[原始论文](https://arxiv.org/abs/2204.14198) · [v2全文](https://arxiv.org/html/2204.14198v2)。
 
-## 一分钟理解
+### 先接住前作的问题
 
-CLIP可以比较图片与文字是否匹配，但它不能直接生成一段解释。纯语言模型会生成，却看不到图片。Flamingo把已经训练好的视觉编码器和语言模型冻结，用可训练的连接层让语言模型读取图像，再学习包含多张图片和文字的交错序列。
+[CLIP](043-clip.md)给图文匹配分数，不能直接生成解释；[Chinchilla](057-chinchilla.md)会生成文本，却没有视觉输入。本篇组合这两类能力，研究冻结预训练两端时，怎样通过可训练接口实现图文少样本生成。
 
-新任务不一定需要微调：给几组“图片—回答”示例，再放入新图片和问题，模型便可模仿任务形式。最大模型建立在70B Chinchilla之上，总体约80B。
+## 一、问题设定：冻结视觉与语言两端，怎样接收交错多图并生成回答
 
-一句话：在图像/视频描述与问答中，通过视觉压缩、门控交叉注意力和交错图文训练获得多模态少样本适配能力，代价是大规模预训练数据与计算，并且少样本能力不等于所有任务超越专门微调模型。
-
-## 场景与问题定义
-
-输入是一串文字、图片或视频，输出是文本。任务可以是开放描述、回答视觉问题，也可以通过候选答案概率做分类。本文不输出机器人连续动作，也没有环境奖励或策略优化；把视频理解成绩直接解释成可执行机器人控制能力，会跨越很大的任务差异。
+输入是交错的文字、图片或视频，输出是描述、问答文本，也可按候选答案概率分类。多张图片需要可控地接入语言上下文，测试示例则指定任务；本篇不输出机器人连续动作，也没有环境奖励或策略优化。
 
 困难有三层：视觉特征数量随分辨率和视频帧数变化；预训练语言模型没有视觉输入接口；训练和测试可能出现不同数量的图片。作者希望在保留已有视觉与语言知识的同时，训练一个适合交错输入的连接机制。
 
 “冻结”发生在多模态连接训练阶段。视觉模型此前已经用大规模图文对比学习训练，语言模型也经历了昂贵预训练。因此不能把Flamingo说成只花少量参数或32个例子就从零学会看图。
 
-## 方法：固定视觉槽位与门控连接
+## 二、压缩视觉槽位并用零初始化门控接入语言层
 
 ### 视觉编码与Perceiver Resampler
 
@@ -220,6 +215,22 @@ $$
 
 $D_m$是不同图文/视频数据源，$\lambda_m$控制其梯度权重；$x_{\le\ell}$表示当前文字之前的视觉输入。模型拟合条件文本概率，而非直接优化VQA准确率或CIDEr。不同数据源梯度累积后共同更新，避免简单轮流更新使训练目标偏移。
 
+### 零门初始化为何不会把新接口永远关死
+
+令插入块输出 $h'=h+\tanh(\alpha)F(h,v)$，其中 $h,h'$ 为插入前后的隐藏表示，$F$ 为待训练视觉交互模块，$v$ 为视觉特征、$\alpha$ 为可学习标量。α=0时，输出确实保持原语言模型；但 $\partial h'/\partial\alpha=F(h,v)$，门可先收到梯度，而F的参数梯度首步被零门压住。门打开后视觉模块逐步参与更新。这与完全删掉视觉分支不同，是温和接入新模态的优化路径。
+
+以下为自构例子：先给一张桌上红杯图片和回答“红色”，再给蓝杯图片和“蓝色”，最后给绿杯问“什么颜色”。视觉编码器提供内容，连接层把内容送入语言状态，示例文本说明目标是颜色而非长描述。
+
+若改成前两例都回答“可用于喝水”，模型会受到另一种任务示范。这说明上下文示例同时承担视觉证据和输出规则，但结果是否符合实际图片仍需要测试。可交换示例标签、遮挡杯子或加入无关图片，分别检查任务学习与视觉依赖；这些实验尚未运行。
+
+### 零门首步还要看上游梯度与视觉方向
+
+对零初始化标量门，首步门梯度是上游向量与视觉分支输出的内积。若两者分别为(1,−1)与(2,2)，内积为0，门在这一样本上仍不更新；换成(2,1)才得到1。原公式说明门有可用梯度路径，不保证每个样本都使门打开；视觉分支权重首步受零门抑制则是另一件事。
+
+教法联系：[Jay Alammar的The Illustrated Transformer](https://jalammar.github.io/illustrated-transformer/)。算例为本文自构。
+
+## 三、训练连接模块与交错序列，固定最近图片掩码
+
 ```text
 输入：预训练视觉编码器、预训练语言模型、交错多模态数据
 冻结视觉和语言主干；初始化Resampler与门控交叉注意力
@@ -233,7 +244,9 @@ $D_m$是不同图文/视频数据源，$\lambda_m$控制其梯度权重；$x_{\l
 测试时：串联少量视觉/文本示例和新问题，生成或评分答案
 ```
 
-## 数据与实验预算
+## 四、分开少样本、任务微调和连接频率的代价
+
+先区分32样本推理与额外任务微调，再读门控和连接频率消融；不同输出指标不能混成一个准确率。
 
 | 项目 | 原文设置及其意义 |
 |---|---|
@@ -249,37 +262,42 @@ $D_m$是不同图文/视频数据源，$\lambda_m$控制其梯度权重；$x_{\l
 
 零样本口径需要单独看：开放生成任务使用两条去掉图片的任务文本示例，因此是零视觉示例，不是完全没有任务示例。闭合候选任务不一定需要这两条文字。RICES检索示例与提示集成也有额外标注池和推理成本，应与普通32样本上下文分开比较。
 
-## 五组证据与可支持结论
+**证据一：[表1](https://arxiv.org/html/2204.14198v2#S3.T1)的少样本增益与边界。** 80B模型VQAv2从四样本63.1提高到32样本67.6，增加4.5个百分点；COCO CIDEr从103.2到113.8。它们分别是不同指标，后者不是113.8%准确率。32样本OKVQA57.8超过表中专门微调对照54.4，但VQAv2仍低于80.2，说明优势依赖任务。
 
-**证据一：表1的少样本增益与边界。** 80B模型VQAv2从四样本63.1提高到32样本67.6，增加4.5个百分点；COCO CIDEr从103.2到113.8。它们分别是不同指标，后者不是113.8%准确率。32样本OKVQA57.8超过表中专门微调对照54.4，但VQAv2仍低于80.2，说明优势依赖任务。
+**证据二：[表3](#llm-v6-058-table-3)的数据消融。** 缩短训练的3B配置总体归一化分数70.7，去掉M3W降至53.4，去掉图文对为60.9；去掉视频文本后MSVDQA36.3降至34.5、VATEX53.4降至46.0。不同格式互补得到支持，但删数据也改变计算量，不能把差距全解释成唯一的数据结构因果效应。
 
-**证据二：表3的数据消融。** 缩短训练的3B配置总体归一化分数70.7，去掉M3W降至53.4，去掉图文对为60.9；去掉视频文本后MSVDQA36.3降至34.5、VATEX53.4降至46.0。不同格式互补得到支持，但删数据也改变计算量，不能把差距全解释成唯一的数据结构因果效应。
+&lt;!-- figure-ref-v6:start:058-t3-2-anchor --&gt;
+&lt;a id=&quot;llm-v6-058-table-3&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:058-t3-2-anchor --&gt;
 
-**证据三：表3的门控与冻结。** 去掉零初始化tanh门控，总体分数70.7到66.5；解冻预训练语言主干的对照为62.7，单步时间从1.74秒变为2.42秒。这支持本训练预算下稳定保留预训练知识的设计，并不能证明所有多模态训练永远应该冻结语言模型。
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/058-flamingo-t3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/058-flamingo-t3.png&quot; width=&quot;1701&quot; height=&quot;750&quot; alt=&quot;Flamingo数据、门控、跨注意力、视觉编码器及冻结策略消融&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Jean-Baptiste Alayrac等，2022，表3，PDF第8页；&lt;a href=&quot;https://arxiv.org/pdf/2204.14198v2#page=8&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-**证据四：表3的连接频率。** 每层加连接的配置为1.74秒/步、70.7分；每四层加一次为1.02秒、68.8分。按表计算单步时间下降约41.4%，吞吐比约1.71倍；原文“加速66%”是另一种近似速度措辞，不应直接解读成耗时减少66%。这体现参数、速度与质量的实际取舍。
+**证据三：[表3](#llm-v6-058-table-3)的门控与冻结。** 去掉零初始化tanh门控，总体分数70.7到66.5；解冻预训练语言主干的对照为62.7，单步时间从1.74秒变为2.42秒。这支持本训练预算下稳定保留预训练知识的设计，并不能证明所有多模态训练永远应该冻结语言模型。
 
-**证据五：表2的微调上限。** 在额外任务数据和权重更新下，VQAv2 test-dev达到82.0、VATEX达到84.2，而32样本分别67.6、65.1。说明预训练模型仍能从专门适配获益。两行的标注预算与训练方式不同，不能把微调结果作为无需更新权重的能力宣传。
+**证据四：[表3](#llm-v6-058-table-3)的连接频率。** 每层加连接的配置为1.74秒/步、70.7分；每四层加一次为1.02秒、68.8分。按表计算单步时间下降约41.4%，吞吐比约1.71倍；原文“加速66%”是另一种近似速度措辞，不应直接解读成耗时减少66%。这体现参数、速度与质量的实际取舍。
 
-## 贡献与局限
+**证据五：[表2](https://arxiv.org/html/2204.14198v2#S3.T2)的微调上限。** 在额外任务数据和权重更新下，VQAv2 test-dev达到82.0、VATEX达到84.2，而32样本分别67.6、65.1。说明预训练模型仍能从专门适配获益。两行的标注预算与训练方式不同，不能把微调结果作为无需更新权重的能力宣传。
 
-Flamingo的重要贡献是把多模态上下文学习变成同一接口：图片和视频都可接入，少量示例通过文本序列指定任务。架构并非简单给语言模型附一张图片，而是压缩视觉长度、控制跨模态信息注入和匹配交错训练数据的组合。
+**教学算例。** 一维h=2、F=3，门α=0时输出2；若损失希望输出5，则对α的梯度为 $(2-5)\times3=-9$，梯度下降会把α推向正值。后续F也开始学习。该例只说明接口可训练，不保证视觉内容被忠实使用；仍需遮挡或换图对照。
 
-模型仍继承语言模型的幻觉与偏差，可能输出与视觉证据不符的细节。低帧率与固定视觉槽位也限制细微动作和小字信息；视觉问答正确并不保证有精确定位或物理因果理解。分类任务和专门微调模型的差距也不能用开放生成优势掩盖。
-
-原文存在一处统计表述差异：主文与图2说六个任务超过微调最佳，表1图注写七个。本文不凭猜测统一计数，采用具体任务与行列数值作为证据；这也是阅读时保留版本和评价口径的原因。
-
-## 一个多模态少样本例子
-
-以下为自构例子：先给一张桌上红杯图片和回答“红色”，再给蓝杯图片和“蓝色”，最后给绿杯问“什么颜色”。视觉编码器提供内容，连接层把内容送入语言状态，示例文本说明目标是颜色而非长描述。
-
-若改成前两例都回答“可用于喝水”，模型会受到另一种任务示范。这说明上下文示例同时承担视觉证据和输出规则，但结果是否符合实际图片仍需要测试。可交换示例标签、遮挡杯子或加入无关图片，分别检查任务学习与视觉依赖；这些实验尚未运行。
+## 五、视觉条件仍不能保证事实可靠或动作控制
 
 五个前置概念：**对比学习**把匹配图文表示拉近；**交叉注意力**让一种表示读取另一种；**冻结主干**保持已有权重不更新；**可学习查询**用固定槽位汇聚可变长度特征；**上下文学习**在推理输入中示范任务而不改权重。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 视觉模型不生成语言，语言模型缺少视觉接口 | 64槽位Resampler、门控交叉注意力、交错图文混合训练 | 保留预训练能力，压缩视觉读取成本，学习多模态示例格式 | 表1少样本结果；表3数据/门控/频率消融；表2微调对照 | 私有大数据与计算；少样本有任务差异；零样本包含文本示例；幻觉与细节瓶颈 |
+架构并非简单给语言模型附一张图片，而是压缩视觉长度、控制跨模态信息注入和匹配交错训练数据的组合。
+
+模型仍继承语言模型的幻觉与偏差，可能输出与视觉证据不符的细节。低帧率与固定视觉槽位也限制细微动作和小字信息；视觉问答正确并不保证有精确定位或物理因果理解。分类任务和专门微调模型的差距也不能用开放生成优势掩盖。
+
+原文存在一处统计表述差异：主文与[图2](#llm-v6-058-figure-2)说六个任务超过微调最佳，[表1](https://arxiv.org/html/2204.14198v2#S3.T1)图注写七个。本文不凭猜测统一计数，采用具体任务与行列数值作为证据；这也是阅读时保留版本和评价口径的原因。 左图比较任务结果，右图考察模型大小与上下文示例数；32-shot 描述使用时的示范量，不包含通用图文预训练。
+
+&lt;!-- figure-ref-v6:start:058-f2-4 --&gt;
+&lt;a id=&quot;llm-v6-058-figure-2&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/058-flamingo-f2-v6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/058-flamingo-f2-v6.png&quot; width=&quot;1800&quot; height=&quot;617&quot; alt=&quot;Flamingo跨视觉语言任务的相对表现及少样本数量曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原文图形摘引：Jean-Baptiste Alayrac等，2022，图2，PDF第3页；&lt;a href=&quot;https://arxiv.org/html/2204.14198v2#S0.F2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:058-f2-4 --&gt;
+
+## 六、对照冻结两端的另一种视觉桥接方式
+
+门控交叉层并非冻结两端的唯一桥梁。[BLIP-2](066-blip2.md)通过查询与两阶段对齐提供平行方案；比较时应控制视觉输入形式、可训练参数和上下文示例能力，而非只比总模型大小。
 
 ## 自测与参考答案
 

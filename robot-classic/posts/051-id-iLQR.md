@@ -4,19 +4,15 @@
 
 **论文**：Emanuel Todorov、Weiwei Li，*A Generalized Iterative LQG Method for Locally-Optimal Feedback Control of Constrained Nonlinear Stochastic Systems*，ACC 2005，300–306。[作者实验室归档全文](https://roboti.us/lab/papers/TodorovACC05.pdf) · [会议论文副本](https://skoge.folk.ntnu.no/prost/proceedings/acc05/PDFs/Papers/0057_WeA10_2.pdf)。这篇讨论广义 ILQG，不能与作者此前的 ILQR 论文或后来控制受限 DDP 实现混为同一版本。
 
-**阅读范围**：已核对七页原稿的局部近似、值函数递推、控制约束、主迭代、两类数值问题和讨论。以下定位使用章节及图号。作者在讨论中明确承认随机问题的近似不具有确定性情形同等的最优性保证。
+### 先接住前作的问题
 
-## 一分钟：轨迹之外，也要有办法
+[动力学递推](005-newton-euler.md)给定动作可以预测受力，最优反馈却不能轻易在整个状态空间求解。本篇沿名义轨迹反复构造局部LQG；[CHOMP](059-chomp.md)是不同局部优化路线，[MPC](094-cheetah-mpc.md)可作滚动执行的教学对照。
+
+## 一、问题设定：非线性轨迹怎样同时配上偏离后的局部反馈
 
 如果只算好一串电机命令，然后不看机器人是否偏离就照着执行，这是一种开环计划。真实运动会受噪声影响，尤其是动作越大、误差也越大的执行器。更好的结果不仅是一条轨迹，还包括偏离轨迹时怎样修正的反馈增益。
 
-本文反复在当前轨迹附近把非线性系统近似成线性系统，把代价近似成二次函数，通过反向动态规划计算局部反馈，再更新轨迹。与简单迭代 LQR 相比，它重点加入控制相关噪声、输入约束以及与修正后控制律一致的值函数递推。
-
-实验使用受限扭矩倒立摆和六肌肉手臂模型。它们表明这种计算可产生有效的局部反馈，并在手臂噪声仿真中优于只执行开环序列。它没有证明找到所有非线性随机控制问题的全局最优解。
-
-一句话：在模型已知、状态可观测的非线性控制中，通过局部动态规划共同改进名义动作和反馈，改善运动代价及抗控制相关噪声能力，代价是局部近似、初值敏感和模型导数计算。
-
-## 背景：为什么既不用全局网格，也不只做开环优化
+### 背景：为什么既不用全局网格，也不只做开环优化
 
 全局动态规划原则上能描述每个状态应该采取什么动作，但状态维数一高，网格就迅速膨胀。仅在一条控制序列上做优化避开了状态网格，却未必直接给出附近状态的修正策略。DDP 一类方法在轨迹周围的一条“管道”内做动态规划，获得局部的反馈结构。
 
@@ -32,7 +28,9 @@ $$J=\mathbb E\left[h(x(T))+\int_0^T\rho(t,x,u)dt\right].$$
 
 $x$ 是状态，$u$ 是控制，$f$ 是确定性动力学，$F$ 决定布朗噪声如何进入系统，$U$ 假设为凸控制集合。状态可直接观测是本文的前提；名字有 LQG，不代表已经实现带观测器的部分可观测控制，相关扩展留在第 IX 节。
 
-## 方法：把局部模型、控制律和值函数同时说明白
+## 二、沿轨迹线性化并反向递推控制律和值函数
+
+### 方法：把局部模型、控制律和值函数同时说明白
 
 当前名义状态与动作为 $\bar x_k,\bar u_k$，偏差为 $\delta x_k,\delta u_k$。第 III 节把离散系统写成局部形式
 
@@ -60,13 +58,25 @@ $$\sum_i C_i^TS_{k+1}C_i,$$
 
 线性项也含有 $C_i^TS_{k+1}c_i$。动作改变噪声幅度，就改变未来代价的期望，控制器可能主动少使用噪声代价高的动作方向。这与固定加性噪声不同：在本文二次近似和完全观测设定中，纯加性噪声主要影响值函数常数项，不改变控制律。不能把这个近似性质推广成“噪声永远不影响最优动作”。
 
-## 约束和非凸性：不能把一个逆矩阵当成万能答案
+### 配方一次平方，反馈项与前馈项就分开了
+
+局部动作价值写成 $Q(\delta x,\delta u)=\text{与动作无关项}+Q_u^T\delta u+\delta u^TQ_{ux}\delta x+\tfrac12\delta u^TQ_{uu}\delta u$。$\delta x,\delta u$是相对当前轨迹的偏差，$Q_u,Q_{ux},Q_{uu}$是相应一、二阶导数。当 $Q_{uu}$正定且无活跃动作约束，驻点给 $\delta u=-Q_{uu}^{-1}Q_u-Q_{uu}^{-1}Q_{ux}\delta x$。
+
+**教学标量例**取 $Q_u=2,Q_{ux}=3,Q_{uu}=4$，便有 $\delta u=-0.5-0.75\delta x$。轨迹自身可通过前馈−0.5改善；真实状态偏离0.2时，再反馈−0.15。若直接把结果截断到动作界，控制律的局部导数会改变，不能继续无条件沿用未约束的值函数递推。
+
+[原文第III–IV节](https://roboti.us/lab/papers/TodorovACC05.pdf)明确在线性化偏差系统上求仿射控制律，并保留控制相关噪声。它与[CHOMP](059-chomp.md)是控制轨迹局部优化的平行路线；与[Cheetah MPC](094-cheetah-mpc.md)是局部模型、有限时域求解的教学联系，后者凸化和接触假设不同。实验中的反馈抗扰价值不能由开环名义代价单独衡量。
+
+### 约束和非凸性：不能把一个逆矩阵当成万能答案
 
 一般代价局部二次展开后，$H$ 可能有负特征值。此时令梯度为零未必得到极小值。作者用类似 Levenberg–Marquardt 的办法，将负特征值截至零并加正则常数 $\lambda$，得到正定矩阵来计算更新。
 
 关键不只是修正矩阵，而是随后仍用实际选定的仿射控制律回代原来的局部代价，更新值函数。若一边改变控制律、一边沿用假设“已经精确最小化”的简化 Riccati 公式，递推可能不再自洽；这是本文强调的方法贡献。
 
 第 V.B 节先求 $\delta x=0$ 时满足输入约束的 $l$。早期可沿方向回退到可行区，精化阶段使用二次规划。若某个独立受限输入处于边界，原文将对应反馈增益行置零，避免局部反馈向边界外推动。它是一种局部近似，不是对任意大状态偏差都保证可行的仿射控制律。原文也直接指出，若要求对所有无界 $\delta x$ 保证有界输入，一般只能采取极保守的零反馈。
+
+反向递推给出的反馈只有放回实际输入约束后才是同一控制律。下面检查前向更新与值函数处理，再用噪声执行比较开环和闭环。
+
+## 三、更新名义轨迹，检查输入约束与控制相关噪声
 
 ```text
 输入：动力学和导数、代价、控制可行集合、初始状态、时间范围
@@ -89,7 +99,31 @@ $$\sum_i C_i^TS_{k+1}C_i,$$
 
 这是按原文第 VI 节整理的流程。现代实现常用不同的非线性闭环前向展开与线搜索，但不能反过来说那些实现细节都已经出现在这篇论文。原文对随机目标的数值评估细节没有展开成完整软件规范，复现应进一步核对所用代码版本。
 
-## 实验如何设计
+### 自构例子：为什么“用力更大”未必更稳
+
+设单步状态为 $x'=x+u+\sigma u\xi$，其中 $\xi$ 均值零、方差一，目标是最小化 $\mathbb E[(x')^2]+ru^2$。展开可得
+
+$$J=(x+u)^2+(r+\sigma^2)u^2.$$
+
+因此 $u^*=-x/(1+r+\sigma^2)$。噪声随动作放大，等价增加了这个例子里的控制代价。这是自构一维解释，不是论文肌肉模型，也不意味着多步非线性系统只需调整一个能量权重。
+
+五个前置概念是：**Bellman 递推**把当前代价和未来代价连接起来；**线性化**近似局部状态变化；**二次展开**用曲率描述代价；**仿射反馈**同时包含前馈更新和状态纠偏；**乘性噪声**让不确定性幅度随动作或状态改变。
+
+## 四、读倒立摆和肌肉手臂的闭环对照
+
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/051-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/051-evidence.png" width="808" height="417" alt="Fig. 5：左图以 CPU 时间而非迭代次数比较代价下降，右图展示不同初始化的路径" loading="lazy"></a><figcaption>原论文结果图／表摘引：Emanuel Todorov、Weiwei Li（2005），Fig. 5，PDF 第 6 页；<a href="https://roboti.us/lab/papers/TodorovACC05.pdf#page=6" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:start:rc-51-figure-5 -->
+<figure class="reading-evidence-figure" id="rc-51-figure-5"><a href="/robot-classic/assets/figure-refs-v6/051-fig-5-complete.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/051-fig-5-complete.png" width="584" height="344" alt="原论文Figure 5完整图：ILQG计算时间与成本，以及优化前后的手部轨迹" loading="lazy"></a><figcaption>完整原图补充：Todorov、Li（2005），Figure 5，PDF 第 6 页；<a href="https://roboti.us/lab/papers/TodorovACC05.pdf#page=6" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+读图：A面板完整显示纵轴顶端−1刻度，成本随CPU计算时间下降；B面板保留随机初始控制的插图、黑色优化轨迹和青色差局部解，不能把每次优化都视为全局成功。
+<!-- figure-ref-v6:end:rc-51-figure-5 -->
+
+
+读图：左图以 CPU 时间而非迭代次数比较代价下降，右图展示不同初始化的路径。应同时看计算预算与最终代价，不能仅用一次迭代更快判断完整求解更快。
+
+### 实验如何设计
+
+确定性局部优化与随机系统近似的保证不同；作者在讨论中保留了这一差别，不能从递推形式相似推到同等最优性。
 
 | 项目 | 原文设置 | 检验目的 |
 |---|---|---|
@@ -104,19 +138,46 @@ $$\sum_i C_i^TS_{k+1}C_i,$$
 
 没有强化学习训练集、环境交互预算或策略网络。优化需要可调用模型及其导数；手臂使用中心有限差分，论文称其为计算瓶颈。将“无需交互训练”理解成“没有计算成本”会遗漏这部分工作。
 
-## 五组证据，以及它们不能证明的事情
+### 五组证据，以及它们不能证明的事情
 
-**图 1、第 VII 节：问题和代价。** 倒立摆要求有限时间到达上方并停止，同时惩罚控制量；因此合理解既可能饱和，也可能连续改变力矩，并非纯时间最优的 bang-bang 控制。手臂终端位置和速度也进入代价，所以不能只观察路径弯不弯评价优化质量。
+**[图 1](#rc-51-figure-1)、第 VII 节：问题和代价。** 倒立摆要求有限时间到达上方并停止，同时惩罚控制量；因此合理解既可能饱和，也可能连续改变力矩，并非纯时间最优的 bang-bang 控制。手臂终端位置和速度也进入代价，所以不能只观察路径弯不弯评价优化质量。
 
-**图 2：与 HJB 的对照。** 多个起点上 ILQG 与离散 HJB 解接近；出现不符时，增加初始化可找到更好的局部解。这支持算法能找到好的候选，同时直接反驳“无需重启、必得全局最优”。HJB 本身也是有限网格数值参考，不是连续问题的精确解析真值。
+<!-- figure-ref-v6:start:rc-51-figure-1-reviewed -->
+<figure class="reading-evidence-figure" id="rc-51-figure-1"><a href="/robot-classic/assets/figure-refs-v6/051-fig-1-independent.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/051-fig-1-independent.png" width="1358" height="834" alt="独立绘制的受限力矩倒立摆及两关节六肌群控制模型" loading="lazy"></a><figcaption>按原文模型独立绘制：Emanuel Todorov、Weiwei Li，A Generalized Iterative LQG Method for Locally-Optimal Feedback Control of Constrained Nonlinear Stochastic Systems，ACC 2005，300–306，图 1，PDF 第 5 页；<a href="https://roboti.us/lab/papers/TodorovACC05.pdf#page=5" target="_blank" rel="noopener noreferrer">原文与图注</a>。原创排版与绘制，未转载原图像素。点击图片可放大。</figcaption></figure>
 
-**图 3：手臂行为。** 图中给出十六个方向的平均路径、速度和肌肉激活。作者认为这些形态与人类运动的一些特征相似，但明确没有在本篇详细论证运动控制学意义。它不能证明人脑执行了这套算法。
+读图：左侧保留原文的摆方程、5秒时限与力矩界；右侧只画两关节与六个执行肌群的功能结构，不临摹人体外形。肌肉激活状态也属于控制状态，不能只凭末端路径评价总代价。
+<!-- figure-ref-v6:end:rc-51-figure-1-reviewed -->
 
-**图 4：反馈与噪声建模。** 比较开环、按随机模型设计的反馈、按确定性模型设计的反馈，末端误差椭圆支持前两项设计因素的价值。图展示分布形状，正文没有给出可直接引用的统一误差缩减百分比，因此不从图片估造精确增益。
 
-**图 5：速度和局部极小值。** 文本报告手臂问题平均约 5 秒求得局部时变反馈。八十次初始化中七十三次接近各方向所找到的最好解，七次较差局部解。$73/80=91.25\%$ 是该初始化方案下接近已知最好解的比例，不是通用成功率，更不是已证明的全局最优概率。图 5A 横轴标 CPU 时间，不能只看正文“迭代下降”的描述便把它当作迭代次数。
+**[图 2](#rc-51-figure-2)：与 HJB 的对照。** 多个起点上 ILQG 与离散 HJB 解接近；出现不符时，增加初始化可找到更好的局部解。这支持算法能找到好的候选，同时直接反驳“无需重启、必得全局最优”。HJB 本身也是有限网格数值参考，不是连续问题的精确解析真值。
 
-## 贡献、局限与几个容易误读的词
+<!-- figure-ref-v6:start:rc-51-figure-2 -->
+<figure class="reading-evidence-figure" id="rc-51-figure-2"><a href="/robot-classic/assets/figure-refs-v6/051-figure-2.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/051-figure-2.png" width="574" height="413" alt="原论文 Figure 2：摆系统在不同初态下的局部最优轨迹" loading="lazy"></a><figcaption>原论文图摘引：Todorov、Li（2005），Figure 2，PDF 第 6 页；<a href="https://roboti.us/lab/papers/TodorovACC05.pdf#page=6" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+读图：九个相平面面板展示不同初态与轨迹形状；黑色轨迹可以绕行后再到目标，因此局部反馈优化不等于总沿最短几何路径运动。
+<!-- figure-ref-v6:end:rc-51-figure-2 -->
+
+**[图 3](https://roboti.us/lab/papers/TodorovACC05.pdf#page=6)：手臂行为。** 图中给出十六个方向的平均路径、速度和肌肉激活。作者认为这些形态与人类运动的一些特征相似，但明确没有在本篇详细论证运动控制学意义。它不能证明人脑执行了这套算法。
+
+<!-- figure-ref-v6:start:rc-51-final-source-gap-note -->
+<span id="rc-51-figure-3"></span><p class="figure-reference-note">尚未内嵌：<a href="https://roboti.us/lab/papers/TodorovACC05.pdf#page=6" target="_blank" rel="noopener noreferrer">图 3</a>。两种控制问题模型已独立重绘，相平面轨迹、噪声反馈和定量结果已展示；剩余为十六方向肌肉控制、速度和路径组成的大型复合实验图。缺少该次优化的完整数据，不能用任意仿真或教学线条替代。</p>
+<!-- figure-ref-v6:end:rc-51-final-source-gap-note -->
+
+
+
+
+
+**[图 4](#rc-51-figure-4)：反馈与噪声建模。** 比较开环、按随机模型设计的反馈、按确定性模型设计的反馈，末端误差椭圆支持前两项设计因素的价值。图展示分布形状，正文没有给出可直接引用的统一误差缩减百分比，因此不从图片估造精确增益。
+
+<!-- figure-ref-v6:start:rc-51-figure-4 -->
+<figure class="reading-evidence-figure" id="rc-51-figure-4"><a href="/robot-classic/assets/figure-refs-v6/051-figure-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/051-figure-4.png" width="502" height="260" alt="原论文 Figure 4：噪声下开环与反馈到达分布" loading="lazy"></a><figcaption>原论文图摘引：Todorov、Li（2005），Figure 4，PDF 第 6 页；<a href="https://roboti.us/lab/papers/TodorovACC05.pdf#page=6" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+读图：三组轨迹末端的椭圆范围不同；相同目标附近的散布揭示反馈抗扰能力，而不是只比较一条无噪声名义轨迹。
+<!-- figure-ref-v6:end:rc-51-figure-4 -->
+
+**[图 5](#rc-51-figure-5)：速度和局部极小值。** 文本报告手臂问题平均约 5 秒求得局部时变反馈。八十次初始化中七十三次接近各方向所找到的最好解，七次较差局部解。$73/80=91.25\%$ 是该初始化方案下接近已知最好解的比例，不是通用成功率，更不是已证明的全局最优概率。[图 5A](#rc-51-figure-5) 横轴标 CPU 时间，不能只看正文“迭代下降”的描述便把它当作迭代次数。
+
+## 五、保留初值、导数和局部近似的范围
 
 这里的“全局收敛”涉及优化过程从较远初始化仍能受控地推进，不等于“收敛到全局最小值”。摘要同时写了局部最优，实验又显示局部极小值，二者并不矛盾。对于随机系统，第 IX 节进一步承认二次近似的最优性限制，不能只摘摘要里的保证词。
 
@@ -124,23 +185,21 @@ $$\sum_i C_i^TS_{k+1}C_i,$$
 
 由方法可推知，模型误差或大扰动可能把系统带离局部近似有效区域。高维模型的导数成本、有限差分精度和初始化会影响结果。作者提出结合状态估计、时间多分辨率和 MPC 等扩展，但不能把这些建议当作已经完成的实机系统。
 
-## 自构例子：为什么“用力更大”未必更稳
+## 六、追问：只比较无噪声名义轨迹代价，能否确认控制相关噪声处理有效？
 
-设单步状态为 $x'=x+u+\sigma u\xi$，其中 $\xi$ 均值零、方差一，目标是最小化 $\mathbb E[(x')^2]+ru^2$。展开可得
+<details>
+<summary>只比较无噪声名义轨迹代价，能否确认控制相关噪声处理有效？</summary>
 
-$$J=(x+u)^2+(r+\sigma^2)u^2.$$
+**参考答案**：不能，因为该比较可能根本没有激活所设计的噪声条件。应固定模型、初态和约束，在相同噪声协议下比较闭环与开环执行，并报告重复结果。局部反馈的收益也不能由一次成功轨迹推广为全局最优或任意扰动恢复。
 
-因此 $u^*=-x/(1+r+\sigma^2)$。噪声随动作放大，等价增加了这个例子里的控制代价。这是自构一维解释，不是论文肌肉模型，也不意味着多步非线性系统只需调整一个能量权重。
+</details>
 
-五个前置概念是：**Bellman 递推**把当前代价和未来代价连接起来；**线性化**近似局部状态变化；**二次展开**用曲率描述代价；**仿射反馈**同时包含前馈更新和状态纠偏；**乘性噪声**让不确定性幅度随动作或状态改变。
+## 七、比较轨迹平滑与滚动执行
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 开环对扰动敏感 | 同时计算局部反馈 | 偏离轨迹后及时修正 | 图 4 | 依赖状态观测与局部模型 |
-| 控制影响噪声 | 在期望值递推中保留控制噪声项 | 避免高方差动作方向 | 图 4 随机与确定性反馈对照 | 二次近似仍可能遗漏随机效应 |
-| 负曲率和输入边界 | 正则、受限更新及一致回代 | 获得可用局部更新 | 第 V–VI 节、图 2/5 | 不保证全局最优或任意状态安全 |
+- **平行路线**：[CHOMP：让整条轨迹一起绕开障碍](059-chomp.md)。直接优化轨迹平滑与碰撞，目标和反馈组织不同。
+- **教学联系**：[Cheetah 凸 MPC：用简化模型提前安排四足机器人的支撑力](094-cheetah-mpc.md)。比较局部反馈设计与每周期重解的滚动控制。
 
-## 自测：把局部反馈的边界讲清楚
+## 八、自测与参考答案
 
 **1．为什么既要 $l$，又要 $L\delta x$？**
 
@@ -153,3 +212,5 @@ $l$ 推动当前名义计划改进，$L\delta x$ 在实际或预测状态偏离�
 **3．输入边界上的反馈行设为零，是否保证强扰动下永不越界？**
 
 不能据此得到全局保证。它限制边界输入在局部状态变化下的响应，而未激活输入在大偏差时仍可能越界，模型也可能失真。实际执行仍需检查输入可行性，必要时重新优化或使用专门的约束控制方法。
+
+

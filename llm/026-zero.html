@@ -42,22 +42,26 @@
                 <span class="text-gray-500">ZeRO：数据并行中，没必要让每张卡保存全部训练状态</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="8f393618eb4b2fbf53ed2176a58871413014aa631ee8b96514d014f2b0ee5727"><h1>026｜ZeRO：数据并行中，没必要让每张卡保存全部训练状态</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="6565fe60816368059b7c79ed0bb08ba75cb203655804f7005dc26449dea79e55"><h1>026｜ZeRO：数据并行中，没必要让每张卡保存全部训练状态</h1>
 <p><a href="index.html">目录</a> · <a href="025-albert.html">上一篇</a> · <a href="027-t5.html">下一篇</a></p>
 <p><strong>论文</strong>：Samyam Rajbhandari 等，<em>ZeRO: Memory Optimizations Toward Training Trillion Parameter Models</em>，2019 年预印本。<a href="https://arxiv.org/abs/1910.02054">原文</a> · <a href="https://arxiv.org/pdf/1910.02054">PDF</a>。本文区分状态分片理论、实现实验与容量推算；标题中的万亿参数方向不等于文中每个推算规模都已完整训练验证。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>混合精度 Adam 训练不仅保存模型权重，还要保存梯度、主精度副本和两个矩状态。普通数据并行让每张卡重复保存这些内容，浪费大量总显存。ZeRO 把不同状态分片到各卡，需要时通信取得或汇总，从而减少每卡冗余。</p>
-<p>它没有把参数剪掉，也没有改变目标函数。核心贡献是用通信安排替代重复存储；代价是状态调度、通信以及仍未被消除的激活和临时缓冲。模型状态估算能放下，不代表实际训练峰值一定放下。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="009-adam.html">Adam</a>让训练除权重外还保存两个矩和步数，<a href="024-megatron.html">Megatron</a>处理单层计算的跨卡切分。未解决的另一份浪费是数据并行卡上的状态副本；本篇直接改变这些状态的所有权与生命周期，可与张量并行组合而不改变任务目标。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念是优化器状态、reduce-scatter、all-gather、常驻与峰值显存、数据并行语义。理解这些，就能判断一个训练配置到底节省了什么，而不只凭阶段数字猜测性能。</p>
-<h2 id="背景权重文件大小远小于训练显存">背景：权重文件大小远小于训练显存</h2>
-<p>一个参数在推理时可能只需低精度权重，但训练要保留更多信息。Adam 的一阶、二阶矩通常使用较高精度，混合精度还可能维护主权重。若只把参数量乘以两字节，就会严重低估训练需求。</p>
-<p>普通数据并行的每张卡处理不同样本，却保存相同模型状态。这种冗余对吞吐有便利，但当模型接近显存上限时，就限制了可训练规模。ZeRO 观察到，参数更新并不要求每卡永久拥有所有优化器状态。</p>
-<p>它与 Megatron 的张量并行区别在于：张量并行切分同一层计算；ZeRO 首先切分数据并行中的状态所有权。两者可以结合，分别处理计算图和存储冗余，但组合后的通信成本需重新测量。</p>
-<h2 id="方法逐步分片三类状态">方法：逐步分片三类状态</h2>
+<h2 id="一问题设定每张数据并行卡是否必须保存全部训练状态">一、问题设定：每张数据并行卡是否必须保存全部训练状态</h2>
+<p>混合精度Adam训练不仅有低精度权重，还可能有主权重、梯度和两个高精度矩。只用参数量乘两字节会严重低估需求；普通数据并行又在每张卡重复保存它们。本篇追问更新参数是否真的要求每卡永久持有全部状态。</p>
+<h2 id="二逐项拆开16字节账本再推分片阶段">二、逐项拆开16字节账本，再推分片阶段</h2>
 <p>设参数数为 <span class="reading-math" data-tex="\Psi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">Ψ</mi></mrow><annotation encoding="application/x-tex">\Psi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">Ψ</span></span></span></span></span>、数据并行卡数为 <span class="reading-math" data-tex="N"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi></mrow><annotation encoding="application/x-tex">N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span></span>。在论文采用的具体混合精度状态口径下，普通状态约为 <span class="reading-math" data-tex="16\Psi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>16</mn><mi mathvariant="normal">Ψ</mi></mrow><annotation encoding="application/x-tex">16\Psi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">16Ψ</span></span></span></span></span> 字节。只分片优化器状态时约为 <span class="reading-math" data-tex="4\Psi+12\Psi/N"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>4</mn><mi mathvariant="normal">Ψ</mi><mo>+</mo><mn>12</mn><mi mathvariant="normal">Ψ</mi><mi mathvariant="normal">/</mi><mi>N</mi></mrow><annotation encoding="application/x-tex">4\Psi+12\Psi/N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord">4Ψ</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">12Ψ/</span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span></span>；再分片梯度时约为 <span class="reading-math" data-tex="2\Psi+14\Psi/N"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mi mathvariant="normal">Ψ</mi><mo>+</mo><mn>14</mn><mi mathvariant="normal">Ψ</mi><mi mathvariant="normal">/</mi><mi>N</mi></mrow><annotation encoding="application/x-tex">2\Psi+14\Psi/N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord">2Ψ</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">14Ψ/</span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span></span>；全部分片时理想常驻状态约为 <span class="reading-math" data-tex="16\Psi/N"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>16</mn><mi mathvariant="normal">Ψ</mi><mi mathvariant="normal">/</mi><mi>N</mi></mrow><annotation encoding="application/x-tex">16\Psi/N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">16Ψ/</span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span></span>。</p>
 <p>这些式子描述特定精度和状态集合，不是所有框架永远固定的字节数。激活、通信 bucket、临时参数聚合和碎片还需要另外计入。理解口径比背诵 16 这个常数更重要。</p>
 <p>第一阶段每卡只更新自己负责的参数分片，再同步更新后权重；第二阶段梯度也按所有者聚合，减少完整梯度常驻；第三阶段连参数都分片，在计算需要时收集相关层，使用后再释放或重新分片。释放时机与预取策略影响峰值与吞吐。</p>
+<h3 id="先把16字节一参数拆清楚">先把16字节一参数拆清楚</h3>
+<p>在论文混合精度Adam模型中，每参数包含FP16权重2字节、梯度2字节，以及FP32主权重和两个矩各4字节，共16字节。设参数量为P、数据并行设备数为n：只分片优化器状态约为 <span class="reading-math" data-tex="4P+12P/n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>4</mn><mi>P</mi><mo>+</mo><mn>12</mn><mi>P</mi><mi mathvariant="normal">/</mi><mi>n</mi></mrow><annotation encoding="application/x-tex">4P+12P/n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord">4</span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">12</span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mord">/</span><span class="mord mathnormal">n</span></span></span></span></span>；再分片梯度为 <span class="reading-math" data-tex="2P+14P/n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mi>P</mi><mo>+</mo><mn>14</mn><mi>P</mi><mi mathvariant="normal">/</mi><mi>n</mi></mrow><annotation encoding="application/x-tex">2P+14P/n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">14</span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mord">/</span><span class="mord mathnormal">n</span></span></span></span></span>；三类全分片为 <span class="reading-math" data-tex="16P/n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>16</mn><mi>P</mi><mi mathvariant="normal">/</mi><mi>n</mi></mrow><annotation encoding="application/x-tex">16P/n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">16</span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mord">/</span><span class="mord mathnormal">n</span></span></span></span></span>。这些是模型状态下界式账本，暂未算激活、临时全收集和通信缓冲。</p>
+<p><strong>教学算例。</strong> P=10亿、n=8，以十进制GB计，基线状态16GB，三个阶段分别约5.5、3.75、2GB。若峰值仍有6GB激活与缓冲，最后并不是每卡2GB即可训练。一次按层all-gather形成的临时完整权重还可能成为峰值；容量和运行时峰值必须分别测。</p>
+<h3 id="把一个分片状态的生命周期列出来">把一个分片状态的生命周期列出来</h3>
+<p>以四个数据并行rank为例，某参数的优化器状态只由所属rank保存；需要执行该层时，各rank仍须取得相应参数值，反向后再把梯度归约到正确所有者。容量减少来自“不长期重复驻留”，并不意味着其余rank从不接触这些字节。核算峰值时应记录收集中的临时参数与当前激活。</p>
+<p>教法联系：<a href="https://lilianweng.github.io/posts/2021-09-25-train-large/">Lilian Weng的How to Train Really Large Models on Many GPUs?</a>。算例为本文自构。</p>
+<h2 id="三让全局梯度到达状态所有者并管理临时聚合">三、让全局梯度到达状态所有者，并管理临时聚合</h2>
 <pre><code class="language-text">划分参数索引，给每个数据并行进程分配所有权
 按阶段决定分片优化器状态、梯度和参数
 每个batch：
@@ -67,8 +71,11 @@
     按下一计算需要同步或收集更新参数
 记录峰值显存、通信量、吞吐与数值一致性
 </code></pre>
-<p>数学目标保持不变，机制是状态生命周期和通信重排，指标是容量、显存和训练效率。没有参数被删除，所以 ZeRO 不是量化或剪枝；也不能说每卡只训练自己样本对应的一部分模型。</p>
-<h2 id="实验与证据">实验与证据</h2>
+<p>构造四张卡和四个参数块。每卡仍处理自己的样本，所有样本梯度最终都应影响所有参数；只是第一卡保存并更新块一的 Adam 状态，第二卡负责块二，以此类推。所有权分片不等于数据对参数影响被隔离。</p>
+<p>若错误地让每卡只用自己的局部梯度更新其块，而不聚合其他样本贡献，就改变了训练算法。正确通信必须保持相应全局梯度语义。这也是验证分布式实现时应检查的小模型数值对照。</p>
+<h2 id="四把容量推算与实测峰值吞吐分开读">四、把容量推算与实测峰值、吞吐分开读</h2>
+<p>没有参数被删除，所以 ZeRO 不是量化或剪枝；也不能说每卡只训练自己样本对应的一部分模型。</p>
+<p>理论常驻账本与运行峰值不同，图1和表1的估算应接着实测吞吐读。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -101,39 +108,39 @@
 <td>相同精度、batch、模型和硬件下比较峰值与吞吐</td>
 </tr>
 </tbody></table></div>
-<p>**证据一，图 1。**清晰分解不同状态的冗余，解释各阶段节省来自哪里。图中模型状态不是全部训练峰值。</p>
-<p>**证据二，表 1。**例如 7.5B 模型在 64 路条件下，完全分片的模型状态约 1.88GB，而普通状态约 120GB。这是论文口径的计算结果，不是说一张两GB卡便能完整训练该模型。</p>
-<p>**证据三，分片算法与通信量分析章节，以及实测扩展部分。**理论给出不同阶段的通信取舍，实测验证系统可运行。通信总量、通信关键路径和实际等待时间仍不相同，不能只凭字节总数预测速度。</p>
+<p><strong>证据一，<a href="#llm-v6-026-figure-1">图1</a>。</strong>清晰分解不同状态的冗余，解释各阶段节省来自哪里。图中模型状态不是全部训练峰值。 内存示意图只统计模型状态：示例固定 7.5B 参数、64 路数据并行和混合精度 Adam。它不是包含激活、缓存及碎片的实际峰值显存截图。</p>
+<!-- figure-ref-v6:start:026-f1-1-anchor -->
+<p><a id="llm-v6-026-figure-1"></a></p>
+<!-- figure-ref-v6:end:026-f1-1-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/026-zero-f1.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/026-zero-f1.png" width="2902" height="1345" alt="ZeRO各阶段在多张GPU上分片参数、梯度和优化器状态的内存示意" loading="lazy"></a><figcaption>模型状态内存示意摘引：Samyam Rajbhandari 等，2019，图1；<a href="https://arxiv.org/html/1910.02054#S1.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据二，<a href="https://arxiv.org/html/1910.02054#S5.T1">表1</a>。</strong>例如 7.5B 模型在 64 路条件下，完全分片的模型状态约 1.88GB，而普通状态约 120GB。这是论文口径的计算结果，不是说一张两GB卡便能完整训练该模型。</p>
+<p><strong>从内存账本走到实测。</strong> 原图2横轴改变模型规模，点表示单GPU吞吐，灰柱按右轴表示相对基线的加速。ZeRO与基线的模型并行放置不同；节省状态内存能够改变可训练规模与通信布局，但某一个柱高不是所有模型、硬件的固定加速倍数。</p>
+<!-- figure-ref-v6:start:026-f2-3-anchor -->
+<p><a id="llm-v6-026-figure-2"></a></p>
+<!-- figure-ref-v6:end:026-f2-3-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/026-zero-f2.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/026-zero-f2.png" width="1701" height="696" alt="ZeRO在不同模型参数规模下的单GPU训练吞吐和相对基线加速" loading="lazy"></a><figcaption>原实验图摘引：Samyam Rajbhandari 等，2019，图2，PDF第4页；<a href="https://arxiv.org/pdf/1910.02054#page=4" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据三，分片算法与通信量分析章节，以及实测扩展部分。</strong>理论给出不同阶段的通信取舍，实测验证系统可运行。通信总量、通信关键路径和实际等待时间仍不相同，不能只凭字节总数预测速度。</p>
 <p>标题强调面向万亿模型的扩展方向，阅读时应逐项识别哪些是分析推算、哪些是已运行实验。容量推算有价值，但不能被改写成完整训练已经完成并达到某个任务质量。</p>
-<h2 id="教学例子谁拥有优化器状态">教学例子：谁拥有优化器状态</h2>
-<p>构造四张卡和四个参数块。每卡仍处理自己的样本，所有样本梯度最终都应影响所有参数；只是第一卡保存并更新块一的 Adam 状态，第二卡负责块二，以此类推。所有权分片不等于数据对参数影响被隔离。</p>
-<p>若错误地让每卡只用自己的局部梯度更新其块，而不聚合其他样本贡献，就改变了训练算法。正确通信必须保持相应全局梯度语义。这也是验证分布式实现时应检查的小模型数值对照。</p>
-<p>第三阶段在执行某层时可能临时取得较完整参数，因此瞬时显存高于常驻分片值。若通信预取多层，吞吐可能改善，峰值却增加。内存与速度需要在同一时间线上分析，而不是两个独立最大化目标。</p>
-<h2 id="怎样验证一个-zero-配置">怎样验证一个 ZeRO 配置</h2>
 <p>先用小模型对照未分片训练，固定随机性，检查一两步参数变化与损失在浮点容差内一致。再测峰值内存，区分参数、优化器、激活和通信缓冲，最后比较达到相同质量所需时间。</p>
 <p>只报告“没有 OOM”不足以说明方案好。一个配置可能靠过度通信勉强运行，却吞吐很低；另一个可能内存稍高但总体训练成本更低。分片阶段越高并不自动越优，应由模型规模、互联和batch决定。</p>
-<h2 id="贡献与局限">贡献与局限</h2>
-<p>ZeRO 将数据并行从完整状态复制转向按需协作，显著改变大模型训练的容量边界。限制包括通信、调度复杂性、故障恢复、检查点重组以及激活内存。它提供资源管理能力，不直接提高语言建模目标的统计效率。</p>
+<h2 id="五常驻状态减少仍留下激活预取和恢复问题">五、常驻状态减少仍留下激活、预取和恢复问题</h2>
+<p>第三阶段在执行某层时可能临时取得较完整参数，因此瞬时显存高于常驻分片值。若通信预取多层，吞吐可能改善，峰值却增加。内存与速度需要在同一时间线上分析，而不是两个独立最大化目标。</p>
+<p>限制包括通信、调度复杂性、故障恢复、检查点重组以及激活内存。它提供资源管理能力，不直接提高语言建模目标的统计效率。</p>
 <p>检查点保存也是状态分片带来的真实工程问题。每个进程可能只持有局部权重和优化器状态，恢复到不同并行度时必须重新组织所有权，并保持参数顺序和矩状态对应。若只合并权重做推理，这是合法导出，却不等于可无缝恢复原训练。可以用一个保存前后单步对照检验恢复语义，再测试改变设备数的重分片。这个实验方案还应模拟一个进程缺失文件，确认系统会明确失败，而不是静默生成不完整模型。它关注可靠性，与论文的理想内存公式是不同但相关的要求。</p>
 <p>分片后的模型状态估算不包含激活、临时通信缓冲和内存碎片，因此容量公式不能直接当作运行时显存峰值；实际最大批量仍需测量。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>数据并行重复保存模型训练状态</td>
-<td>分阶段分片优化器、梯度和参数</td>
-<td>把冗余状态分摊到各设备</td>
-<td>图1状态分解、表1容量、通信分析</td>
-<td>通信调度更复杂，激活仍需额外内存</td>
-</tr>
-</tbody></table></div>
+<h2 id="六把本篇机制再推进一步">六、把本篇机制再推进一步</h2>
+<details>
+<summary>1. 改变并行卡数后只合并权重，能否无缝恢复训练？</summary>
+
+<p><strong>参考答案</strong>：不能据此保证。恢复还需要让优化器矩状态与正确参数重新对应，并重组状态所有权；只合并权重是合法推理导出，却不是完整训练检查点。可比对保存前后的一步更新，再检查缺失分片是否明确报错，而非静默得到不完整模型。</p>
+</details>
+
+<h2 id="七按计算分片与精度增量两条轴继续优化">七、按计算分片与精度/增量两条轴继续优化</h2>
+<p>分片后还要处理具体算子与请求状态。<a href="024-megatron.html">Megatron</a>是可组合的张量轴，<a href="079-vllm.html">vLLM</a>研究推理KV生命周期。继续比较时先明确保存对象，避免把训练优化器状态与生成缓存混为一类。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 每卡只拥有部分优化器状态，是否意味着只训练部分参数？</strong></p>
 <p>全局仍更新全部参数，每卡负责一部分所有权，梯度需要正确聚合。所有权和学习范围不同，不能把分片误读成冻结其余参数。</p>
@@ -152,27 +159,35 @@
 
 **论文**：Samyam Rajbhandari 等，*ZeRO: Memory Optimizations Toward Training Trillion Parameter Models*，2019 年预印本。[原文](https://arxiv.org/abs/1910.02054) · [PDF](https://arxiv.org/pdf/1910.02054)。本文区分状态分片理论、实现实验与容量推算；标题中的万亿参数方向不等于文中每个推算规模都已完整训练验证。
 
-## 一分钟理解
+### 先接住前作的问题
 
-混合精度 Adam 训练不仅保存模型权重，还要保存梯度、主精度副本和两个矩状态。普通数据并行让每张卡重复保存这些内容，浪费大量总显存。ZeRO 把不同状态分片到各卡，需要时通信取得或汇总，从而减少每卡冗余。
+[Adam](009-adam.md)让训练除权重外还保存两个矩和步数，[Megatron](024-megatron.md)处理单层计算的跨卡切分。未解决的另一份浪费是数据并行卡上的状态副本；本篇直接改变这些状态的所有权与生命周期，可与张量并行组合而不改变任务目标。
 
-它没有把参数剪掉，也没有改变目标函数。核心贡献是用通信安排替代重复存储；代价是状态调度、通信以及仍未被消除的激活和临时缓冲。模型状态估算能放下，不代表实际训练峰值一定放下。
+## 一、问题设定：每张数据并行卡是否必须保存全部训练状态
 
-## 背景：权重文件大小远小于训练显存
+混合精度Adam训练不仅有低精度权重，还可能有主权重、梯度和两个高精度矩。只用参数量乘两字节会严重低估需求；普通数据并行又在每张卡重复保存它们。本篇追问更新参数是否真的要求每卡永久持有全部状态。
 
-一个参数在推理时可能只需低精度权重，但训练要保留更多信息。Adam 的一阶、二阶矩通常使用较高精度，混合精度还可能维护主权重。若只把参数量乘以两字节，就会严重低估训练需求。
-
-普通数据并行的每张卡处理不同样本，却保存相同模型状态。这种冗余对吞吐有便利，但当模型接近显存上限时，就限制了可训练规模。ZeRO 观察到，参数更新并不要求每卡永久拥有所有优化器状态。
-
-它与 Megatron 的张量并行区别在于：张量并行切分同一层计算；ZeRO 首先切分数据并行中的状态所有权。两者可以结合，分别处理计算图和存储冗余，但组合后的通信成本需重新测量。
-
-## 方法：逐步分片三类状态
+## 二、逐项拆开16字节账本，再推分片阶段
 
 设参数数为 $\Psi$、数据并行卡数为 $N$。在论文采用的具体混合精度状态口径下，普通状态约为 $16\Psi$ 字节。只分片优化器状态时约为 $4\Psi+12\Psi/N$；再分片梯度时约为 $2\Psi+14\Psi/N$；全部分片时理想常驻状态约为 $16\Psi/N$。
 
 这些式子描述特定精度和状态集合，不是所有框架永远固定的字节数。激活、通信 bucket、临时参数聚合和碎片还需要另外计入。理解口径比背诵 16 这个常数更重要。
 
 第一阶段每卡只更新自己负责的参数分片，再同步更新后权重；第二阶段梯度也按所有者聚合，减少完整梯度常驻；第三阶段连参数都分片，在计算需要时收集相关层，使用后再释放或重新分片。释放时机与预取策略影响峰值与吞吐。
+
+### 先把16字节一参数拆清楚
+
+在论文混合精度Adam模型中，每参数包含FP16权重2字节、梯度2字节，以及FP32主权重和两个矩各4字节，共16字节。设参数量为P、数据并行设备数为n：只分片优化器状态约为 $4P+12P/n$；再分片梯度为 $2P+14P/n$；三类全分片为 $16P/n$。这些是模型状态下界式账本，暂未算激活、临时全收集和通信缓冲。
+
+**教学算例。** P=10亿、n=8，以十进制GB计，基线状态16GB，三个阶段分别约5.5、3.75、2GB。若峰值仍有6GB激活与缓冲，最后并不是每卡2GB即可训练。一次按层all-gather形成的临时完整权重还可能成为峰值；容量和运行时峰值必须分别测。
+
+### 把一个分片状态的生命周期列出来
+
+以四个数据并行rank为例，某参数的优化器状态只由所属rank保存；需要执行该层时，各rank仍须取得相应参数值，反向后再把梯度归约到正确所有者。容量减少来自“不长期重复驻留”，并不意味着其余rank从不接触这些字节。核算峰值时应记录收集中的临时参数与当前激活。
+
+教法联系：[Lilian Weng的How to Train Really Large Models on Many GPUs?](https://lilianweng.github.io/posts/2021-09-25-train-large/)。算例为本文自构。
+
+## 三、让全局梯度到达状态所有者，并管理临时聚合
 
 ```text
 划分参数索引，给每个数据并行进程分配所有权
@@ -185,9 +200,15 @@
 记录峰值显存、通信量、吞吐与数值一致性
 ```
 
-数学目标保持不变，机制是状态生命周期和通信重排，指标是容量、显存和训练效率。没有参数被删除，所以 ZeRO 不是量化或剪枝；也不能说每卡只训练自己样本对应的一部分模型。
+构造四张卡和四个参数块。每卡仍处理自己的样本，所有样本梯度最终都应影响所有参数；只是第一卡保存并更新块一的 Adam 状态，第二卡负责块二，以此类推。所有权分片不等于数据对参数影响被隔离。
 
-## 实验与证据
+若错误地让每卡只用自己的局部梯度更新其块，而不聚合其他样本贡献，就改变了训练算法。正确通信必须保持相应全局梯度语义。这也是验证分布式实现时应检查的小模型数值对照。
+
+## 四、把容量推算与实测峰值、吞吐分开读
+
+没有参数被删除，所以 ZeRO 不是量化或剪枝；也不能说每卡只训练自己样本对应的一部分模型。
+
+理论常驻账本与运行峰值不同，图1和表1的估算应接着实测吞吐读。
 
 | 项目 | 原文范围 |
 |---|---|
@@ -198,31 +219,37 @@
 | 未覆盖内存 | 激活、临时缓冲及碎片属于额外分析和优化对象 |
 | 比较要求 | 相同精度、batch、模型和硬件下比较峰值与吞吐 |
 
-**证据一，图 1。**清晰分解不同状态的冗余，解释各阶段节省来自哪里。图中模型状态不是全部训练峰值。
+**证据一，[图1](#llm-v6-026-figure-1)。**清晰分解不同状态的冗余，解释各阶段节省来自哪里。图中模型状态不是全部训练峰值。 内存示意图只统计模型状态：示例固定 7.5B 参数、64 路数据并行和混合精度 Adam。它不是包含激活、缓存及碎片的实际峰值显存截图。
 
-**证据二，表 1。**例如 7.5B 模型在 64 路条件下，完全分片的模型状态约 1.88GB，而普通状态约 120GB。这是论文口径的计算结果，不是说一张两GB卡便能完整训练该模型。
+&lt;!-- figure-ref-v6:start:026-f1-1-anchor --&gt;
+&lt;a id=&quot;llm-v6-026-figure-1&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:026-f1-1-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/026-zero-f1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/026-zero-f1.png&quot; width=&quot;2902&quot; height=&quot;1345&quot; alt=&quot;ZeRO各阶段在多张GPU上分片参数、梯度和优化器状态的内存示意&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;模型状态内存示意摘引：Samyam Rajbhandari 等，2019，图1；&lt;a href=&quot;https://arxiv.org/html/1910.02054#S1.F1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+**证据二，[表1](https://arxiv.org/html/1910.02054#S5.T1)。**例如 7.5B 模型在 64 路条件下，完全分片的模型状态约 1.88GB，而普通状态约 120GB。这是论文口径的计算结果，不是说一张两GB卡便能完整训练该模型。
+
+**从内存账本走到实测。** 原图2横轴改变模型规模，点表示单GPU吞吐，灰柱按右轴表示相对基线的加速。ZeRO与基线的模型并行放置不同；节省状态内存能够改变可训练规模与通信布局，但某一个柱高不是所有模型、硬件的固定加速倍数。
+
+&lt;!-- figure-ref-v6:start:026-f2-3-anchor --&gt;
+&lt;a id=&quot;llm-v6-026-figure-2&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:026-f2-3-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/026-zero-f2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/026-zero-f2.png&quot; width=&quot;1701&quot; height=&quot;696&quot; alt=&quot;ZeRO在不同模型参数规模下的单GPU训练吞吐和相对基线加速&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原实验图摘引：Samyam Rajbhandari 等，2019，图2，PDF第4页；&lt;a href=&quot;https://arxiv.org/pdf/1910.02054#page=4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 **证据三，分片算法与通信量分析章节，以及实测扩展部分。**理论给出不同阶段的通信取舍，实测验证系统可运行。通信总量、通信关键路径和实际等待时间仍不相同，不能只凭字节总数预测速度。
 
 标题强调面向万亿模型的扩展方向，阅读时应逐项识别哪些是分析推算、哪些是已运行实验。容量推算有价值，但不能被改写成完整训练已经完成并达到某个任务质量。
 
-## 教学例子：谁拥有优化器状态
-
-构造四张卡和四个参数块。每卡仍处理自己的样本，所有样本梯度最终都应影响所有参数；只是第一卡保存并更新块一的 Adam 状态，第二卡负责块二，以此类推。所有权分片不等于数据对参数影响被隔离。
-
-若错误地让每卡只用自己的局部梯度更新其块，而不聚合其他样本贡献，就改变了训练算法。正确通信必须保持相应全局梯度语义。这也是验证分布式实现时应检查的小模型数值对照。
-
-第三阶段在执行某层时可能临时取得较完整参数，因此瞬时显存高于常驻分片值。若通信预取多层，吞吐可能改善，峰值却增加。内存与速度需要在同一时间线上分析，而不是两个独立最大化目标。
-
-## 怎样验证一个 ZeRO 配置
-
 先用小模型对照未分片训练，固定随机性，检查一两步参数变化与损失在浮点容差内一致。再测峰值内存，区分参数、优化器、激活和通信缓冲，最后比较达到相同质量所需时间。
 
 只报告“没有 OOM”不足以说明方案好。一个配置可能靠过度通信勉强运行，却吞吐很低；另一个可能内存稍高但总体训练成本更低。分片阶段越高并不自动越优，应由模型规模、互联和batch决定。
 
-## 贡献与局限
+## 五、常驻状态减少仍留下激活、预取和恢复问题
 
-ZeRO 将数据并行从完整状态复制转向按需协作，显著改变大模型训练的容量边界。限制包括通信、调度复杂性、故障恢复、检查点重组以及激活内存。它提供资源管理能力，不直接提高语言建模目标的统计效率。
+第三阶段在执行某层时可能临时取得较完整参数，因此瞬时显存高于常驻分片值。若通信预取多层，吞吐可能改善，峰值却增加。内存与速度需要在同一时间线上分析，而不是两个独立最大化目标。
+
+限制包括通信、调度复杂性、故障恢复、检查点重组以及激活内存。它提供资源管理能力，不直接提高语言建模目标的统计效率。
 
 五个前置概念是优化器状态、reduce-scatter、all-gather、常驻与峰值显存、数据并行语义。理解这些，就能判断一个训练配置到底节省了什么，而不只凭阶段数字猜测性能。
 
@@ -230,9 +257,18 @@ ZeRO 将数据并行从完整状态复制转向按需协作，显著改变大模
 
 分片后的模型状态估算不包含激活、临时通信缓冲和内存碎片，因此容量公式不能直接当作运行时显存峰值；实际最大批量仍需测量。
 
-|原有问题|作者改动|为什么可能有效|实验证据|代价与局限|
-|---|---|---|---|---|
-|数据并行重复保存模型训练状态|分阶段分片优化器、梯度和参数|把冗余状态分摊到各设备|图1状态分解、表1容量、通信分析|通信调度更复杂，激活仍需额外内存|
+## 六、把本篇机制再推进一步
+
+&lt;details&gt;
+&lt;summary&gt;1. 改变并行卡数后只合并权重，能否无缝恢复训练？&lt;/summary&gt;
+
+**参考答案**：不能据此保证。恢复还需要让优化器矩状态与正确参数重新对应，并重组状态所有权；只合并权重是合法推理导出，却不是完整训练检查点。可比对保存前后的一步更新，再检查缺失分片是否明确报错，而非静默得到不完整模型。
+
+&lt;/details&gt;
+
+## 七、按计算分片与精度/增量两条轴继续优化
+
+分片后还要处理具体算子与请求状态。[Megatron](024-megatron.md)是可组合的张量轴，[vLLM](079-vllm.md)研究推理KV生命周期。继续比较时先明确保存对象，避免把训练优化器状态与生成缓存混为一类。
 
 ## 自测与参考答案
 

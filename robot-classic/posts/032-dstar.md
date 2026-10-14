@@ -4,19 +4,15 @@
 
 **论文**：Anthony Stentz，*Optimal and Efficient Path Planning for Partially-Known Environments*，ICRA 1994，3310–3317。[作者机构入口](https://publications.ri.cmu.edu/optimal-and-efficient-path-planning-for-partially-known-environments) · [八页原文](https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf)。更早的相关技术报告发表于 1993 年；本文以 1994 年会议版为主，不混入后来的 Focused D* 或 D* Lite。
 
-**阅读范围**：会议版八页全文，包括第 2 节算法、第 3 节非形式化证明、第 4 节表 1。下文页数按该 PDF 的 1–8 页计，便于对照无印刷页码的作者稿。
+### 先接住前作的问题
 
-## 一分钟：绕过新障碍，不必忘掉整张地图
+[A*](003-astar.md)解决当前图上的搜索，地图每次变化却可能导致重复劳动。D*复用已有代价依赖。
+
+## 一、问题设定：地图改变后怎样修复当前路线而不重算全部搜索
 
 导航系统已经找好路线，前方却出现施工围挡。重新跑一遍最短路当然可以，但昨天算过的大量区域没有变化。反过来，只在围挡旁临时绕一下，又可能错过真正便宜的全局路线。
 
-D* 保存到目标的路径代价与后继指针。当传感器发现地图错误，算法只传播与变化有关的代价修正，直到机器人当前位置的最优路线重新可靠。这里的“局部修复”不是只看局部地图，而是复用全局搜索信息、按需更新。
-
-实验支持在给定随机地图、传感器范围和实现下，重规划明显快于从头搜索。它优化的是**当前地图上的剩余路径**，不会预知尚未看到的障碍，也不保证最终实际走过的整段路等于全知最短路。
-
-一句话：在边走边更新地图的图搜索任务中，通过增量传播路径代价变化，减少重复重规划计算，同时保持当前信息下的最优性，代价是保存状态、复杂的更新逻辑和有限的物理建模范围。
-
-## 问题定义：最优性究竟针对哪个世界
+### 问题定义：最优性究竟针对哪个世界
 
 设有有限图 $G=(V,E)$，边代价 $c(u,v)>0$，起点随机器人移动，目标固定。状态可以是栅格位置，也可以来自其他离散规划表示。动作是沿合法边前进；到达目标或确认无路时结束。代价可以表达距离、能耗或危险暴露，但本文实验主要采用栅格通行代价。
 
@@ -30,7 +26,9 @@ $$
 
 它没有策略网络、价值学习、奖励采样或训练集。路径代价函数虽然与强化学习中的价值函数形式相近，但这里根据明确图结构进行搜索和修复。也没有把主动探索的信息收益纳入路径目标。
 
-## 方法：维护一个指向目标的路标网络
+## 二、维护到目标的代价依赖，传播增减两类变化
+
+### 方法：维护一个指向目标的路标网络
 
 对每个状态 $x$，保存到目标的代价估计 $h(x)$、下一步指针 $b(x)$，以及 NEW、OPEN、CLOSED 标记。OPEN 队列存储待传播变化的状态。搜索从目标向外建立信息，因此机器人移动之后，还能利用同一组到目标的路标。
 
@@ -48,7 +46,23 @@ $$
 
 不能把 RAISE 理解成“永远把邻居加一个固定数”：遇到替代路径，某些状态会改换后继，变化不会继续传到所有旧后代。也不能把 CLOSED 理解成永远不再访问，地图变化会使已经处理过的状态重新入队。
 
-## 输入、处理与输出：停止条件也是算法的一部分
+### 输入、处理与输出：停止条件也是算法的一部分
+
+原文用 $k_{\min}\ge h(s)$ 表达修复足以覆盖当前状态的条件，并单独处理空队列。其含义不是“整张地图全部更新”，而是队列里尚未处理的影响已经不能破坏当前所需的最优性。若过早恢复运动，可能沿过时后继走；若每次都清空 OPEN，正确性通常仍可保留，但会丢掉按需计算的效率。
+
+**数学目标**仍是正代价图上的最短路；**新机制**是复用后继结构、区分上升与下降、按键值界限停止；**改善指标**是地图变化后的累计重规划 CPU 时间。它没有通过降低路径质量来换速度。
+
+### 用两条支路追踪一次代价上升
+
+**教学图**有边 $s\to a$ 代价1、$a\to g$ 代价1，另有 $s\to b$ 代价2、$b\to g$ 代价2。原来的 $h(a)=1,h(b)=2,h(s)=2$，后继为 $s\to a\to g$。当 $a\to g$ 变为9，仅将 $h(a)$ 更新为9还不够：$s$仍携带已经失效的值2。传播依赖后，$s$应比较 $1+9=10$ 与 $2+2=4$，改指向 $b$。
+
+关键不是“改了一个栅格就重算一个栅格”，而是受影响的旧最优依赖链；地图改动的空间范围很小，代价影响仍可很远。相反，不依赖该边的分支可能完全无需处理。这里展示Bellman依赖，未把四次算术冒充原版PROCESS-STATE的完整队列轨迹。
+
+与[A*](003-astar.md)的联系是保留最短路目标、改变重计算方式；[D* Lite](046-dstar-lite.md)是同一任务的后续增量搜索重构，不能直接把本篇RAISE标签替换为其 $g/rhs$。结合[原文第3–4节](https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf)阅读时，“未知环境最优”应落实为每次已获信息定义的图，而不是拥有未来障碍知识的行驶总里程最优。实验的CPU节省也应对照更新次数和相同代价图。
+
+变化传播不只更新障碍旁边的节点，还可能沿代价依赖影响远处。下面用断桥例子核对处理顺序和停止条件，再将修复计时与最优性证明分开。
+
+## 三、执行状态处理与停止条件，用断桥检查远处影响
 
 第 2.2 节包含 PROCESS-STATE 和 MODIFY-COST。前者弹出最小键状态并修复依赖，后者更新边并安排受影响状态。以下为控制流程的教学伪代码，RAISE/LOWER 内部保持原文的更新规则，不是可直接替换 D* Lite 的实现：
 
@@ -67,48 +81,7 @@ $$
 输出：随地图修正的路径，以及对应剩余代价
 ```
 
-原文用 $k_{\min}\ge h(s)$ 表达修复足以覆盖当前状态的条件，并单独处理空队列。其含义不是“整张地图全部更新”，而是队列里尚未处理的影响已经不能破坏当前所需的最优性。若过早恢复运动，可能沿过时后继走；若每次都清空 OPEN，正确性通常仍可保留，但会丢掉按需计算的效率。
-
-**数学目标**仍是正代价图上的最短路；**新机制**是复用后继结构、区分上升与下降、按键值界限停止；**改善指标**是地图变化后的累计重规划 CPU 时间。它没有通过降低路径质量来换速度。
-
-## 实验与证明如何各司其职
-
-| 项目 | 原文设定与用途 |
-|---|---|
-| 机制示例 | 50×50 八邻接栅格、点机器人、接触传感器，图 1–3 展示封闭凹陷中的更新传播 |
-| 地形示例 | 450×450 分形地形，灰色区域通行代价为白色的五倍，图 4–6 比较地图先验 |
-| 运行时间比较 | 1000 到 1000000 状态，混合已知与未知障碍 |
-| 传感器 | 计时实验为全向、半径 10 格；地形示例的半径是 20 格，不能混用 |
-| 对比方法 | 使用乐观直线启发式的从头最优重规划器 |
-| 硬件与时间口径 | SPARC-10 CPU 时间；不含最初一次路径规划，只累计之后的重规划 |
-| 重复 | 每种规模五张随机生成地图取平均，没有提供方差或置信区间 |
-| 理论范围 | 有限图与正边代价，正确调用修改和传播过程；会议版给非形式化证明，完整证明指向早期技术报告 |
-
-第 3 节分别讨论后继链存在且不成环、满足停止条件后的最优性、有限图上的完备性。这三件事不同：有一条可走的链不代表最短；当前最短也不代表所有未访问状态已经更新。
-
-## 五处关键证据及其边界
-
-**图 1–3，PDF 第 4–5 页：**比较发现未知障碍前后的后继箭头。机器人脱离凹陷后，部分远处箭头仍保持旧方向。这支持按需修复的机制解释，并不表示地图全局一致已经恢复。
-
-**图 4、5，第 5 页：**同一地形中，全白乐观先验导致实际行程约为全知最优代价的两倍。它清楚表明论文的最优性不能解释为“从一开始就走对所有岔路”。
-
-**图 6，第 5–6 页：**粗分辨率先验帮助机器人选对中央障碍的绕行侧，最终代价仅比全知最优高 6%。这是这一张地图的结果，不是关于地图分辨率的普遍误差上界。
-
-**表 1，第 7 页：**百万状态时，重规划器平均 50.82 分钟，D* 平均 16.83 秒。表中加速为 229.30 倍；不能简单拿两个平均耗时相除去“纠正”它，因为正文说明加速列是五次试验各自加速比的平均。比值的平均与平均值的比值通常不同。
-
-**第 4 节和第 5.1 节，第 7 页：**作者解释变化主要发生在机器人附近时更有利。实验没有证明每次变化都只影响小区域；若一条关键桥梁关闭，旧最短路树可能大范围失效，修复仍然很昂贵。
-
-百万格上的结果不能直接外推为任何现代导航栈固定 229 倍加速。地图结构、障碍比例、数据结构、初始规划是否计时都会影响结论。两算法接受相同传感器信息，比较相对清楚；但没有系统的调参预算或置信区间报告。
-
-## 贡献、代价与失败边界
-
-D* 把变化中的图最短路变成可增量维护的计算对象，这是它的核心贡献。原文并未把高速物理避障、连续轨迹优化、定位不确定性一起解决。第 5.2 节提到室外系统集成进展，但主要定量证据仍然是离散地图实验。
-
-内存保存旧搜索信息，更新逻辑也比一次性搜索复杂。地图抖动会不断触发修改；若感知把安全区域误标成不可走，搜索再精确也会绕错。机器人形状需要由状态表示或配置空间障碍编码，不能让有体积的机器人直接执行点模型路径。
-
-进一步的系统分析是：动态边代价与具有速度的移动障碍不是同一个问题。只把障碍当前位置涂黑，没有表示到达时刻，就不能保证未来相遇安全。D* 可以作为时间扩展图上的组件，但原文栅格计时实验没有验证这样的完整系统。
-
-## 自构例子：一座桥为何会影响很远
+### 自构例子：一座桥为何会影响很远
 
 设目标在河东，机器人在河西。有一座近桥，跨越代价 2；另一座远桥绕行代价 20。旧后继树大多指向近桥。近桥关闭后，直接把这条边置为高代价还不够：河西许多状态的 $h$ 仍错误地相信近桥可走。
 
@@ -116,13 +89,126 @@ RAISE 把这些依赖标出，远桥方向的合法路线再通过 LOWER 传播�
 
 五个前置概念：**最短路**最小化边代价和；**反向搜索**从目标构建到达信息；**优先队列**首先处理最小键事件；**一致性**要求代价与后继关系匹配；**在线信息**意味着当前决策只能使用已经获得的地图。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 地图变化后从头计算 | 保留代价和后继链 | 大量区域可以复用 | 表 1 | 存储与复杂更新逻辑 |
-| 旧路径代价过于乐观 | RAISE 传播上升 | 消除失效路径的依赖 | 图 1–3 | 影响可能跨越很远 |
-| 局部绕障损失全局最优 | 修复到当前状态满足界限 | 使用全局图信息保证当前最短路 | 第 3 节 | 不是全知行程或信息采集最优 |
+## 四、分开阅读最优性证明与随机地图重规划计时
 
-## 自测与参考答案
+
+<!-- figure-ref-v6:start:rc-32-table-1-anchor -->
+<span id="rc-32-table-1"></span>
+<!-- figure-ref-v6:end:rc-32-table-1-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/032-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/032-evidence.png" width="717" height="253" alt="Table 1：在同一状态规模下，对照两种累计耗时与加速比" loading="lazy"></a><figcaption>原论文结果图／表摘引：Anthony Stentz（1994），Table 1，PDF 第 7 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=7" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+读图：在同一状态规模下，对照两种累计耗时与加速比。表中比值是各次试验比值的平均，不能用两种耗时的均值再相除来替代；优势来自地图更新后的复用。
+
+### 实验与证明如何各司其职
+
+下文定位按八页作者 PDF 的页序；[表 1](https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=7) 的重规划比较和第 3 节的证明梗概分工不同，不能用计时表替代最短路条件。
+
+<!-- figure-ref-v6:start:rc-32-links-100 -->
+本页定位：[表 1内嵌图](#rc-32-table-1)。
+<!-- figure-ref-v6:end:rc-32-links-100 -->
+
+| 项目 | 原文设定与用途 |
+|---|---|
+| 机制示例 | 50×50 八邻接栅格、点机器人、接触传感器，[图 1](#rc-32-figure-1)–[图 3](#rc-32-figure-3) 展示封闭凹陷中的更新传播 |
+| 地形示例 | 450×450 分形地形，灰色区域通行代价为白色的五倍，[图 4](#rc-32-figure-4)–[图 6](#rc-32-figure-6) 比较地图先验 |
+| 运行时间比较 | 1000 到 1000000 状态，混合已知与未知障碍 |
+| 传感器 | 计时实验为全向、半径 10 格；地形示例的半径是 20 格，不能混用 |
+| 对比方法 | 使用乐观直线启发式的从头最优重规划器 |
+| 硬件与时间口径 | SPARC-10 CPU 时间；不含最初一次路径规划，只累计之后的重规划 |
+| 重复 | 每种规模五张随机生成地图取平均，没有提供方差或置信区间 |
+| 理论范围 | 有限图与正边代价，正确调用修改和传播过程；会议版给非形式化证明，完整证明指向早期技术报告 |
+
+<!-- figure-ref-v6:start:rc-32-figure-1 -->
+<figure class="reading-evidence-figure" id="rc-32-figure-1"><a href="/robot-classic/assets/figure-refs-v6/032-fig-1.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/032-fig-1.png" width="569" height="569" alt="图1：初始代价传播形成的栅格回指针场" loading="lazy"></a><figcaption>Anthony Stentz（1994），图 1，PDF 第 4 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=4" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/032-fig-1.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：箭头指向当前估计的最优后继；初始传播尚未知道新障碍，因此局部路径可以指向后来需要修复的区域。
+<!-- figure-ref-v6:end:rc-32-figure-1 -->
+
+<!-- figure-ref-v6:start:rc-32-figure-2 -->
+<figure class="reading-evidence-figure" id="rc-32-figure-2"><a href="/robot-classic/assets/figure-refs-v6/032-fig-2.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/032-fig-2.png" width="568" height="571" alt="图2：RAISE状态传播代价增加，LOWER状态绕过障碍进入原路径区域" loading="lazy"></a><figcaption>Anthony Stentz（1994），图 2，PDF 第 4 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=4" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/032-fig-2.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：先找RAISE与LOWER两个区域，再追踪分界处箭头；D*重新处理受影响的状态，而非从头重算全部地图。
+<!-- figure-ref-v6:end:rc-32-figure-2 -->
+
+<!-- figure-ref-v6:start:rc-32-figure-3 -->
+<figure class="reading-evidence-figure" id="rc-32-figure-3"><a href="/robot-classic/assets/figure-refs-v6/032-fig-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/032-fig-3.png" width="567" height="568" alt="图3：障碍变化处理后得到的最终回指针场" loading="lazy"></a><figcaption>Anthony Stentz（1994），图 3，PDF 第 5 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=5" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/032-fig-3.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：与图1比较障碍附近箭头如何绕行；远处仍可保留旧回指针，因此图中的局部修复不能解释成整图处处已更新。
+<!-- figure-ref-v6:end:rc-32-figure-3 -->
+
+<!-- figure-ref-v6:start:rc-32-figure-4 -->
+<figure class="reading-evidence-figure" id="rc-32-figure-4"><a href="/robot-classic/assets/figure-refs-v6/032-fig-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/032-fig-4.png" width="562" height="564" alt="图4：已知完整分形地形时的规划路径" loading="lazy"></a><figcaption>Anthony Stentz（1994），图 4，PDF 第 5 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=5" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/032-fig-4.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：这张完整地图给出对照路线；不同灰度表示不同通行成本，不应把所有非黑区域都按同一距离度量。
+<!-- figure-ref-v6:end:rc-32-figure-4 -->
+
+<!-- figure-ref-v6:start:rc-32-figure-5 -->
+<figure class="reading-evidence-figure" id="rc-32-figure-5"><a href="/robot-classic/assets/figure-refs-v6/032-fig-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/032-fig-5.png" width="562" height="573" alt="图5：从乐观未知地图出发逐渐发现障碍后的路径" loading="lazy"></a><figcaption>Anthony Stentz（1994），图 5，PDF 第 5 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=5" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/032-fig-5.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：白色区域最初按可通行处理，机器人随后发现死路并回退；读图要区分执行轨迹与事先知道完整地图时的最短路径。
+<!-- figure-ref-v6:end:rc-32-figure-5 -->
+
+<!-- figure-ref-v6:start:rc-32-figure-6 -->
+<figure class="reading-evidence-figure" id="rc-32-figure-6"><a href="/robot-classic/assets/figure-refs-v6/032-fig-6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/032-fig-6.png" width="577" height="577" alt="图6：在粗分辨率先验地图上规划和局部细化的路径" loading="lazy"></a><figcaption>Anthony Stentz（1994），图 6，PDF 第 6 页；<a href="https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=6" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/032-fig-6.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：粗网格提供先验地形代价，行进中才获得细节；与图4、5对照时，应把先验信息量作为自变量。
+<!-- figure-ref-v6:end:rc-32-figure-6 -->
+
+第 3 节分别讨论后继链存在且不成环、满足停止条件后的最优性、有限图上的完备性。这三件事不同：有一条可走的链不代表最短；当前最短也不代表所有未访问状态已经更新。
+
+### 五处关键证据及其边界
+
+**[图 1](#rc-32-figure-1)–[图 3](#rc-32-figure-3)，PDF 第 4–5 页：**比较发现未知障碍前后的后继箭头。机器人脱离凹陷后，部分远处箭头仍保持旧方向。这支持按需修复的机制解释，并不表示地图全局一致已经恢复。
+
+<!-- figure-ref-v6:start:rc-32-links-117 -->
+本页定位：[图 1内嵌图](#rc-32-figure-1) · [图 2内嵌图](#rc-32-figure-2) · [图 3内嵌图](#rc-32-figure-3)。
+<!-- figure-ref-v6:end:rc-32-links-117 -->
+
+**[图 4](#rc-32-figure-4)、5，第 5 页：**同一地形中，全白乐观先验导致实际行程约为全知最优代价的两倍。它清楚表明论文的最优性不能解释为“从一开始就走对所有岔路”。
+
+<!-- figure-ref-v6:start:rc-32-links-119 -->
+本页定位：[图 4内嵌图](#rc-32-figure-4) · [图 5内嵌图](#rc-32-figure-5)。
+<!-- figure-ref-v6:end:rc-32-links-119 -->
+
+**[图 6](#rc-32-figure-6)，第 5–6 页：**粗分辨率先验帮助机器人选对中央障碍的绕行侧，最终代价仅比全知最优高 6%。这是这一张地图的结果，不是关于地图分辨率的普遍误差上界。
+
+<!-- figure-ref-v6:start:rc-32-links-121 -->
+本页定位：[图 6内嵌图](#rc-32-figure-6)。
+<!-- figure-ref-v6:end:rc-32-links-121 -->
+
+**[表 1](https://www2.cs.sfu.ca/~vaughan/teaching/894/papers/dstar_icra94.pdf#page=7)，第 7 页：**百万状态时，重规划器平均 50.82 分钟，D* 平均 16.83 秒。表中加速为 229.30 倍；不能简单拿两个平均耗时相除去“纠正”它，因为正文说明加速列是五次试验各自加速比的平均。比值的平均与平均值的比值通常不同。
+
+<!-- figure-ref-v6:start:rc-32-links-123 -->
+本页定位：[表 1内嵌图](#rc-32-table-1)。
+<!-- figure-ref-v6:end:rc-32-links-123 -->
+
+**第 4 节和第 5.1 节，第 7 页：**作者解释变化主要发生在机器人附近时更有利。实验没有证明每次变化都只影响小区域；若一条关键桥梁关闭，旧最短路树可能大范围失效，修复仍然很昂贵。
+
+百万格上的结果不能直接外推为任何现代导航栈固定 229 倍加速。地图结构、障碍比例、数据结构、初始规划是否计时都会影响结论。两算法接受相同传感器信息，比较相对清楚；但没有系统的调参预算或置信区间报告。
+
+## 五、区分当前地图最优、全知最优和复用成本
+
+D* 把变化中的图最短路变成可增量维护的计算对象，这是它的核心贡献。原文并未把高速物理避障、连续轨迹优化、定位不确定性一起解决。第 5.2 节提到室外系统集成进展，但主要定量证据仍然是离散地图实验。
+
+内存保存旧搜索信息，更新逻辑也比一次性搜索复杂。地图抖动会不断触发修改；若感知把安全区域误标成不可走，搜索再精确也会绕错。机器人形状需要由状态表示或配置空间障碍编码，不能让有体积的机器人直接执行点模型路径。
+
+进一步的系统分析是：动态边代价与具有速度的移动障碍不是同一个问题。只把障碍当前位置涂黑，没有表示到达时刻，就不能保证未来相遇安全。D* 可以作为时间扩展图上的组件，但原文栅格计时实验没有验证这样的完整系统。
+
+## 六、追问：改变传感器视野后，重规划总耗时还能只归因于D*实现吗？
+
+<details>
+<summary>改变传感器视野后，重规划总耗时还能只归因于D*实现吗？</summary>
+
+**参考答案**：不能。视野改变发现障碍的时机和每次更新的范围，也可能改变实际行走路线。比较应固定地图、观测协议与实现口径，分别记录搜索调用、每次修复时间和总路程。当前地图上的最优性不承诺相同探索过程，更不等于全知最短路。
+
+</details>
+
+## 七、改写增量搜索，再加入质量调节
+
+- **直接继承**：[D* Lite：地图变了，只修复受到影响的搜索结果](046-dstar-lite.md)。用g与rhs的局部一致性组织同一增量重规划任务。
+- **模块组合**：[AD*：先给有质量界的路线，再随时间和地图一起改进](052-anytime-dstar.md)。进一步同时处理快速首解与持续提高质量的需要。
+
+## 八、自测与参考答案
 
 **问题1：如果新障碍没有挡住正在执行的路线，就一定不用更新吗？**
 

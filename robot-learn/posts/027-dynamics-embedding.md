@@ -4,17 +4,13 @@
 
 **原论文**：*Learning to Adapt in Dynamic, Real-World Environments through Meta-Reinforcement Learning*，Anusha Nagabandi、Ignasi Clavera 等，2018 年首次公开，ICLR 2019。[论文](https://arxiv.org/abs/1803.11347)。
 
-## 一、一分钟理解：训练一个容易修正的模型
+### 先接住前作的问题
+
+[动力学随机化](024-dynamics-randomization.md)让循环策略隐式适应物理变化，但不显式修正一个可用于规划的预测器。本篇把学习目标放在短历史更新后的模型表现上：最近经验怎样让下一段预测更准？模型适应与策略隐藏状态变化不能混写。
+
+## 一、问题设定：几步新经验怎样修正下一段动力学预测
 
 一只机器人在地毯上走得很好，换到斜坡、拖上负载或损坏一条腿后，原来的动作与运动关系会变。可以从头训练新策略，但数据和时间都不允许；也可以微调环境模型，但普通神经网络未必能靠最近几步就学好。
-
-这篇论文把训练目标改成“用过去一小段经验更新后，能否预测接下来的一小段运动”。模型学到的不是一个永远正确的世界，而是一个能够迅速根据现场数据调整的起点。控制器拿调整后的模型做短时规划，每执行一步就重新适应、重新规划。
-
-作者提出梯度式 GrBAL 与循环式 ReBAL。实验支持它们在动力学变化下的适应价值，并用真实六足微型机器人展示 GrBAL。最重要的理解是：这里快速适应的是**前向动力学模型**，而不是直接通过回报更新一个 Actor。
-
-一句话：在地形、部件和负载可能变化的控制场景中，通过元训练可快速调整的预测模型，改善在线适应，代价是测试时模型更新与规划计算，以及对近期动力学局部一致性的依赖。
-
-## 二、设定：任务可以在一条轨迹中变化
 
 传统元强化学习常把一个完整回合视为一个任务，先收集几条轨迹，再调整策略。现实故障不会等到回合结束。本文把每个短时间片看作一个局部任务：最近 $M$ 步提供上下文，后续 $K$ 步用于检验预测。
 
@@ -24,7 +20,9 @@
 
 核心假设是短片段内动力学近似一致。若过去几步在地毯、未来几步突然进入冰面，过去数据对未来可能失效。模型可以在观察到变化后恢复，却不能保证在第一个变化瞬间提前知道发生了什么。
 
-## 三、方法：把“适应之后好不好”变成训练目标
+## 二、优化适应后的未来误差并重新规划
+
+这篇论文把训练目标改成“用过去一小段经验更新后，能否预测接下来的一小段运动”。模型学到的不是一个永远正确的世界，而是一个能够迅速根据现场数据调整的起点。控制器拿调整后的模型做短时规划，每执行一步就重新适应、重新规划。
 
 ### 1. 内层更新与外层评价
 
@@ -68,7 +66,17 @@ $$
 
 $H$ 为规划长度。方括号下标零表示只执行序列第一项。短时闭环减轻模型误差积累，却不使误差消失。模型更新误差可能改变候选动作的排序，因此预测质量最终仍要通过任务表现验证。
 
-教学伪代码：
+过去窗口和未来窗口必须保持因果顺序。若把待预测转移也放进内层适应集，模型当然可能预测得更好，却不再检验部署时的快速适应。外层正确问题是：只看到故障后的少数过去转移，一次更新能否改善尚未发生的后果预测？[原文元训练与算法2](https://arxiv.org/html/1803.11347)
+
+教学设定：窗口10步，地面在第8步由硬变软，当前适应集含7步旧地面、3步新地面。长窗口降低统计噪声，却稀释变化；短窗口响应快，却可能把一次传感器异常当新动力学。每步回到共享先验避免永久遗忘，不会自动解决窗口选择。应在实验中分开报告变化后恢复时间与稳定环境最终回报。
+
+### 一个具体例子与概念表
+
+自构例子，未运行：左右相同速度设定本应直行，现在右侧因负载变慢，机器人开始偏转。过去几步的“设定值—位姿变化”使适应模型预测右侧响应减弱，规划器于是增加右侧指令或减小左侧指令。它无需收到“右侧负载为多少克”的标签，也无需等完整回合失败后再更新。
+
+## 三、用过去窗口适应模型，再规划下一步
+
+内层更新用最近过去，元目标评价随后未来；若两段混用，便看不到适应能否推广。部署时按原设定从共享参数重新适应，而非无限累积一次临时修正。
 
 ~~~text
 元训练：
@@ -86,7 +94,26 @@ $H$ 为规划长度。方括号下标零表示只执行序列第一项。短时�
     只执行第一步，记录真实结果，再次适应与规划
 ~~~
 
-## 四、实验怎样区分“会适应”与“普通微调”
+## 四、将预测改善与实际控制改善分开核对
+
+作者提出梯度式 GrBAL 与循环式 ReBAL。实验支持它们在动力学变化下的适应价值，并用真实六足微型机器人展示 GrBAL。最重要的理解是：这里快速适应的是**前向动力学模型**，而不是直接通过回报更新一个 Actor。
+
+**原图怎么读：** [图3，原论文图注与图像](#paper-027-dynamics-embedding-figure-3)。横向比较更新前后K步预测误差的直方图，检验的是一次适应是否改善模型预测；后续控制回报另看[图5](#paper-027-dynamics-embedding-figure-5)，不能由误差分布直接推出任务必然成功。
+
+<!-- figure-ref-v6:start:43670d2143ff -->
+<a id="paper-027-dynamics-embedding-figure-5"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/027-dynamics-embedding-v6-figure-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/027-dynamics-embedding-v6-figure-5.png" width="2132" height="1607" alt="Learning to Adapt in Dynamic, Real-World Environments through Meta-Reinforcement Learning，图5：读图对应本段的“快速变化和未见失效条件下，GrBAL 整体表现较好”；说明局部适应有用；“oracle”只是特定全局模型基线，不是最优控制上界。" loading="lazy"></a><figcaption>原图摘引：Anusha Nagabandi、Ignasi Clavera 等，2018 年首次公开，ICLR 2019，HTML S6.F5，图5。<a href="https://arxiv.org/html/1803.11347v6#S6.F5" target="_blank" rel="noopener noreferrer">核对原文</a>。读图对应本段的“快速变化和未见失效条件下，GrBAL 整体表现较好”；说明局部适应有用；“oracle”只是特定全局模型基线，不是最优控制上界。</figcaption></figure>
+<!-- figure-ref-v6:end:43670d2143ff -->
+
+
+
+<!-- figure-ref-v6:start:7475cb883fad-anchor -->
+<a id="paper-027-dynamics-embedding-figure-3"></a>
+<!-- figure-ref-v6:end:7475cb883fad-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/027-dynamics-embedding-s6-f3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/027-dynamics-embedding-s6-f3.png" width="1804" height="1171" alt="Learning to Adapt in Dynamic, Real-World Environments through Meta-Reinforcement Learning，图3：横向比较更新前后K步预测误差的直方图，检验的是一次适应是否改善模型预测；后续控制回报另看图5，不能由误差分布直接推出任务必然成功。" loading="lazy"></a><figcaption>实验图原图摘引：Anusha Nagabandi、Ignasi Clavera 等，2018 年首次公开，ICLR 2019，HTML S6.F3，图3。原图面板重新排版，数据未改。<a href="https://arxiv.org/html/1803.11347v6#S6.F3" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+样本倍率和窗口参数应按各实验的明确配置分别解释，不能用概括性倍率反推所有图的统一交互预算。
 
 | 实验维度 | 设置与目的 |
 |---|---|
@@ -99,29 +126,51 @@ $H$ 为规划长度。方括号下标零表示只执行序列第一项。短时�
 | 真机采集方式 | 随机策略配合避免离开指定区域的安全策略，不是专家动作示范 |
 | 真机测试变化 | 缺腿、未见地形与坡度、位姿误差、拖拽新负载 |
 | 指标 | 仿真回报、模型预测误差；真机轨迹跟踪成本，越低越好 |
-| 不确定性 | 各图完整随机种子及误差条定义未逐项确认，表 1 本身列成本均值 |
+| 不确定性 | 各图完整随机种子及误差条定义未逐项确认，[表1](https://arxiv.org/html/1803.11347v6#S6.T1) 本身列成本均值 |
 
 第 6.2 节比较随训练数据增长的性能，并允许无模型方法训练至收敛；第 6.3 节则把各方法限制在相同低数据预算，专门检查在线变化与泛化。前者考察效率和最终性能，后者考察有限数据下适应效果，不能把两套预算混成一组公平性判断。正文的“等效真实交互小时”描述模拟数据的物理时长，不是 GPU 训练耗时。真机的 90 分钟是实际采集规模，但外部计算、元训练和规划成本仍需另计。
 
 附录列 HalfCheetah 的 GrBAL 使用 $M=K=32$、每次内层一步更新，训练规划长度 10、测试 15。参数不能机械推广：Ant 表格的 $M,K$ 与正文概述不同，详见下文范围说明。
 
-## 五、证据：适应后更准，还要看是否走得更好
+### 证据：适应后更准，还要看是否走得更好
 
 | 原文位置 | 观察 | 支持什么，不能证明什么 |
 |---|---|---|
-| 图 3、附录 A 图 8–9 | 适应后未来片段预测误差下降 | 更新提取了局部信息，但误差降低不自动保证回报单调提升 |
-| 图 4 | 有模型方法在较少训练数据下表现较强 | 支持样本效率趋势；不能忽略原文倍数口径疑点 |
-| 图 5 | 快速变化和未见失效条件下，GrBAL 整体表现较好 | 说明局部适应有用；“oracle”只是特定全局模型基线，不是最优控制上界 |
-| 表 1 | 训练内地形中 GrBAL 与 MB 成本接近，互有高低 | 常规场景不一定需要适应，不支持处处优胜 |
-| 图 6–7 | 真机新地形、缺腿和负载等测试中轨迹改善 | 支持若干硬件变化下可行性，不证明任意损坏都可恢复 |
+| [图3](#paper-027-dynamics-embedding-figure-3)、附录 A [图8](#paper-027-dynamics-embedding-figure-8)、[图9](#paper-027-dynamics-embedding-figure-9) | 适应后未来片段预测误差下降 | 更新提取了局部信息，但误差降低不自动保证回报单调提升 |
+| [图4](#paper-027-dynamics-embedding-figure-4) | 有模型方法在较少训练数据下表现较强 | 支持样本效率趋势；不能忽略原文倍数口径疑点 |
+| [图5](#paper-027-dynamics-embedding-figure-5) | 快速变化和未见失效条件下，GrBAL 整体表现较好 | 说明局部适应有用；“oracle”只是特定全局模型基线，不是最优控制上界 |
+| [表1](https://arxiv.org/html/1803.11347v6#S6.T1) | 训练内地形中 GrBAL 与 MB 成本接近，互有高低 | 常规场景不一定需要适应，不支持处处优胜 |
+| [图6](#paper-027-dynamics-embedding-figure-6)、[图7](#paper-027-dynamics-embedding-figure-7) | 真机新地形、缺腿和负载等测试中轨迹改善 | 支持若干硬件变化下可行性，不证明任意损坏都可恢复 |
 
-表 1 的地毯直线任务两者成本同为 3.26；地毯之字形 GrBAL 为 7.08、MB 为 6.56，前者反而较差；泡沫塑料直线分别为 3.75 和 4.06，前者较好。因为是成本，不能把更大的数字读成更强。作者“训练内相当”的判断比“元学习全面提升”准确。
+<!-- figure-ref-v6:start:b91ceabd724d -->
+<a id="paper-027-dynamics-embedding-figure-4"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/027-dynamics-embedding-v6-figure-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/027-dynamics-embedding-v6-figure-4.png" width="2132" height="987" alt="Learning to Adapt in Dynamic, Real-World Environments through Meta-Reinforcement Learning，图4：读图对应本段的“有模型方法在较少训练数据下表现较强”；支持样本效率趋势；不能忽略原文倍数口径疑点。" loading="lazy"></a><figcaption>原图摘引：Anusha Nagabandi、Ignasi Clavera 等，2018 年首次公开，ICLR 2019，HTML S6.F4，图4。<a href="https://arxiv.org/html/1803.11347v6#S6.F4" target="_blank" rel="noopener noreferrer">核对原文</a>。读图对应本段的“有模型方法在较少训练数据下表现较强”；支持样本效率趋势；不能忽略原文倍数口径疑点。</figcaption></figure>
+<!-- figure-ref-v6:end:b91ceabd724d -->
+<!-- figure-ref-v6:start:1d824a50b632 -->
+<a id="paper-027-dynamics-embedding-figure-6"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/027-dynamics-embedding-v6-figure-6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/027-dynamics-embedding-v6-figure-6.png" width="2132" height="1712" alt="Learning to Adapt in Dynamic, Real-World Environments through Meta-Reinforcement Learning，图6：读图对应本段的“真机新地形、缺腿和负载等测试中轨迹改善”；支持若干硬件变化下可行性，不证明任意损坏都可恢复。" loading="lazy"></a><figcaption>原图摘引：Anusha Nagabandi、Ignasi Clavera 等，2018 年首次公开，ICLR 2019，HTML S6.T1.2，图6。<a href="https://arxiv.org/html/1803.11347v6#S6.T1.2" target="_blank" rel="noopener noreferrer">核对原文</a>。读图对应本段的“真机新地形、缺腿和负载等测试中轨迹改善”；支持若干硬件变化下可行性，不证明任意损坏都可恢复。</figcaption></figure>
+<!-- figure-ref-v6:end:1d824a50b632 -->
+<!-- figure-ref-v6:start:46cc931ca9e2 -->
+<a id="paper-027-dynamics-embedding-figure-7"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/027-dynamics-embedding-v6-figure-7.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/027-dynamics-embedding-v6-figure-7.png" width="2132" height="475" alt="Learning to Adapt in Dynamic, Real-World Environments through Meta-Reinforcement Learning，图7：读图对应本段的“真机新地形、缺腿和负载等测试中轨迹改善”；支持若干硬件变化下可行性，不证明任意损坏都可恢复。" loading="lazy"></a><figcaption>原图摘引：Anusha Nagabandi、Ignasi Clavera 等，2018 年首次公开，ICLR 2019，HTML S6.F7，图7。<a href="https://arxiv.org/html/1803.11347v6#S6.F7" target="_blank" rel="noopener noreferrer">核对原文</a>。读图对应本段的“真机新地形、缺腿和负载等测试中轨迹改善”；支持若干硬件变化下可行性，不证明任意损坏都可恢复。</figcaption></figure>
+<!-- figure-ref-v6:end:46cc931ca9e2 -->
+<!-- figure-ref-v6:start:b06cbc2455a1 -->
+<a id="paper-027-dynamics-embedding-figure-8"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/027-dynamics-embedding-v6-figure-8.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/027-dynamics-embedding-v6-figure-8.png" width="2132" height="1264" alt="Learning to Adapt in Dynamic, Real-World Environments through Meta-Reinforcement Learning，图8：读图对应本段的“适应后未来片段预测误差下降”；更新提取了局部信息，但误差降低不自动保证回报单调提升。" loading="lazy"></a><figcaption>原图摘引：Anusha Nagabandi、Ignasi Clavera 等，2018 年首次公开，ICLR 2019，HTML A1.F8，图8。原面板按源顺序重新排版，数据未改。<a href="https://arxiv.org/html/1803.11347v6#A1.F8" target="_blank" rel="noopener noreferrer">核对原文</a>。读图对应本段的“适应后未来片段预测误差下降”；更新提取了局部信息，但误差降低不自动保证回报单调提升。</figcaption></figure>
+<!-- figure-ref-v6:end:b06cbc2455a1 -->
+<!-- figure-ref-v6:start:466b7ebab248 -->
+<a id="paper-027-dynamics-embedding-figure-9"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/027-dynamics-embedding-v6-figure-9.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/027-dynamics-embedding-v6-figure-9.png" width="2132" height="1247" alt="Learning to Adapt in Dynamic, Real-World Environments through Meta-Reinforcement Learning，图9：读图对应本段的“适应后未来片段预测误差下降”；更新提取了局部信息，但误差降低不自动保证回报单调提升。" loading="lazy"></a><figcaption>原图摘引：Anusha Nagabandi、Ignasi Clavera 等，2018 年首次公开，ICLR 2019，HTML A1.F9，图9。原面板按源顺序重新排版，数据未改。<a href="https://arxiv.org/html/1803.11347v6#A1.F9" target="_blank" rel="noopener noreferrer">核对原文</a>。读图对应本段的“适应后未来片段预测误差下降”；更新提取了局部信息，但误差降低不自动保证回报单调提升。</figcaption></figure>
+<!-- figure-ref-v6:end:466b7ebab248 -->
+
+
+[表1](https://arxiv.org/html/1803.11347v6#S6.T1) 的地毯直线任务两者成本同为 3.26；地毯之字形 GrBAL 为 7.08、MB 为 6.56，前者反而较差；泡沫塑料直线分别为 3.75 和 4.06，前者较好。因为是成本，不能把更大的数字读成更强。作者“训练内相当”的判断比“元学习全面提升”准确。
 
 两处口径值得保留。第 6.2 节同时写无模型约两天、模型驱动约 1.5–3 小时，又使用“1000 倍”数据差异；直接按小时相除只能得到约 16–32 倍，无法由这些文字独立重建 1000 倍。附录 C 说所有实验 $K=M$，但附录 E 的 Ant 表为 GrBAL $K=10,M=16$，机械臂表也不同。PDF 中同样存在这些信息，因此本文不自行统一成一个确定倍率或一组通用参数。
 
 这些疑点不抹去图中适应改善的证据，但限制了精确复现口径。要引用“几倍效率”，还需结合作者代码、实际采样次数与物理时间换算继续确认。
 
-## 六、贡献与局限：模型无需全局完美，但仍需局部可学
+## 五、历史窗口需要对应局部一致的动力学
 
 贡献是把元训练任务从整回合转为连续时间片，并将快速适应前向模型接入 MPC。与只在部署时临时微调相比，训练本身已经为少量数据更新做准备；与直接元训练策略相比，监督信号每一步都能从状态转移获得。
 
@@ -129,22 +178,19 @@ $H$ 为规划长度。方括号下标零表示只执行序列第一项。短时�
 
 训练分布也很重要。附录 B 的外力实验显示更丰富扰动往往有益，但这不是“只要元学习，就能外推任何新物理机制”。从平面行走到腾空跳跃，或从完整执行器到完全失去一侧驱动，可能需要不同动作能力与模型结构。
 
-## 七、一个具体例子与概念表
-
-自构例子，未运行：左右相同速度设定本应直行，现在右侧因负载变慢，机器人开始偏转。过去几步的“设定值—位姿变化”使适应模型预测右侧响应减弱，规划器于是增加右侧指令或减小左侧指令。它无需收到“右侧负载为多少克”的标签，也无需等完整回合失败后再更新。
+### 五个前置概念
 
 五个前置概念：**前向模型**预测动作的运动结果；**元学习**优化快速学习的起点或规则；**支持与查询数据**分别用于局部适应和检验适应；**MPC**每次规划但只执行一步；**局部平稳性**是假设短时间内动力学近似不变。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 证据 | 代价与局限 |
-|---|---|---|---|---|
-| 全局模型难覆盖变化 | 近期数据局部适应 | 预测集中于当前环境 | 图 3 | 窗口可能含过时信息 |
-| 普通微调反应慢 | 优化适应后损失 | 学到容易更新的先验 | MB+DE 对照 | 元训练仍需覆盖变化 |
-| 回合中故障 | 每步重适应和规划 | 不必等下个回合 | 图 5–7 | 变化后仍有识别延迟 |
-| 真机数据昂贵 | 模型监督与规划 | 每条转移都能训练 | 真机 90 分钟数据 | 计算与感知基础设施 |
+### 追问：近期数据窗口跨过动力学突变时，适应会学到什么？
 
-阅读范围：已核对[全文及参数附录](https://arxiv.org/pdf/1803.11347)，采用 2019 年修订正文，首次公开于 2018 年。未独立复现；样本倍率与部分窗口参数存在上述未统一口径。
+参考答案：窗口同时包含旧机制和新机制，更新可能折中两者，未必准确表示当前环境。可固定总数据量，改变窗口是否跨过变化点，分别测适应后的预测误差和控制恢复。更短窗口响应快但信息少，更长窗口方差小却可能混入过时数据；这来自本篇局部适应设定，不构成通用最佳窗口结论。
 
-## 八、三个问题及答案
+## 六、沿机制关系继续读
+
+与[动力学随机化](024-dynamics-randomization.md)是平行适应路线：前者训练能快速更新的前向模型并规划，后者用循环策略隐式适应；与[PETS](029-pets.md)共享模型规划接口，但本篇的核心变量是更新后的局部模型。
+
+## 七、自测三题与参考答案
 
 **问题1：为什么过去数据和未来数据必须分开？**
 

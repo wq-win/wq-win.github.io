@@ -42,20 +42,19 @@
                 <span class="text-gray-500">BERT：隐藏部分输入，才能联合学习左右上下文</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="6bd8130722f780e0971416109b05ebd548f74e81d94e0692da00a12b17effa86"><h1>018｜BERT：隐藏部分输入，才能联合学习左右上下文</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="041d383d9c02ccfc7a0c1671e5407c56eb8e7d70d93d45295da9bc8737de92cb"><h1>018｜BERT：隐藏部分输入，才能联合学习左右上下文</h1>
 <p><a href="index.html">目录</a> · <a href="017-gpt.html">上一篇</a> · <a href="019-transformer-xl.html">下一篇</a></p>
 <p><strong>论文</strong>：Jacob Devlin 等，<em>BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding</em>，2018 年预印本、NAACL 2019。<a href="https://arxiv.org/abs/1810.04805">原文</a> · <a href="https://arxiv.org/pdf/1810.04805">PDF</a>。本文以原版 MLM、NSP 与任务微调为对象；后续 RoBERTa 的训练结论不倒写成原论文实验。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>若直接让双向网络预测当前位置的原词，它可能从输入中抄答案。BERT 先破坏部分 token，再要求模型利用左右上下文恢复这些位置，由此训练深层双向表示。另一个预训练任务判断句段是否连续，微调时再接入具体任务输出。</p>
-<p>作者在 GLUE、问答等任务上报告提升，并通过预训练目标消融分析双向信息。核心贡献是适合双向编码器的预训练任务与通用微调接口；它不是标准左到右生成模型，也不意味着原版每个训练设计都永远必要。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="017-gpt.html">GPT</a>在每个位置只用左侧前缀，<a href="016-elmo.html">ELMo</a>把两个方向分别训练再组合。共同留下的是：怎样在同一深层表示里持续融合左右信息，同时避免预测词直接出现在输入中？BERT改变自监督问题，通过部分破坏输入训练双向编码器，是与因果生成不同的预训练路线。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念是破坏式自监督、双向注意力、特殊 token、任务微调和抽取式问答。理解它们可以避免把 BERT 当成只会填空的玩具，也避免把所有文本生成能力无条件归给它。</p>
-<h2 id="背景双向访问与标签泄露的矛盾">背景：双向访问与标签泄露的矛盾</h2>
-<p>自然语言理解常需要右侧信息，例如某个词的意思要由后文决定。传统因果语言模型在每个位置只能看左侧；分别训练两个方向再拼接，也不同于多层中持续联合交互。BERT 希望在每一层就整合左右线索。</p>
+<h2 id="一问题设定怎样联合利用左右语境而不把原词直接当答案">一、问题设定：怎样联合利用左右语境而不把原词直接当答案</h2>
+<p>有些词义需要后文才能确定，但直接让双向网络预测未改动的当前位置会给它抄答案的机会。两个单向模型输出拼接也不等于多层持续融合左右线索；本篇因此先破坏部分输入，再恢复被选位置，使深层双向计算获得可训练任务。</p>
 <p>解决方法是改变监督问题。选中的位置被替换、扰动或保留，但监督只针对选中集合；模型不能把整个输入都当成未破坏答案。原版选择 15% token 作为预测位置，并按 80% MASK、10% 随机、10% 原词处理选中项。这里的比例条件是“被选中位置内部”，不能误读成全语料 80% 都被遮盖。</p>
 <p>保留部分原词与随机替换用于缓解预训练与微调输入差异，但并不能完全消除差异。微调通常不含 MASK，而预训练监督稀疏，后续工作正会研究这些效率与配方问题。</p>
 <p>被选中但保持原词的位置确实可能提供容易复制的局部样本；它只是训练混合的一小部分，不能因此推断整个目标退化为恒等复制，也不能声称每个预测位置都完全看不见其真实词。</p>
-<h2 id="方法mlmnsp-与微调">方法：MLM、NSP 与微调</h2>
+<h2 id="二定义被选位置再推导破坏输入上的监督范围">二、定义被选位置，再推导破坏输入上的监督范围</h2>
 <p>设破坏后输入为 <span class="reading-math" data-tex="\widetilde x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>x</mi><mo stretchy="true">~</mo></mover></mrow><annotation encoding="application/x-tex">\widetilde x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6906em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6906em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">x</span></span><span class="svg-align" style="width:calc(100% - 0.0556em);margin-left:0.0556em;top:-3.4306em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.26em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.26em" viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M200 55.538c-77 0-168 73.953-177 73.953-3 0-7
 -2.175-9-5.437L2 97c-1-2-2-4-2-6 0-4 2-7 5-9l20-12C116 12 171 0 207 0c86 0
  114 68 191 68 78 0 168-68 177-68 4 0 7 2 9 5l12 19c1 2.175 2 4.35 2 6.525 0
@@ -69,6 +68,13 @@
 <p>模型同时读取整段破坏输入，输出各选中词概率。这个损失不是标准自回归联合序列似然，不能把它直接当作按链式分解的文本困惑度。</p>
 <p>NSP 使用句段对，判断第二段是否为第一段的真实后续。输入包含 CLS、SEP、位置和句段嵌入。句段标记提供边界，不是语言学句法树，也不保证模型学到深层篇章推理。</p>
 <p>微调时根据任务选择输出：CLS 表示用于分类，token 表示用于标注或抽取式问答。骨干和任务参数联合更新。问答的起止位置预测意味着答案通常取自输入片段，这与开放生成答案的能力边界不同。</p>
+<h3 id="15与801010对应不同分母">15%与80/10/10对应不同分母</h3>
+<p>设原序列为 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span>、被选预测位置集合为 <span class="reading-math" data-tex="M"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi></mrow><annotation encoding="application/x-tex">M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">M</span></span></span></span></span>、损坏序列为 <span class="reading-math" data-tex="\tilde x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>x</mi><mo>~</mo></mover></mrow><annotation encoding="application/x-tex">\tilde x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6679em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">x</span></span><span style="top:-3.35em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">~</span></span></span></span></span></span></span></span></span></span></span>，MLM项为 <span class="reading-math" data-tex="-\sum_{i\in M}\log p(x_i\mid\tilde x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><msub><mo>∑</mo><mrow><mi>i</mi><mo>∈</mo><mi>M</mi></mrow></msub><mi>log</mi><mo>⁡</mo><mi>p</mi><mo stretchy="false">(</mo><msub><mi>x</mi><mi>i</mi></msub><mo>∣</mo><mover accent="true"><mi>x</mi><mo>~</mo></mover><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">-\sum_{i\in M}\log p(x_i\mid\tilde x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0771em;vertical-align:-0.3271em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1786em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">∈</span><span class="mord mathnormal mtight" style="margin-right:0.10903em;">M</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3271em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">x</span></span><span style="top:-3.35em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">~</span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>。集合M先按15%选出，再决定选中位置如何损坏；未改变输入的选中位置仍计算损失。未选位置虽无直接词预测损失，仍通过注意力影响选中位置，所以它们的表示与参数并非没有梯度。双向性指对损坏输入的访问范围，不是把完整答案交给每个预测位置。</p>
+<p>构造“这家[MASK]批准了贷款”。模型利用“批准贷款”与前文恢复目标词。若输入直接保留目标词且每个位置都监督自己，网络可能只复制当前嵌入，学不到所需上下文关系。破坏输入迫使它利用其他线索。</p>
+<h3 id="从掩码损失回追未选位置的梯度">从掩码损失回追未选位置的梯度</h3>
+<p>未被选作预测目标的位置不直接贡献词表交叉熵，却可作为键和值被掩码位置读取，因此仍可能通过注意力收到梯度。检查时把“是否进入损失”与“是否参与计算图”写成两张掩码；若把所有未选位置都detach，就额外改变了原BERT训练，而非仅实现15%的目标选择。</p>
+<p>教法联系：<a href="https://lilianweng.github.io/posts/2020-04-07-the-transformer-family/">Lilian Weng的The Transformer Family</a>。算例为本文自构。</p>
+<h2 id="三分别执行mlm句段任务与带标签微调">三、分别执行MLM、句段任务与带标签微调</h2>
 <pre><code class="language-text">预训练：
     构造连续或非连续句段对
     选15%位置，并按原版比例遮盖、替换或保留
@@ -81,7 +87,9 @@
 测试：使用对应任务格式和独立评价数据
 </code></pre>
 <p>数学目标是两个预训练损失与后续监督目标；机制是深层双向编码；实验指标包括准确率、F1、相关等。所谓“理解”需要由这些具体任务支撑，不是一个单独被直接优化的量。</p>
-<h2 id="实验与证据">实验与证据</h2>
+<p><strong>教学算例。</strong> 1000个token平均选150个监督位置，其中120个替换成MASK、15个随机词、15个保持原样，其余850个不直接计算MLM词损失。说“80%的所有token被遮盖”把条件概率分母换错了；说“仅MASK位置有监督”又漏掉30个位置。一次抽样数量会波动，这些是期望而非每个batch必然精确计数。</p>
+<h2 id="四从主结果走向方向和nsp的受控比较">四、从主结果走向方向和NSP的受控比较</h2>
+<p>在说明监督与微调预算后，再区分跨系统主结果和原条件下的目标消融。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -118,43 +126,40 @@
 <td>最佳重启选择不是随机种子均值，应保留模型选择预算</td>
 </tr>
 </tbody></table></div>
-<p>**证据一，第 3 节与图 1。**预训练和微调接口展示了模型如何统一接入任务。它支持架构通用性，不表示一个微调模型同时解决所有任务。</p>
-<p>**证据二，表 1—4。**多任务结果提供广泛经验支持，但与原 GPT 的比较包含预训练数据和配方差异，不能全部归因于注意力方向。表 1 的聚合指标也有特定口径。</p>
-<p>**证据三，表 5。**BASE 的 SQuAD 开发 F1 为 88.5，去掉 NSP 为 87.9，改为左到右且无 NSP 为 77.8；这是更接近机制隔离的比较，但仍限于原文训练条件。不能据此证明任何规模和数据下 NSP 都不可删除。</p>
+<p><strong>证据一，第 3 节与<a href="#llm-v6-018-figure-1">图1</a>。</strong>预训练和微调接口展示了模型如何统一接入任务。它支持架构通用性，不表示一个微调模型同时解决所有任务。 原图从左到右分别展示预训练与任务微调；不同任务复用初始化，但微调会更新全部参数。图中的箭头表示信息与训练流程，不是效果排名。</p>
+<!-- figure-ref-v6:start:018-f1-1 -->
+<p><a id="llm-v6-018-figure-1"></a></p>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/018-bert-f1-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/018-bert-f1-v6.png" width="1800" height="716" alt="BERT预训练与下游任务微调的完整输入输出结构" loading="lazy"></a><figcaption>原文图形摘引：Jacob Devlin 等，2018，图1，PDF第3页；<a href="https://arxiv.org/html/1810.04805v2#S2.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:018-f1-1 -->
+
+<p><strong>证据二，<a href="https://arxiv.org/html/1810.04805#S3.T1">表1</a>、<a href="https://arxiv.org/html/1810.04805#S4.T2">表2</a>、<a href="https://arxiv.org/html/1810.04805#S4.T3">表3</a>、<a href="https://arxiv.org/html/1810.04805#S4.T4">表4</a>。</strong>多任务结果提供广泛经验支持，但与原 GPT 的比较包含预训练数据和配方差异，不能全部归因于注意力方向。<a href="https://arxiv.org/html/1810.04805#S3.T1">表1</a> 的聚合指标也有特定口径。</p>
+<p><strong>证据三，<a href="#llm-v6-018-table-5">表5</a>。</strong>BASE 的 SQuAD 开发 F1 为 88.5，去掉 NSP 为 87.9，改为左到右且无 NSP 为 77.8；这是更接近机制隔离的比较，但仍限于原文训练条件。不能据此证明任何规模和数据下 NSP 都不可删除。</p>
+<!-- figure-ref-v6:start:018-t5-6-anchor -->
+<p><a id="llm-v6-018-table-5"></a></p>
+<!-- figure-ref-v6:end:018-t5-6-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/018-bert-t5.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/018-bert-t5.png" width="1332" height="510" alt="BERT移除NSP和改为左到右目标后的多任务开发集结果" loading="lazy"></a><figcaption>实验结果表摘引：Jacob Devlin 等，2018，表5，PDF第8页；<a href="https://arxiv.org/pdf/1810.04805#page=8" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <p>原文说明小数据微调有时不稳定，并做不同初始化和数据顺序重启后选开发集最好者。报告单个最终成绩时，若省掉这一过程，会低估复现成本，也高估一次训练就达到相同结果的概率。</p>
-<h2 id="教学例子遮盖的必要性">教学例子：遮盖的必要性</h2>
-<p>构造“这家[MASK]批准了贷款”。模型利用“批准贷款”与前文恢复目标词。若输入直接保留目标词且每个位置都监督自己，网络可能只复制当前嵌入，学不到所需上下文关系。破坏输入迫使它利用其他线索。</p>
+<h2 id="五掩码接口不保证因果生成或事实校验">五、掩码接口不保证因果生成或事实校验</h2>
 <p>但上下文可能允许“银行”“机构”等多个合理答案，训练只给一个真实词。模型拟合的是文本分布，不是逻辑上唯一正确的填空规则。高预测概率也不保证句子陈述真实，常见错误表达仍可能获得高概率。</p>
 <p>抽取式问答例子中，输入写“甲于 1998 年成立”，模型预测年份片段位置。若原文事实错误，模型可以忠实抽取错误年份，得到相应任务分数。文本匹配和事实校验是不同能力，必须另外评价。</p>
-<h2 id="与后续路线的关系">与后续路线的关系</h2>
-<p>RoBERTa 会重新考察训练量、动态遮盖和 NSP，ELECTRA 会让更多位置提供判别信号。这些工作不否定 BERT 的核心双向预训练思想，而是区分架构价值与具体训练配方。</p>
-<p>生成式大模型后来在很多理解任务上强大，也不能倒推双向编码没有意义。应用可能需要低延迟分类、检索表示或抽取，目标和成本不同。模型路线应与任务接口比较，而不是仅按发布时间排序优劣。</p>
-<h2 id="贡献与边界">贡献与边界</h2>
-<p>BERT 把深层双向预训练与简洁任务微调推广到多种语言理解任务。限制包括预训练监督稀疏、MASK 分布差异、长度、数据偏差和小任务稳定性。它没有提供标准因果文本生成接口，也没有显式事实数据库。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>单向预训练限制每个位置同时利用左右语境</td>
-<td>双向Transformer配合MLM/NSP预训练，再以简单接口微调</td>
-<td>掩码预测使双向上下文可联合训练，表示可迁移到多种理解任务</td>
-<td>表1–4主结果，表5方向与NSP消融</td>
-<td>MASK带来训练使用差异；成本、数据与重启选择影响比较，原消融不证明NSP普遍必要</td>
-</tr>
-</tbody></table></div>
+<p>限制包括预训练监督稀疏、MASK 分布差异、长度、数据偏差和小任务稳定性。它没有提供标准因果文本生成接口，也没有显式事实数据库。</p>
+<h2 id="六把本篇机制再推进一步">六、把本篇机制再推进一步</h2>
+<details>
+<summary>1. 没有直接MLM损失的850个位置，是否可以在反传时全部丢掉？</summary>
+
+<p><strong>参考答案</strong>：不能据此判断。它们仍作为被选位置的上下文，通过注意力参与预测，损失可沿这些路径影响其表示与共享参数。监督稀疏指直接预测项稀疏，不代表计算图只有选中位置；要降低计算还需额外算法设计。</p>
+</details>
+
+<h2 id="七重审配方增加监督位置再对照掩码生成">七、重审配方、增加监督位置，再对照掩码生成</h2>
+<p>掩码训练的设计与实现预算可以分别改变。<a href="023-roberta.html">RoBERTa</a>重检训练配方，<a href="031-electra.html">ELECTRA</a>改为判别替换token；前者不应被称为新骨干，后者也不是简单把掩码比例调大。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 15%、80%、10%、10% 各指什么？</strong></p>
 <p>先选择全部 token 中的 15% 作为预测集合，再在该集合内部决定 MASK、随机词或原词的比例。监督只计算选中位置，不能把比例相加成全输入的破坏率。</p>
 <p><strong>2. BERT 的 MLM 损失能否直接当作标准自回归文本概率？</strong></p>
 <p>不能。它在破坏输入条件下预测选中位置，不是逐位置仅依赖前缀的链式分解。若需要文本概率或困惑度，必须明确另行定义的计算协议。</p>
-<p><strong>3. 表 5 能否证明 NSP 永远必要？</strong></p>
+<p><strong>3. <a href="#llm-v6-018-table-5">表5</a> 能否证明 NSP 永远必要？</strong></p>
 <p>不能。它说明在原文相同数据与配方下删除 NSP 的效果。其他训练量、数据组织和目标组合可能改变结果，需要后续受控实验，而不是把一张消融表提升为普遍定理。</p>
 </div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
@@ -167,15 +172,13 @@
 
 **论文**：Jacob Devlin 等，*BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding*，2018 年预印本、NAACL 2019。[原文](https://arxiv.org/abs/1810.04805) · [PDF](https://arxiv.org/pdf/1810.04805)。本文以原版 MLM、NSP 与任务微调为对象；后续 RoBERTa 的训练结论不倒写成原论文实验。
 
-## 一分钟理解
+### 先接住前作的问题
 
-若直接让双向网络预测当前位置的原词，它可能从输入中抄答案。BERT 先破坏部分 token，再要求模型利用左右上下文恢复这些位置，由此训练深层双向表示。另一个预训练任务判断句段是否连续，微调时再接入具体任务输出。
+[GPT](017-gpt.md)在每个位置只用左侧前缀，[ELMo](016-elmo.md)把两个方向分别训练再组合。共同留下的是：怎样在同一深层表示里持续融合左右信息，同时避免预测词直接出现在输入中？BERT改变自监督问题，通过部分破坏输入训练双向编码器，是与因果生成不同的预训练路线。
 
-作者在 GLUE、问答等任务上报告提升，并通过预训练目标消融分析双向信息。核心贡献是适合双向编码器的预训练任务与通用微调接口；它不是标准左到右生成模型，也不意味着原版每个训练设计都永远必要。
+## 一、问题设定：怎样联合利用左右语境而不把原词直接当答案
 
-## 背景：双向访问与标签泄露的矛盾
-
-自然语言理解常需要右侧信息，例如某个词的意思要由后文决定。传统因果语言模型在每个位置只能看左侧；分别训练两个方向再拼接，也不同于多层中持续联合交互。BERT 希望在每一层就整合左右线索。
+有些词义需要后文才能确定，但直接让双向网络预测未改动的当前位置会给它抄答案的机会。两个单向模型输出拼接也不等于多层持续融合左右线索；本篇因此先破坏部分输入，再恢复被选位置，使深层双向计算获得可训练任务。
 
 解决方法是改变监督问题。选中的位置被替换、扰动或保留，但监督只针对选中集合；模型不能把整个输入都当成未破坏答案。原版选择 15% token 作为预测位置，并按 80% MASK、10% 随机、10% 原词处理选中项。这里的比例条件是“被选中位置内部”，不能误读成全语料 80% 都被遮盖。
 
@@ -183,7 +186,7 @@
 
 被选中但保持原词的位置确实可能提供容易复制的局部样本；它只是训练混合的一小部分，不能因此推断整个目标退化为恒等复制，也不能声称每个预测位置都完全看不见其真实词。
 
-## 方法：MLM、NSP 与微调
+## 二、定义被选位置，再推导破坏输入上的监督范围
 
 设破坏后输入为 $\widetilde x$，选中位置集合为 $M$：
 
@@ -196,6 +199,20 @@ $$
 NSP 使用句段对，判断第二段是否为第一段的真实后续。输入包含 CLS、SEP、位置和句段嵌入。句段标记提供边界，不是语言学句法树，也不保证模型学到深层篇章推理。
 
 微调时根据任务选择输出：CLS 表示用于分类，token 表示用于标注或抽取式问答。骨干和任务参数联合更新。问答的起止位置预测意味着答案通常取自输入片段，这与开放生成答案的能力边界不同。
+
+### 15%与80/10/10对应不同分母
+
+设原序列为 $x$、被选预测位置集合为 $M$、损坏序列为 $\tilde x$，MLM项为 $-\sum_{i\in M}\log p(x_i\mid\tilde x)$。集合M先按15%选出，再决定选中位置如何损坏；未改变输入的选中位置仍计算损失。未选位置虽无直接词预测损失，仍通过注意力影响选中位置，所以它们的表示与参数并非没有梯度。双向性指对损坏输入的访问范围，不是把完整答案交给每个预测位置。
+
+构造“这家[MASK]批准了贷款”。模型利用“批准贷款”与前文恢复目标词。若输入直接保留目标词且每个位置都监督自己，网络可能只复制当前嵌入，学不到所需上下文关系。破坏输入迫使它利用其他线索。
+
+### 从掩码损失回追未选位置的梯度
+
+未被选作预测目标的位置不直接贡献词表交叉熵，却可作为键和值被掩码位置读取，因此仍可能通过注意力收到梯度。检查时把“是否进入损失”与“是否参与计算图”写成两张掩码；若把所有未选位置都detach，就额外改变了原BERT训练，而非仅实现15%的目标选择。
+
+教法联系：[Lilian Weng的The Transformer Family](https://lilianweng.github.io/posts/2020-04-07-the-transformer-family/)。算例为本文自构。
+
+## 三、分别执行MLM、句段任务与带标签微调
 
 ```text
 预训练：
@@ -212,7 +229,11 @@ NSP 使用句段对，判断第二段是否为第一段的真实后续。输入�
 
 数学目标是两个预训练损失与后续监督目标；机制是深层双向编码；实验指标包括准确率、F1、相关等。所谓“理解”需要由这些具体任务支撑，不是一个单独被直接优化的量。
 
-## 实验与证据
+**教学算例。** 1000个token平均选150个监督位置，其中120个替换成MASK、15个随机词、15个保持原样，其余850个不直接计算MLM词损失。说“80%的所有token被遮盖”把条件概率分母换错了；说“仅MASK位置有监督”又漏掉30个位置。一次抽样数量会波动，这些是期望而非每个batch必然精确计数。
+
+## 四、从主结果走向方向和NSP的受控比较
+
+在说明监督与微调预算后，再区分跨系统主结果和原条件下的目标消融。
 
 | 项目 | 原文范围 |
 |---|---|
@@ -224,38 +245,47 @@ NSP 使用句段对，判断第二段是否为第一段的真实后续。输入�
 | 指标 | 任务不同，GLUE 表中平均明确排除 WNLI，不能视为完全相同官方聚合 |
 | 不确定性 | 最佳重启选择不是随机种子均值，应保留模型选择预算 |
 
-**证据一，第 3 节与图 1。**预训练和微调接口展示了模型如何统一接入任务。它支持架构通用性，不表示一个微调模型同时解决所有任务。
+**证据一，第 3 节与[图1](#llm-v6-018-figure-1)。**预训练和微调接口展示了模型如何统一接入任务。它支持架构通用性，不表示一个微调模型同时解决所有任务。 原图从左到右分别展示预训练与任务微调；不同任务复用初始化，但微调会更新全部参数。图中的箭头表示信息与训练流程，不是效果排名。
 
-**证据二，表 1—4。**多任务结果提供广泛经验支持，但与原 GPT 的比较包含预训练数据和配方差异，不能全部归因于注意力方向。表 1 的聚合指标也有特定口径。
+&lt;!-- figure-ref-v6:start:018-f1-1 --&gt;
+&lt;a id=&quot;llm-v6-018-figure-1&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/018-bert-f1-v6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/018-bert-f1-v6.png&quot; width=&quot;1800&quot; height=&quot;716&quot; alt=&quot;BERT预训练与下游任务微调的完整输入输出结构&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原文图形摘引：Jacob Devlin 等，2018，图1，PDF第3页；&lt;a href=&quot;https://arxiv.org/html/1810.04805v2#S2.F1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:018-f1-1 --&gt;
 
-**证据三，表 5。**BASE 的 SQuAD 开发 F1 为 88.5，去掉 NSP 为 87.9，改为左到右且无 NSP 为 77.8；这是更接近机制隔离的比较，但仍限于原文训练条件。不能据此证明任何规模和数据下 NSP 都不可删除。
+**证据二，[表1](https://arxiv.org/html/1810.04805#S3.T1)、[表2](https://arxiv.org/html/1810.04805#S4.T2)、[表3](https://arxiv.org/html/1810.04805#S4.T3)、[表4](https://arxiv.org/html/1810.04805#S4.T4)。**多任务结果提供广泛经验支持，但与原 GPT 的比较包含预训练数据和配方差异，不能全部归因于注意力方向。[表1](https://arxiv.org/html/1810.04805#S3.T1) 的聚合指标也有特定口径。
+
+**证据三，[表5](#llm-v6-018-table-5)。**BASE 的 SQuAD 开发 F1 为 88.5，去掉 NSP 为 87.9，改为左到右且无 NSP 为 77.8；这是更接近机制隔离的比较，但仍限于原文训练条件。不能据此证明任何规模和数据下 NSP 都不可删除。
+
+&lt;!-- figure-ref-v6:start:018-t5-6-anchor --&gt;
+&lt;a id=&quot;llm-v6-018-table-5&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:018-t5-6-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/018-bert-t5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/018-bert-t5.png&quot; width=&quot;1332&quot; height=&quot;510&quot; alt=&quot;BERT移除NSP和改为左到右目标后的多任务开发集结果&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Jacob Devlin 等，2018，表5，PDF第8页；&lt;a href=&quot;https://arxiv.org/pdf/1810.04805#page=8&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 原文说明小数据微调有时不稳定，并做不同初始化和数据顺序重启后选开发集最好者。报告单个最终成绩时，若省掉这一过程，会低估复现成本，也高估一次训练就达到相同结果的概率。
 
-## 教学例子：遮盖的必要性
-
-构造“这家[MASK]批准了贷款”。模型利用“批准贷款”与前文恢复目标词。若输入直接保留目标词且每个位置都监督自己，网络可能只复制当前嵌入，学不到所需上下文关系。破坏输入迫使它利用其他线索。
+## 五、掩码接口不保证因果生成或事实校验
 
 但上下文可能允许“银行”“机构”等多个合理答案，训练只给一个真实词。模型拟合的是文本分布，不是逻辑上唯一正确的填空规则。高预测概率也不保证句子陈述真实，常见错误表达仍可能获得高概率。
 
 抽取式问答例子中，输入写“甲于 1998 年成立”，模型预测年份片段位置。若原文事实错误，模型可以忠实抽取错误年份，得到相应任务分数。文本匹配和事实校验是不同能力，必须另外评价。
 
-## 与后续路线的关系
-
-RoBERTa 会重新考察训练量、动态遮盖和 NSP，ELECTRA 会让更多位置提供判别信号。这些工作不否定 BERT 的核心双向预训练思想，而是区分架构价值与具体训练配方。
-
-生成式大模型后来在很多理解任务上强大，也不能倒推双向编码没有意义。应用可能需要低延迟分类、检索表示或抽取，目标和成本不同。模型路线应与任务接口比较，而不是仅按发布时间排序优劣。
-
-## 贡献与边界
-
-BERT 把深层双向预训练与简洁任务微调推广到多种语言理解任务。限制包括预训练监督稀疏、MASK 分布差异、长度、数据偏差和小任务稳定性。它没有提供标准因果文本生成接口，也没有显式事实数据库。
+限制包括预训练监督稀疏、MASK 分布差异、长度、数据偏差和小任务稳定性。它没有提供标准因果文本生成接口，也没有显式事实数据库。
 
 五个前置概念是破坏式自监督、双向注意力、特殊 token、任务微调和抽取式问答。理解它们可以避免把 BERT 当成只会填空的玩具，也避免把所有文本生成能力无条件归给它。
 
+## 六、把本篇机制再推进一步
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 单向预训练限制每个位置同时利用左右语境 | 双向Transformer配合MLM/NSP预训练，再以简单接口微调 | 掩码预测使双向上下文可联合训练，表示可迁移到多种理解任务 | 表1–4主结果，表5方向与NSP消融 | MASK带来训练使用差异；成本、数据与重启选择影响比较，原消融不证明NSP普遍必要 |
+&lt;details&gt;
+&lt;summary&gt;1. 没有直接MLM损失的850个位置，是否可以在反传时全部丢掉？&lt;/summary&gt;
+
+**参考答案**：不能据此判断。它们仍作为被选位置的上下文，通过注意力参与预测，损失可沿这些路径影响其表示与共享参数。监督稀疏指直接预测项稀疏，不代表计算图只有选中位置；要降低计算还需额外算法设计。
+
+&lt;/details&gt;
+
+## 七、重审配方、增加监督位置，再对照掩码生成
+
+掩码训练的设计与实现预算可以分别改变。[RoBERTa](023-roberta.md)重检训练配方，[ELECTRA](031-electra.md)改为判别替换token；前者不应被称为新骨干，后者也不是简单把掩码比例调大。
 
 ## 自测与参考答案
 
@@ -267,7 +297,7 @@ BERT 把深层双向预训练与简洁任务微调推广到多种语言理解任
 
 不能。它在破坏输入条件下预测选中位置，不是逐位置仅依赖前缀的链式分解。若需要文本概率或困惑度，必须明确另行定义的计算协议。
 
-**3. 表 5 能否证明 NSP 永远必要？**
+**3. [表5](#llm-v6-018-table-5) 能否证明 NSP 永远必要？**
 
 不能。它说明在原文相同数据与配方下删除 NSP 的效果。其他训练量、数据组织和目标组合可能改变结果，需要后续受控实验，而不是把一张消融表提升为普遍定理。
 </textarea>

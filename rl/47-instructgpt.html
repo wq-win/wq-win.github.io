@@ -42,15 +42,11 @@
                 <span class="text-gray-500">InstructGPT：从预测下一个词，到学习人类更偏好的回答</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="6d3a485feb98b092ddaacbc38e934b66d6ca2377234a9c2f9f7c4be6fcf8cc97"><h1>第 47 天｜InstructGPT：从预测下一个词，到学习人类更偏好的回答</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="558e943d231925a311d0f296bb0dad0aebbc69dd3a0aa2727a7a7ed824d6a5b7"><h1>第 47 天｜InstructGPT：从预测下一个词，到学习人类更偏好的回答</h1>
 <p><a href="index.html">系列首页</a> · <a href="46-iql.html">上一篇</a> · <a href="48-dreamerv3.html">下一篇</a></p>
 <p><strong>原论文与版本</strong>：Ouyang 等，<em>Training language models to follow instructions with human feedback</em>，2022。<a href="https://arxiv.org/html/2203.02155v1">正文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p><strong>研究问题</strong>：语言模型的输出与用户意图不一致</p>
-<p><strong>旧方法卡点</strong>：更大的预训练模型不自动更遵循指令，也可能输出无帮助或不真实内容</p>
-<p><strong>作者主张</strong>：用示范SFT、成对偏好奖励模型、PPO及预训练混合更新进行对齐</p>
-<p><strong>论文证据</strong>：特定API提示分布的人类评价中1.3B对齐模型优于175B基础模型</p>
-<p><strong>一句话</strong>：在语言模型RLHF；提示条件的序列策略学习中，作者通过“用示范SFT、成对偏好奖励模型、PPO及预训练混合更新进行对齐”应对“语言模型的输出与用户意图不一致”这一问题；证据边界或代价是：不是全面能力超越，标注群体、奖励投机与能力回退仍重要。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="27-ppo.html">第27天 PPO</a>提供了控制策略更新幅度的优化器，却没有告诉语言模型什么回答值得奖励；<a href="49-dpo.html">第49天 DPO</a>以后才会重写偏好优化接口。本篇先看InstructGPT怎样把人类示范、排序奖励、PPO和预训练保持组合起来。这是模块组合的历史关系，与上一篇<a href="46-iql.html">IQL</a>的离线控制没有直接继承关系。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <ol>
 <li><strong>SFT</strong>：用示范监督微调语言模型。</li>
@@ -59,8 +55,9 @@
 <li><strong>Critic</strong>：预测RL训练中的未来回报。</li>
 <li><strong>对齐代价</strong>：改善偏好指标伴随其他能力下降。</li>
 </ol>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
-<p>本篇将“语言模型的输出与用户意图不一致”放在语言模型RLHF；提示条件的序列策略学习的边界内研究。更大的预训练模型不自动更遵循指令，也可能输出无帮助或不真实内容。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<h2 id="一问题设定怎样把用户偏好变成语言模型的训练信号">一、问题设定：怎样把用户偏好变成语言模型的训练信号</h2>
+<p>预训练语言模型擅长延续文本，但用户要的是遵循指令、有帮助且尽可能真实的回答。扩大模型不自动把这两个目标变成同一个目标，因此本篇引入人类示范和同提示回答排序，研究这些反馈能否改变输出。</p>
+<p>生成过程可以按token视为策略，但奖励模型评价的是完整回答。接下来的关键不只是“使用RLHF”，而是辨清每个网络、每类数据和每项约束的职责，避免把人类偏好分数、Critic价值与基础语言能力混成一个指标。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -89,13 +86,22 @@
 <td>EOS或生成长度上限，截断的奖励语义需明确</td>
 </tr>
 </tbody></table></div>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
-<p>SFT教模型回答的基本样式；奖励模型把人类比较变成标量；PPO探索并增加高奖励回答概率。Critic预测未来训练回报，奖励模型判断偏好，二者角色不同。π_old生成本轮样本，π_ref约束偏离SFT，不能混用。</p>
-<h3 id="关键公式与符号">关键公式与符号</h3>
+<h2 id="二接通sft排序奖励与两种策略参照">二、接通SFT、排序奖励与两种策略参照</h2>
+<p>InstructGPT不是一个新策略梯度公式，而是把三个不同监督接口接起来。SFT先学示范回答；奖励模型用同一提示下的人类排序拟合相对偏好；PPO再从当前策略采样，让输出获得更高的学习奖励。奖励模型评估完整回答的好坏，PPO的价值函数预测后续训练回报，二者即使初始化相关也承担不同统计任务。</p>
+<h3 id="从排序概率推导rm损失">从排序概率推导RM损失</h3>
 <p><span class="reading-math" data-tex="L_{RM}=-E\log\sigma(r_\phi(x,y_w)-r_\phi(x,y_l))."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mrow><mi>R</mi><mi>M</mi></mrow></msub><mo>=</mo><mo>−</mo><mi>E</mi><mi>log</mi><mo>⁡</mo><mi>σ</mi><mo stretchy="false">(</mo><msub><mi>r</mi><mi>ϕ</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo separator="true">,</mo><msub><mi>y</mi><mi>w</mi></msub><mo stretchy="false">)</mo><mo>−</mo><msub><mi>r</mi><mi>ϕ</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo separator="true">,</mo><msub><mi>y</mi><mi>l</mi></msub><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_{RM}=-E\log\sigma(r_\phi(x,y_w)-r_\phi(x,y_l)).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.10903em;">RM</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord">−</span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">ϕ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">ϕ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">))</span><span class="mord">.</span></span></span></span></span></span>
 RL目标示意 <span class="reading-math" data-tex="E[r_\phi(x,y)-\beta\log(\pi_\theta(y|x)/\pi_{ref}(y|x))]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><mo stretchy="false">[</mo><msub><mi>r</mi><mi>ϕ</mi></msub><mo stretchy="false">(</mo><mi>x</mi><mo separator="true">,</mo><mi>y</mi><mo stretchy="false">)</mo><mo>−</mo><mi>β</mi><mi>log</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>y</mi><mi mathvariant="normal">∣</mi><mi>x</mi><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><msub><mi>π</mi><mrow><mi>r</mi><mi>e</mi><mi>f</mi></mrow></msub><mo stretchy="false">(</mo><mi>y</mi><mi mathvariant="normal">∣</mi><mi>x</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">E[r_\phi(x,y)-\beta\log(\pi_\theta(y|x)/\pi_{ref}(y|x))]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">ϕ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mord">∣</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord">/</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">re</span><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mord">∣</span><span class="mord mathnormal">x</span><span class="mclose">))]</span></span></span></span></span>；PPO-ptx再加入预训练文本log似然。并非直接对离散采样后的RM分数穿透求导。</p>
-<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
-<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<p><strong>偏好标签怎样变成RM损失</strong>：<span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 是提示，<span class="reading-math" data-tex="y_w/y_l"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>y</mi><mi>w</mi></msub><mi mathvariant="normal">/</mi><msub><mi>y</mi><mi>l</mi></msub></mrow><annotation encoding="application/x-tex">y_w/y_l</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是同提示下被排在更前/更后的回答，<span class="reading-math" data-tex="r_\phi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>r</mi><mi>ϕ</mi></msub></mrow><annotation encoding="application/x-tex">r_\phi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">ϕ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是奖励模型标量，<span class="reading-math" data-tex="\sigma(u)=1/(1+e^{-u})"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>σ</mi><mo stretchy="false">(</mo><mi>u</mi><mo stretchy="false">)</mo><mo>=</mo><mn>1</mn><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mn>1</mn><mo>+</mo><msup><mi>e</mi><mrow><mo>−</mo><mi>u</mi></mrow></msup><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\sigma(u)=1/(1+e^{-u})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="mopen">(</span><span class="mord mathnormal">u</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0213em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7713em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mathnormal mtight">u</span></span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>。令模型预测“前者胜出”的概率为 <span class="reading-math" data-tex="p=\sigma(r_w-r_l)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo>=</mo><mi>σ</mi><mo stretchy="false">(</mo><msub><mi>r</mi><mi>w</mi></msub><mo>−</mo><msub><mi>r</mi><mi>l</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">p=\sigma(r_w-r_l)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，观察到前者胜出后最小化负对数似然 <span class="reading-math" data-tex="-\log p"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><mi>log</mi><mo>⁡</mo><mi>p</mi></mrow><annotation encoding="application/x-tex">-\log p</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span></span></span></span></span>，就得到上式。梯度推动奖励差增大，但同一提示下所有奖励同时加一个常数不会改变比较概率，所以排序监督本身不提供绝对奖励零点。随后PPO使用这个学得的评价信号，RM损失不等于策略损失。见<a href="https://arxiv.org/html/2203.02155v1#S3.SS2">原文§3.2奖励模型训练</a>。</p>
+<p>在RL阶段还要分清两个比较对象。<span class="reading-math" data-tex="\pi_{old}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>π</mi><mrow><mi>o</mi><mi>l</mi><mi>d</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\pi_{old}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是本轮采样策略，用于PPO的重要性比与更新控制；<span class="reading-math" data-tex="\pi_{ref}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>π</mi><mrow><mi>r</mi><mi>e</mi><mi>f</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\pi_{ref}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">re</span><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是SFT参考策略，用于逐token的对数概率差惩罚。前者随采样轮次变化，后者在这段训练中提供行为锚点。裁剪旧策略比率不能代替参考KL，参考KL也不能代替PPO更新稳定机制。</p>
+<p>PPO-ptx进一步在目标中混入预训练文本的对数似然。它不是把预训练文本伪装成人类奖励，而是在偏好优化之外保留语言建模梯度。奖励偏好、参考约束、预训练保持分别回答“朝哪里走”“离起点多远”“哪些基础能力别丢”，三个系数的作用不能压缩成一个所谓对齐强度。</p>
+<h3 id="新一轮更新开始时哪个概率比应等于1">新一轮更新开始时，哪个概率比应等于1</h3>
+<p>刚用当前策略完成采样、尚未进行参数更新时，新策略与采样旧策略相同，PPO比率应为1；它与SFT参考的对数比却可能非零。这个同批次检查能发现把参考概率误放进PPO分母的问题，前提是两次概率计算使用相同的token掩码与计算设置。</p>
+<h3 id="分别算参考惩罚旧策略裁剪与ptx梯度">分别算参考惩罚、旧策略裁剪与ptx梯度</h3>
+<p>以下是可手算的教学构造，不是论文实验。</p>
+<p>把一条两token回答的偏好奖励设为2，策略相对参考的逐token对数比为0.4与0.6，参考KL系数为0.1。该采样回答的整段惩罚是0.1(0.4+0.6)=0.1，正则化回报为1.9。单条轨迹的对数比和不保证非负，KL的非负性是适当分布下的期望性质。</p>
+<p>现在令某token的新旧概率比为1.3、优势为1、PPO ε=0.2，则该token裁剪代理贡献为1.2；这里分母是旧策略，不是刚才的SFT参考。即使PPO比率保持在附近，累计多轮也可能远离参考策略。</p>
+<p>最后加入一条预训练文本，其梯度独立来自正确下一个token的似然。它可以缓解能力遗忘，但不会自动提高当前回答的人类排序分数，这正是多目标训练可能发生权衡的地方。</p>
+<h2 id="三冻结rm与参考策略交替生成和ppo更新">三、冻结RM与参考策略，交替生成和PPO更新</h2>
 <pre><code class="language-text">收集人类示范，训练SFT策略
 收集同提示候选的人类排序，训练RM
 固定参考策略与RM，初始化Actor/Critic
@@ -108,29 +114,7 @@ RL目标示意 <span class="reading-math" data-tex="E[r_\phi(x,y)-\beta\log(\pi_
 用独立人类评价及能力任务检查效果
 输出：对齐策略
 </code></pre>
-<p><strong>实现要点</strong>：不是全面能力超越，标注群体、奖励投机与能力回退仍重要。</p>
-<h3 id="三种优化要分开">三种“优化”要分开</h3>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>层次</th>
-<th>这里具体是什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>数学目标／训练损失</td>
-<td>RM偏好分类；PPO优化RM分数减参考KL，ptx另加预训练似然</td>
-</tr>
-<tr>
-<td>机制改变</td>
-<td>用示范SFT、成对偏好奖励模型、PPO及预训练混合更新进行对齐</td>
-</tr>
-<tr>
-<td>评价改善的指标</td>
-<td>人类偏好胜率、有帮助／真实性及能力回退</td>
-</tr>
-</tbody></table></div>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<h2 id="四读人类偏好图并把ptx的能力与成本另列">四、读人类偏好图，并把ptx的能力与成本另列</h2>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -167,77 +151,60 @@ RL目标示意 <span class="reading-math" data-tex="E[r_\phi(x,y)-\beta\log(\pi_
 <td>偏好优化是否改善用户感受，混合预训练能否缓解回退</td>
 </tr>
 </tbody></table></div>
-<p><strong>实验解读（本文分析）</strong>：不是全面能力超越，标注群体、奖励投机与能力回退仍重要。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>证据定位</th>
-<th>比较什么／观察到什么</th>
-<th>支持什么</th>
-<th>不能证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>图1</td>
-<td>不同规模模型的人类偏好</td>
-<td>小对齐模型可优于大基础模型</td>
-<td>不代表所有智能能力更强</td>
-</tr>
-<tr>
-<td>§3训练流程</td>
-<td>三阶段监督来源</td>
-<td>明确RL依赖数据与RM</td>
-<td>不等于从零靠RL学语言</td>
-</tr>
-<tr>
-<td>能力评价及附录E.6</td>
-<td>PPO与ptx混合的回退</td>
-<td>支持混合目标缓解部分退化</td>
-<td>不消除全部对齐代价</td>
-</tr>
-<tr>
-<td>偏差／真实性分析（具体图表编号本文未核实）</td>
-<td>多项行为评价</td>
-<td>显示有限改善</td>
-<td>不能承诺绝对真实安全</td>
-</tr>
-</tbody></table></div>
-<p><strong>结论边界</strong>：特定API提示分布的人类评价中1.3B对齐模型优于175B基础模型。不是全面能力超越，标注群体、奖励投机与能力回退仍重要。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p><strong>作者承认</strong>偏好来自特定人群，能力与对齐并非完全一致。<strong>本文分析</strong>：奖励模型容易被过度优化，人工胜率也依赖问题分布、盲评与回答长度。新增监督和训练算力必须计入小模型比较。</p>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<h3 id="教学例子">教学例子</h3>
-<p>以下是教学推演，不是原论文实验。</p>
-<p>基础模型续写“请解释重力”可能产出相似网页文本；SFT学会解释格式，RM偏好清晰回答，PPO提升其概率。但若RM把长回答误判为更好，策略可能学会啰嗦而非更准确。</p>
-<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
-<ol>
-<li>RM和Critic为何不能混为一谈？</li>
-<li>如何检查回答变长造成的评价偏差？</li>
-<li>小对齐模型优于大基础模型的结论边界在哪？</li>
-</ol>
-<h2 id="方法与证据总结">方法与证据总结</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据／理论证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>语言模型的输出与用户意图不一致</td>
-<td>用示范SFT、成对偏好奖励模型、PPO及预训练混合更新进行对齐</td>
-<td>人类比较把目标从预测文本转向更有帮助的输出</td>
-<td>特定API提示分布的人类评价中1.3B对齐模型优于175B基础模型</td>
-<td>不是全面能力超越，标注群体、奖励投机与能力回退仍重要</td>
-</tr>
-</tbody></table></div>
-<h2 id="资料与阅读范围">资料与阅读范围</h2>
-<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
-<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h3 id="图1模型规模与相对sft偏好胜率">图1：模型规模与相对SFT偏好胜率</h3>
+<!-- inline-evidence-v2:start -->
+
+<!-- figure-ref-v6:start:rl-47-figure-1 -->
+<p><span id="rl-47-figure-1"></span></p>
+<!-- figure-ref-v6:end:rl-47-figure-1 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/47-instructgpt-figure-1.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/47-instructgpt-figure-1.png" width="1600" height="900" alt="不同规模GPT、SFT、PPO和PPO-ptx相对175B SFT的人类偏好胜率" loading="lazy"></a><figcaption>原论文图形摘引；Ouyang等，2022，Figure 1；原HTML图形。<a href="https://arxiv.org/html/2203.02155v1#S0.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+
+<p>横轴是模型参数规模1.3B、6B、175B，按对数尺度排布；纵轴是相对同一个175B SFT参考回答的偏好胜率，0.5虚线表示打平参考。不同颜色区分训练方式，因此应先在同一规模比较训练改变，再跨规模比较；图中的误差条是评价的95%置信区间，不是三种规模训练出来的方差。小模型偏好更高可支持“训练方式很重要”，却不能把纵轴换成知识或推理总能力。</p>
+<!-- inline-evidence-v2:end -->
+
+<p>偏好图必须结合提示分布与标注者群体阅读。真实性与偏差还需独立测试；下面的PPO-ptx对照进一步检查偏好优化是否伴随基础能力回退。<a href="https://arxiv.org/html/2203.02155v1">核对原文</a>。</p>
+<h3 id="ppo-ptx缓解回退时新增了多少训练">PPO-ptx缓解回退时新增了多少训练</h3>
+<p>附录E.6将对齐税与PPO-ptx联系起来：混入预训练梯度改善部分DROP/SQuAD能力回退，而仅增大KL系数并未获得同样修复。报告配置中预训练样本量为RL episode数量的8倍，带来额外计算，因此PPO与PPO-ptx不能只按RL步数比较成本。</p>
+<h2 id="五偏好改善的范围由谁评价评什么来界定">五、偏好改善的范围由谁评价、评什么来界定</h2>
+<p>特定API提示分布上，1.3B对齐模型可在人类偏好中优于175B基础模型，跨规模比较仍须计入新增监督与训练算力。偏好来自特定标注群体，胜率又受盲评、回答长度和问题分布影响；奖励投机、能力回退与真实性要另测，不能扩写成全面能力超越。</p>
+<h2 id="六三个值得继续追问的问题与参考答案">六、三个值得继续追问的问题与参考答案</h2>
+<details>
+<summary>1. RM和Critic为何不能混为一谈？</summary>
+
+<p>RM 把提示和回答映射为由偏好数据学习的奖励，用来定义优化信号；Critic 预测当前策略在前缀后能获得的未来回报，用于基线和优势估计，随策略训练而变化。它们可以有相似架构甚至初始化来源，监督对象和更新时机仍不同。省去Critic不代表不需要RM，RM分数也不等于对当前策略价值的无偏估计。</p>
+</details>
+
+<details>
+<summary>2. 如何检查回答变长造成的评价偏差？</summary>
+
+<p>记录并分层比较回答长度、内容正确性、信息密度与盲评偏好，做长度匹配或在相近长度区间比较；还可加入无信息冗长控制回答，检测评审是否奖励篇幅。统计校正不能自动证明因果，因为长度也可能承载真实解释价值。应报告原始与长度控制结果，并用独立评审或客观任务分数复核。</p>
+</details>
+
+<details>
+<summary>3. 小对齐模型优于大基础模型的结论边界在哪？</summary>
+
+<p>结论限定于所选API提示分布、标注群体、模型版本和人类偏好评价，小对齐模型更贴合指令并不意味着知识、推理、代码或所有语言能力全面超过更大的基础模型。还要区分PPO与PPO-ptx，后者混入预训练目标以缓解部分能力回退。应查分项任务与标注分歧，不能把一个偏好胜率扩写成通用智能排名。</p>
+</details>
+
+<h2 id="七沿未解决的问题继续读">七、沿未解决的问题继续读</h2>
+<ul>
+<li><p><a href="49-dpo.html">DPO</a>：必须先训练显式RM，再做在线PPO循环吗？DPO从这类KL正则奖励目标的解析策略关系导出直接偏好损失，改变的是优化接口。（后作问题承接）</p>
+</li>
+<li><p><a href="52-grpo.html">DeepSeekMath／GRPO</a>：如果仍做在线策略优化，独立Critic的基线能否由同题多回答替代？GRPO沿PPO裁剪路线改变优势估计，是优化模块的后续发展，仍需奖励来源。（后续模块路线）</p>
+</li>
+</ul>
+<h3 id="原文核对与路线出处">原文核对与路线出处</h3>
+<ul>
+<li><p><a href="https://arxiv.org/html/2203.02155v1">原论文与图表入口</a>。三阶段训练方法、PPO-ptx目标及附录E.6能力回退与预算讨论。</p>
+</li>
+<li><p><strong>模块组合</strong>：<a href="27-ppo.html">PPO</a>。InstructGPT将PPO作为策略优化器，与奖励模型和参考约束组合。</p>
+</li>
+<li><p><strong>后作承接本篇</strong>：<a href="49-dpo.html">DPO</a>。后作DPO重新参数化这类KL正则偏好目标，省去显式奖励模型与在线RL循环。</p>
+</li>
+<li><p>教学阅读：<a href="https://huggingface.co/blog/rlhf">Illustrating Reinforcement Learning from Human Feedback</a>。仅借用本节的解释顺序与接口视角；具体算法、版本和实验以本篇原论文为准。</p>
+</li>
+</ul>
 <h2 id="自测两题">自测两题</h2>
 <p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
 <p><strong>问题 1</strong>：奖励模型与 Critic 都输出分数，为什么不是同一个东西？</p>
@@ -256,21 +223,15 @@ RL目标示意 <span class="reading-math" data-tex="E[r_\phi(x,y)-\beta\log(\pi_
 
 **原论文与版本**：Ouyang 等，*Training language models to follow instructions with human feedback*，2022。[正文](https://arxiv.org/html/2203.02155v1)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：语言模型的输出与用户意图不一致
+[第27天 PPO](27-ppo.md)提供了控制策略更新幅度的优化器，却没有告诉语言模型什么回答值得奖励；[第49天 DPO](49-dpo.md)以后才会重写偏好优化接口。本篇先看InstructGPT怎样把人类示范、排序奖励、PPO和预训练保持组合起来。这是模块组合的历史关系，与上一篇[IQL](46-iql.md)的离线控制没有直接继承关系。
 
-**旧方法卡点**：更大的预训练模型不自动更遵循指令，也可能输出无帮助或不真实内容
+## 一、问题设定：怎样把用户偏好变成语言模型的训练信号
 
-**作者主张**：用示范SFT、成对偏好奖励模型、PPO及预训练混合更新进行对齐
+预训练语言模型擅长延续文本，但用户要的是遵循指令、有帮助且尽可能真实的回答。扩大模型不自动把这两个目标变成同一个目标，因此本篇引入人类示范和同提示回答排序，研究这些反馈能否改变输出。
 
-**论文证据**：特定API提示分布的人类评价中1.3B对齐模型优于175B基础模型
-
-**一句话**：在语言模型RLHF；提示条件的序列策略学习中，作者通过“用示范SFT、成对偏好奖励模型、PPO及预训练混合更新进行对齐”应对“语言模型的输出与用户意图不一致”这一问题；证据边界或代价是：不是全面能力超越，标注群体、奖励投机与能力回退仍重要。
-
-## 二、研究背景与问题定义
-
-本篇将“语言模型的输出与用户意图不一致”放在语言模型RLHF；提示条件的序列策略学习的边界内研究。更大的预训练模型不自动更遵循指令，也可能输出无帮助或不真实内容。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+生成过程可以按token视为策略，但奖励模型评价的是完整回答。接下来的关键不只是“使用RLHF”，而是辨清每个网络、每类数据和每项约束的职责，避免把人类偏好分数、Critic价值与基础语言能力混成一个指标。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -280,18 +241,36 @@ RL目标示意 <span class="reading-math" data-tex="E[r_\phi(x,y)-\beta\log(\pi_
 | 奖励或学习信号 | 奖励模型终局评分减参考策略KL；PPO-ptx另加预训练目标 |
 | 终止／边界 | EOS或生成长度上限，截断的奖励语义需明确 |
 
-## 三、方法：到底改了什么
+## 二、接通SFT、排序奖励与两种策略参照
 
-SFT教模型回答的基本样式；奖励模型把人类比较变成标量；PPO探索并增加高奖励回答概率。Critic预测未来训练回报，奖励模型判断偏好，二者角色不同。π_old生成本轮样本，π_ref约束偏离SFT，不能混用。
+InstructGPT不是一个新策略梯度公式，而是把三个不同监督接口接起来。SFT先学示范回答；奖励模型用同一提示下的人类排序拟合相对偏好；PPO再从当前策略采样，让输出获得更高的学习奖励。奖励模型评估完整回答的好坏，PPO的价值函数预测后续训练回报，二者即使初始化相关也承担不同统计任务。
 
-### 关键公式与符号
+### 从排序概率推导RM损失
 
 $$L_{RM}=-E\log\sigma(r_\phi(x,y_w)-r_\phi(x,y_l)).$$
 RL目标示意 $E[r_\phi(x,y)-\beta\log(\pi_\theta(y|x)/\pi_{ref}(y|x))]$；PPO-ptx再加入预训练文本log似然。并非直接对离散采样后的RM分数穿透求导。
 
-### 输入 → 处理 → 输出：教学伪代码
+**偏好标签怎样变成RM损失**：$x$ 是提示，$y_w/y_l$ 是同提示下被排在更前/更后的回答，$r_\phi$ 是奖励模型标量，$\sigma(u)=1/(1+e^{-u})$。令模型预测“前者胜出”的概率为 $p=\sigma(r_w-r_l)$，观察到前者胜出后最小化负对数似然 $-\log p$，就得到上式。梯度推动奖励差增大，但同一提示下所有奖励同时加一个常数不会改变比较概率，所以排序监督本身不提供绝对奖励零点。随后PPO使用这个学得的评价信号，RM损失不等于策略损失。见[原文§3.2奖励模型训练](https://arxiv.org/html/2203.02155v1#S3.SS2)。
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+在RL阶段还要分清两个比较对象。$\pi_{old}$ 是本轮采样策略，用于PPO的重要性比与更新控制；$\pi_{ref}$ 是SFT参考策略，用于逐token的对数概率差惩罚。前者随采样轮次变化，后者在这段训练中提供行为锚点。裁剪旧策略比率不能代替参考KL，参考KL也不能代替PPO更新稳定机制。
+
+PPO-ptx进一步在目标中混入预训练文本的对数似然。它不是把预训练文本伪装成人类奖励，而是在偏好优化之外保留语言建模梯度。奖励偏好、参考约束、预训练保持分别回答“朝哪里走”“离起点多远”“哪些基础能力别丢”，三个系数的作用不能压缩成一个所谓对齐强度。
+
+### 新一轮更新开始时，哪个概率比应等于1
+
+刚用当前策略完成采样、尚未进行参数更新时，新策略与采样旧策略相同，PPO比率应为1；它与SFT参考的对数比却可能非零。这个同批次检查能发现把参考概率误放进PPO分母的问题，前提是两次概率计算使用相同的token掩码与计算设置。
+
+### 分别算参考惩罚、旧策略裁剪与ptx梯度
+
+以下是可手算的教学构造，不是论文实验。
+
+把一条两token回答的偏好奖励设为2，策略相对参考的逐token对数比为0.4与0.6，参考KL系数为0.1。该采样回答的整段惩罚是0.1(0.4+0.6)=0.1，正则化回报为1.9。单条轨迹的对数比和不保证非负，KL的非负性是适当分布下的期望性质。
+
+现在令某token的新旧概率比为1.3、优势为1、PPO ε=0.2，则该token裁剪代理贡献为1.2；这里分母是旧策略，不是刚才的SFT参考。即使PPO比率保持在附近，累计多轮也可能远离参考策略。
+
+最后加入一条预训练文本，其梯度独立来自正确下一个token的似然。它可以缓解能力遗忘，但不会自动提高当前回答的人类排序分数，这正是多目标训练可能发生权衡的地方。
+
+## 三、冻结RM与参考策略，交替生成和PPO更新
 
 ```text
 收集人类示范，训练SFT策略
@@ -307,17 +286,7 @@ RL目标示意 $E[r_\phi(x,y)-\beta\log(\pi_\theta(y|x)/\pi_{ref}(y|x))]$；PPO-
 输出：对齐策略
 ```
 
-**实现要点**：不是全面能力超越，标注群体、奖励投机与能力回退仍重要。
-
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | RM偏好分类；PPO优化RM分数减参考KL，ptx另加预训练似然 |
-| 机制改变 | 用示范SFT、成对偏好奖励模型、PPO及预训练混合更新进行对齐 |
-| 评价改善的指标 | 人类偏好胜率、有帮助／真实性及能力回退 |
-
-## 四、实验如何验证方法
+## 四、读人类偏好图，并把ptx的能力与成本另列
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
@@ -329,30 +298,29 @@ RL目标示意 $E[r_\phi(x,y)-\beta\log(\pi_\theta(y|x)/\pi_{ref}(y|x))]$；PPO-
 | 随机性与不确定性 | 人类评价含95%CI；这不是训练种子CI |
 | 实际验证的假设 | 偏好优化是否改善用户感受，混合预训练能否缓解回退 |
 
-**实验解读（本文分析）**：不是全面能力超越，标注群体、奖励投机与能力回退仍重要。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+### 图1：模型规模与相对SFT偏好胜率
 
-## 五、结果：证据到底有多强
+&lt;!-- inline-evidence-v2:start --&gt;
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 图1 | 不同规模模型的人类偏好 | 小对齐模型可优于大基础模型 | 不代表所有智能能力更强 |
-| §3训练流程 | 三阶段监督来源 | 明确RL依赖数据与RM | 不等于从零靠RL学语言 |
-| 能力评价及附录E.6 | PPO与ptx混合的回退 | 支持混合目标缓解部分退化 | 不消除全部对齐代价 |
-| 偏差／真实性分析（具体图表编号本文未核实） | 多项行为评价 | 显示有限改善 | 不能承诺绝对真实安全 |
+&lt;!-- figure-ref-v6:start:rl-47-figure-1 --&gt;
+&lt;span id=&quot;rl-47-figure-1&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rl-47-figure-1 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/papers/47-instructgpt-figure-1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/47-instructgpt-figure-1.png&quot; width=&quot;1600&quot; height=&quot;900&quot; alt=&quot;不同规模GPT、SFT、PPO和PPO-ptx相对175B SFT的人类偏好胜率&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引；Ouyang等，2022，Figure 1；原HTML图形。&lt;a href=&quot;https://arxiv.org/html/2203.02155v1#S0.F1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-**结论边界**：特定API提示分布的人类评价中1.3B对齐模型优于175B基础模型。不是全面能力超越，标注群体、奖励投机与能力回退仍重要。
 
-## 六、贡献、代价与局限
+横轴是模型参数规模1.3B、6B、175B，按对数尺度排布；纵轴是相对同一个175B SFT参考回答的偏好胜率，0.5虚线表示打平参考。不同颜色区分训练方式，因此应先在同一规模比较训练改变，再跨规模比较；图中的误差条是评价的95%置信区间，不是三种规模训练出来的方差。小模型偏好更高可支持“训练方式很重要”，却不能把纵轴换成知识或推理总能力。
 
-**作者承认**偏好来自特定人群，能力与对齐并非完全一致。**本文分析**：奖励模型容易被过度优化，人工胜率也依赖问题分布、盲评与回答长度。新增监督和训练算力必须计入小模型比较。
+&lt;!-- inline-evidence-v2:end --&gt;
 
-## 七、帮助建立理解
+偏好图必须结合提示分布与标注者群体阅读。真实性与偏差还需独立测试；下面的PPO-ptx对照进一步检查偏好优化是否伴随基础能力回退。[核对原文](https://arxiv.org/html/2203.02155v1)。
 
-### 教学例子
+### PPO-ptx缓解回退时新增了多少训练
 
-以下是教学推演，不是原论文实验。
+附录E.6将对齐税与PPO-ptx联系起来：混入预训练梯度改善部分DROP/SQuAD能力回退，而仅增大KL系数并未获得同样修复。报告配置中预训练样本量为RL episode数量的8倍，带来额外计算，因此PPO与PPO-ptx不能只按RL步数比较成本。
 
-基础模型续写“请解释重力”可能产出相似网页文本；SFT学会解释格式，RM偏好清晰回答，PPO提升其概率。但若RM把长回答误判为更好，策略可能学会啰嗦而非更准确。
+## 五、偏好改善的范围由谁评价、评什么来界定
+
+特定API提示分布上，1.3B对齐模型可在人类偏好中优于175B基础模型，跨规模比较仍须计入新增监督与训练算力。偏好来自特定标注群体，胜率又受盲评、回答长度和问题分布影响；奖励投机、能力回退与真实性要另测，不能扩写成全面能力超越。
 
 ### 五个前置概念
 
@@ -362,23 +330,42 @@ RL目标示意 $E[r_\phi(x,y)-\beta\log(\pi_\theta(y|x)/\pi_{ref}(y|x))]$；PPO-
 4. **Critic**：预测RL训练中的未来回报。
 5. **对齐代价**：改善偏好指标伴随其他能力下降。
 
-### 三个值得继续追问的问题
+## 六、三个值得继续追问的问题与参考答案
 
-1. RM和Critic为何不能混为一谈？
-2. 如何检查回答变长造成的评价偏差？
-3. 小对齐模型优于大基础模型的结论边界在哪？
+&lt;details&gt;
+&lt;summary&gt;1. RM和Critic为何不能混为一谈？&lt;/summary&gt;
 
-## 方法与证据总结
+RM 把提示和回答映射为由偏好数据学习的奖励，用来定义优化信号；Critic 预测当前策略在前缀后能获得的未来回报，用于基线和优势估计，随策略训练而变化。它们可以有相似架构甚至初始化来源，监督对象和更新时机仍不同。省去Critic不代表不需要RM，RM分数也不等于对当前策略价值的无偏估计。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| 语言模型的输出与用户意图不一致 | 用示范SFT、成对偏好奖励模型、PPO及预训练混合更新进行对齐 | 人类比较把目标从预测文本转向更有帮助的输出 | 特定API提示分布的人类评价中1.3B对齐模型优于175B基础模型 | 不是全面能力超越，标注群体、奖励投机与能力回退仍重要 |
+&lt;/details&gt;
 
-## 资料与阅读范围
+&lt;details&gt;
+&lt;summary&gt;2. 如何检查回答变长造成的评价偏差？&lt;/summary&gt;
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+记录并分层比较回答长度、内容正确性、信息密度与盲评偏好，做长度匹配或在相近长度区间比较；还可加入无信息冗长控制回答，检测评审是否奖励篇幅。统计校正不能自动证明因果，因为长度也可能承载真实解释价值。应报告原始与长度控制结果，并用独立评审或客观任务分数复核。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;3. 小对齐模型优于大基础模型的结论边界在哪？&lt;/summary&gt;
+
+结论限定于所选API提示分布、标注群体、模型版本和人类偏好评价，小对齐模型更贴合指令并不意味着知识、推理、代码或所有语言能力全面超过更大的基础模型。还要区分PPO与PPO-ptx，后者混入预训练目标以缓解部分能力回退。应查分项任务与标注分歧，不能把一个偏好胜率扩写成通用智能排名。
+
+&lt;/details&gt;
+
+## 七、沿未解决的问题继续读
+
+- [DPO](49-dpo.md)：必须先训练显式RM，再做在线PPO循环吗？DPO从这类KL正则奖励目标的解析策略关系导出直接偏好损失，改变的是优化接口。（后作问题承接）
+
+- [DeepSeekMath／GRPO](52-grpo.md)：如果仍做在线策略优化，独立Critic的基线能否由同题多回答替代？GRPO沿PPO裁剪路线改变优势估计，是优化模块的后续发展，仍需奖励来源。（后续模块路线）
+
+### 原文核对与路线出处
+
+- [原论文与图表入口](https://arxiv.org/html/2203.02155v1)。三阶段训练方法、PPO-ptx目标及附录E.6能力回退与预算讨论。
+- **模块组合**：[PPO](27-ppo.md)。InstructGPT将PPO作为策略优化器，与奖励模型和参考约束组合。
+- **后作承接本篇**：[DPO](49-dpo.md)。后作DPO重新参数化这类KL正则偏好目标，省去显式奖励模型与在线RL循环。
+
+- 教学阅读：[Illustrating Reinforcement Learning from Human Feedback](https://huggingface.co/blog/rlhf)。仅借用本节的解释顺序与接口视角；具体算法、版本和实验以本篇原论文为准。
 
 ## 自测两题
 

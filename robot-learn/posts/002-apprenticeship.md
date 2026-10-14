@@ -4,15 +4,13 @@
 
 **原论文**：*Apprenticeship Learning via Inverse Reinforcement Learning*，Pieter Abbeel、Andrew Y. Ng，ICML 2004。[原文](https://ai.stanford.edu/~ang/papers/icml04-apprentice.pdf)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
+
+[DMP](001-dmp.md)已把示范变成可执行的运动形状，却没有回答示范背后的任务偏好是什么。学徒学习转向长期行为统计：若不唯一恢复奖励，还能否保证接近专家？这里是学习对象的对照，不是把DMP改成奖励学习器。
+
+## 一、问题设定：不识别唯一奖励，怎样约束专家性能差距
 
 一个人可以演示怎样开车，却很难精确写出“碰撞、偏离车道、速度”之间的奖励权重。行为克隆直接学习状态到动作的映射，但没有明确利用“这些选择服务于长期目标”这一结构。学徒学习尝试从示范中恢复足以生成合适行为的奖励描述。
-
-本篇的关键结论比“猜出专家真正的奖励”更谨慎：如果奖励属于已知特征的线性组合，那么让学习策略与专家具有接近的特征期望，就能控制这类奖励下的性能差异。恢复唯一真实奖励并不是必要条件。[原文 §2–4](https://ai.stanford.edu/~ang/papers/icml04-apprentice.pdf)
-
-一句话：在已知特征与可调用规划器的设定下，通过反复寻找区分专家和当前策略的奖励方向，学习者可以接近专家行为统计；代价是仍要设计特征，并反复解决正向控制问题。
-
-## 二、什么是特征期望
 
 设 $\phi(s)$ 是一组状态特征，奖励为 $r(s)=w^\top\phi(s)$。特征可以描述碰撞、所在区域或与其他物体的距离。对策略 $\pi$，定义：
 
@@ -39,7 +37,9 @@ $$
 
 这不是完全被动地看视频就能学会控制的设定。原文明确使用正向 RL／MDP 求解子程序，网格实验并不靠专家示范去学习转移概率。示范数量少与总计算量少也因此不是同一结论。
 
-## 三、为什么匹配统计能控制性能差异
+## 二、用特征距离界定奖励家族内的性能差
+
+本篇的关键结论比“猜出专家真正的奖励”更谨慎：如果奖励属于已知特征的线性组合，那么让学习策略与专家具有接近的特征期望，就能控制这类奖励下的性能差异。恢复唯一真实奖励并不是必要条件。[原文 §2–4](https://ai.stanford.edu/~ang/papers/icml04-apprentice.pdf)
 
 若 $\|w\|_2\le1$，则：
 
@@ -53,7 +53,21 @@ $$
 
 以机器人搬运为教学类比，若特征只包括路程与耗时，却没有物体掉落，两个策略可以匹配路程和时间，却一个把物体摔坏。数学关系仍成立，但它约束的奖励家族没有包含真正关心的损坏。这是表示遗漏，而非不等式失效。
 
-## 四、算法为何在奖励和策略之间交替
+还应拆开三种误差。若有限示范估计为 $\hat\mu_E$，三角不等式给出 $\|\mu(\pi)-\mu_E\|\leq\|\mu(\pi)-\hat\mu_E\|+\|\hat\mu_E-\mu_E\|$：把训练匹配误差压到零，不会消除专家统计估计误差。若再用有限模拟估计学习者统计，还应加第三项。这里是由前述范数界直接得到的教学推导。
+
+例如专家只有一条轨迹，恰好从未遇到行人，估计中的“让行”特征为零。再精确的凸投影也不能凭空补出罕见场景的偏好。相反，如果真实奖励包含未列入 $\phi$ 的损坏项，增加同分布示范也不能修补特征遗漏。有限样本、特征偏差与正向求解不充分是三种不同原因，实验中应分别改变示范数、特征集合与规划精度。
+
+### 一个二维例子
+
+教学构造：用两个归一化特征表示“安全通行”和“路程节省”。专家为 $(0.8,0.6)$，当前策略为 $(0.4,0.9)$。差向量 $(0.4,-0.3)$ 提示当前策略过度追求短路程，牺牲安全。单位化后方向为 $(0.8,-0.6)$，间隔为 0.5。
+
+用这个方向规划后，可能得到 $(0.95,0.2)$。它安全但绕远，下一轮奖励方向会改变。若两个候选的凸组合接近专家，混合就能改善统计匹配。这个例子展示的是方向更新的几何含义，数值不是论文结果。
+
+还可以看到奖励不唯一：对已经匹配的统计，多个 $w$ 都无法区分两套行为。因此从输出权重解释“专家最重视什么”时要格外谨慎；权重在算法中首先是构造策略的工具。
+
+## 三、交替找奖励方向与求解新策略
+
+特征距离给出的是性能判据，还没有给出达到这个判据的策略。算法因此反复把当前差距变成一个奖励方向，调用正向规划，再用新策略的统计缩小差距。
 
 ### 1. 找一个最能暴露差距的奖励方向
 
@@ -88,41 +102,64 @@ $$
 
 这份教学伪代码省略了有限轨迹估计与近似规划的误差处理。目标是匹配行为统计，机制是对抗式地寻找奖励方向，实验指标可以是特征距离或已知真实奖励下的回报比。
 
-## 五、实验与证据应怎样阅读
+## 四、分别核对道路行为与正向规划成本
+
+二维例子解释了方向为什么会改变；实验还必须计入每次正向求解和特征估计。只数专家示范，会漏掉这套交替算法的大部分成本。
+
+**原图怎么读：** [图4，PDF第5页](#paper-002-apprenticeship-figure-4)。横轴是专家轨迹数，且采用十进对数刻度；纵轴才是策略性能。不要把横轴的等距离误读成等量增加的示范，也不要与[图3](#paper-002-apprenticeship-figure-3)的算法迭代次数混用。
+
+<!-- figure-ref-v6:start:eee0e94966ef -->
+<a id="paper-002-apprenticeship-figure-3"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/002-apprenticeship-v6-figure-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/002-apprenticeship-v6-figure-3.png" width="652" height="508" alt="Apprenticeship Learning via Inverse Reinforcement Learning，图3：横轴是算法迭代次数，纵轴是到专家特征期望的距离；两种更新逐步缩小差距。" loading="lazy"></a><figcaption>原图摘引：Pieter Abbeel、Andrew Y. Ng，ICML 2004，PDF第5页，图3。<a href="https://users.cs.utah.edu/~dsbrown/readings/apprenticeship_learning.pdf#page=5" target="_blank" rel="noopener noreferrer">核对原文</a>。横轴是算法迭代次数，纵轴是到专家特征期望的距离；两种更新逐步缩小差距。</figcaption></figure>
+<!-- figure-ref-v6:end:eee0e94966ef -->
+
+
+
+<!-- figure-ref-v6:start:0c38d534808e-anchor -->
+<a id="paper-002-apprenticeship-figure-4"></a>
+<!-- figure-ref-v6:end:0c38d534808e-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/002-apprenticeship-fig4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/002-apprenticeship-fig4.png" width="672" height="532" alt="Apprenticeship Learning via Inverse Reinforcement Learning，图4：横轴是专家轨迹数，且采用十进对数刻度；纵轴才是策略性能。不要把横轴的等距离误读成等量增加的示范，也不要与图3的算法迭代次数混用。" loading="lazy"></a><figcaption>实验图原图摘引：Pieter Abbeel、Andrew Y. Ng，ICML 2004，PDF第5页，图4。<a href="https://users.cs.utah.edu/~dsbrown/readings/apprenticeship_learning.pdf#page=5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
 
 | 原文位置 | 对象与设置 | 主要检验 | 边界 |
 |---|---|---|---|
-| 图 1–2、§3 | 最大间隔与投影的几何过程 | 新策略怎样缩小统计差距 | 图示不是经验性能统计 |
+| [图1](#paper-002-apprenticeship-figure-1)、[图2](#paper-002-apprenticeship-figure-2)、§3 | 最大间隔与投影的几何过程 | 新策略怎样缩小统计差距 | 图示不是经验性能统计 |
 | 定理 1–2、§4 | 迭代与专家样本条件 | 算法何时终止及近专家保证 | 依赖特征与估计假设 |
-| 图 3、§5.1 | 128×128 网格、64 个区域特征 | 两种更新的收敛行为 | 使用已知环境求解器 |
-| 图 4、§5.1 | 改变专家轨迹数量 | 示范利用效率 | 横轴为轨迹数的对数 |
-| 表 1、§5.2 | 驾驶风格模仿 | 特征统计与行为风格对应 | 未给定真实奖励，不能报真实回报改善 |
+| [图3](#paper-002-apprenticeship-figure-3)、§5.1 | 128×128 网格、64 个区域特征 | 两种更新的收敛行为 | 使用已知环境求解器 |
+| [图4](#paper-002-apprenticeship-figure-4)、§5.1 | 改变专家轨迹数量 | 示范利用效率 | 横轴为轨迹数的对数 |
+| [表1](https://users.cs.utah.edu/~dsbrown/readings/apprenticeship_learning.pdf#page=7)、§5.2 | 驾驶风格模仿 | 特征统计与行为风格对应 | 未给定真实奖励，不能报真实回报改善 |
 
-网格图 3 为 40 次运行平均、带一个标准误；图 4 为 20 个实例平均。驾驶使用一条两分钟、1200 样本的示范，运行 30 轮后人工检查选策略。这些条件说明证据并非“一个原始视频直接产生自动驾驶系统”。
+<!-- figure-ref-v6:start:7064618854c4 -->
+<a id="paper-002-apprenticeship-figure-1"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/002-apprenticeship-v6-figure-1.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/002-apprenticeship-v6-figure-1.png" width="676" height="304" alt="Apprenticeship Learning via Inverse Reinforcement Learning，图1：图中的策略特征期望与专家特征期望处于同一空间，分隔方向随迭代更新。" loading="lazy"></a><figcaption>原图摘引：Pieter Abbeel、Andrew Y. Ng，ICML 2004，PDF第3页，图1。<a href="https://users.cs.utah.edu/~dsbrown/readings/apprenticeship_learning.pdf#page=3" target="_blank" rel="noopener noreferrer">核对原文</a>。图中的策略特征期望与专家特征期望处于同一空间，分隔方向随迭代更新。</figcaption></figure>
+<!-- figure-ref-v6:end:7064618854c4 -->
+<!-- figure-ref-v6:start:40a3149d48f2 -->
+<a id="paper-002-apprenticeship-figure-2"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/002-apprenticeship-v6-figure-2.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/002-apprenticeship-v6-figure-2.png" width="780" height="304" alt="Apprenticeship Learning via Inverse Reinforcement Learning，图2：投影过程使用已有策略特征期望的组合；投影点与某一个真实策略的特征期望不能混为一谈。" loading="lazy"></a><figcaption>原图摘引：Pieter Abbeel、Andrew Y. Ng，ICML 2004，PDF第4页，图2。<a href="https://users.cs.utah.edu/~dsbrown/readings/apprenticeship_learning.pdf#page=4" target="_blank" rel="noopener noreferrer">核对原文</a>。投影过程使用已有策略特征期望的组合；投影点与某一个真实策略的特征期望不能混为一谈。</figcaption></figure>
+<!-- figure-ref-v6:end:40a3149d48f2 -->
 
-图 4 中使用已知非零奖励特征的变体获得额外信息，应与完整特征变体区分。对比行为克隆的策略类也有表示限制。原文支持在这些设置中的示范效率优势，不能把差距全部归结成“逆 RL 永远胜过监督学习”。
 
-## 六、一个二维例子
+网格[图3](#paper-002-apprenticeship-figure-3) 为 40 次运行平均、带一个标准误；[图4](#paper-002-apprenticeship-figure-4) 为 20 个实例平均。驾驶使用一条两分钟、1200 样本的示范，运行 30 轮后人工检查选策略。这些条件说明证据并非“一个原始视频直接产生自动驾驶系统”。
 
-教学构造：用两个归一化特征表示“安全通行”和“路程节省”。专家为 $(0.8,0.6)$，当前策略为 $(0.4,0.9)$。差向量 $(0.4,-0.3)$ 提示当前策略过度追求短路程，牺牲安全。单位化后方向为 $(0.8,-0.6)$，间隔为 0.5。
+[图4](#paper-002-apprenticeship-figure-4) 中使用已知非零奖励特征的变体获得额外信息，应与完整特征变体区分。对比行为克隆的策略类也有表示限制。原文支持在这些设置中的示范效率优势，不能把差距全部归结成“逆 RL 永远胜过监督学习”。
 
-用这个方向规划后，可能得到 $(0.95,0.2)$。它安全但绕远，下一轮奖励方向会改变。若两个候选的凸组合接近专家，混合就能改善统计匹配。这个例子展示的是方向更新的几何含义，数值不是论文结果。
-
-还可以看到奖励不唯一：对已经匹配的统计，多个 $w$ 都无法区分两套行为。因此从输出权重解释“专家最重视什么”时要格外谨慎；权重在算法中首先是构造策略的工具。
-
-## 七、贡献、代价与理解要点
+## 五、特征和初始分布改变后重查保证
 
 贡献在于把近专家性能与奖励可辨识性分开：即使无法找到真正奖励，也可以在明确奖励类下给出行为保证。代价是特征工程、正向求解以及策略选择。换一个初始状态分布或新的环境动力学后，旧特征期望关系需要重新核对。
 
+### 五个前置概念
+
 重要的五个前置概念是 MDP、线性奖励、折扣特征期望、最大间隔和凸组合。MDP 描述行动后果；线性奖励规定目标家族；特征期望压缩长期行为；最大间隔寻找尚未解释的差距；凸组合把多种策略统计连接起来。
 
-| 原有问题 | 作者改动 | 为什么有效 | 证据 | 限制 |
-|---|---|---|---|---|
-| 难写奖励，又不想只记住动作 | 匹配专家长期特征统计 | 线性奖励下回报由统计决定 | §3–4、图 3–4、表 1 | 特征遗漏、规划成本、评估分布变化 |
+### 追问：怎样检验学到的是任务偏好，还是初始状态分布的巧合？
 
-阅读范围为原文方法、定理陈述及网格／驾驶实验；计算资源未逐项确认，本文未独立复现。
+参考答案：可固定奖励特征和学习流程，另设初始状态分布，重新估计专家与学习策略的折扣特征期望。原来的性能界约束原分布下的统计，不自动约束新分布。如果旧分布匹配而新分布分离，应先定位访问区域和特征覆盖，再讨论奖励迁移；这项检验是由上文定义提出的实验设计，不能用训练分布上的零间隔替代。
 
-## 八、自测题与参考答案
+## 六、沿机制关系继续读
+
+本篇与[最大熵IRL](003-maxent-irl.md)共享“示范约束长期统计”的问题，属于历史关联；最大熵进一步为多种兼容行为选择概率分布，不能把它误写成本篇最大间隔目标的同义改名。[GAIL](015-gail.md)再把比较对象扩为状态动作占用。
+
+## 七、自测题与参考答案
 
 **问题 1：如果学到了与专家完全相同的特征期望，是否就恢复了真实奖励？**
 
@@ -135,4 +172,3 @@ $$
 **问题 3：两个策略的特征各为 $(1,0)$ 和 $(0,1)$，如何得到 $(0.5,0.5)$？每步随机切换是否等价？**
 
 参考答案：在每回合开始以各一半概率选定一个策略，期望统计就是平均。每步切换一般不等价，因为它产生新的状态访问过程；原来两个整段策略的统计不能直接线性拼接。
-

@@ -42,15 +42,11 @@
                 <span class="text-gray-500">Decision Transformer：把控制写成条件序列预测</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="48775f99ac67ecdb5f67108325eb2ee0fccddb9ca2dacbd2cfa695ed327b560d"><h1>第 44 天｜Decision Transformer：把控制写成条件序列预测</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="e67ea2b39f938425b8689ffac07a74cb0779dfe23ecdaeaafc9925c43e5c0538"><h1>第 44 天｜Decision Transformer：把控制写成条件序列预测</h1>
 <p><a href="index.html">系列首页</a> · <a href="43-awac.html">上一篇</a> · <a href="45-td3-bc.html">下一篇</a></p>
 <p><strong>原论文与版本</strong>：<em>Decision Transformer: Reinforcement Learning via Sequence Modeling</em>，2021。<a href="https://arxiv.org/abs/2106.01345">原论文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p><strong>研究问题</strong>：离线决策是否必须使用Bellman自举</p>
-<p><strong>旧方法卡点</strong>：TD目标有外推误差，简单BC又不区分好坏轨迹</p>
-<p><strong>作者主张</strong>：用期望回报、状态、动作序列训练因果Transformer预测动作</p>
-<p><strong>论文证据</strong>：Atari、D4RL和序列任务实验展示条件序列建模的竞争力</p>
-<p><strong>一句话</strong>：在离线、回报条件的序列建模控制中，作者通过“用期望回报、状态、动作序列训练因果Transformer预测动作”应对“离线决策是否必须使用Bellman自举”这一问题；证据边界或代价是：请求很高回报不保证可实现，数据覆盖仍限制行为。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="42-cql.html">第42天 CQL</a>继续使用Bellman自举，只是修正陌生动作的乐观Q；<a href="43-awac.html">第43天 AWAC</a>则用Critic优势筛选值得模仿的数据动作。它们共同留下一个更激进的问题：离线策略一定要先学价值吗？Decision Transformer改用回报条件下的动作序列预测，与这些价值方法平行，而不是由AWAC逐步删去Critic得到的历史继承。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <ol>
 <li><strong>Return-to-go</strong>：从当前时刻到终局的剩余奖励和。</li>
@@ -59,8 +55,9 @@
 <li><strong>上下文窗口</strong>：模型保留的历史长度。</li>
 <li><strong>行为分布支持</strong>：训练数据中可见的动作与结果。</li>
 </ol>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
-<p>本篇将“离线决策是否必须使用Bellman自举”放在离线、回报条件的序列建模控制的边界内研究。TD目标有外推误差，简单BC又不区分好坏轨迹。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<h2 id="一问题设定不学bellman价值能否直接生成好动作">一、问题设定：不学Bellman价值能否直接生成好动作</h2>
+<p>固定数据含有好坏不同的轨迹。直接行为克隆会把它们混在一起，价值方法则需要依赖自举目标；本篇尝试把“希望得到多少回报”作为输入，让同一序列模型根据历史和目标生成动作。</p>
+<p>训练时剩余回报来自已完成轨迹，执行时却只是提出的目标。因而研究问题有两面：条件序列监督能否学出有效控制，以及请求的回报在真实环境中究竟能实现多少。没有Bellman误差，并不等于没有数据分布之外的请求。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -89,13 +86,20 @@
 <td>回合边界与上下文窗口独立处理</td>
 </tr>
 </tbody></table></div>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
-<p>训练输入依序为(RTG,s,a)，因果mask防止看到未来动作和回报。部署时指定想达到的回报，执行动作后减去实际奖励更新剩余目标。没有独立Q、Critic或Bellman TD损失，也不意味着自动学会因果规划。</p>
-<h3 id="关键公式与符号">关键公式与符号</h3>
+<h2 id="二把剩余回报放进因果序列并推清执行递推">二、把剩余回报放进因果序列，并推清执行递推</h2>
+<p>训练序列交替包含RTG、状态和动作，因果mask使动作预测只看到过去动作与当前状态。部署时的输入来源与递推在下式中分别说明。</p>
+<p>动作监督损失不直接做Bellman备份；长上下文可区分同一观测下的不同历史，回报条件则可从混合质量数据中选择行为模式。</p>
+<h3 id="rtg递推与因果输入的边界">RTG递推与因果输入的边界</h3>
 <p><span class="reading-math" data-tex="\hat R_t=\sum_{k=t}^T r_k,\quad \hat a_t=f_\theta(\hat R_{\le t},s_{\le t},a_{&lt;t})."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mi>t</mi></msub><mo>=</mo><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mi>t</mi></mrow><mi>T</mi></munderover><msub><mi>r</mi><mi>k</mi></msub><mo separator="true">,</mo><mspace width="1em"/><msub><mover accent="true"><mi>a</mi><mo>^</mo></mover><mi>t</mi></msub><mo>=</mo><msub><mi>f</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mrow><mo>≤</mo><mi>t</mi></mrow></msub><mo separator="true">,</mo><msub><mi>s</mi><mrow><mo>≤</mo><mi>t</mi></mrow></msub><mo separator="true">,</mo><msub><mi>a</mi><mrow><mo>&lt;</mo><mi>t</mi></mrow></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\hat R_t=\sum_{k=t}^T r_k,\quad \hat a_t=f_\theta(\hat R_{\le t},s_{\le t},a_{&lt;t}).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0968em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.1304em;vertical-align:-1.3021em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8283em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mrel mtight">=</span><span class="mord mathnormal mtight">t</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3021em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">a</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2952em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">≤</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2452em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2952em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">≤</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2452em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span>
 训练动作MSE或交叉熵；执行无折扣RTG时 <span class="reading-math" data-tex="\hat R_{t+1}=\hat R_t-r_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>=</mo><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mi>t</mi></msub><mo>−</mo><msub><mi>r</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">\hat R_{t+1}=\hat R_t-r_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1551em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0968em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。折扣版本需改递推。</p>
-<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
-<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<p><strong>因果预测的输入边界</strong>：<span class="reading-math" data-tex="\hat R_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">\hat R_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0968em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 在训练中是从当前时刻到轨迹终点的实际奖励和，部署时则是希望获得的剩余回报；同一记号在两个阶段的来源不同。<span class="reading-math" data-tex="a_{&lt;t}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>a</mi><mrow><mo>&lt;</mo><mi>t</mi></mrow></msub></mrow><annotation encoding="application/x-tex">a_{&lt;t}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6079em;vertical-align:-0.1774em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span></span></span></span></span> 明确排除要预测的 <span class="reading-math" data-tex="a_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>a</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">a_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，否则网络会复制标签而不是学决策。无折扣递推直接来自 <span class="reading-math" data-tex="\hat R_t=r_t+\hat R_{t+1}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mi>t</mi></msub><mo>=</mo><msub><mi>r</mi><mi>t</mi></msub><mo>+</mo><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">\hat R_t=r_t+\hat R_{t+1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0968em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1551em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span>；若改成以当前步为基准的折扣回报，才需使用 <span class="reading-math" data-tex="\hat R_{t+1}=(\hat R_t-r_t)/\gamma"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>=</mo><mo stretchy="false">(</mo><msub><mover accent="true"><mi>R</mi><mo>^</mo></mover><mi>t</mi></msub><mo>−</mo><msub><mi>r</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mi>γ</mi></mrow><annotation encoding="application/x-tex">\hat R_{t+1}=(\hat R_t-r_t)/\gamma</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1551em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span></span></span></span></span>（<span class="reading-math" data-tex="\gamma&gt;0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi><mo>&gt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\gamma&gt;0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7335em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>），并让训练标签与部署更新一致。这是递推的教学推导，原文DT采用无折扣形式，见<a href="https://arxiv.org/html/2106.01345v2#S3">§3</a>。</p>
+<h3 id="区分剩余目标与状态价值估计">区分剩余目标与状态价值估计</h3>
+<p>扣除已得奖励只更新“还要求多少”的目标账本，并没有调用Critic重估“当前还能拿到多少”。即使环境转移使原目标已不可达，递推仍会给出一个数；因此执行日志应分别记录请求目标与实际完成回报。</p>
+<h3 id="剩余目标1085与不可控硬币">剩余目标10、8、5与不可控硬币</h3>
+<p>以下是可手算的教学构造，不是论文实验。</p>
+<p>希望总回报10，前两步实际收到2和3，则输入RTG依次10、8、5。若每一步仍给10，就是反复要求“从现在再拿10”，条件序列不再符合训练递推。</p>
+<p>再考虑掷硬币奖励与动作无关的任务：成功轨迹RTG=1，失败=0。模型可完美学习两类序列的统计特征，却无法因条件为1就让硬币必胜。这说明回报条件建模本身不是可达性证明。</p>
+<h2 id="三生成rtg标签遮住未来动作并滚动更新目标">三、生成RTG标签、遮住未来动作并滚动更新目标</h2>
 <pre><code class="language-text">从离线完整轨迹反向计算RTG
 抽长度K片段，构造RTG/状态/动作tokens
 加时序编码，使用因果attention mask
@@ -107,29 +111,7 @@
   更新上下文窗口直到终止
 输出：回报条件策略
 </code></pre>
-<p><strong>实现要点</strong>：请求很高回报不保证可实现，数据覆盖仍限制行为。</p>
-<h3 id="三种优化要分开">三种“优化”要分开</h3>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>层次</th>
-<th>这里具体是什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>数学目标／训练损失</td>
-<td>给定RTG与历史，最小化动作预测MSE或交叉熵</td>
-</tr>
-<tr>
-<td>机制改变</td>
-<td>用期望回报、状态、动作序列训练因果Transformer预测动作</td>
-</tr>
-<tr>
-<td>评价改善的指标</td>
-<td>归一化回报、不同目标RTG效果</td>
-</tr>
-</tbody></table></div>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<h2 id="四读图4的请求实得关系再看延迟奖励实验">四、读图4的请求—实得关系，再看延迟奖励实验</h2>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -166,77 +148,62 @@
 <td>序列监督能否替代TD提供有效控制</td>
 </tr>
 </tbody></table></div>
-<p><strong>实验解读（本文分析）</strong>：请求很高回报不保证可实现，数据覆盖仍限制行为。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>证据定位</th>
-<th>比较什么／观察到什么</th>
-<th>支持什么</th>
-<th>不能证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>图1</td>
-<td>因果序列架构</td>
-<td>明确条件与预测对象</td>
-<td>不证明规划能力</td>
-</tr>
-<tr>
-<td>表1</td>
-<td>4 Atari小数据比较</td>
-<td>其中3个与CQL可比</td>
-<td>并非所有任务胜出</td>
-</tr>
-<tr>
-<td>表2</td>
-<td>D4RL任务</td>
-<td>支持连续控制可用性</td>
-<td>不保证OOD目标可达</td>
-</tr>
-<tr>
-<td>条件／稀疏任务实验（具体图表编号本文未核实）</td>
-<td>RTG与序列上下文变化</td>
-<td>检验条件建模</td>
-<td>不证明任意轨迹拼接</td>
-</tr>
-</tbody></table></div>
-<p><strong>结论边界</strong>：Atari、D4RL和序列任务实验展示条件序列建模的竞争力。请求很高回报不保证可实现，数据覆盖仍限制行为。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p><strong>作者贡献</strong>是简洁的序列建模范式。<strong>本文分析</strong>：选择目标RTG是一项决策超参数；若用测试成绩调它，应计入模型选择。数据中的高回报关联未必是可控因果。</p>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<h3 id="教学例子">教学例子</h3>
-<p>以下是教学推演，不是原论文实验。</p>
-<p>目标回报10，第一步实际得3，下一步输入剩余目标7。模型只是在条件7下预测动作，不能保证环境还允许得到7；目标设100也不会自动产生新能力。</p>
-<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
-<ol>
-<li>RTG调参会怎样影响公平比较？</li>
-<li>未来奖励条件是否可能携带不可控随机性？</li>
-<li>何种任务需要TD式拼接而序列BC做不到？</li>
-</ol>
-<h2 id="方法与证据总结">方法与证据总结</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据／理论证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>离线决策是否必须使用Bellman自举</td>
-<td>用期望回报、状态、动作序列训练因果Transformer预测动作</td>
-<td>把好坏轨迹区分为不同条件，避免直接使用自举标签</td>
-<td>Atari、D4RL和序列任务实验展示条件序列建模的竞争力</td>
-<td>请求很高回报不保证可实现，数据覆盖仍限制行为</td>
-</tr>
-</tbody></table></div>
-<h2 id="资料与阅读范围">资料与阅读范围</h2>
-<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
-<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h3 id="图4请求回报并不总能兑现">图4：请求回报并不总能兑现</h3>
+<!-- inline-evidence-v2:start -->
+
+<!-- figure-ref-v6:start:rl-44-figure-4 -->
+<p><span id="rl-44-figure-4"></span></p>
+<!-- figure-ref-v6:end:rl-44-figure-4 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/44-decision-transformer-figure-4.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/44-decision-transformer-figure-4.png" width="1800" height="530" alt="Decision Transformer设定目标回报与实得回报的任务对照图" loading="lazy"></a><figcaption>原论文图形摘引；Chen等，2021，Figure 4；原HTML图形。<a href="https://arxiv.org/html/2106.01345v2#S5.F4" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+
+<p>图4每个面板横轴是请求的归一化目标回报，纵轴是实际获得的归一化表现；这不是训练时间曲线。绿色斜虚线是“实际恰好实现请求”的理想参照，橙色竖虚线是数据集中最好轨迹的回报，蓝线是DT。Pong在较高请求区域回落、Qbert与Reacher未跟随理想线，说明条件数值能调行为却不能提供无限可达性；还要区分“超过数据最佳”的区域与普通插值区域。</p>
+<!-- inline-evidence-v2:end -->
+
+<p><a href="#rl-44-figure-1">图1</a>展示RTG、状态与动作的因果排列。Atari与D4RL表格检验特定离线数据上的控制表现；请求—实得关系已由上面的图4单独检验，不能用训练损失替代这一评价。</p>
+<!-- figure-ref-v6:start:rl-44-figure-1 -->
+<p><span id="rl-44-figure-1"></span></p>
+<figure class="reading-evidence-figure"><a href="/rl/assets/reference-v6/44-decision-transformer-figure-1-full.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/44-decision-transformer-figure-1-full.png" width="1800" height="832" alt="原论文Figure 1：序列中回报目标、状态、动作先分别嵌入，再经因果注意力预测后续动作。回报目标是条件输入，不能仅由这个结构保证能达到任意指定回报。" loading="lazy"></a><figcaption>完整原图摘引｜Chen等，2021，Figure 1；2106.01345v2，HTML S0.F1。<a href="https://arxiv.org/html/2106.01345v2#S0.F1" target="_blank" rel="noopener noreferrer">核对原文与图号</a>。原版权保留。原引用定位：<a href="https://arxiv.org/html/2106.01345#S0.F1" target="_blank" rel="noopener noreferrer">原文</a>。</figcaption></figure>
+
+<p>读图提示：序列中回报目标、状态、动作先分别嵌入，再经因果注意力预测后续动作。回报目标是条件输入，不能仅由这个结构保证能达到任意指定回报。</p>
+<!-- figure-ref-v6:end:rl-44-figure-1 -->
+
+<h3 id="延迟奖励与图任务没有证明一般稀疏探索">延迟奖励与图任务没有证明一般稀疏探索</h3>
+<p>表7把Hopper奖励全部延迟到最后，DT及模仿方法相对稳健，说明无需逐步TD传播的一项优势，但不证明已解决一般稀疏探索。主Atari基线有直接引用其他论文的数值；附录图最短路另有特定数据和回报生成机制，不能推广为任意跨轨迹拼接保证。</p>
+<h2 id="五高回报条件不能替代可达性与轨迹覆盖">五、高回报条件不能替代可达性与轨迹覆盖</h2>
+<p>请求超过数据支持的RTG会进入分布外，不能靠不断提高输入目标补出缺失行为。无TD损失绕开了一类自举高估，却没有消除随机环境中的回报关联与可控性差别；若用测试成绩选择目标RTG，还必须计入模型选择权限。</p>
+<h2 id="六三个值得继续追问的问题与参考答案">六、三个值得继续追问的问题与参考答案</h2>
+<details>
+<summary>1. RTG调参会怎样影响公平比较？</summary>
+
+<p>RTG 是部署时的行为条件，试许多目标回报后挑最高测试分，相当于额外模型选择。应在训练/验证数据上预先确定目标或固定调度，并给所有方法相同调参预算，报告对RTG的敏感性和失败请求。超出训练支持的高RTG不保证更好，且不同数据集的回报尺度不同，不能用一个未经说明的目标值比较。</p>
+</details>
+
+<details>
+<summary>2. 未来奖励条件是否可能携带不可控随机性？</summary>
+
+<p>可能。实际回报由动作和环境随机性共同决定；用高回报轨迹做条件学习，会筛选到“运气好”的样本，模型可能把不可控结果误当作能靠动作实现。确定性或随机性较小环境弱化该问题，不能推广到任意随机MDP。应在重复相同动作的受控随机环境中比较条件回报与真实达成分布，识别选择偏差。</p>
+</details>
+
+<details>
+<summary>3. 何种任务需要TD式拼接而序列BC做不到？</summary>
+
+<p>当数据含通向中间状态的前半段和从该状态通向目标的后半段，但没有一条完整高回报轨迹时，Bellman备份可以在马尔可夫覆盖条件下传播并拼接价值。朴素条件序列模仿没有显式备份机制，若所需上下文组合不在数据中，未必学会连接。Transformer有可能通过结构泛化解决部分图任务，所以应把它表述为条件和实证问题，而不是绝对不能拼接。</p>
+</details>
+
+<h2 id="七沿未解决的问题继续读">七、沿未解决的问题继续读</h2>
+<ul>
+<li><p><a href="46-iql.html">IQL</a>：当没有完整高回报轨迹、只有可连接的片段时，价值传播能提供什么？IQL的toy maze提供数据内拼接对照，是后续价值路线，与条件序列建模并行。（后续平行路线）</p>
+</li>
+<li><p><a href="45-td3-bc.html">TD3+BC</a>：条件Transformer的收益是否需要复杂模型，还是简单价值加模仿也有竞争力？同期TD3+BC提供简洁基线，比较首先要统一D4RL版本与调参预算。（同期并行路线）</p>
+</li>
+</ul>
+<h3 id="原文核对与路线出处">原文核对与路线出处</h3>
+<ul>
+<li><a href="https://arxiv.org/html/2106.01345">原论文与图表入口</a>。§3序列与训练；§5.6表7；附录回报条件与图任务。</li>
+<li><strong>并行路线</strong>：<a href="42-cql.html">CQL</a>。同为离线决策，DT改为条件序列监督而非保守TD。</li>
+<li><strong>并行路线</strong>：<a href="45-td3-bc.html">TD3+BC</a>。同期以简洁价值加模仿基线检验不同方法复杂度的必要性。</li>
+</ul>
 <h2 id="自测两题">自测两题</h2>
 <p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
 <p><strong>问题 1</strong>：目标剩余回报在训练和执行时分别怎么获得？</p>
@@ -255,21 +222,15 @@
 
 **原论文与版本**：*Decision Transformer: Reinforcement Learning via Sequence Modeling*，2021。[原论文](https://arxiv.org/abs/2106.01345)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：离线决策是否必须使用Bellman自举
+[第42天 CQL](42-cql.md)继续使用Bellman自举，只是修正陌生动作的乐观Q；[第43天 AWAC](43-awac.md)则用Critic优势筛选值得模仿的数据动作。它们共同留下一个更激进的问题：离线策略一定要先学价值吗？Decision Transformer改用回报条件下的动作序列预测，与这些价值方法平行，而不是由AWAC逐步删去Critic得到的历史继承。
 
-**旧方法卡点**：TD目标有外推误差，简单BC又不区分好坏轨迹
+## 一、问题设定：不学Bellman价值能否直接生成好动作
 
-**作者主张**：用期望回报、状态、动作序列训练因果Transformer预测动作
+固定数据含有好坏不同的轨迹。直接行为克隆会把它们混在一起，价值方法则需要依赖自举目标；本篇尝试把“希望得到多少回报”作为输入，让同一序列模型根据历史和目标生成动作。
 
-**论文证据**：Atari、D4RL和序列任务实验展示条件序列建模的竞争力
-
-**一句话**：在离线、回报条件的序列建模控制中，作者通过“用期望回报、状态、动作序列训练因果Transformer预测动作”应对“离线决策是否必须使用Bellman自举”这一问题；证据边界或代价是：请求很高回报不保证可实现，数据覆盖仍限制行为。
-
-## 二、研究背景与问题定义
-
-本篇将“离线决策是否必须使用Bellman自举”放在离线、回报条件的序列建模控制的边界内研究。TD目标有外推误差，简单BC又不区分好坏轨迹。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+训练时剩余回报来自已完成轨迹，执行时却只是提出的目标。因而研究问题有两面：条件序列监督能否学出有效控制，以及请求的回报在真实环境中究竟能实现多少。没有Bellman误差，并不等于没有数据分布之外的请求。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -279,18 +240,32 @@
 | 奖励或学习信号 | 训练RTG由数据未来奖励计算 |
 | 终止／边界 | 回合边界与上下文窗口独立处理 |
 
-## 三、方法：到底改了什么
+## 二、把剩余回报放进因果序列，并推清执行递推
 
-训练输入依序为(RTG,s,a)，因果mask防止看到未来动作和回报。部署时指定想达到的回报，执行动作后减去实际奖励更新剩余目标。没有独立Q、Critic或Bellman TD损失，也不意味着自动学会因果规划。
+训练序列交替包含RTG、状态和动作，因果mask使动作预测只看到过去动作与当前状态。部署时的输入来源与递推在下式中分别说明。
 
-### 关键公式与符号
+动作监督损失不直接做Bellman备份；长上下文可区分同一观测下的不同历史，回报条件则可从混合质量数据中选择行为模式。
+
+### RTG递推与因果输入的边界
 
 $$\hat R_t=\sum_{k=t}^T r_k,\quad \hat a_t=f_\theta(\hat R_{\le t},s_{\le t},a_{&lt;t}).$$
 训练动作MSE或交叉熵；执行无折扣RTG时 $\hat R_{t+1}=\hat R_t-r_t$。折扣版本需改递推。
 
-### 输入 → 处理 → 输出：教学伪代码
+**因果预测的输入边界**：$\hat R_t$ 在训练中是从当前时刻到轨迹终点的实际奖励和，部署时则是希望获得的剩余回报；同一记号在两个阶段的来源不同。$a_{&lt;t}$ 明确排除要预测的 $a_t$，否则网络会复制标签而不是学决策。无折扣递推直接来自 $\hat R_t=r_t+\hat R_{t+1}$；若改成以当前步为基准的折扣回报，才需使用 $\hat R_{t+1}=(\hat R_t-r_t)/\gamma$（$\gamma&gt;0$），并让训练标签与部署更新一致。这是递推的教学推导，原文DT采用无折扣形式，见[§3](https://arxiv.org/html/2106.01345v2#S3)。
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+### 区分剩余目标与状态价值估计
+
+扣除已得奖励只更新“还要求多少”的目标账本，并没有调用Critic重估“当前还能拿到多少”。即使环境转移使原目标已不可达，递推仍会给出一个数；因此执行日志应分别记录请求目标与实际完成回报。
+
+### 剩余目标10、8、5与不可控硬币
+
+以下是可手算的教学构造，不是论文实验。
+
+希望总回报10，前两步实际收到2和3，则输入RTG依次10、8、5。若每一步仍给10，就是反复要求“从现在再拿10”，条件序列不再符合训练递推。
+
+再考虑掷硬币奖励与动作无关的任务：成功轨迹RTG=1，失败=0。模型可完美学习两类序列的统计特征，却无法因条件为1就让硬币必胜。这说明回报条件建模本身不是可达性证明。
+
+## 三、生成RTG标签、遮住未来动作并滚动更新目标
 
 ```text
 从离线完整轨迹反向计算RTG
@@ -305,17 +280,7 @@ $$\hat R_t=\sum_{k=t}^T r_k,\quad \hat a_t=f_\theta(\hat R_{\le t},s_{\le t},a_{
 输出：回报条件策略
 ```
 
-**实现要点**：请求很高回报不保证可实现，数据覆盖仍限制行为。
-
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | 给定RTG与历史，最小化动作预测MSE或交叉熵 |
-| 机制改变 | 用期望回报、状态、动作序列训练因果Transformer预测动作 |
-| 评价改善的指标 | 归一化回报、不同目标RTG效果 |
-
-## 四、实验如何验证方法
+## 四、读图4的请求—实得关系，再看延迟奖励实验
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
@@ -327,30 +292,37 @@ $$\hat R_t=\sum_{k=t}^T r_k,\quad \hat a_t=f_\theta(\hat R_{\le t},s_{\le t},a_{
 | 随机性与不确定性 | 主要任务3种子；文字与表对离散度称呼需逐项核实 |
 | 实际验证的假设 | 序列监督能否替代TD提供有效控制 |
 
-**实验解读（本文分析）**：请求很高回报不保证可实现，数据覆盖仍限制行为。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+### 图4：请求回报并不总能兑现
 
-## 五、结果：证据到底有多强
+&lt;!-- inline-evidence-v2:start --&gt;
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 图1 | 因果序列架构 | 明确条件与预测对象 | 不证明规划能力 |
-| 表1 | 4 Atari小数据比较 | 其中3个与CQL可比 | 并非所有任务胜出 |
-| 表2 | D4RL任务 | 支持连续控制可用性 | 不保证OOD目标可达 |
-| 条件／稀疏任务实验（具体图表编号本文未核实） | RTG与序列上下文变化 | 检验条件建模 | 不证明任意轨迹拼接 |
+&lt;!-- figure-ref-v6:start:rl-44-figure-4 --&gt;
+&lt;span id=&quot;rl-44-figure-4&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rl-44-figure-4 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/papers/44-decision-transformer-figure-4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/44-decision-transformer-figure-4.png&quot; width=&quot;1800&quot; height=&quot;530&quot; alt=&quot;Decision Transformer设定目标回报与实得回报的任务对照图&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引；Chen等，2021，Figure 4；原HTML图形。&lt;a href=&quot;https://arxiv.org/html/2106.01345v2#S5.F4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-**结论边界**：Atari、D4RL和序列任务实验展示条件序列建模的竞争力。请求很高回报不保证可实现，数据覆盖仍限制行为。
 
-## 六、贡献、代价与局限
+图4每个面板横轴是请求的归一化目标回报，纵轴是实际获得的归一化表现；这不是训练时间曲线。绿色斜虚线是“实际恰好实现请求”的理想参照，橙色竖虚线是数据集中最好轨迹的回报，蓝线是DT。Pong在较高请求区域回落、Qbert与Reacher未跟随理想线，说明条件数值能调行为却不能提供无限可达性；还要区分“超过数据最佳”的区域与普通插值区域。
 
-**作者贡献**是简洁的序列建模范式。**本文分析**：选择目标RTG是一项决策超参数；若用测试成绩调它，应计入模型选择。数据中的高回报关联未必是可控因果。
+&lt;!-- inline-evidence-v2:end --&gt;
 
-## 七、帮助建立理解
+[图1](#rl-44-figure-1)展示RTG、状态与动作的因果排列。Atari与D4RL表格检验特定离线数据上的控制表现；请求—实得关系已由上面的图4单独检验，不能用训练损失替代这一评价。
 
-### 教学例子
+&lt;!-- figure-ref-v6:start:rl-44-figure-1 --&gt;
+&lt;span id=&quot;rl-44-figure-1&quot;&gt;&lt;/span&gt;
 
-以下是教学推演，不是原论文实验。
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/44-decision-transformer-figure-1-full.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/44-decision-transformer-figure-1-full.png&quot; width=&quot;1800&quot; height=&quot;832&quot; alt=&quot;原论文Figure 1：序列中回报目标、状态、动作先分别嵌入，再经因果注意力预测后续动作。回报目标是条件输入，不能仅由这个结构保证能达到任意指定回报。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;完整原图摘引｜Chen等，2021，Figure 1；2106.01345v2，HTML S0.F1。&lt;a href=&quot;https://arxiv.org/html/2106.01345v2#S0.F1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文与图号&lt;/a&gt;。原版权保留。原引用定位：&lt;a href=&quot;https://arxiv.org/html/2106.01345#S0.F1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
 
-目标回报10，第一步实际得3，下一步输入剩余目标7。模型只是在条件7下预测动作，不能保证环境还允许得到7；目标设100也不会自动产生新能力。
+读图提示：序列中回报目标、状态、动作先分别嵌入，再经因果注意力预测后续动作。回报目标是条件输入，不能仅由这个结构保证能达到任意指定回报。
+&lt;!-- figure-ref-v6:end:rl-44-figure-1 --&gt;
+
+### 延迟奖励与图任务没有证明一般稀疏探索
+
+表7把Hopper奖励全部延迟到最后，DT及模仿方法相对稳健，说明无需逐步TD传播的一项优势，但不证明已解决一般稀疏探索。主Atari基线有直接引用其他论文的数值；附录图最短路另有特定数据和回报生成机制，不能推广为任意跨轨迹拼接保证。
+
+## 五、高回报条件不能替代可达性与轨迹覆盖
+
+请求超过数据支持的RTG会进入分布外，不能靠不断提高输入目标补出缺失行为。无TD损失绕开了一类自举高估，却没有消除随机环境中的回报关联与可控性差别；若用测试成绩选择目标RTG，还必须计入模型选择权限。
 
 ### 五个前置概念
 
@@ -360,23 +332,40 @@ $$\hat R_t=\sum_{k=t}^T r_k,\quad \hat a_t=f_\theta(\hat R_{\le t},s_{\le t},a_{
 4. **上下文窗口**：模型保留的历史长度。
 5. **行为分布支持**：训练数据中可见的动作与结果。
 
-### 三个值得继续追问的问题
+## 六、三个值得继续追问的问题与参考答案
 
-1. RTG调参会怎样影响公平比较？
-2. 未来奖励条件是否可能携带不可控随机性？
-3. 何种任务需要TD式拼接而序列BC做不到？
+&lt;details&gt;
+&lt;summary&gt;1. RTG调参会怎样影响公平比较？&lt;/summary&gt;
 
-## 方法与证据总结
+RTG 是部署时的行为条件，试许多目标回报后挑最高测试分，相当于额外模型选择。应在训练/验证数据上预先确定目标或固定调度，并给所有方法相同调参预算，报告对RTG的敏感性和失败请求。超出训练支持的高RTG不保证更好，且不同数据集的回报尺度不同，不能用一个未经说明的目标值比较。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| 离线决策是否必须使用Bellman自举 | 用期望回报、状态、动作序列训练因果Transformer预测动作 | 把好坏轨迹区分为不同条件，避免直接使用自举标签 | Atari、D4RL和序列任务实验展示条件序列建模的竞争力 | 请求很高回报不保证可实现，数据覆盖仍限制行为 |
+&lt;/details&gt;
 
-## 资料与阅读范围
+&lt;details&gt;
+&lt;summary&gt;2. 未来奖励条件是否可能携带不可控随机性？&lt;/summary&gt;
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+可能。实际回报由动作和环境随机性共同决定；用高回报轨迹做条件学习，会筛选到“运气好”的样本，模型可能把不可控结果误当作能靠动作实现。确定性或随机性较小环境弱化该问题，不能推广到任意随机MDP。应在重复相同动作的受控随机环境中比较条件回报与真实达成分布，识别选择偏差。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;3. 何种任务需要TD式拼接而序列BC做不到？&lt;/summary&gt;
+
+当数据含通向中间状态的前半段和从该状态通向目标的后半段，但没有一条完整高回报轨迹时，Bellman备份可以在马尔可夫覆盖条件下传播并拼接价值。朴素条件序列模仿没有显式备份机制，若所需上下文组合不在数据中，未必学会连接。Transformer有可能通过结构泛化解决部分图任务，所以应把它表述为条件和实证问题，而不是绝对不能拼接。
+
+&lt;/details&gt;
+
+## 七、沿未解决的问题继续读
+
+- [IQL](46-iql.md)：当没有完整高回报轨迹、只有可连接的片段时，价值传播能提供什么？IQL的toy maze提供数据内拼接对照，是后续价值路线，与条件序列建模并行。（后续平行路线）
+
+- [TD3+BC](45-td3-bc.md)：条件Transformer的收益是否需要复杂模型，还是简单价值加模仿也有竞争力？同期TD3+BC提供简洁基线，比较首先要统一D4RL版本与调参预算。（同期并行路线）
+
+### 原文核对与路线出处
+
+- [原论文与图表入口](https://arxiv.org/html/2106.01345)。§3序列与训练；§5.6表7；附录回报条件与图任务。
+- **并行路线**：[CQL](42-cql.md)。同为离线决策，DT改为条件序列监督而非保守TD。
+- **并行路线**：[TD3+BC](45-td3-bc.md)。同期以简洁价值加模仿基线检验不同方法复杂度的必要性。
 
 ## 自测两题
 

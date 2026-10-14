@@ -42,13 +42,11 @@
                 <span class="text-gray-500">MimicGen：用对象中心变换复用示范</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="f5828330dd22ca8ef194ca67bc68d6cdf109d84c00bdb520c44aaba90c38baa1"><h1>071｜MimicGen：用对象中心变换复用示范</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="5270433b1fa7761f027f57004fc7fb6a5cc2385b9e147c184d529d299ebb5d4c"><h1>071｜MimicGen：用对象中心变换复用示范</h1>
 <p><a href="index.html">系列首页</a> · <a href="070-tdmpc2.html">上一篇</a> · <a href="072-gr1.html">下一篇</a></p>
 <p><strong>原论文</strong>：<em>MimicGen: A Data Generation System for Scalable Robot Learning using Human Demonstrations</em>，Ajay Mandlekar 等，2023，本文依据 arXiv v1。<a href="https://arxiv.org/abs/2310.17596">论文</a>。</p>
-<h2 id="一一分钟理解示范不必从头再录">一、一分钟理解：示范不必从头再录</h2>
-<p>把杯子从桌角移到桌心，人通常不需要重新学习抓杯子，只需让“相对杯子的动作”跟着杯子移动。MimicGen 把这种复用做成数据生产系统：把少量示范分成对象中心片段，变换并执行，收集成功轨迹，再训练视觉策略。</p>
-<p>作者希望降低人工遥操作量。实验支持它能在规定的任务结构下扩展数据与初始状态覆盖；它没有证明机器人能够自己发现任意任务分解，也没有让所有生成轨迹天然正确。</p>
-<p>一句话：在可分解为对象中心操作的任务中，通过几何迁移示范并重新执行，改善模仿学习的数据覆盖，代价是对象位姿、子任务定义、成功检测和实际交互成本。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="043-robomimic.html">robomimic</a>暴露了示范覆盖与采集成本的限制，继续手工录制每种物体摆放难以扩展。MimicGen把示范分成对象中心片段并变换重执行，研究哪些局部动作可复用；它不自动发现任意任务分解。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：</p>
 <ul>
@@ -58,12 +56,13 @@
 <li><strong>数据选择偏差</strong>：保留规则改变了数据实际覆盖的状态分布。</li>
 <li><strong>闭环策略</strong>：不断根据当前观察修正动作，而非只播放固定轨迹。</li>
 </ul>
-<h2 id="二背景与问题定义">二、背景与问题定义</h2>
+<h2 id="一问题设定少量示范怎样变成覆盖新摆放的真实执行数据">一、问题设定：少量示范怎样变成覆盖新摆放的真实执行数据</h2>
+<p>把杯子从桌角移到桌心，人通常不需要重新学习抓杯子，只需让“相对杯子的动作”跟着杯子移动。MimicGen 把这种复用做成数据生产系统：把少量示范分成对象中心片段，变换并执行，收集成功轨迹，再训练视觉策略。</p>
 <p>这是“交互生成数据＋离线行为克隆”的系统。生成阶段会进入环境执行动作；训练阶段用监督学习，而非用回报优化一个新强化学习算法。任务的成功判定用于筛选数据，不是价值网络。</p>
 <p>需要分清两个观察接口：生成器知道当前相关对象的位姿；部署的图像策略只看相机和本体信息。生成时的特权信息相当于一个数据教师，不能据此说策略部署必须访问精确对象位姿，也不能反过来说整个系统不需要它。</p>
 <p>典型动作是末端位姿增量加夹爪命令。目标可能是叠块、穿孔、装配或制作咖啡。是否完成由任务判定器决定，轨迹片段结束则由子任务标记决定；两者并不相同。一段“抓取完成”不意味着整个咖啡任务完成。</p>
 <p>核心假设是每个子任务能相对一个对象坐标系表达。抓杯相对杯，放杯相对托盘。若一个操作必须同时绕开移动障碍、协调两个自由运动物体，单一刚体变换就未必保留可行性。原有演示覆盖稀疏的问题，因而被转化为“能否把轨迹放到新情境中仍成功”的问题。<a href="https://arxiv.org/html/2310.17596v1#S3">设定与方法：§3–4</a>。</p>
-<h2 id="三方法重新执行而非只移动图片">三、方法：重新执行，而非只移动图片</h2>
+<h2 id="二按子任务对象变换轨迹并重新验收">二、按子任务对象变换轨迹并重新验收</h2>
 <h3 id="1-三层系统分别做什么">1. 三层系统分别做什么</h3>
 <p>第一层是任务语义：预先给出子任务顺序，以及每一段应参照哪个对象。第二层是运动几何：选择源片段、计算新目标位姿、插值连接。第三层是学习：把执行得到的图像与动作交给 BC-RNN。三层可以分别失败，不能把所有误差归到神经网络。</p>
 <p>选择片段时可以随机取，也可以依据对象位姿选近邻；部分任务允许每个子任务重新选源示范。重新选择有助于利用不同演示的局部优势，但产生的连接运动可能更难模仿。</p>
@@ -83,6 +82,14 @@
 \log\pi_\theta(a\mid o_{0:t}).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathcal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">BC</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1333em;vertical-align:-0.3833em;"></span><span class="mord">−</span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.5198em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight">o</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">a</span><span class="mclose mtight">)</span><span class="mrel mtight">∼</span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.3488em;margin-left:-0.0278em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">generated</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2901em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3833em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">0</span><span class="mrel mtight">:</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="r"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>r</mi></mrow><annotation encoding="application/x-tex">r</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span></span></span></span> 或 <span class="reading-math" data-tex="Q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Q</mi></mrow><annotation encoding="application/x-tex">Q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span></span></span></span></span> 没有进入这个目标。方法改变数据来源；指标则有人工示范量、生成成功率、策略成功率。三者不可互换。</p>
 <p>生成时还会给动作加噪声，增加局部变化；只有执行成功的轨迹留下。因而它不像普通图像增强那样假设变换后标签自动有效，而是让环境检查物理后果。</p>
+<p>成功筛选会重塑训练分布。令 <span class="reading-math" data-tex="p_0(x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mn>0</mn></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">p_0(x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span> 为尝试生成时初态 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 的分布，<span class="reading-math" data-tex="s(x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">s(x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span> 为生成器在该初态的成功概率，则保留数据的初态分布为 <span class="reading-math" data-tex="p_{\rm keep}(x)=p_0(x)s(x)/\mathbb E_{p_0}[s(x)]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mrow><mi mathvariant="normal">k</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">p</mi></mrow></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><msub><mi>p</mi><mn>0</mn></msub><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mi>s</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><msub><mi mathvariant="double-struck">E</mi><msub><mi>p</mi><mn>0</mn></msub></msub><mo stretchy="false">[</mo><mi>s</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">p_{\rm keep}(x)=p_0(x)s(x)/\mathbb E_{p_0}[s(x)]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">keep</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord mathnormal">s</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord">/</span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3173em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">[</span><span class="mord mathnormal">s</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)]</span></span></span></span></span>。这个等式假设每次尝试按同一规则独立采样且平均留存概率大于零。即使初态均匀，难位置也会因低通过率而稀少。</p>
+<p>教学例：左右两区各尝试100次，成功率分别90%与10%，最终示范就有90%来自左区。增加生成次数不会自动纠正此偏差，还需分区配额、改进生成器或补充示范。原文真机生成通过率与学习后策略成功率明显不同，且插值长度也影响模仿难度；不能把“生成成功”直接当作策略能力。<a href="https://arxiv.org/html/2310.17596v1">原文数据生成成功率与真机讨论</a></p>
+<h3 id="用小例子检验理解">用小例子检验理解</h3>
+<p><strong>自构教学例子，未运行。</strong> 旧杯子中心在<span class="reading-math" data-tex="x=0.2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo>=</mo><mn>0.2</mn></mrow><annotation encoding="application/x-tex">x=0.2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.2</span></span></span></span></span>米，抓取目标在<span class="reading-math" data-tex="x=0.25"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo>=</mo><mn>0.25</mn></mrow><annotation encoding="application/x-tex">x=0.25</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.25</span></span></span></span></span>米，相对偏移为0.05米。杯子移到<span class="reading-math" data-tex="x=0.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">x=0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span>米，新目标应为0.55米。若把新、旧矩阵次序写反，会得到向反方向移动的结果。这是检查公式的最简单单元例子。</p>
+<p>接着把托盘单独移到另一侧。抓杯片段应跟杯子变换，放杯片段应跟托盘变换，不能把整条轨迹只平移一次。两段之间的新连接可能穿过障碍；几何复用没有解决全局避障。</p>
+<p>最后假设生成1000条成功轨迹需要5000次尝试，策略训练后在100次评估成功80次。20%是生成率，80%是策略成功率。不能宣称机器人从20%“强化学习提升”到80%，因为训练方法是监督模仿，且两个执行系统不同。</p>
+<h2 id="三变换对象中心片段并实际执行生成候选">三、变换对象中心片段并实际执行生成候选</h2>
+<p>抓杯片段跟杯子变换，放杯片段跟托盘变换，段间还要连接并重新执行。生成器产生可训练示范，随后学习器才从观察预测动作；二者不是同一个控制系统。</p>
 <pre><code class="language-text">输入：源示范、已知子任务顺序、对象位姿接口、成功检测器
 把每条源示范切成对应子任务的片段
 重复直到收集够成功轨迹：
@@ -98,7 +105,18 @@
 部署时：图像与本体信息 → 策略动作 → 控制器
 </code></pre>
 <p>这是教学伪代码，省略了动作裁剪、移动底盘处理、片段边界随机化等工程细节。尤其“执行控制目标”不意味着机器人精确到达目标；跟踪误差正是需要成功筛选的原因。</p>
-<h2 id="四实验设计从数据效率读而非只看数据规模">四、实验设计：从数据效率读，而非只看数据规模</h2>
+<h2 id="四分别统计生成尝试保留轨迹和策略成绩">四、分别统计生成尝试、保留轨迹和策略成绩</h2>
+<p>作者希望降低人工遥操作量。实验支持它能在规定的任务结构下扩展数据与初始状态覆盖；它没有证明机器人能够自己发现任意任务分解，也没有让所有生成轨迹天然正确。</p>
+<p><strong>原图怎么读：</strong> <a href="#paper-071-mimicgen-figure-4">图4，原论文图注与图像</a>。原有局部摘图展示右侧两组消融并上下排列：上图改变源示范数量，下图比较策略训练数据来源；下方完整图补上左侧源示范与生成示范的逐任务结果表。分开这三组变量，才能避免把生成更多与人工示范更多混为一谈。</p>
+<!-- figure-ref-v6:start:590bf66984fc -->
+<p><a id="paper-071-mimicgen-figure-4"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/071-mimicgen-v6-figure-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/071-mimicgen-v6-figure-4.png" width="1584" height="564" alt="MimicGen: A Data Generation System for Scalable Robot Learning using Human Demonstrations，图4：左表给出源示范与生成数据在各任务及D0/D1/D2分布的成功率；右上改变生成时的源示范数量，右下比较策略训练数据来源。源示范增加并非各任务单调改善，不能把三种数据量对照合成同一条趋势。" loading="lazy"></a><figcaption>原图摘引：Ajay Mandlekar 等，2023，本文依据 arXiv v1，PDF第6页，图4。<a href="https://arxiv.org/pdf/2310.17596v1#page=6" target="_blank" rel="noopener noreferrer">核对原文</a>。左表给出源示范与生成数据在各任务及D0/D1/D2分布的成功率；右上改变生成时的源示范数量，右下比较策略训练数据来源。源示范增加并非各任务单调改善，不能把三种数据量对照合成同一条趋势。<a href="https://arxiv.org/html/2310.17596v1#S6.F4" target="_blank" rel="noopener noreferrer">原引用入口 </a></figcaption></figure>
+<!-- figure-ref-v6:end:590bf66984fc -->
+
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/071-mimicgen-s6-f4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/071-mimicgen-s6-f4.png" width="1804" height="1340" alt="MimicGen: A Data Generation System for Scalable Robot Learning using Human Demonstrations，图4：所选上图改变源示范数量，下图比较策略训练数据来源；逐任务源示范与生成示范结果表见原文。分开这三组变量，才能避免把生成更多与人工示范更多混为一谈。" loading="lazy"></a><figcaption>实验图原图摘引：Ajay Mandlekar 等，2023，HTML S6.F4，图4，右侧源示范数量与策略训练数据消融。原图面板重新排版，数据未改。<a href="https://arxiv.org/html/2310.17596v1#S6.F4" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>位姿函数链接指向官方当前代码，未锁定论文历史提交；它可帮助检查代数方向，但不能证明历史实验的每个实现细节。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -153,58 +171,31 @@
 <td>不据此推算统一墙钟效率</td>
 </tr>
 </tbody></table></div>
-<p>这些设置见 §5、附录 N/O。真实 Stack 的生成量在 §6.4 写200条，图6说明与附录部分概括写100条；正文采用 §6.4 明确列出的200条，并保留这个口径差异。</p>
+<p>这些设置见 §5、附录 N/O。真实 Stack 的生成量在 §6.4 写200条，<a href="#paper-071-mimicgen-figure-6">图6</a>说明与附录部分概括写100条；正文采用 §6.4 明确列出的200条，并保留这个口径差异。</p>
+<!-- figure-ref-v6:start:b576a76c4207 -->
+<p><a id="paper-071-mimicgen-figure-6"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/071-mimicgen-v6-figure-6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/071-mimicgen-v6-figure-6.png" width="2132" height="1880" alt="MimicGen: A Data Generation System for Scalable Robot Learning using Human Demonstrations，图6：这些设置见 §5、附录 N/O。真实 Stack 的生成量在 §6.4 写200条，图6说明与附录部分概括写100条；正文采用 §6.4 明确列出的200条，并保留这个口径差异。" loading="lazy"></a><figcaption>原图摘引：Ajay Mandlekar 等，2023，本文依据 arXiv v1，HTML S6.F6，图6。原面板按源顺序重新排版，数据未改。<a href="https://arxiv.org/html/2310.17596v1#S6.F6" target="_blank" rel="noopener noreferrer">核对原文</a>。这些设置见 §5、附录 N/O。真实 Stack 的生成量在 §6.4 写200条，图6说明与附录部分概括写100条；正文采用 §6.4 明确列出的200条，并保留这个口径差异。</figcaption></figure>
+<!-- figure-ref-v6:end:b576a76c4207 -->
+
+
 <p>模拟中的最大检查点成功率与真实最后检查点不可直接当作完全同口径的模拟—现实差距。更多数据也意味着更多执行尝试；人工时间节省和机器占用节省是两个不同主张。</p>
-<h2 id="五五处证据生成器好用不等于策略已经可靠">五、五处证据：生成器好用，不等于策略已经可靠</h2>
-<p><strong>证据1：图4比较源数据与生成数据。</strong> Square 图像策略在<span class="reading-math" data-tex="D_0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>D</mi><mn>0</mn></msub></mrow><annotation encoding="application/x-tex">D_0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>从11.3%到90.7%，绝对增加79.4个百分点；但更困难的<span class="reading-math" data-tex="D_2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>D</mi><mn>2</mn></msub></mrow><annotation encoding="application/x-tex">D_2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>为49.3%。这支持数据扩展有效，也说明扩大场景范围仍有难度。不能把<span class="reading-math" data-tex="D_0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>D</mi><mn>0</mn></msub></mrow><annotation encoding="application/x-tex">D_0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>成绩作为所有物体位置的保证。</p>
-<p><strong>证据2：图4的人工与生成数据比较。</strong> 作者用相同条数的人工数据和生成数据比较，并观察到生成量继续增大后的收益递减。它支持“重复情境的演示可复用”；不支持“新的操作技巧永远不需要人教”。如果源示范全部没有某种抓法，刚体变换不能创造该技巧。</p>
-<p><strong>证据3：表 N.1 的动作噪声消融。</strong> 去掉噪声可以让数据生成更容易成功，却让训练后策略表现下降。其因果解释是：最容易重放的轨迹可能过于单一。生成器只需把这一次做对，学习器还要从有限样本得到面对变化的反馈规则。</p>
+<h3 id="五处证据生成器好用不等于策略已经可靠">五处证据：生成器好用，不等于策略已经可靠</h3>
+<p><strong>证据1：<a href="#paper-071-mimicgen-figure-4">图4</a>比较源数据与生成数据。</strong> Square 图像策略在<span class="reading-math" data-tex="D_0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>D</mi><mn>0</mn></msub></mrow><annotation encoding="application/x-tex">D_0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>从11.3%到90.7%，绝对增加79.4个百分点；但更困难的<span class="reading-math" data-tex="D_2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>D</mi><mn>2</mn></msub></mrow><annotation encoding="application/x-tex">D_2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>为49.3%。这支持数据扩展有效，也说明扩大场景范围仍有难度。不能把<span class="reading-math" data-tex="D_0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>D</mi><mn>0</mn></msub></mrow><annotation encoding="application/x-tex">D_0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>成绩作为所有物体位置的保证。</p>
+<p><strong>证据2：<a href="#paper-071-mimicgen-figure-4">图4</a>的人工与生成数据比较。</strong> 作者用相同条数的人工数据和生成数据比较，并观察到生成量继续增大后的收益递减。它支持“重复情境的演示可复用”；不支持“新的操作技巧永远不需要人教”。如果源示范全部没有某种抓法，刚体变换不能创造该技巧。</p>
+<p><strong>证据3：<a href="https://arxiv.org/html/2310.17596v1#A14.T1">表N.1</a> 的动作噪声消融。</strong> 去掉噪声可以让数据生成更容易成功，却让训练后策略表现下降。其因果解释是：最容易重放的轨迹可能过于单一。生成器只需把这一次做对，学习器还要从有限样本得到面对变化的反馈规则。</p>
 <p><strong>证据4：§6.4 与附录 H 的真实结果。</strong> BC-RNN 的真实 Stack/Coffee 成功率为36%/14%；Stack 改用 Diffusion Policy 达76%。这些数字来自实际执行，不是生成率。它们表明同一类数据对不同策略架构的可学习性不同，也说明高生成率不能替代部署验证。</p>
 <p><strong>证据5：附录 R 的覆盖分析。</strong> 成功筛选后的数据在部分空间分箱中存在明显缺口。这是选择偏差的直接提醒：被丢弃的尝试可能恰好集中在困难位置，留下来的大数据并不等于均匀覆盖大空间。<a href="https://arxiv.org/html/2310.17596v1">实验与附录全文</a>。</p>
-<p>读这些证据，还要避免把低维策略表 Q.1 的结果误填到图像策略图4。论文若在解释段引用了一个不同观察接口的数值，应回到对应表格确认，而不是仅按任务名合并。</p>
-<h2 id="六贡献代价与适用边界">六、贡献、代价与适用边界</h2>
+<p>读这些证据，还要避免把低维策略<a href="https://arxiv.org/html/2310.17596v1#A17.T1">表Q.1</a> 的结果误填到图像策略<a href="#paper-071-mimicgen-figure-4">图4</a>。论文若在解释段引用了一个不同观察接口的数值，应回到对应表格确认，而不是仅按任务名合并。</p>
+<h2 id="五成功筛选可能丢掉困难状态与过程质量">五、成功筛选可能丢掉困难状态与过程质量</h2>
 <p>真正的贡献是将演示复用改成可扩展的数据接口。部署无需每次重新估计对象并重放，而是学习一个视觉反馈策略。这使“生成程序的局限”和“最终策略的形式”不必完全相同。</p>
 <p>代价有三类。几何上需要对象坐标与末端控制约定一致；语义上需要已知子任务顺序和边界；资源上需要真实或模拟环境执行许多尝试。真实场景还需要复位，不能只用保留下来的轨迹条数估计成本。</p>
 <p>作者承认插值可能产生冗长、不自然的动作，成功轨迹也可能包含不必要碰撞。本文的分析是：单纯按最终成功筛选，会把“达到目标”与“过程质量”混为一谈。若应用在昂贵易损物体上，应把碰撞、力和动作长度作为数据质量指标，而不是期待 BC 自动消除这些行为。</p>
 <p>迁移对象也不是无条件形状泛化：需要可对应的规范坐标系和可复用接触方式。杯柄形状改变到无法用原抓法时，再精确的位姿变换也不能解决抓取拓扑变化。</p>
-<h2 id="七用小例子检验理解">七、用小例子检验理解</h2>
-<p><strong>自构教学例子，未运行。</strong> 旧杯子中心在<span class="reading-math" data-tex="x=0.2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo>=</mo><mn>0.2</mn></mrow><annotation encoding="application/x-tex">x=0.2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.2</span></span></span></span></span>米，抓取目标在<span class="reading-math" data-tex="x=0.25"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo>=</mo><mn>0.25</mn></mrow><annotation encoding="application/x-tex">x=0.25</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.25</span></span></span></span></span>米，相对偏移为0.05米。杯子移到<span class="reading-math" data-tex="x=0.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">x=0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span>米，新目标应为0.55米。若把新、旧矩阵次序写反，会得到向反方向移动的结果。这是检查公式的最简单单元例子。</p>
-<p>接着把托盘单独移到另一侧。抓杯片段应跟杯子变换，放杯片段应跟托盘变换，不能把整条轨迹只平移一次。两段之间的新连接可能穿过障碍；几何复用没有解决全局避障。</p>
-<p>最后假设生成1000条成功轨迹需要5000次尝试，策略训练后在100次评估成功80次。20%是生成率，80%是策略成功率。不能宣称机器人从20%“强化学习提升”到80%，因为训练方法是监督模仿，且两个执行系统不同。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>反复遥操作成本高</td>
-<td>对象中心变换并执行</td>
-<td>重用局部动作结构</td>
-<td>图4的数据比较</td>
-<td>仍要交互与复位</td>
-</tr>
-<tr>
-<td>初始场景狭窄</td>
-<td>在新分布中生成成功数据</td>
-<td>增加状态—动作覆盖</td>
-<td><span class="reading-math" data-tex="D_1/D_2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>D</mi><mn>1</mn></msub><mi mathvariant="normal">/</mi><msub><mi>D</mi><mn>2</mn></msub></mrow><annotation encoding="application/x-tex">D_1/D_2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>实验</td>
-<td>成功筛选会偏置覆盖</td>
-</tr>
-<tr>
-<td>生成轨迹不等于可学策略</td>
-<td>单独训练视觉模型</td>
-<td>形成观察驱动反馈</td>
-<td>真实BC与扩散策略差异</td>
-<td>插值伪影、多模态学习困难</td>
-</tr>
-</tbody></table></div>
-<p>阅读范围：核对 v1 方法、主要实验及相关附录，并对照官方当前位姿变换代码；代码未锁定论文历史提交。未独立运行生成与训练系统。</p>
-<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<h3 id="追问只按最终成功保留轨迹会不会把不必要碰撞也教给策略">追问：只按最终成功保留轨迹，会不会把不必要碰撞也教给策略？</h3>
+<p>参考答案：会有这种可能，因为最终成功不约束接触过程。应在保留规则中另外检查碰撞、力或动作长度，并在相同生成预算下比较质量筛选与单纯成功筛选。筛得更干净也可能缩窄覆盖，所以还需记录被拒绝的场景。生成成功和可学习的反馈行为不是同一质量指标。</p>
+<h2 id="六沿机制关系继续读">六、沿机制关系继续读</h2>
+<p>本篇针对<a href="043-robomimic.html">robomimic</a>揭示的示范覆盖瓶颈，用对象中心重执行扩充数据，再组合既有BC学习器；后作<a href="088-dexmimicgen.html">DexMimicGen</a>直接继承并扩展这条生成路线到双臂灵巧操作。</p>
+<h2 id="七自测三题与参考答案">七、自测三题与参考答案</h2>
 <p><strong>问题1：MimicGen 为什么不能被理解成“把旧动作整体平移一下”？</strong></p>
 <p>答案：不同子任务相对不同对象，旋转也会改变接近方向。每段需要各自的刚体变换，段间需要连接，并且必须实际执行检查接触结果。整体平移既不能处理对象独立移动，也无法验证新轨迹的动力学可行性。</p>
 <p><strong>问题2：提高数据生成成功率一定会提高最终策略成功率吗？</strong></p>
@@ -222,15 +213,13 @@
 
 **原论文**：*MimicGen: A Data Generation System for Scalable Robot Learning using Human Demonstrations*，Ajay Mandlekar 等，2023，本文依据 arXiv v1。[论文](https://arxiv.org/abs/2310.17596)。
 
-## 一、一分钟理解：示范不必从头再录
+### 先接住前作的问题
+
+[robomimic](043-robomimic.md)暴露了示范覆盖与采集成本的限制，继续手工录制每种物体摆放难以扩展。MimicGen把示范分成对象中心片段并变换重执行，研究哪些局部动作可复用；它不自动发现任意任务分解。
+
+## 一、问题设定：少量示范怎样变成覆盖新摆放的真实执行数据
 
 把杯子从桌角移到桌心，人通常不需要重新学习抓杯子，只需让“相对杯子的动作”跟着杯子移动。MimicGen 把这种复用做成数据生产系统：把少量示范分成对象中心片段，变换并执行，收集成功轨迹，再训练视觉策略。
-
-作者希望降低人工遥操作量。实验支持它能在规定的任务结构下扩展数据与初始状态覆盖；它没有证明机器人能够自己发现任意任务分解，也没有让所有生成轨迹天然正确。
-
-一句话：在可分解为对象中心操作的任务中，通过几何迁移示范并重新执行，改善模仿学习的数据覆盖，代价是对象位姿、子任务定义、成功检测和实际交互成本。
-
-## 二、背景与问题定义
 
 这是“交互生成数据＋离线行为克隆”的系统。生成阶段会进入环境执行动作；训练阶段用监督学习，而非用回报优化一个新强化学习算法。任务的成功判定用于筛选数据，不是价值网络。
 
@@ -240,7 +229,7 @@
 
 核心假设是每个子任务能相对一个对象坐标系表达。抓杯相对杯，放杯相对托盘。若一个操作必须同时绕开移动障碍、协调两个自由运动物体，单一刚体变换就未必保留可行性。原有演示覆盖稀疏的问题，因而被转化为“能否把轨迹放到新情境中仍成功”的问题。[设定与方法：§3–4](https://arxiv.org/html/2310.17596v1#S3)。
 
-## 三、方法：重新执行，而非只移动图片
+## 二、按子任务对象变换轨迹并重新验收
 
 ### 1. 三层系统分别做什么
 
@@ -280,6 +269,22 @@ $r$ 或 $Q$ 没有进入这个目标。方法改变数据来源；指标则有�
 
 生成时还会给动作加噪声，增加局部变化；只有执行成功的轨迹留下。因而它不像普通图像增强那样假设变换后标签自动有效，而是让环境检查物理后果。
 
+成功筛选会重塑训练分布。令 $p_0(x)$ 为尝试生成时初态 $x$ 的分布，$s(x)$ 为生成器在该初态的成功概率，则保留数据的初态分布为 $p_{\rm keep}(x)=p_0(x)s(x)/\mathbb E_{p_0}[s(x)]$。这个等式假设每次尝试按同一规则独立采样且平均留存概率大于零。即使初态均匀，难位置也会因低通过率而稀少。
+
+教学例：左右两区各尝试100次，成功率分别90%与10%，最终示范就有90%来自左区。增加生成次数不会自动纠正此偏差，还需分区配额、改进生成器或补充示范。原文真机生成通过率与学习后策略成功率明显不同，且插值长度也影响模仿难度；不能把“生成成功”直接当作策略能力。[原文数据生成成功率与真机讨论](https://arxiv.org/html/2310.17596v1)
+
+### 用小例子检验理解
+
+**自构教学例子，未运行。** 旧杯子中心在$x=0.2$米，抓取目标在$x=0.25$米，相对偏移为0.05米。杯子移到$x=0.5$米，新目标应为0.55米。若把新、旧矩阵次序写反，会得到向反方向移动的结果。这是检查公式的最简单单元例子。
+
+接着把托盘单独移到另一侧。抓杯片段应跟杯子变换，放杯片段应跟托盘变换，不能把整条轨迹只平移一次。两段之间的新连接可能穿过障碍；几何复用没有解决全局避障。
+
+最后假设生成1000条成功轨迹需要5000次尝试，策略训练后在100次评估成功80次。20%是生成率，80%是策略成功率。不能宣称机器人从20%“强化学习提升”到80%，因为训练方法是监督模仿，且两个执行系统不同。
+
+## 三、变换对象中心片段并实际执行生成候选
+
+抓杯片段跟杯子变换，放杯片段跟托盘变换，段间还要连接并重新执行。生成器产生可训练示范，随后学习器才从观察预测动作；二者不是同一个控制系统。
+
 ~~~text
 输入：源示范、已知子任务顺序、对象位姿接口、成功检测器
 把每条源示范切成对应子任务的片段
@@ -298,7 +303,21 @@ $r$ 或 $Q$ 没有进入这个目标。方法改变数据来源；指标则有�
 
 这是教学伪代码，省略了动作裁剪、移动底盘处理、片段边界随机化等工程细节。尤其“执行控制目标”不意味着机器人精确到达目标；跟踪误差正是需要成功筛选的原因。
 
-## 四、实验设计：从数据效率读，而非只看数据规模
+## 四、分别统计生成尝试、保留轨迹和策略成绩
+
+作者希望降低人工遥操作量。实验支持它能在规定的任务结构下扩展数据与初始状态覆盖；它没有证明机器人能够自己发现任意任务分解，也没有让所有生成轨迹天然正确。
+
+**原图怎么读：** [图4，原论文图注与图像](#paper-071-mimicgen-figure-4)。原有局部摘图展示右侧两组消融并上下排列：上图改变源示范数量，下图比较策略训练数据来源；下方完整图补上左侧源示范与生成示范的逐任务结果表。分开这三组变量，才能避免把生成更多与人工示范更多混为一谈。
+
+&lt;!-- figure-ref-v6:start:590bf66984fc --&gt;
+&lt;a id=&quot;paper-071-mimicgen-figure-4&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/071-mimicgen-v6-figure-4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/071-mimicgen-v6-figure-4.png&quot; width=&quot;1584&quot; height=&quot;564&quot; alt=&quot;MimicGen: A Data Generation System for Scalable Robot Learning using Human Demonstrations，图4：左表给出源示范与生成数据在各任务及D0/D1/D2分布的成功率；右上改变生成时的源示范数量，右下比较策略训练数据来源。源示范增加并非各任务单调改善，不能把三种数据量对照合成同一条趋势。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Ajay Mandlekar 等，2023，本文依据 arXiv v1，PDF第6页，图4。&lt;a href=&quot;https://arxiv.org/pdf/2310.17596v1#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。左表给出源示范与生成数据在各任务及D0/D1/D2分布的成功率；右上改变生成时的源示范数量，右下比较策略训练数据来源。源示范增加并非各任务单调改善，不能把三种数据量对照合成同一条趋势。&lt;a href=&quot;https://arxiv.org/html/2310.17596v1#S6.F4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原引用入口 &lt;/a&gt;&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:590bf66984fc --&gt;
+
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/071-mimicgen-s6-f4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/071-mimicgen-s6-f4.png&quot; width=&quot;1804&quot; height=&quot;1340&quot; alt=&quot;MimicGen: A Data Generation System for Scalable Robot Learning using Human Demonstrations，图4：所选上图改变源示范数量，下图比较策略训练数据来源；逐任务源示范与生成示范结果表见原文。分开这三组变量，才能避免把生成更多与人工示范更多混为一谈。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验图原图摘引：Ajay Mandlekar 等，2023，HTML S6.F4，图4，右侧源示范数量与策略训练数据消融。原图面板重新排版，数据未改。&lt;a href=&quot;https://arxiv.org/html/2310.17596v1#S6.F4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+位姿函数链接指向官方当前代码，未锁定论文历史提交；它可帮助检查代数方向，但不能证明历史实验的每个实现细节。
 
 | 项目 | 原文设置或阅读口径 | 验证问题 |
 |---|---|---|
@@ -312,25 +331,31 @@ $r$ 或 $Q$ 没有进入这个目标。方法改变数据来源；指标则有�
 | 资源 | 模拟运行使用V100与8 CPU配置；部分任务共享机器 | 数据生成并非零算力 |
 | 尚未逐项确认 | 每任务训练更新总数、全部误差条统计定义 | 不据此推算统一墙钟效率 |
 
-这些设置见 §5、附录 N/O。真实 Stack 的生成量在 §6.4 写200条，图6说明与附录部分概括写100条；正文采用 §6.4 明确列出的200条，并保留这个口径差异。
+这些设置见 §5、附录 N/O。真实 Stack 的生成量在 §6.4 写200条，[图6](#paper-071-mimicgen-figure-6)说明与附录部分概括写100条；正文采用 §6.4 明确列出的200条，并保留这个口径差异。
+
+&lt;!-- figure-ref-v6:start:b576a76c4207 --&gt;
+&lt;a id=&quot;paper-071-mimicgen-figure-6&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/071-mimicgen-v6-figure-6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/071-mimicgen-v6-figure-6.png&quot; width=&quot;2132&quot; height=&quot;1880&quot; alt=&quot;MimicGen: A Data Generation System for Scalable Robot Learning using Human Demonstrations，图6：这些设置见 §5、附录 N/O。真实 Stack 的生成量在 §6.4 写200条，图6说明与附录部分概括写100条；正文采用 §6.4 明确列出的200条，并保留这个口径差异。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Ajay Mandlekar 等，2023，本文依据 arXiv v1，HTML S6.F6，图6。原面板按源顺序重新排版，数据未改。&lt;a href=&quot;https://arxiv.org/html/2310.17596v1#S6.F6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。这些设置见 §5、附录 N/O。真实 Stack 的生成量在 §6.4 写200条，图6说明与附录部分概括写100条；正文采用 §6.4 明确列出的200条，并保留这个口径差异。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:b576a76c4207 --&gt;
+
 
 模拟中的最大检查点成功率与真实最后检查点不可直接当作完全同口径的模拟—现实差距。更多数据也意味着更多执行尝试；人工时间节省和机器占用节省是两个不同主张。
 
-## 五、五处证据：生成器好用，不等于策略已经可靠
+### 五处证据：生成器好用，不等于策略已经可靠
 
-**证据1：图4比较源数据与生成数据。** Square 图像策略在$D_0$从11.3%到90.7%，绝对增加79.4个百分点；但更困难的$D_2$为49.3%。这支持数据扩展有效，也说明扩大场景范围仍有难度。不能把$D_0$成绩作为所有物体位置的保证。
+**证据1：[图4](#paper-071-mimicgen-figure-4)比较源数据与生成数据。** Square 图像策略在$D_0$从11.3%到90.7%，绝对增加79.4个百分点；但更困难的$D_2$为49.3%。这支持数据扩展有效，也说明扩大场景范围仍有难度。不能把$D_0$成绩作为所有物体位置的保证。
 
-**证据2：图4的人工与生成数据比较。** 作者用相同条数的人工数据和生成数据比较，并观察到生成量继续增大后的收益递减。它支持“重复情境的演示可复用”；不支持“新的操作技巧永远不需要人教”。如果源示范全部没有某种抓法，刚体变换不能创造该技巧。
+**证据2：[图4](#paper-071-mimicgen-figure-4)的人工与生成数据比较。** 作者用相同条数的人工数据和生成数据比较，并观察到生成量继续增大后的收益递减。它支持“重复情境的演示可复用”；不支持“新的操作技巧永远不需要人教”。如果源示范全部没有某种抓法，刚体变换不能创造该技巧。
 
-**证据3：表 N.1 的动作噪声消融。** 去掉噪声可以让数据生成更容易成功，却让训练后策略表现下降。其因果解释是：最容易重放的轨迹可能过于单一。生成器只需把这一次做对，学习器还要从有限样本得到面对变化的反馈规则。
+**证据3：[表N.1](https://arxiv.org/html/2310.17596v1#A14.T1) 的动作噪声消融。** 去掉噪声可以让数据生成更容易成功，却让训练后策略表现下降。其因果解释是：最容易重放的轨迹可能过于单一。生成器只需把这一次做对，学习器还要从有限样本得到面对变化的反馈规则。
 
 **证据4：§6.4 与附录 H 的真实结果。** BC-RNN 的真实 Stack/Coffee 成功率为36%/14%；Stack 改用 Diffusion Policy 达76%。这些数字来自实际执行，不是生成率。它们表明同一类数据对不同策略架构的可学习性不同，也说明高生成率不能替代部署验证。
 
 **证据5：附录 R 的覆盖分析。** 成功筛选后的数据在部分空间分箱中存在明显缺口。这是选择偏差的直接提醒：被丢弃的尝试可能恰好集中在困难位置，留下来的大数据并不等于均匀覆盖大空间。[实验与附录全文](https://arxiv.org/html/2310.17596v1)。
 
-读这些证据，还要避免把低维策略表 Q.1 的结果误填到图像策略图4。论文若在解释段引用了一个不同观察接口的数值，应回到对应表格确认，而不是仅按任务名合并。
+读这些证据，还要避免把低维策略[表Q.1](https://arxiv.org/html/2310.17596v1#A17.T1) 的结果误填到图像策略[图4](#paper-071-mimicgen-figure-4)。论文若在解释段引用了一个不同观察接口的数值，应回到对应表格确认，而不是仅按任务名合并。
 
-## 六、贡献、代价与适用边界
+## 五、成功筛选可能丢掉困难状态与过程质量
 
 真正的贡献是将演示复用改成可扩展的数据接口。部署无需每次重新估计对象并重放，而是学习一个视觉反馈策略。这使“生成程序的局限”和“最终策略的形式”不必完全相同。
 
@@ -340,13 +365,7 @@ $r$ 或 $Q$ 没有进入这个目标。方法改变数据来源；指标则有�
 
 迁移对象也不是无条件形状泛化：需要可对应的规范坐标系和可复用接触方式。杯柄形状改变到无法用原抓法时，再精确的位姿变换也不能解决抓取拓扑变化。
 
-## 七、用小例子检验理解
-
-**自构教学例子，未运行。** 旧杯子中心在$x=0.2$米，抓取目标在$x=0.25$米，相对偏移为0.05米。杯子移到$x=0.5$米，新目标应为0.55米。若把新、旧矩阵次序写反，会得到向反方向移动的结果。这是检查公式的最简单单元例子。
-
-接着把托盘单独移到另一侧。抓杯片段应跟杯子变换，放杯片段应跟托盘变换，不能把整条轨迹只平移一次。两段之间的新连接可能穿过障碍；几何复用没有解决全局避障。
-
-最后假设生成1000条成功轨迹需要5000次尝试，策略训练后在100次评估成功80次。20%是生成率，80%是策略成功率。不能宣称机器人从20%“强化学习提升”到80%，因为训练方法是监督模仿，且两个执行系统不同。
+### 五个前置概念
 
 五个前置概念：
 
@@ -356,15 +375,15 @@ $r$ 或 $Q$ 没有进入这个目标。方法改变数据来源；指标则有�
 - **数据选择偏差**：保留规则改变了数据实际覆盖的状态分布。
 - **闭环策略**：不断根据当前观察修正动作，而非只播放固定轨迹。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 反复遥操作成本高 | 对象中心变换并执行 | 重用局部动作结构 | 图4的数据比较 | 仍要交互与复位 |
-| 初始场景狭窄 | 在新分布中生成成功数据 | 增加状态—动作覆盖 | $D_1/D_2$实验 | 成功筛选会偏置覆盖 |
-| 生成轨迹不等于可学策略 | 单独训练视觉模型 | 形成观察驱动反馈 | 真实BC与扩散策略差异 | 插值伪影、多模态学习困难 |
+### 追问：只按最终成功保留轨迹，会不会把不必要碰撞也教给策略？
 
-阅读范围：核对 v1 方法、主要实验及相关附录，并对照官方当前位姿变换代码；代码未锁定论文历史提交。未独立运行生成与训练系统。
+参考答案：会有这种可能，因为最终成功不约束接触过程。应在保留规则中另外检查碰撞、力或动作长度，并在相同生成预算下比较质量筛选与单纯成功筛选。筛得更干净也可能缩窄覆盖，所以还需记录被拒绝的场景。生成成功和可学习的反馈行为不是同一质量指标。
 
-## 八、三个问题及答案
+## 六、沿机制关系继续读
+
+本篇针对[robomimic](043-robomimic.md)揭示的示范覆盖瓶颈，用对象中心重执行扩充数据，再组合既有BC学习器；后作[DexMimicGen](088-dexmimicgen.md)直接继承并扩展这条生成路线到双臂灵巧操作。
+
+## 七、自测三题与参考答案
 
 **问题1：MimicGen 为什么不能被理解成“把旧动作整体平移一下”？**
 
@@ -377,7 +396,6 @@ $r$ 或 $Q$ 没有进入这个目标。方法改变数据来源；指标则有�
 **问题3：为什么“生成器使用精确对象位姿”与“视觉策略部署不用对象位姿”并不矛盾？**
 
 答案：前者负责产生训练标签，后者从图像学习预测动作，信息权限发生在不同阶段。教师可拥有额外信息，但数据生成成本必须计入系统描述。若宣称整个流程只需要RGB，则遗漏了教师的位姿与任务结构条件。
-
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

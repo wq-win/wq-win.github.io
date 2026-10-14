@@ -42,15 +42,11 @@
                 <span class="text-gray-500">Cheetah 凸 MPC：用简化模型提前安排四足机器人的支撑力</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="26e6bb73dec12f77432df999b76791eccb43490d0d4b9a6bc8603f9d9ddcfcbb"><h1>094｜Cheetah 凸 MPC：用简化模型提前安排四足机器人的支撑力</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="ad859697bb484ad81d5f772292b39a11abdeaa118e50c22c8c2148b6d9e5cdfa"><h1>094｜Cheetah 凸 MPC：用简化模型提前安排四足机器人的支撑力</h1>
 <p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="093-toppra.html">上一篇</a> · <a href="095-legoloam.html">下一篇</a></p>
 <p><strong>论文</strong>：Jared Di Carlo、Patrick M. Wensing、Benjamin Katz、Gerardo Bledt、Sangbae Kim，<em>Dynamic Locomotion in the MIT Cheetah 3 Through Convex Model-Predictive Control</em>，IROS 2018。<a href="https://doi.org/10.1109/IROS.2018.8594448">论文 DOI</a> · <a href="https://dspace.mit.edu/bitstream/handle/1721.1/138000/convex_mpc_2fix.pdf">MIT 作者稿</a> · <a href="https://github.com/mit-biomimetics/Cheetah-Software">实验室代码</a>。</p>
-<p><strong>阅读范围</strong>：方法和结果依据可访问的<a href="https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control">论文全文镜像</a>中原稿正文及图注核对，不采用平台自动摘要。MIT 存档直接读取受限，图中未能可靠量化的曲线不读数。官方代码仅核对项目说明，未逐行审计或运行；不把后来的 Mini Cheetah 结果并入本篇。</p>
-<h2 id="一分钟理解脚还没离地就要准备好腾空后的运动">一分钟理解：脚还没离地，就要准备好腾空后的运动</h2>
-<p>四足机器人腾空时，不能继续用地面支撑力纠正机身。若控制器只盯着眼前姿态，它可能等到脚都离地才发现来不及调整。</p>
-<p>这篇论文用模型预测控制提前考虑未来一段时间的支撑与腾空。它把机器人近似成一个受到各足接触力作用的刚体，固定当前规划的接触时序与足点，从而将支撑力规划变成一个能快速求解的凸二次规划。</p>
-<p>机器人实验展示多种步态、转向、扰动恢复与最高 3 m/s 的奔跑。关键不是求解一个毫无近似的全身动力学最优控制，而是让足够有用的模型以较小延迟反复更新。</p>
-<p><strong>一句话</strong>：在力矩控制四足机器人上，通过固定步态条件下的简化三维动力学与滚动支撑力优化，实现多种动态步态，代价是忽略部分腿部与旋转动力学，并依赖状态估计、接触管理和摆腿控制。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="080-wholebody-qp.html">质心动力学规划</a>保留全身运动学一致性，但在线高频求解仍昂贵；Cheetah 凸 MPC 选择固定接触计划和参考几何，以更简化的单刚体预测换取快速反馈。它与<a href="072-contact-implicit.html">接触隐式优化</a>是不同取舍的平行路线，后者探索接触而本篇把接触时序交给上层。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：</p>
 <ol>
@@ -60,11 +56,14 @@
 <li><strong>摩擦锥</strong>：限制接触力方向以描述不滑动的条件。</li>
 <li><strong>凝聚 QP</strong>：消去预测状态，仅以控制序列为主要变量。</li>
 </ol>
-<h2 id="1问题定义优化地面反力不学习一套策略">1．问题定义：优化地面反力，不学习一套策略</h2>
+<h2 id="一问题设定未来腾空阶段怎样提前影响当前接触力">一、问题设定：未来腾空阶段怎样提前影响当前接触力</h2>
+<p>四足机器人腾空时，不能继续用地面支撑力纠正机身。若控制器只盯着眼前姿态，它可能等到脚都离地才发现来不及调整。</p>
+<h3 id="问题定义优化地面反力不学习一套策略">问题定义：优化地面反力，不学习一套策略</h3>
 <p>输入包括机身状态、足点位置、接触时序和期望速度；MPC 输出未来各足地面反力，底层再转成关节力矩。这是模型驱动控制，不是强化学习训练。</p>
 <p>预测状态可概括为机身位置、姿态、线速度和角速度。论文实现增加重力辅助状态，便于写成统一线性状态方程。这里“12 维机身运动状态”不应与机器人的 12 个驱动关节混为一谈。</p>
 <p>任务不是自主选择“现在应该用哪种步态”。本文步态由人工设计，接触序列和速度参考来自上层命令；足点也使用启发式规划。接触检测能处理提前或延后触地，但不等于 QP 联合搜索任意接触顺序。</p>
-<h2 id="2模型为什么要简化">2．模型为什么要简化</h2>
+<h2 id="二固定接触计划以简化刚体模型建立凸qp">二、固定接触计划，以简化刚体模型建立凸QP</h2>
+<h3 id="模型为什么要简化">模型为什么要简化</h3>
 <p>完整机器人有浮动基座、腿部惯性、关节约束和接触切换。把所有这些都放入长时域非线性优化会增加计算负担，还可能产生局部最优与数值问题。</p>
 <p>单刚体近似保留最关键的力学关系。用本文统一的重力向量约定：</p>
 <p><span class="reading-math" data-tex="m\ddot p=\sum_i f_i+mg,\qquad
@@ -75,7 +74,7 @@ I\dot\omega+\omega\times(I\omega)=\sum_i r_i\times f_i.</annotation></semantics>
 <p><span class="reading-math" data-tex="x_{k+1}=A_kx_k+B_ku_k."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>x</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>=</mo><msub><mi>A</mi><mi>k</mi></msub><msub><mi>x</mi><mi>k</mi></msub><mo>+</mo><msub><mi>B</mi><mi>k</mi></msub><msub><mi>u</mi><mi>k</mi></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">x_{k+1}=A_kx_k+B_ku_k.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0502em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p><strong>最关键的条件</strong>是 <span class="reading-math" data-tex="A_k,B_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>A</mi><mi>k</mi></msub><mo separator="true">,</mo><msub><mi>B</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">A_k,B_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0502em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 在本次求解时已给定。若把足点与姿态也作为自由变量，<span class="reading-math" data-tex="r_i\times f_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>r</mi><mi>i</mi></msub><mo>×</mo><msub><mi>f</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">r_i\times f_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 等项会重新引入非线性，不能继续宣称同一个问题仍是凸 QP。</p>
 <p>作者认为在平台上忽略腿部动力学是可用的近似；这不是证明轻腿以外的所有四足平台都能采用同样模型。</p>
-<h2 id="3优化问题提前看见将来哪些脚不能用">3．优化问题：提前看见将来哪些脚不能用</h2>
+<h3 id="优化问题提前看见将来哪些脚不能用">优化问题：提前看见将来哪些脚不能用</h3>
 <p>教学形式如下：</p>
 <p><span class="reading-math" data-tex="\min_{x,u}\sum_{k=0}^{H-1}
 \|x_{k+1}-x^{\rm ref}_{k+1}\|_{Q_k}^2+
@@ -103,9 +102,16 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 <h3 id="31-凝聚形式为什么更快">3.1 凝聚形式为什么更快</h3>
 <p>将未来状态展开为 <span class="reading-math" data-tex="X=\mathcal A x_0+\mathcal B U"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>X</mi><mo>=</mo><mi mathvariant="script">A</mi><msub><mi>x</mi><mn>0</mn></msub><mo>+</mo><mi mathvariant="script">B</mi><mi>U</mi></mrow><annotation encoding="application/x-tex">X=\mathcal A x_0+\mathcal B U</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord mathcal">A</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathcal" style="margin-right:0.03041em;">B</span><span class="mord mathnormal" style="margin-right:0.10903em;">U</span></span></span></span></span>，代回目标后，只优化接触力序列 <span class="reading-math" data-tex="U"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>U</mi></mrow><annotation encoding="application/x-tex">U</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">U</span></span></span></span></span>。再去掉已经被规定为零的摆动足变量，可以缩小问题。</p>
 <p>此时求解器找到的是给定简化模型、权重与接触序列下的凸问题最优解。它不是机器人全部可能步态中的全局最优，更不是没有模型误差的稳定保证。</p>
+<p>把凝聚过程展开两步，就能看见凸性依赖哪些量固定。由 <span class="reading-math" data-tex="x_1=A_0x_0+B_0u_0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mn>1</mn></msub><mo>=</mo><msub><mi>A</mi><mn>0</mn></msub><msub><mi>x</mi><mn>0</mn></msub><mo>+</mo><msub><mi>B</mi><mn>0</mn></msub><msub><mi>u</mi><mn>0</mn></msub></mrow><annotation encoding="application/x-tex">x_1=A_0x_0+B_0u_0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0502em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>、<span class="reading-math" data-tex="x_2=A_1x_1+B_1u_1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mn>2</mn></msub><mo>=</mo><msub><mi>A</mi><mn>1</mn></msub><msub><mi>x</mi><mn>1</mn></msub><mo>+</mo><msub><mi>B</mi><mn>1</mn></msub><msub><mi>u</mi><mn>1</mn></msub></mrow><annotation encoding="application/x-tex">x_2=A_1x_1+B_1u_1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0502em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，得到</p>
+<p><span class="reading-math" data-tex="\begin{bmatrix}x_1\\x_2\end{bmatrix}=\begin{bmatrix}A_0\\A_1A_0\end{bmatrix}x_0+\begin{bmatrix}B_0&amp;0\\A_1B_0&amp;B_1\end{bmatrix}\begin{bmatrix}u_0\\u_1\end{bmatrix}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mrow><mo fence="true">[</mo><mtable rowspacing="0.16em" columnalign="center" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><msub><mi>x</mi><mn>1</mn></msub></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><msub><mi>x</mi><mn>2</mn></msub></mstyle></mtd></mtr></mtable><mo fence="true">]</mo></mrow><mo>=</mo><mrow><mo fence="true">[</mo><mtable rowspacing="0.16em" columnalign="center" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><msub><mi>A</mi><mn>0</mn></msub></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><msub><mi>A</mi><mn>1</mn></msub><msub><mi>A</mi><mn>0</mn></msub></mrow></mstyle></mtd></mtr></mtable><mo fence="true">]</mo></mrow><msub><mi>x</mi><mn>0</mn></msub><mo>+</mo><mrow><mo fence="true">[</mo><mtable rowspacing="0.16em" columnalign="center center" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><msub><mi>B</mi><mn>0</mn></msub></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>0</mn></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><msub><mi>A</mi><mn>1</mn></msub><msub><mi>B</mi><mn>0</mn></msub></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><msub><mi>B</mi><mn>1</mn></msub></mstyle></mtd></mtr></mtable><mo fence="true">]</mo></mrow><mrow><mo fence="true">[</mo><mtable rowspacing="0.16em" columnalign="center" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><msub><mi>u</mi><mn>0</mn></msub></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><msub><mi>u</mi><mn>1</mn></msub></mstyle></mtd></mtr></mtable><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\begin{bmatrix}x_1\\x_2\end{bmatrix}=\begin{bmatrix}A_0\\A_1A_0\end{bmatrix}x_0+\begin{bmatrix}B_0&amp;0\\A_1B_0&amp;B_1\end{bmatrix}\begin{bmatrix}u_0\\u_1\end{bmatrix}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">[</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">]</span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">[</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">[</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0502em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">A</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0502em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em;"></span><span class="arraycolsep" style="width:0.5em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">0</span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0502em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">[</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em;"><span style="top:-3.61em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.41em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>令堆叠参考为 <span class="reading-math" data-tex="X_r"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>X</mi><mi>r</mi></msub></mrow><annotation encoding="application/x-tex">X_r</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>、跟踪权重为块对角矩阵 <span class="reading-math" data-tex="Q\succeq0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Q</mi><mo>⪰</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">Q\succeq0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">⪰</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>、力权重为 <span class="reading-math" data-tex="R\succ0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>R</mi><mo>≻</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">R\succ0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7224em;vertical-align:-0.0391em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≻</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，凝聚目标的 Hessian 是 <span class="reading-math" data-tex="H=2(\mathcal B^TQ\mathcal B+R)\succ0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>H</mi><mo>=</mo><mn>2</mn><mo stretchy="false">(</mo><msup><mi mathvariant="script">B</mi><mi>T</mi></msup><mi>Q</mi><mi mathvariant="script">B</mi><mo>+</mo><mi>R</mi><mo stretchy="false">)</mo><mo>≻</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">H=2(\mathcal B^TQ\mathcal B+R)\succ0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0913em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mopen">(</span><span class="mord"><span class="mord mathcal" style="margin-right:0.03041em;">B</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span></span></span></span></span><span class="mord mathnormal">Q</span><span class="mord mathcal" style="margin-right:0.03041em;">B</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≻</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>。因此给定接触计划且约束可行时，有唯一最优力序列；若只要求 <span class="reading-math" data-tex="R\succeq0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>R</mi><mo>⪰</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">R\succeq0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8193em;vertical-align:-0.136em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">⪰</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，仍可凸，却不一定唯一。这个结论不证明跨下一次重规划的闭环稳定性。</p>
+<p><strong>原创腾空前手算。</strong> 只考虑竖直运动，质量 <span class="reading-math" data-tex="m=10"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi><mo>=</mo><mn>10</mn></mrow><annotation encoding="application/x-tex">m=10</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">m</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">10</span></span></span></span></span> kg、重力大小 <span class="reading-math" data-tex="g=10\,\mathrm{m/s^2}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi><mo>=</mo><mn>10</mn><mtext> </mtext><mrow><mi mathvariant="normal">m</mi><mi mathvariant="normal">/</mi><msup><mi mathvariant="normal">s</mi><mn>2</mn></msup></mrow></mrow><annotation encoding="application/x-tex">g=10\,\mathrm{m/s^2}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord">10</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathrm">m/</span><span class="mord"><span class="mord mathrm">s</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathrm mtight">2</span></span></span></span></span></span></span></span></span></span></span></span></span>，初速度为零；接下来先支撑 <span class="reading-math" data-tex="0.1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0.1</mn></mrow><annotation encoding="application/x-tex">0.1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.1</span></span></span></span></span> s，再腾空 <span class="reading-math" data-tex="0.1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0.1</mn></mrow><annotation encoding="application/x-tex">0.1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.1</span></span></span></span></span> s。支撑总力为常数 <span class="reading-math" data-tex="F"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>F</mi></mrow><annotation encoding="application/x-tex">F</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">F</span></span></span></span></span>，腾空力为零，则最终速度为 <span class="reading-math" data-tex="v_2=0.1(F/10-10)-1=0.01F-2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>v</mi><mn>2</mn></msub><mo>=</mo><mn>0.1</mn><mo stretchy="false">(</mo><mi>F</mi><mi mathvariant="normal">/</mi><mn>10</mn><mo>−</mo><mn>10</mn><mo stretchy="false">)</mo><mo>−</mo><mn>1</mn><mo>=</mo><mn>0.01</mn><mi>F</mi><mo>−</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">v_2=0.1(F/10-10)-1=0.01F-2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">0.1</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.13889em;">F</span><span class="mord">/10</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">10</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord">0.01</span><span class="mord mathnormal" style="margin-right:0.13889em;">F</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span></span></span></span></span>。希望腾空段结束时竖直速度为零，需要支撑阶段先给 <span class="reading-math" data-tex="F=200"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>F</mi><mo>=</mo><mn>200</mn></mrow><annotation encoding="application/x-tex">F=200</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">F</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">200</span></span></span></span></span> N；只看当前静止状态而给平衡力 100 N，终点速度会是 <span class="reading-math" data-tex="-1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">-1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">−</span><span class="mord">1</span></span></span></span></span> m/s。若力上限只有 150 N，则这一参考本来就无法精确跟踪，优化只能在约束内折中。</p>
+<p>例子不模拟完整步态，却明确说明“预见未来零接触力”改变了当前力。凝聚结构对应<a href="https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control">原稿IV-D式(27)–(32)</a>；原实验按步态选定一个周期的预测时域，不能把这里的两步和人为参数称为论文配置。</p>
 <h3 id="32-从接触力到关节力矩">3.2 从接触力到关节力矩</h3>
 <p>支撑阶段通过坐标变换和足端雅可比转置将期望力映射成力矩。摆腿阶段则有位置/速度反馈与动力学前馈。原文式 1–4 描述这些环节。</p>
 <p>因此“直接使用 MPC 力”不等于没有底层控制、状态估计或摆腿控制器。复现时若只实现 QP，机器人仍缺少完成运动所需的其他环节。</p>
+<p>凸力规划依赖已给定接触和几何，在线反馈通过每周期重解实现。下面检查腾空区间的零支撑与摆腿接口，再读实机动作。</p>
+<h2 id="三滚动更新支撑力并连接摆腿控制">三、滚动更新支撑力并连接摆腿控制</h2>
 <pre><code class="language-text">输入：估计状态、关节状态、期望速度、人工步态与接触检测
 高速循环：
     更新状态估计和真实接触状态
@@ -120,7 +126,20 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
     更新电机力矩/电流指令
 下一次 MPC 到来时根据新状态重新规划
 </code></pre>
-<h2 id="4实验设计一个平台多种动态行为">4．实验设计：一个平台，多种动态行为</h2>
+<h3 id="一个自构例子">一个自构例子</h3>
+<p><strong>自构例子，未运行</strong>：假设下一段所有脚都会离地。只优化当前时刻的控制器可能等离地后才发现机身俯仰角速度过大；MPC 会在当前仍能施力时，通过前后足力差提前改变角动量。腾空阶段在模型中令接触力为零，不能凭空用地面力消除误差。</p>
+<p>若把落脚时刻改晚，最优的当前支撑力通常也会变化。这说明预测的价值来自未来接触限制，而不是仅仅在代价里多加几个时间点。</p>
+<h2 id="四读多步态扰动与奔跑实机证据">四、读多步态、扰动与奔跑实机证据</h2>
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/094-teaching.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/094-teaching.png" width="1100" height="650" alt="四足 MPC：在还能施力时，为腾空阶段做准备；这是本文自构的接触时序示意，不是 Cheetah 3 原实验" loading="lazy"></a><figcaption>原创教学图：本文手算与几何示意；<a href="https://doi.org/10.1109/IROS.2018.8594448" target="_blank" rel="noopener noreferrer">核对相关原文</a>。非原论文图，非实验数据。</figcaption></figure>
+
+<p>读图：这是本文自构的接触时序示意，不是 Cheetah 3 原实验。黄色阶段没有地面控制力，预测的价值在于提前改变支撑期的角动量；原论文求解时间、扰动与高速实验图仍未补入。</p>
+<h3 id="实验设计一个平台多种动态行为">实验设计：一个平台，多种动态行为</h3>
+<p>控制系统部分的图 2，以及第 V 节的图 4、5、7–10，可通过<a href="https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control">公开正文和图注转录</a>核对说明。本轮尚未取得可可靠查看的原图或核实 PDF 页序，因此这个入口只算文字来源，不算已验证的原图入口；下文不新增曲线读数。</p>
+<!-- figure-ref-v6:start:rc-94-figure-gaps -->
+<p><span id="rc-94-figure-2"></span><span id="rc-94-figure-4"></span><span id="rc-94-figure-5"></span><span id="rc-94-figure-7"></span><span id="rc-94-figure-8"></span><span id="rc-94-figure-9"></span><span id="rc-94-figure-10"></span><p class="figure-reference-note">原图暂缺：<a href="https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control" target="_blank" rel="noopener noreferrer">图 2</a>、<a href="https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control" target="_blank" rel="noopener noreferrer">图 4</a>、<a href="https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control" target="_blank" rel="noopener noreferrer">图 5</a>、<a href="https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control" target="_blank" rel="noopener noreferrer">图 7</a>、<a href="https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control" target="_blank" rel="noopener noreferrer">图 8</a>、<a href="https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control" target="_blank" rel="noopener noreferrer">图 9</a>、<a href="https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control" target="_blank" rel="noopener noreferrer">图 10</a>尚未取得；官方作者稿下载仍受限，现有原创教学图不计作原图。<a href="https://dspace.mit.edu/entities/publication/bc8c7e1e-5830-443f-a879-787947111fcf" target="_blank" rel="noopener noreferrer">官方作者稿与许可信息</a>。</p></p>
+<!-- figure-ref-v6:end:rc-94-figure-gaps -->
+
+<p>MIT 存档本轮读取失败，结果可回看原稿全文镜像的图注；无法可靠查看的曲线不新增读数，Mini Cheetah 的后续结果不归入 Cheetah 3。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -169,90 +188,33 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 </tbody></table></div>
 <p>没有学习数据或环境采样预算。正文以实体演示和时间序列为主，没有覆盖各步态的随机种子、统一重复次数和置信区间表，也没有在同平台对全部现代控制器进行公平排行榜比较。</p>
 <p>摘要与正文对更新频率给出不同范围：摘要写 20–30 Hz，第 V-A 节按步态写 25–50 Hz。本文保留这一差异，不把两处强行合成单一精确配置。底层状态估计、摆腿和阻抗控制以更高频率执行。</p>
-<h2 id="5结果与证据强度">5．结果与证据强度</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>图表</th>
-<th>比较什么 → 观察什么</th>
-<th>支持什么</th>
-<th>不足以证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>图 2</td>
-<td>各控制模块和频率</td>
-<td>MPC 是完整控制链的一部分</td>
-<td>仅靠 QP 即能运动</td>
-</tr>
-<tr>
-<td>图 4</td>
-<td>奔跑时求解时间分布</td>
-<td>简化优化具有低延迟实现潜力</td>
-<td>所有硬件或所有时域均小于 1 ms</td>
-</tr>
-<tr>
-<td>图 5</td>
-<td>转向与加减速跟踪</td>
-<td>可控制三维方向运动</td>
-<td>未知环境自主导航</td>
-</tr>
-<tr>
-<td>图 7</td>
-<td>踢击后的速度和姿态</td>
-<td>本次扰动后恢复</td>
-<td>任意幅度扰动均可恢复</td>
-</tr>
-<tr>
-<td>图 8–10</td>
-<td>2.5 m/s 足部与力数据、到 3 m/s 的速度跟踪</td>
-<td>在该平台实现动态奔跑</td>
-<td>长时间无失败可靠性</td>
-</tr>
-</tbody></table></div>
+<h3 id="结果与证据强度">结果与证据强度</h3>
+<p><strong>图 2。</strong> 各控制模块和频率；MPC 是完整控制链的一部分；不能据此推出：仅靠 QP 即能运动。</p>
+<p><strong>图 4。</strong> 奔跑时求解时间分布；简化优化具有低延迟实现潜力；不能据此推出：所有硬件或所有时域均小于 1 ms。</p>
+<p><strong>图 5。</strong> 转向与加减速跟踪；可控制三维方向运动；未知环境自主导航。</p>
+<p><strong>图 7。</strong> 踢击后的速度和姿态；本次扰动后恢复；不能据此推出：任意幅度扰动均可恢复。</p>
+<p><strong>图 8–10。</strong> 2.5 m/s 足部与力数据、到 3 m/s 的速度跟踪；在该平台实现动态奔跑；不能据此推出：长时间无失败可靠性。</p>
 <p>最高 3 m/s 是硬件结果；第 V-F 节提到的 6 m/s 来自提高腿速后的全多体仿真，两者不能合并成“机器人跑到 6 m/s”。高速度失败还受到摆腿速度、跑步机宽度和机械问题影响。</p>
 <p>楼梯部分尤其值得细读：三次尝试包含操作命令失误、脚踏出台阶、膝关节反向以及碰到电源开关等事件，只有第二次完整上下来回成功；第三次还发生恢复后继续尝试。原文没有提供能将这些过程统一归为某种成功率的正式协议。因此应报告试验经过，而不是简写“连续三次成功爬楼梯”。</p>
-<h2 id="6贡献代价与局限">6．贡献、代价与局限</h2>
+<h2 id="五保留接触计划状态估计和旋转近似">五、保留接触计划、状态估计和旋转近似</h2>
 <p>贡献是找到模型表达力和计算速度之间可用的平衡：保留三维机身动力学与接触力限制，将足点、接触时序和部分姿态量放到优化之外，使支撑力问题快速可解。</p>
 <p>作者将成功部分归因于频繁更新当前动力学、降低计算延迟。这是作者根据系统表现提出的解释，论文没有用完整消融证明“任何时候低延迟都比模型精确更重要”。</p>
 <p>人工步态、启发式足点、近似摩擦、忽略腿部惯性和高速度摆腿限制构成适用边界。若携带会大幅改变惯量的负载、执行大姿态翻转，或需要在未知石块上选择足点，应重新检查模型与规划分工。</p>
 <p><strong>本文分析</strong>：凸 QP 保证的是数值优化问题的性质。真实闭环稳定还依赖模型误差、接触实现、状态估计、参考生成及递归可行性。不要把“每一步算到了最优”直接翻译成“整段运动一定不会摔倒”。</p>
-<h2 id="7一个自构例子">7．一个自构例子</h2>
-<p><strong>自构例子，未运行</strong>：假设下一段所有脚都会离地。只优化当前时刻的控制器可能等离地后才发现机身俯仰角速度过大；MPC 会在当前仍能施力时，通过前后足力差提前改变角动量。腾空阶段在模型中令接触力为零，不能凭空用地面力消除误差。</p>
-<p>若把落脚时刻改晚，最优的当前支撑力通常也会变化。这说明预测的价值来自未来接触限制，而不是仅仅在代价里多加几个时间点。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>腾空和支撑切换使即时控制不足</td>
-<td>预测未来接触力与机身运动</td>
-<td>在尚能施力时提前调整</td>
-<td>多步态、图 8–10</td>
-<td>接触时序外部给定</td>
-</tr>
-<tr>
-<td>全身非线性优化较重</td>
-<td>刚体近似、预定矩阵、凝聚 QP</td>
-<td>保留关键关系并降低变量规模</td>
-<td>图 4、机载实现</td>
-<td>不覆盖全部腿部与旋转动力学</td>
-</tr>
-<tr>
-<td>平面控制难表达转向</td>
-<td>保留三维力矩与姿态关系</td>
-<td>各足能共同调节方向运动</td>
-<td>图 5、7</td>
-<td>大姿态和模型失配仍需验证</td>
-</tr>
-</tbody></table></div>
-<h2 id="8读懂了吗三个问题与答案">8．读懂了吗？三个问题与答案</h2>
+<h2 id="六追问把落脚时刻也开放为决策变量为什么不能继续直接宣称原问题仍为同一凸qp">六、追问：把落脚时刻也开放为决策变量，为什么不能继续直接宣称原问题仍为同一凸QP？</h2>
+<details>
+<summary>把落脚时刻也开放为决策变量，为什么不能继续直接宣称原问题仍为同一凸QP？</summary>
+
+<p><strong>参考答案</strong>：原线性化与约束组织以给定接触状态为前提，接触时刻变化会改变力可作用的区间和模型结构。应重新分析变量耦合与可行域，不能只在现有向量中追加一个变量。本文快速在线结果针对其明确的固定计划近似。</p>
+<p>教学参照：<a href="https://underactuated.mit.edu/trajopt.html">Underactuated Robotics: Trajectory Optimization</a>。这里借用其分开变量、离散约束与求解预算的讲法。</p>
+</details>
+
+<h2 id="七重新开放接触决策或保留全身一致性">七、重新开放接触决策，或保留全身一致性</h2>
+<ul>
+<li><strong>平行路线</strong>：<a href="072-contact-implicit.html">手部 CIO：把何时接触、在哪里施力一起优化</a>。探索接触活动与动作，承担更复杂的非凸求解。</li>
+<li><strong>平行路线</strong>：<a href="080-wholebody-qp.html">质心动力学与全身运动学：怎样少算方程而不丢掉身体</a>。保留更多全身运动学一致性，使用不同计算预算。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <h3 id="问题一为什么本篇能求凸问题却不能说四足运动规划本身是凸的">问题一：为什么本篇能求凸问题，却不能说四足运动规划本身是凸的？</h3>
 <p><strong>答案</strong>：本篇在每次求解前固定接触时序、预测足点和近似动力学矩阵，只优化接触力。若同时优化接触选择、足点与完整姿态，离散切换及状态和力的乘积会重新带来非凸性。凸性来自明确的问题简化。</p>
 <h3 id="问题二求解只花不到毫秒为什么不等于整个控制系统都按千赫兹更新-mpc">问题二：求解只花不到毫秒，为什么不等于整个控制系统都按千赫兹更新 MPC？</h3>
@@ -270,19 +232,15 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 
 **论文**：Jared Di Carlo、Patrick M. Wensing、Benjamin Katz、Gerardo Bledt、Sangbae Kim，*Dynamic Locomotion in the MIT Cheetah 3 Through Convex Model-Predictive Control*，IROS 2018。[论文 DOI](https://doi.org/10.1109/IROS.2018.8594448) · [MIT 作者稿](https://dspace.mit.edu/bitstream/handle/1721.1/138000/convex_mpc_2fix.pdf) · [实验室代码](https://github.com/mit-biomimetics/Cheetah-Software)。
 
-**阅读范围**：方法和结果依据可访问的[论文全文镜像](https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control)中原稿正文及图注核对，不采用平台自动摘要。MIT 存档直接读取受限，图中未能可靠量化的曲线不读数。官方代码仅核对项目说明，未逐行审计或运行；不把后来的 Mini Cheetah 结果并入本篇。
+### 先接住前作的问题
 
-## 一分钟理解：脚还没离地，就要准备好腾空后的运动
+[质心动力学规划](080-wholebody-qp.md)保留全身运动学一致性，但在线高频求解仍昂贵；Cheetah 凸 MPC 选择固定接触计划和参考几何，以更简化的单刚体预测换取快速反馈。它与[接触隐式优化](072-contact-implicit.md)是不同取舍的平行路线，后者探索接触而本篇把接触时序交给上层。
+
+## 一、问题设定：未来腾空阶段怎样提前影响当前接触力
 
 四足机器人腾空时，不能继续用地面支撑力纠正机身。若控制器只盯着眼前姿态，它可能等到脚都离地才发现来不及调整。
 
-这篇论文用模型预测控制提前考虑未来一段时间的支撑与腾空。它把机器人近似成一个受到各足接触力作用的刚体，固定当前规划的接触时序与足点，从而将支撑力规划变成一个能快速求解的凸二次规划。
-
-机器人实验展示多种步态、转向、扰动恢复与最高 3 m/s 的奔跑。关键不是求解一个毫无近似的全身动力学最优控制，而是让足够有用的模型以较小延迟反复更新。
-
-**一句话**：在力矩控制四足机器人上，通过固定步态条件下的简化三维动力学与滚动支撑力优化，实现多种动态步态，代价是忽略部分腿部与旋转动力学，并依赖状态估计、接触管理和摆腿控制。
-
-## 1．问题定义：优化地面反力，不学习一套策略
+### 问题定义：优化地面反力，不学习一套策略
 
 输入包括机身状态、足点位置、接触时序和期望速度；MPC 输出未来各足地面反力，底层再转成关节力矩。这是模型驱动控制，不是强化学习训练。
 
@@ -290,7 +248,9 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 
 任务不是自主选择“现在应该用哪种步态”。本文步态由人工设计，接触序列和速度参考来自上层命令；足点也使用启发式规划。接触检测能处理提前或延后触地，但不等于 QP 联合搜索任意接触顺序。
 
-## 2．模型为什么要简化
+## 二、固定接触计划，以简化刚体模型建立凸QP
+
+### 模型为什么要简化
 
 完整机器人有浮动基座、腿部惯性、关节约束和接触切换。把所有这些都放入长时域非线性优化会增加计算负担，还可能产生局部最优与数值问题。
 
@@ -313,7 +273,7 @@ $$
 
 作者认为在平台上忽略腿部动力学是可用的近似；这不是证明轻腿以外的所有四足平台都能采用同样模型。
 
-## 3．优化问题：提前看见将来哪些脚不能用
+### 优化问题：提前看见将来哪些脚不能用
 
 教学形式如下：
 
@@ -342,11 +302,25 @@ $$
 
 此时求解器找到的是给定简化模型、权重与接触序列下的凸问题最优解。它不是机器人全部可能步态中的全局最优，更不是没有模型误差的稳定保证。
 
+把凝聚过程展开两步，就能看见凸性依赖哪些量固定。由 $x_1=A_0x_0+B_0u_0$、$x_2=A_1x_1+B_1u_1$，得到
+
+$$\begin{bmatrix}x_1\\x_2\end{bmatrix}=\begin{bmatrix}A_0\\A_1A_0\end{bmatrix}x_0+\begin{bmatrix}B_0&amp;0\\A_1B_0&amp;B_1\end{bmatrix}\begin{bmatrix}u_0\\u_1\end{bmatrix}.$$
+
+令堆叠参考为 $X_r$、跟踪权重为块对角矩阵 $Q\succeq0$、力权重为 $R\succ0$，凝聚目标的 Hessian 是 $H=2(\mathcal B^TQ\mathcal B+R)\succ0$。因此给定接触计划且约束可行时，有唯一最优力序列；若只要求 $R\succeq0$，仍可凸，却不一定唯一。这个结论不证明跨下一次重规划的闭环稳定性。
+
+**原创腾空前手算。** 只考虑竖直运动，质量 $m=10$ kg、重力大小 $g=10\,\mathrm{m/s^2}$，初速度为零；接下来先支撑 $0.1$ s，再腾空 $0.1$ s。支撑总力为常数 $F$，腾空力为零，则最终速度为 $v_2=0.1(F/10-10)-1=0.01F-2$。希望腾空段结束时竖直速度为零，需要支撑阶段先给 $F=200$ N；只看当前静止状态而给平衡力 100 N，终点速度会是 $-1$ m/s。若力上限只有 150 N，则这一参考本来就无法精确跟踪，优化只能在约束内折中。
+
+例子不模拟完整步态，却明确说明“预见未来零接触力”改变了当前力。凝聚结构对应[原稿IV-D式(27)–(32)](https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control)；原实验按步态选定一个周期的预测时域，不能把这里的两步和人为参数称为论文配置。
+
 ### 3.2 从接触力到关节力矩
 
 支撑阶段通过坐标变换和足端雅可比转置将期望力映射成力矩。摆腿阶段则有位置/速度反馈与动力学前馈。原文式 1–4 描述这些环节。
 
 因此“直接使用 MPC 力”不等于没有底层控制、状态估计或摆腿控制器。复现时若只实现 QP，机器人仍缺少完成运动所需的其他环节。
+
+凸力规划依赖已给定接触和几何，在线反馈通过每周期重解实现。下面检查腾空区间的零支撑与摆腿接口，再读实机动作。
+
+## 三、滚动更新支撑力并连接摆腿控制
 
 ```text
 输入：估计状态、关节状态、期望速度、人工步态与接触检测
@@ -364,7 +338,35 @@ $$
 下一次 MPC 到来时根据新状态重新规划
 ```
 
-## 4．实验设计：一个平台，多种动态行为
+### 一个自构例子
+
+**自构例子，未运行**：假设下一段所有脚都会离地。只优化当前时刻的控制器可能等离地后才发现机身俯仰角速度过大；MPC 会在当前仍能施力时，通过前后足力差提前改变角动量。腾空阶段在模型中令接触力为零，不能凭空用地面力消除误差。
+
+若把落脚时刻改晚，最优的当前支撑力通常也会变化。这说明预测的价值来自未来接触限制，而不是仅仅在代价里多加几个时间点。
+
+五个前置概念：
+
+1. **欠驱动**：当前可施加的控制不能独立调整所有运动方向。
+2. **单刚体模型**：用机身整体质量与惯量近似复杂机器人。
+3. **滚动时域**：规划一段未来，只执行开头，再根据新状态重算。
+4. **摩擦锥**：限制接触力方向以描述不滑动的条件。
+5. **凝聚 QP**：消去预测状态，仅以控制序列为主要变量。
+
+## 四、读多步态、扰动与奔跑实机证据
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/094-teaching.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/094-teaching.png&quot; width=&quot;1100&quot; height=&quot;650&quot; alt=&quot;四足 MPC：在还能施力时，为腾空阶段做准备；这是本文自构的接触时序示意，不是 Cheetah 3 原实验&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原创教学图：本文手算与几何示意；&lt;a href=&quot;https://doi.org/10.1109/IROS.2018.8594448&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对相关原文&lt;/a&gt;。非原论文图，非实验数据。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：这是本文自构的接触时序示意，不是 Cheetah 3 原实验。黄色阶段没有地面控制力，预测的价值在于提前改变支撑期的角动量；原论文求解时间、扰动与高速实验图仍未补入。
+
+### 实验设计：一个平台，多种动态行为
+
+控制系统部分的图 2，以及第 V 节的图 4、5、7–10，可通过[公开正文和图注转录](https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control)核对说明。本轮尚未取得可可靠查看的原图或核实 PDF 页序，因此这个入口只算文字来源，不算已验证的原图入口；下文不新增曲线读数。
+
+&lt;!-- figure-ref-v6:start:rc-94-figure-gaps --&gt;
+&lt;span id=&quot;rc-94-figure-2&quot;&gt;&lt;/span&gt;&lt;span id=&quot;rc-94-figure-4&quot;&gt;&lt;/span&gt;&lt;span id=&quot;rc-94-figure-5&quot;&gt;&lt;/span&gt;&lt;span id=&quot;rc-94-figure-7&quot;&gt;&lt;/span&gt;&lt;span id=&quot;rc-94-figure-8&quot;&gt;&lt;/span&gt;&lt;span id=&quot;rc-94-figure-9&quot;&gt;&lt;/span&gt;&lt;span id=&quot;rc-94-figure-10&quot;&gt;&lt;/span&gt;&lt;p class=&quot;figure-reference-note&quot;&gt;原图暂缺：&lt;a href=&quot;https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;图 2&lt;/a&gt;、&lt;a href=&quot;https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;图 4&lt;/a&gt;、&lt;a href=&quot;https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;图 5&lt;/a&gt;、&lt;a href=&quot;https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;图 7&lt;/a&gt;、&lt;a href=&quot;https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;图 8&lt;/a&gt;、&lt;a href=&quot;https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;图 9&lt;/a&gt;、&lt;a href=&quot;https://www.scribd.com/document/891748727/Dynamic-Locomotion-in-the-MIT-Cheetah-3-Through-Convex-Model-Predictive-Control&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;图 10&lt;/a&gt;尚未取得；官方作者稿下载仍受限，现有原创教学图不计作原图。&lt;a href=&quot;https://dspace.mit.edu/entities/publication/bc8c7e1e-5830-443f-a879-787947111fcf&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;官方作者稿与许可信息&lt;/a&gt;。&lt;/p&gt;
+&lt;!-- figure-ref-v6:end:rc-94-figure-gaps --&gt;
+
+MIT 存档本轮读取失败，结果可回看原稿全文镜像的图注；无法可靠查看的曲线不新增读数，Mini Cheetah 的后续结果不归入 Cheetah 3。
 
 | 项目 | 原文设置与位置 | 想验证什么 | 解释限制 |
 |---|---|---|---|
@@ -379,21 +381,23 @@ $$
 
 摘要与正文对更新频率给出不同范围：摘要写 20–30 Hz，第 V-A 节按步态写 25–50 Hz。本文保留这一差异，不把两处强行合成单一精确配置。底层状态估计、摆腿和阻抗控制以更高频率执行。
 
-## 5．结果与证据强度
+### 结果与证据强度
 
-| 图表 | 比较什么 → 观察什么 | 支持什么 | 不足以证明什么 |
-|---|---|---|---|
-| 图 2 | 各控制模块和频率 | MPC 是完整控制链的一部分 | 仅靠 QP 即能运动 |
-| 图 4 | 奔跑时求解时间分布 | 简化优化具有低延迟实现潜力 | 所有硬件或所有时域均小于 1 ms |
-| 图 5 | 转向与加减速跟踪 | 可控制三维方向运动 | 未知环境自主导航 |
-| 图 7 | 踢击后的速度和姿态 | 本次扰动后恢复 | 任意幅度扰动均可恢复 |
-| 图 8–10 | 2.5 m/s 足部与力数据、到 3 m/s 的速度跟踪 | 在该平台实现动态奔跑 | 长时间无失败可靠性 |
+**图 2。** 各控制模块和频率；MPC 是完整控制链的一部分；不能据此推出：仅靠 QP 即能运动。
+
+**图 4。** 奔跑时求解时间分布；简化优化具有低延迟实现潜力；不能据此推出：所有硬件或所有时域均小于 1 ms。
+
+**图 5。** 转向与加减速跟踪；可控制三维方向运动；未知环境自主导航。
+
+**图 7。** 踢击后的速度和姿态；本次扰动后恢复；不能据此推出：任意幅度扰动均可恢复。
+
+**图 8–10。** 2.5 m/s 足部与力数据、到 3 m/s 的速度跟踪；在该平台实现动态奔跑；不能据此推出：长时间无失败可靠性。
 
 最高 3 m/s 是硬件结果；第 V-F 节提到的 6 m/s 来自提高腿速后的全多体仿真，两者不能合并成“机器人跑到 6 m/s”。高速度失败还受到摆腿速度、跑步机宽度和机械问题影响。
 
 楼梯部分尤其值得细读：三次尝试包含操作命令失误、脚踏出台阶、膝关节反向以及碰到电源开关等事件，只有第二次完整上下来回成功；第三次还发生恢复后继续尝试。原文没有提供能将这些过程统一归为某种成功率的正式协议。因此应报告试验经过，而不是简写“连续三次成功爬楼梯”。
 
-## 6．贡献、代价与局限
+## 五、保留接触计划、状态估计和旋转近似
 
 贡献是找到模型表达力和计算速度之间可用的平衡：保留三维机身动力学与接触力限制，将足点、接触时序和部分姿态量放到优化之外，使支撑力问题快速可解。
 
@@ -403,27 +407,23 @@ $$
 
 **本文分析**：凸 QP 保证的是数值优化问题的性质。真实闭环稳定还依赖模型误差、接触实现、状态估计、参考生成及递归可行性。不要把“每一步算到了最优”直接翻译成“整段运动一定不会摔倒”。
 
-## 7．一个自构例子
+## 六、追问：把落脚时刻也开放为决策变量，为什么不能继续直接宣称原问题仍为同一凸QP？
 
-**自构例子，未运行**：假设下一段所有脚都会离地。只优化当前时刻的控制器可能等离地后才发现机身俯仰角速度过大；MPC 会在当前仍能施力时，通过前后足力差提前改变角动量。腾空阶段在模型中令接触力为零，不能凭空用地面力消除误差。
+&lt;details&gt;
+&lt;summary&gt;把落脚时刻也开放为决策变量，为什么不能继续直接宣称原问题仍为同一凸QP？&lt;/summary&gt;
 
-若把落脚时刻改晚，最优的当前支撑力通常也会变化。这说明预测的价值来自未来接触限制，而不是仅仅在代价里多加几个时间点。
+**参考答案**：原线性化与约束组织以给定接触状态为前提，接触时刻变化会改变力可作用的区间和模型结构。应重新分析变量耦合与可行域，不能只在现有向量中追加一个变量。本文快速在线结果针对其明确的固定计划近似。
 
-五个前置概念：
+教学参照：[Underactuated Robotics: Trajectory Optimization](https://underactuated.mit.edu/trajopt.html)。这里借用其分开变量、离散约束与求解预算的讲法。
 
-1. **欠驱动**：当前可施加的控制不能独立调整所有运动方向。
-2. **单刚体模型**：用机身整体质量与惯量近似复杂机器人。
-3. **滚动时域**：规划一段未来，只执行开头，再根据新状态重算。
-4. **摩擦锥**：限制接触力方向以描述不滑动的条件。
-5. **凝聚 QP**：消去预测状态，仅以控制序列为主要变量。
+&lt;/details&gt;
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 腾空和支撑切换使即时控制不足 | 预测未来接触力与机身运动 | 在尚能施力时提前调整 | 多步态、图 8–10 | 接触时序外部给定 |
-| 全身非线性优化较重 | 刚体近似、预定矩阵、凝聚 QP | 保留关键关系并降低变量规模 | 图 4、机载实现 | 不覆盖全部腿部与旋转动力学 |
-| 平面控制难表达转向 | 保留三维力矩与姿态关系 | 各足能共同调节方向运动 | 图 5、7 | 大姿态和模型失配仍需验证 |
+## 七、重新开放接触决策，或保留全身一致性
 
-## 8．读懂了吗？三个问题与答案
+- **平行路线**：[手部 CIO：把何时接触、在哪里施力一起优化](072-contact-implicit.md)。探索接触活动与动作，承担更复杂的非凸求解。
+- **平行路线**：[质心动力学与全身运动学：怎样少算方程而不丢掉身体](080-wholebody-qp.md)。保留更多全身运动学一致性，使用不同计算预算。
+
+## 八、自测与参考答案
 
 ### 问题一：为什么本篇能求凸问题，却不能说四足运动规划本身是凸的？
 

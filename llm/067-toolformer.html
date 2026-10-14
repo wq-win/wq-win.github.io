@@ -39,23 +39,21 @@
                 <span class="text-gray-400">/</span>
                 <a href="index.html" class="text-primary hover:underline">大语言模型</a>
                 <span class="text-gray-400">/</span>
-                <span class="text-gray-500">067 · Toolformer：用后文预测损失筛选值得学习的工具调用</span>
+                <span class="text-gray-500">Toolformer：用后文预测损失筛选值得学习的工具调用</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="b65c9d1a5898df374a5821b48b7adaf8118d35b5c866bd3e9c4da94951d88de1"><h1>067 · Toolformer：用后文预测损失筛选值得学习的工具调用</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="e797788f1ee4b9d942de076ea767f839ace43effc60bebece8aef272aafcd283"><h1>067 · Toolformer：用后文预测损失筛选值得学习的工具调用</h1>
 <p><a href="index.html">返回目录</a> · <a href="066-blip2.html">上一篇：BLIP-2</a> · <a href="068-llama.html">下一篇：LLaMA</a></p>
-<p>论文：Timo Schick等，<em>Toolformer: Language Models Can Teach Themselves to Use Tools</em>，2023年。<a href="https://arxiv.org/abs/2302.04761">原始论文</a> · <a href="https://arxiv.org/html/2302.04761v1">v1正文</a>。阅读范围为调用生成与筛选方法、五类API、主实验、解码消融及附录B训练设置；未复现历史工具后端。论文v1将基础GPT-J记为6.7B，本文以模型名称识别配置，不据此推算精确参数成本。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>教模型使用工具，不只要教它生成正确格式，还要教它什么时候该调用、输入什么，以及怎样利用结果。逐条人工标注这些决定很贵。Toolformer尝试让模型自己生成候选调用，再看工具结果是否帮助预测原文后续内容。</p>
-<p>如果调用后更容易续写正确文本，就把这条调用插回训练语料，用普通语言建模训练。它让“工具是否有用”成为一个可以从现成文本自动估计的信号，不需要对每条调用单独打人工分。</p>
-<p>在可通过文本API补充事实、计算或时间信息的场景下，通过候选调用与预测损失筛选，改善零样本任务表现；代价是数据生成效率有限，而且局部续写收益不等于任务长期收益或成本最优。</p>
+<p>论文：Timo Schick等，<em>Toolformer: Language Models Can Teach Themselves to Use Tools</em>，2023年。<a href="https://arxiv.org/abs/2302.04761">原始论文</a> · <a href="https://arxiv.org/html/2302.04761v1">v1正文</a>。论文v1将基础GPT-J记为6.7B，本文以模型名称识别配置，不据此推算精确参数成本。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="060-react.html">ReAct</a>通过提示组织行动，<a href="063-pal.html">PAL</a>执行生成程序，但都未解决如何规模化产生调用训练标签。本篇让模型生成候选API调用，以工具结果能否降低原文后续预测损失筛选，再用普通语言建模学习调用模式。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>API</strong>以约定格式接收参数并返回结果；<strong>自训练</strong>用模型生成数据继续训练；<strong>交叉熵</strong>衡量目标token的预测代价；<strong>消融</strong>移除功能以分析贡献；<strong>信用分配</strong>判断哪些早期行动促成最终收益。</p>
-<h2 id="背景会写api格式还不够">背景：会写API格式还不够</h2>
-<p>一个模型可以正确输出 <code>Calculator(17*24)</code>，却在完全不需要计算时反复调用；也可能需要搜索时不搜索。工具使用至少有四个决定：选工具、选时机、构造参数、吸收返回结果。</p>
+<h2 id="一问题设定没有逐条调用标注怎样学习何时使用工具">一、问题设定：没有逐条调用标注，怎样学习何时使用工具</h2>
+<p>输出合法API格式只解决语法；模型还要选择工具、位置、参数并吸收结果。逐项人工标注昂贵，本篇把现有文本的后续token当监督信号，检查调用返回是否真的提供了额外信息。</p>
 <p>Toolformer将这些决定统一表示为文本。调用包含API名、参数和返回内容，插在普通文本之间。推理时，模型写到结果分隔符，宿主程序暂停生成、执行API、插入结果，再恢复生成。因此工具结果来自外部执行，不是让模型继续伪造一个返回值。</p>
 <p>与PAL主要通过提示要求生成程序不同，Toolformer会更新模型参数，把调用模式写入模型。与ReAct的多步观察行动相比，论文实际评价限制每个输入最多一次API调用；它不是成熟的多工具规划系统，也不能因为名称中有“工具”就把后来Agent的所有能力归给它。</p>
-<h2 id="方法先构造候选再估计信息增益">方法：先构造候选，再估计信息增益</h2>
+<h2 id="二用两个无结果基线隔离返回内容的预测收益">二、用两个无结果基线隔离返回内容的预测收益</h2>
 <p>给定已有文本 <span class="reading-math" data-tex="x_1,\ldots,x_n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mn>1</mn></msub><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><msub><mi>x</mi><mi>n</mi></msub></mrow><annotation encoding="application/x-tex">x_1,\ldots,x_n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，通过少量人工示例提示模型，在可能有用的位置生成候选调用 <span class="reading-math" data-tex="c_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>c</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">c_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。候选生成可以查看完整示例文本来做离线标注，但最终模型要学会只根据当前位置的前缀决定是否调用。离线看后文不是推理时获得未来答案，而是一种生成训练监督的方式。</p>
 <p>执行调用得到结果 <span class="reading-math" data-tex="r_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>r</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">r_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 后，测量它是否降低后续原文的加权交叉熵。定义</p>
 <p><span class="reading-math" data-tex="L_i(z)=-\sum_{j=i}^{n}w_{j-i}
@@ -68,6 +66,14 @@ L_i^-=\min\{L_i(\varnothing),L_i(e(c_i,\varnothing))\}."><span class="katex-disp
 L_i^-=\min\{L_i(\varnothing),L_i(e(c_i,\varnothing))\}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0883em;vertical-align:-0.267em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8213em;"><span style="top:-2.433em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.267em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0883em;vertical-align:-0.267em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">e</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">))</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8213em;"><span style="top:-2.433em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">−</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.267em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">min</span><span class="mopen">{</span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord amsrm">∅</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">e</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord amsrm">∅</span><span class="mclose">))}</span><span class="mord">.</span></span></span></span></span></span></p>
 <p>保留满足 <span class="reading-math" data-tex="L_i^- - L_i^+\ge\tau_f"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>L</mi><mi>i</mi><mo>−</mo></msubsup><mo>−</mo><msubsup><mi>L</mi><mi>i</mi><mo>+</mo></msubsup><mo>≥</mo><msub><mi>τ</mi><mi>f</mi></msub></mrow><annotation encoding="application/x-tex">L_i^- - L_i^+\ge\tau_f</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0883em;vertical-align:-0.2769em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8115em;"><span style="top:-2.4231em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.1031em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">−</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2769em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0883em;vertical-align:-0.2769em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8115em;"><span style="top:-2.4231em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.1031em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2769em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≥</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1132em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 的调用。<span class="reading-math" data-tex="e"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>e</mi></mrow><annotation encoding="application/x-tex">e</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">e</span></span></span></span></span> 是调用序列化方式，<span class="reading-math" data-tex="\tau_f"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>τ</mi><mi>f</mi></msub></mrow><annotation encoding="application/x-tex">\tau_f</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1132em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是最低收益阈值。取两种基线的最小值很重要：工具结果必须优于“完全没调用”和“只给调用参数但没结果”两种情况，避免把参数文字本身提供的提示误认为执行收益。</p>
 <p>还有一个实现细节：筛选时，调用信息放在整段文本前面，以免未见过调用格式的基础模型被中途插入打断；训练数据中才将保留调用插到对应位置。这两个阶段的位置安排不同，不能机械地用最终训练格式复述筛选公式。</p>
+<h3 id="为什么筛选要同时比较两个无结果基线">为什么筛选要同时比较两个无结果基线</h3>
+<p>设 <span class="reading-math" data-tex="L^+"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>L</mi><mo>+</mo></msup></mrow><annotation encoding="application/x-tex">L^+</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7713em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7713em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span></span></span></span></span></span></span></span></span> 为提供调用及工具结果后的后续文本损失，<span class="reading-math" data-tex="L_0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>L</mi><mn>0</mn></msub></mrow><annotation encoding="application/x-tex">L_0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 为无调用损失，<span class="reading-math" data-tex="L_c"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>L</mi><mi>c</mi></msub></mrow><annotation encoding="application/x-tex">L_c</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">c</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 为仅有调用参数的损失。保留条件基于 <span class="reading-math" data-tex="\min(L_0,L_c)-L^+"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>min</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>L</mi><mn>0</mn></msub><mo separator="true">,</mo><msub><mi>L</mi><mi>c</mi></msub><mo stretchy="false">)</mo><mo>−</mo><msup><mi>L</mi><mo>+</mo></msup></mrow><annotation encoding="application/x-tex">\min(L_0,L_c)-L^+</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">min</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">c</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7713em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7713em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span></span></span></span></span></span></span></span></span>。如果只比无调用，参数本身复述了有用信息也可能被误算为工具贡献；取两个基线较小值，要求结果提供额外预测收益。筛选仍是语言预测代理，并不直接度量工具对用户任务的真实价值或成本。</p>
+<p><strong>教学算例。</strong> <span class="reading-math" data-tex="L_0=5,L_c=3,L^+=2.8"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>L</mi><mn>0</mn></msub><mo>=</mo><mn>5</mn><mo separator="true">,</mo><msub><mi>L</mi><mi>c</mi></msub><mo>=</mo><mn>3</mn><mo separator="true">,</mo><msup><mi>L</mi><mo>+</mo></msup><mo>=</mo><mn>2.8</mn></mrow><annotation encoding="application/x-tex">L_0=5,L_c=3,L^+=2.8</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord">5</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">c</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.9658em;vertical-align:-0.1944em;"></span><span class="mord">3</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7713em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2.8</span></span></span></span></span> 时，表面上相比无调用改善2.2，但结果的新增收益只有0.2。若阈值为0.5，此调用应被删去。另一个调用把损失降到2.0便可保留，却可能耗时几十秒；原筛选目标没有自动完成延迟或权限优化。</p>
+<p>原文是“每盒17元，买24盒，总计408元”。模型提议计算17乘24，结果408让后文数字更容易预测，因而调用被保留。若候选只是把“总计408”写进参数，但执行结果没有新信息，只有参数的基线可帮助识别这种虚假收益。</p>
+<h3 id="用打乱返回值区分工具格式与信息作用">用打乱返回值区分工具格式与信息作用</h3>
+<p>在相同调用位置与参数下，可将正确工具返回替换成无关但等长内容，观察后续目标损失是否仍下降。若两者几乎一样，模型可能只利用了调用参数或格式，而未使用返回信息。这是新增的诊断建议，需要固定采样和文本目标；它不能代替真实任务成功率与工具延迟测量。</p>
+<p>教法联系：<a href="https://lilianweng.github.io/posts/2023-06-23-agent/">Lilian Weng的LLM Powered Autonomous Agents</a>。算例为本文自构。</p>
+<h2 id="三生成候选实际执行筛选并插回语言训练">三、生成候选、实际执行、筛选并插回语言训练</h2>
 <pre><code class="language-text">输入：普通语料C，基础模型M，各API少量示例
 对每个工具和候选文本：
     预测适合插入API的位置
@@ -81,7 +87,8 @@ L_i^-=\min\{L_i(\varnothing),L_i(e(c_i,\varnothing))\}.</annotation></semantics>
     生成调用到结果分隔符 -&gt; 执行API -&gt; 插入结果 -&gt; 继续生成
 </code></pre>
 <p>数学损失仍然是下一token预测。机制变化在数据构造与推理执行；实验改善的是任务答对比例。不能把“预测损失下降”改称为已验证的用户满意度奖励，也没有一个学习工具调用成本的价值函数。</p>
-<h2 id="工具数据与实验预算">工具、数据与实验预算</h2>
+<h2 id="四把api开关收益与解码调用阈值分开读">四、把API开关收益与解码调用阈值分开读</h2>
+<p>同模型API开关检验工具贡献，原模型对照检验微调代价；调用率还受标记阈值控制，不能只归因于学到的策略。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -124,46 +131,33 @@ L_i^-=\min\{L_i(\varnothing),L_i(e(c_i,\varnothing))\}.</annotation></semantics>
 </tbody></table></div>
 <p>工具本身带有外部能力与训练数据：Atlas是检索增强问答模型，翻译由专门模型完成。系统答对更多，不等于GPT-J内部突然学会全部知识。论文也在不同任务禁用可能带来明显不公平优势的工具：LAMA禁维基搜索，问答任务禁已用NQ训练的问答API。</p>
 <p>评价不是统一严格exact match：LAMA检查前五词是否包含答案，开放问答检查前二十词，多语言任务检查前十词。阅读分数时应保留这些规则，不能直接与另一篇不同输出格式和评分器的数字合并排名。</p>
-<h2 id="五处证据收益与局限同时出现">五处证据：收益与局限同时出现</h2>
-<p><strong>证据一：表4，计算工具的作用。</strong> ASDiv上禁用API为14.8，启用为40.4；SVAMP从6.3到29.4。这支持工具执行在同一模型上的贡献，但不能证明多步数学推理已普遍解决。</p>
-<p><strong>证据二：表5，事实问答。</strong> WebQS从禁用时18.9到26.3，仍低于GPT-3的29.0；TriviaQA为48.8对65.9。搜索有用，但不能弥补所有知识、检索和阅读差距。</p>
-<p><strong>证据三：表6，多语言负结果。</strong> 启用工具比同一Toolformer禁用时更好，但德语13.5低于原GPT-J的16.5，中文16.8低于18.2。工具收益与语料微调导致的分布变化可以同时存在，不能只挑有利基线。</p>
-<p><strong>证据四：表8，语言建模是否保持。</strong> WikiText困惑度原GPT-J为9.9，普通CCNet微调与禁用API的Toolformer均为10.3；CCNet分别为10.6、10.5、10.5。支持的是API增强没有在该对照上额外恶化，而不是相对原模型所有数据都不退步。</p>
-<p><strong>证据五：表9，调用由什么决定。</strong> WebQS将调用标记阈值从普通贪心的前一位放宽到前十位，调用率由8.5%升到100%，表现由19.3到26.3。实验能力由模型与解码规则共同产生；“自主决定”不能被误读为完全没有人为调用偏置。</p>
-<p>表2还说明筛选成本：在阈值0.5时，维基搜索有207,241例，计算器仅3,680例。候选规模大并不自动形成平衡的工具训练集；某类工具的有用调用可能非常稀少。</p>
-<h2 id="贡献代价与适用边界">贡献、代价与适用边界</h2>
-<p>核心贡献是把“工具有帮助”转化为可自动计算的数据筛选条件。它利用原文作为续写目标，不需要逐条人工标注调用时机。这使模型能在标准语言建模训练中学习工具格式与使用模式。</p>
+<p><strong>证据一：<a href="#llm-v6-067-table-4">表4</a>，计算工具的作用。</strong> ASDiv上禁用API为14.8，启用为40.4；SVAMP从6.3到29.4。这支持工具执行在同一模型上的贡献，但不能证明多步数学推理已普遍解决。</p>
+<!-- figure-ref-v6:start:067-t4-1-anchor -->
+<p><a id="llm-v6-067-table-4"></a></p>
+<!-- figure-ref-v6:end:067-t4-1-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/067-toolformer-t4.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/067-toolformer-t4.png" width="1344" height="552" alt="Toolformer启用和禁用工具时的三项数学任务结果" loading="lazy"></a><figcaption>实验结果表摘引：Timo Schick等，2023，表4，PDF第6页；<a href="https://arxiv.org/pdf/2302.04761v1#page=6" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据二：<a href="https://arxiv.org/html/2302.04761v1#S4.T5">表5</a>，事实问答。</strong> WebQS从禁用时18.9到26.3，仍低于GPT-3的29.0；TriviaQA为48.8对65.9。搜索有用，但不能弥补所有知识、检索和阅读差距。</p>
+<p><strong>证据三：<a href="https://arxiv.org/html/2302.04761v1#S4.T6">表6</a>，多语言负结果。</strong> 启用工具比同一Toolformer禁用时更好，但德语13.5低于原GPT-J的16.5，中文16.8低于18.2。工具收益与语料微调导致的分布变化可以同时存在，不能只挑有利基线。</p>
+<p><strong>证据四：<a href="https://arxiv.org/html/2302.04761v1#S4.T8">表8</a>，语言建模是否保持。</strong> WikiText困惑度原GPT-J为9.9，普通CCNet微调与禁用API的Toolformer均为10.3；CCNet分别为10.6、10.5、10.5。支持的是API增强没有在该对照上额外恶化，而不是相对原模型所有数据都不退步。</p>
+<p><strong>证据五：<a href="https://arxiv.org/html/2302.04761v1#S5.T9">表9</a>，调用由什么决定。</strong> WebQS将调用标记阈值从普通贪心的前一位放宽到前十位，调用率由8.5%升到100%，表现由19.3到26.3。实验能力由模型与解码规则共同产生；“自主决定”不能被误读为完全没有人为调用偏置。</p>
+<p><a href="https://arxiv.org/html/2302.04761v1#S4.T2">表2</a>还说明筛选成本：在阈值0.5时，维基搜索有207,241例，计算器仅3,680例。候选规模大并不自动形成平衡的工具训练集；某类工具的有用调用可能非常稀少。</p>
+<h2 id="五局部续写收益仍不等于长期任务与成本最优">五、局部续写收益仍不等于长期任务与成本最优</h2>
+<p>再换成“先查询库存，再决定采购量”，第一次查询的价值可能要经过后续决策才体现。局部后文损失未必能充分奖励这种链式流程。这两个自构例子分别说明方法擅长的直接信息补充，以及它缺少的长期信用分配。</p>
+<p>它利用原文作为续写目标，不需要逐条人工标注调用时机。这使模型能在标准语言建模训练中学习工具格式与使用模式。</p>
 <p>这种监督有鲜明偏好：立即帮助预测附近token的调用容易被保留，需要先探索、之后很久才有收益的行动不容易得到信号。第7节也明确指出不能链式组合工具、不能互动式改写搜索、没有把工具费用纳入调用决定。</p>
 <p>我的分析是，局部预测收益可能偏爱“复述已有答案”的工具结果，而不奖励真正改变任务状态的操作。例如先创建一个日程、随后检查冲突，价值不一定体现在原文下几个token上。因此要把方法扩到有副作用的工作流，需要新的结果评价和权限边界，不能只换API名称。</p>
 <p>工具可靠性也决定上限。错误检索、翻译失误或两位小数舍入，都可能传到最终回答。模型读到结果不等于已经验证来源。原方法训练的是利用工具，并未系统训练证据冲突处理、重试或独立核验。</p>
-<h2 id="自构例子与前置概念">自构例子与前置概念</h2>
-<p>原文是“每盒17元，买24盒，总计408元”。模型提议计算17乘24，结果408让后文数字更容易预测，因而调用被保留。若候选只是把“总计408”写进参数，但执行结果没有新信息，只有参数的基线可帮助识别这种虚假收益。</p>
-<p>再换成“先查询库存，再决定采购量”，第一次查询的价值可能要经过后续决策才体现。局部后文损失未必能充分奖励这种链式流程。这两个自构例子分别说明方法擅长的直接信息补充，以及它缺少的长期信用分配。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>人工标注工具、时机与参数昂贵</td>
-<td>自生成候选，以真实返回降低后文损失筛选，再微调</td>
-<td>将工具信息价值变成自动监督</td>
-<td>表4/5启用禁用对照、表8语言建模、表9解码消融</td>
-<td>局部目标、样本效率低、调用成本未建模，原实验不能链式互动</td>
-</tr>
-</tbody></table></div>
+<h2 id="六把工具有用性进一步接到检索支持性">六、把工具有用性进一步接到检索支持性</h2>
+<p>局部续写收益未直接证明证据可靠。<a href="082-self-rag.html">Self-RAG</a>把检索必要性和论断支持度也变成可学习输出；可比较两类自动标签的目标，检查工具调用是否真正服务最终问题。</p>
 <h2 id="自测能够回答才算理解">自测：能够回答，才算理解</h2>
 <p><strong>1. 为什么筛选要同时比较无调用与只有调用参数两种基线？</strong></p>
 <p>答案：参数文本可能已经泄露或提示后文。若只与无调用比较，会把提示效应误当成工具执行价值。要求带结果的损失低于两种基线，才能更有把握把收益归给返回信息。</p>
 <p><strong>2. Toolformer是强化学习算法吗？</strong></p>
 <p>答案：这篇方法不是。它用预测损失筛选离线生成的数据，再用标准语言建模微调，没有通过环境长期回报更新策略的RL步骤。工具调用看起来像动作，不代表训练方式一定是强化学习。</p>
 <p><strong>3. 如何证明模型学会按需要调用，而不是被解码规则推着到处调用？</strong></p>
-<p>答案：应固定模型改变调用阈值，报告调用率、答对率、无需工具任务的误调用和实际成本。表9说明阈值明显影响行为。还需要在确实不需工具和调用代价不同的任务上测试，单看启用后的最高分不足以证明选择最优。</p>
+<p>答案：应固定模型改变调用阈值，报告调用率、答对率、无需工具任务的误调用和实际成本。<a href="https://arxiv.org/html/2302.04761v1#S5.T9">表9</a>说明阈值明显影响行为。还需要在确实不需工具和调用代价不同的任务上测试，单看启用后的最高分不足以证明选择最优。</p>
 </div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
@@ -173,25 +167,21 @@ L_i^-=\min\{L_i(\varnothing),L_i(e(c_i,\varnothing))\}.</annotation></semantics>
 
 [返回目录](README.md) · [上一篇：BLIP-2](066-blip2.md) · [下一篇：LLaMA](068-llama.md)
 
-论文：Timo Schick等，*Toolformer: Language Models Can Teach Themselves to Use Tools*，2023年。[原始论文](https://arxiv.org/abs/2302.04761) · [v1正文](https://arxiv.org/html/2302.04761v1)。阅读范围为调用生成与筛选方法、五类API、主实验、解码消融及附录B训练设置；未复现历史工具后端。论文v1将基础GPT-J记为6.7B，本文以模型名称识别配置，不据此推算精确参数成本。
+论文：Timo Schick等，*Toolformer: Language Models Can Teach Themselves to Use Tools*，2023年。[原始论文](https://arxiv.org/abs/2302.04761) · [v1正文](https://arxiv.org/html/2302.04761v1)。论文v1将基础GPT-J记为6.7B，本文以模型名称识别配置，不据此推算精确参数成本。
 
-## 一分钟理解
+### 先接住前作的问题
 
-教模型使用工具，不只要教它生成正确格式，还要教它什么时候该调用、输入什么，以及怎样利用结果。逐条人工标注这些决定很贵。Toolformer尝试让模型自己生成候选调用，再看工具结果是否帮助预测原文后续内容。
+[ReAct](060-react.md)通过提示组织行动，[PAL](063-pal.md)执行生成程序，但都未解决如何规模化产生调用训练标签。本篇让模型生成候选API调用，以工具结果能否降低原文后续预测损失筛选，再用普通语言建模学习调用模式。
 
-如果调用后更容易续写正确文本，就把这条调用插回训练语料，用普通语言建模训练。它让“工具是否有用”成为一个可以从现成文本自动估计的信号，不需要对每条调用单独打人工分。
+## 一、问题设定：没有逐条调用标注，怎样学习何时使用工具
 
-在可通过文本API补充事实、计算或时间信息的场景下，通过候选调用与预测损失筛选，改善零样本任务表现；代价是数据生成效率有限，而且局部续写收益不等于任务长期收益或成本最优。
-
-## 背景：会写API格式还不够
-
-一个模型可以正确输出 `Calculator(17*24)`，却在完全不需要计算时反复调用；也可能需要搜索时不搜索。工具使用至少有四个决定：选工具、选时机、构造参数、吸收返回结果。
+输出合法API格式只解决语法；模型还要选择工具、位置、参数并吸收结果。逐项人工标注昂贵，本篇把现有文本的后续token当监督信号，检查调用返回是否真的提供了额外信息。
 
 Toolformer将这些决定统一表示为文本。调用包含API名、参数和返回内容，插在普通文本之间。推理时，模型写到结果分隔符，宿主程序暂停生成、执行API、插入结果，再恢复生成。因此工具结果来自外部执行，不是让模型继续伪造一个返回值。
 
 与PAL主要通过提示要求生成程序不同，Toolformer会更新模型参数，把调用模式写入模型。与ReAct的多步观察行动相比，论文实际评价限制每个输入最多一次API调用；它不是成熟的多工具规划系统，也不能因为名称中有“工具”就把后来Agent的所有能力归给它。
 
-## 方法：先构造候选，再估计信息增益
+## 二、用两个无结果基线隔离返回内容的预测收益
 
 给定已有文本 $x_1,\ldots,x_n$，通过少量人工示例提示模型，在可能有用的位置生成候选调用 $c_i$。候选生成可以查看完整示例文本来做离线标注，但最终模型要学会只根据当前位置的前缀决定是否调用。离线看后文不是推理时获得未来答案，而是一种生成训练监督的方式。
 
@@ -215,6 +205,22 @@ $$
 
 还有一个实现细节：筛选时，调用信息放在整段文本前面，以免未见过调用格式的基础模型被中途插入打断；训练数据中才将保留调用插到对应位置。这两个阶段的位置安排不同，不能机械地用最终训练格式复述筛选公式。
 
+### 为什么筛选要同时比较两个无结果基线
+
+设 $L^+$ 为提供调用及工具结果后的后续文本损失，$L_0$ 为无调用损失，$L_c$ 为仅有调用参数的损失。保留条件基于 $\min(L_0,L_c)-L^+$。如果只比无调用，参数本身复述了有用信息也可能被误算为工具贡献；取两个基线较小值，要求结果提供额外预测收益。筛选仍是语言预测代理，并不直接度量工具对用户任务的真实价值或成本。
+
+**教学算例。** $L_0=5,L_c=3,L^+=2.8$ 时，表面上相比无调用改善2.2，但结果的新增收益只有0.2。若阈值为0.5，此调用应被删去。另一个调用把损失降到2.0便可保留，却可能耗时几十秒；原筛选目标没有自动完成延迟或权限优化。
+
+原文是“每盒17元，买24盒，总计408元”。模型提议计算17乘24，结果408让后文数字更容易预测，因而调用被保留。若候选只是把“总计408”写进参数，但执行结果没有新信息，只有参数的基线可帮助识别这种虚假收益。
+
+### 用打乱返回值区分工具格式与信息作用
+
+在相同调用位置与参数下，可将正确工具返回替换成无关但等长内容，观察后续目标损失是否仍下降。若两者几乎一样，模型可能只利用了调用参数或格式，而未使用返回信息。这是新增的诊断建议，需要固定采样和文本目标；它不能代替真实任务成功率与工具延迟测量。
+
+教法联系：[Lilian Weng的LLM Powered Autonomous Agents](https://lilianweng.github.io/posts/2023-06-23-agent/)。算例为本文自构。
+
+## 三、生成候选、实际执行、筛选并插回语言训练
+
 ```text
 输入：普通语料C，基础模型M，各API少量示例
 对每个工具和候选文本：
@@ -231,7 +237,9 @@ $$
 
 数学损失仍然是下一token预测。机制变化在数据构造与推理执行；实验改善的是任务答对比例。不能把“预测损失下降”改称为已验证的用户满意度奖励，也没有一个学习工具调用成本的价值函数。
 
-## 工具、数据与实验预算
+## 四、把API开关收益与解码调用阈值分开读
+
+同模型API开关检验工具贡献，原模型对照检验微调代价；调用率还受标记阈值控制，不能只归因于学到的策略。
 
 | 项目 | 原文设置与意义 |
 |---|---|
@@ -248,23 +256,31 @@ $$
 
 评价不是统一严格exact match：LAMA检查前五词是否包含答案，开放问答检查前二十词，多语言任务检查前十词。阅读分数时应保留这些规则，不能直接与另一篇不同输出格式和评分器的数字合并排名。
 
-## 五处证据：收益与局限同时出现
+**证据一：[表4](#llm-v6-067-table-4)，计算工具的作用。** ASDiv上禁用API为14.8，启用为40.4；SVAMP从6.3到29.4。这支持工具执行在同一模型上的贡献，但不能证明多步数学推理已普遍解决。
 
-**证据一：表4，计算工具的作用。** ASDiv上禁用API为14.8，启用为40.4；SVAMP从6.3到29.4。这支持工具执行在同一模型上的贡献，但不能证明多步数学推理已普遍解决。
+&lt;!-- figure-ref-v6:start:067-t4-1-anchor --&gt;
+&lt;a id=&quot;llm-v6-067-table-4&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:067-t4-1-anchor --&gt;
 
-**证据二：表5，事实问答。** WebQS从禁用时18.9到26.3，仍低于GPT-3的29.0；TriviaQA为48.8对65.9。搜索有用，但不能弥补所有知识、检索和阅读差距。
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/067-toolformer-t4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/067-toolformer-t4.png&quot; width=&quot;1344&quot; height=&quot;552&quot; alt=&quot;Toolformer启用和禁用工具时的三项数学任务结果&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Timo Schick等，2023，表4，PDF第6页；&lt;a href=&quot;https://arxiv.org/pdf/2302.04761v1#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-**证据三：表6，多语言负结果。** 启用工具比同一Toolformer禁用时更好，但德语13.5低于原GPT-J的16.5，中文16.8低于18.2。工具收益与语料微调导致的分布变化可以同时存在，不能只挑有利基线。
+**证据二：[表5](https://arxiv.org/html/2302.04761v1#S4.T5)，事实问答。** WebQS从禁用时18.9到26.3，仍低于GPT-3的29.0；TriviaQA为48.8对65.9。搜索有用，但不能弥补所有知识、检索和阅读差距。
 
-**证据四：表8，语言建模是否保持。** WikiText困惑度原GPT-J为9.9，普通CCNet微调与禁用API的Toolformer均为10.3；CCNet分别为10.6、10.5、10.5。支持的是API增强没有在该对照上额外恶化，而不是相对原模型所有数据都不退步。
+**证据三：[表6](https://arxiv.org/html/2302.04761v1#S4.T6)，多语言负结果。** 启用工具比同一Toolformer禁用时更好，但德语13.5低于原GPT-J的16.5，中文16.8低于18.2。工具收益与语料微调导致的分布变化可以同时存在，不能只挑有利基线。
 
-**证据五：表9，调用由什么决定。** WebQS将调用标记阈值从普通贪心的前一位放宽到前十位，调用率由8.5%升到100%，表现由19.3到26.3。实验能力由模型与解码规则共同产生；“自主决定”不能被误读为完全没有人为调用偏置。
+**证据四：[表8](https://arxiv.org/html/2302.04761v1#S4.T8)，语言建模是否保持。** WikiText困惑度原GPT-J为9.9，普通CCNet微调与禁用API的Toolformer均为10.3；CCNet分别为10.6、10.5、10.5。支持的是API增强没有在该对照上额外恶化，而不是相对原模型所有数据都不退步。
 
-表2还说明筛选成本：在阈值0.5时，维基搜索有207,241例，计算器仅3,680例。候选规模大并不自动形成平衡的工具训练集；某类工具的有用调用可能非常稀少。
+**证据五：[表9](https://arxiv.org/html/2302.04761v1#S5.T9)，调用由什么决定。** WebQS将调用标记阈值从普通贪心的前一位放宽到前十位，调用率由8.5%升到100%，表现由19.3到26.3。实验能力由模型与解码规则共同产生；“自主决定”不能被误读为完全没有人为调用偏置。
 
-## 贡献、代价与适用边界
+[表2](https://arxiv.org/html/2302.04761v1#S4.T2)还说明筛选成本：在阈值0.5时，维基搜索有207,241例，计算器仅3,680例。候选规模大并不自动形成平衡的工具训练集；某类工具的有用调用可能非常稀少。
 
-核心贡献是把“工具有帮助”转化为可自动计算的数据筛选条件。它利用原文作为续写目标，不需要逐条人工标注调用时机。这使模型能在标准语言建模训练中学习工具格式与使用模式。
+## 五、局部续写收益仍不等于长期任务与成本最优
+
+再换成“先查询库存，再决定采购量”，第一次查询的价值可能要经过后续决策才体现。局部后文损失未必能充分奖励这种链式流程。这两个自构例子分别说明方法擅长的直接信息补充，以及它缺少的长期信用分配。
+
+五个前置概念：**API**以约定格式接收参数并返回结果；**自训练**用模型生成数据继续训练；**交叉熵**衡量目标token的预测代价；**消融**移除功能以分析贡献；**信用分配**判断哪些早期行动促成最终收益。
+
+它利用原文作为续写目标，不需要逐条人工标注调用时机。这使模型能在标准语言建模训练中学习工具格式与使用模式。
 
 这种监督有鲜明偏好：立即帮助预测附近token的调用容易被保留，需要先探索、之后很久才有收益的行动不容易得到信号。第7节也明确指出不能链式组合工具、不能互动式改写搜索、没有把工具费用纳入调用决定。
 
@@ -272,17 +288,9 @@ $$
 
 工具可靠性也决定上限。错误检索、翻译失误或两位小数舍入，都可能传到最终回答。模型读到结果不等于已经验证来源。原方法训练的是利用工具，并未系统训练证据冲突处理、重试或独立核验。
 
-## 自构例子与前置概念
+## 六、把工具有用性进一步接到检索支持性
 
-原文是“每盒17元，买24盒，总计408元”。模型提议计算17乘24，结果408让后文数字更容易预测，因而调用被保留。若候选只是把“总计408”写进参数，但执行结果没有新信息，只有参数的基线可帮助识别这种虚假收益。
-
-再换成“先查询库存，再决定采购量”，第一次查询的价值可能要经过后续决策才体现。局部后文损失未必能充分奖励这种链式流程。这两个自构例子分别说明方法擅长的直接信息补充，以及它缺少的长期信用分配。
-
-五个前置概念：**API**以约定格式接收参数并返回结果；**自训练**用模型生成数据继续训练；**交叉熵**衡量目标token的预测代价；**消融**移除功能以分析贡献；**信用分配**判断哪些早期行动促成最终收益。
-
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 人工标注工具、时机与参数昂贵 | 自生成候选，以真实返回降低后文损失筛选，再微调 | 将工具信息价值变成自动监督 | 表4/5启用禁用对照、表8语言建模、表9解码消融 | 局部目标、样本效率低、调用成本未建模，原实验不能链式互动 |
+局部续写收益未直接证明证据可靠。[Self-RAG](082-self-rag.md)把检索必要性和论断支持度也变成可学习输出；可比较两类自动标签的目标，检查工具调用是否真正服务最终问题。
 
 ## 自测：能够回答，才算理解
 
@@ -296,7 +304,7 @@ $$
 
 **3. 如何证明模型学会按需要调用，而不是被解码规则推着到处调用？**
 
-答案：应固定模型改变调用阈值，报告调用率、答对率、无需工具任务的误调用和实际成本。表9说明阈值明显影响行为。还需要在确实不需工具和调用代价不同的任务上测试，单看启用后的最高分不足以证明选择最优。
+答案：应固定模型改变调用阈值，报告调用率、答对率、无需工具任务的误调用和实际成本。[表9](https://arxiv.org/html/2302.04761v1#S5.T9)说明阈值明显影响行为。还需要在确实不需工具和调用代价不同的任务上测试，单看启用后的最高分不足以证明选择最优。
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

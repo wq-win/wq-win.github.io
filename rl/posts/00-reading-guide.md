@@ -129,6 +129,22 @@ $$
 | $\alpha$ | SAC 中常表示熵权重 | 在其他算法中可能表示学习率 |
 | $\tau$ | 有时表示轨迹，有时表示软更新系数 | 必须读局部定义，不能跨文照搬 |
 
+## 从回报走到梯度：先看一个不跳步的桥梁
+
+前面说策略要提高长期回报，但“提高”怎样变成参数更新？先把小车简化成一次决策的两动作教学问题：轻刹奖励2，加速奖励0，轻刹概率 $p=\sigma(\theta)$。期望回报 $J=2p$，所以 $\nabla_\theta J=2p(1-p)$。取p=0.3，梯度就是0.42。
+
+不用对环境奖励求导，也能得到同一结果。轻刹的score为 $\nabla\log p=1-p=0.7$，加速的score为 $\nabla\log(1-p)=-p=-0.3$；把各动作的概率、奖励、score相乘相加：$0.3\times2\times0.7+0.7\times0\times(-0.3)=0.42$。这就是[REINFORCE](05-reinforce.md)中log概率乘回报的最小原型。
+
+再减去与动作无关的基线b=0.6，期望变成 $0.3(2-0.6)0.7+0.7(0-0.6)(-0.3)=0.42$。基线没有改变平均方向，因为对动作求和有 $\sum_a\pi(a|s)\nabla\log\pi(a|s)=\nabla\sum_a\pi(a|s)=0$。它改变的是样本波动；若基线含有当前动作或样本自身的额外依赖，就必须重新检查这个等式的使用条件。
+
+多步任务新增的困难是“策略还改变将来访问哪些状态”。对于固定初始分布、$0\le\gamma<1$的折扣目标，定义归一化访问分布
+
+$$d_\pi(s)=(1-\gamma)\sum_{t\ge0}\gamma^t P(s_t=s\mid\pi).$$
+
+[策略梯度定理](08-policy-gradient-theorem.md)把递归影响收进这个权重，使梯度可以写成 $\frac1{1-\gamma}E_{s\sim d_\pi,a\sim\pi}[Q^\pi(s,a)\nabla\log\pi(a|s)]$。这里d不是随手假设的平稳分布；若换成平均奖励问题，分布与目标须一起更换。GAE原论文还专门区分未折扣任务目标与引入γ的降方差近似，不能跨论文只认字母。
+
+到这里才能清楚看见三个独立接口：Critic/回报估计提供Q或A，[GAE](15-gae.md)选择怎样混合多步残差，[TRPO](14-trpo.md)或[PPO](27-ppo.md)决定参数怎样移动。把优势估得更准不会自动限制策略步幅，把步幅限制住也不会修复错误优势。
+
 ## 七、接下来怎样读
 
 先读[发展时间线](00-timeline.html)，把论文放回当时的问题中。之后可以按这条基础路线进入：
@@ -153,8 +169,10 @@ $$
 
 先问五秒是否是任务真正终点。如果只是截断一段持续任务的数据，通常还需要估计未观察的未来；若任务本来就到此结束，则遵循该有限时域任务的终止定义。
 
-## 资料与阅读边界
+## 参考入口
 
-本篇是教学导读，案例没有独立实验结果。分类与算法接口可对照 [OpenAI Spinning Up 的 RL 分类](https://spinningup.openai.com/en/latest/spinningup/rl_intro2.html)，SAC 版本差异可对照其 [SAC 文档](https://spinningup.openai.com/en/latest/algorithms/sac.html)；具体论文证据仍以各篇的原文链接与范围说明为准。加入导读不表示既有文章的全部证明、附录和代码已重新核实，也不改变原有“未核实”或“未复现”的限制。
+- [Spinning Up的RL分类](https://spinningup.openai.com/en/latest/spinningup/rl_intro2.html)：用数据来源、策略形式与模型作用核对分类轴。
+- [SAC算法说明](https://spinningup.openai.com/en/latest/algorithms/sac.html)：检查熵项、重参数化与不同版本的实现关系。
+- [Lilian Weng的策略梯度综述](https://lilianweng.github.io/posts/2018-04-08-policy-gradient/)：推导组织的参考；本文小车算例独立构造，论文实验证据在各篇原文入口核对。
 
 [继续阅读发展时间线](00-timeline.html) · [打开中英概念与符号速查](../glossary.html?series=rl)

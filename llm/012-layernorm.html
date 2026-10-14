@@ -42,19 +42,16 @@
                 <span class="text-gray-500">Layer Normalization：让归一化不再依赖同批其他样本</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="16e1299b9fb166ac32ea155fd90ef19a7f312001210937a62500909c096af241"><h1>012｜Layer Normalization：让归一化不再依赖同批其他样本</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="8f99910de6c9b346c3cbba6b7642afc86811baea8e4d00062e5be101b0d4ebb9"><h1>012｜Layer Normalization：让归一化不再依赖同批其他样本</h1>
 <p><a href="index.html">目录</a> · <a href="011-bpe.html">上一篇</a> · <a href="013-fasttext.html">下一篇</a></p>
 <p><strong>论文</strong>：Jimmy Lei Ba、Jamie Ryan Kiros、Geoffrey Hinton，<em>Layer Normalization</em>，2016。<a href="https://arxiv.org/abs/1607.06450">原文</a> · <a href="https://arxiv.org/pdf/1607.06450">PDF</a>。重点是统计维度、循环网络适用性及原文实验，不把后来的 Pre-LN、RMSNorm 等变体归入同一原始方法。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>Batch Normalization 依赖一批样本计算统计量，小批量、可变长度序列和在线执行时可能不方便。Layer Normalization 对单个样本内部的一组隐藏单元计算均值与方差，让每个样本自己的表示得到归一化，不依赖同批其他输入。</p>
-<p>它仍保留可学习的缩放和平移，使网络不必永久受限于零均值单位尺度。作者在循环与其他模型上比较训练表现。核心价值是改变归一化统计范围，便于序列训练；边界是具体归一化位置与维度影响行为，不能笼统推断所有架构都受益。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="009-adam.html">Adam</a>按梯度历史调整更新，但并不决定网络中间激活怎样归一化。对<a href="003-rnnlm.html">RNNLM</a>一类变长顺序计算，跨样本统计又会把当前输出与batch构成耦合。本篇提供可组合的归一化模块，和优化器是不同层面的设计。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念是样本轴与特征轴、均值方差、可学习仿射变换、因果信息范围和训练推理一致性。理解这些即可判断一个代码实现到底是不是所讨论的方法，也能识别与其他归一化变体的区别。</p>
-<h2 id="背景统计范围是一项模型假设">背景：统计范围是一项模型假设</h2>
-<p>如果一个样本的输出取决于与它同批的其他样本，那么改变 batch 构成可能改变计算。Batch Normalization 在许多视觉模型中有效，但这种跨样本耦合不一定适合每个序列场景。循环网络不同时间步的输入分布也在变化，使统一处理更加复杂。</p>
-<p>Layer Normalization 把统计范围转到单样本的特征维度。一个 token 或时间步的隐藏向量可以独立计算，不必等候大批样本。这里的“层”应结合原论文与实际张量布局理解，不能把所有轴都一起归一化而仍称相同实现。</p>
-<p>归一化也不是把文本特征变得“语义标准”。它改变数值尺度、参数化和梯度几何，能影响优化，却不会凭空加入任务信息。有效性最终需要训练与验证表现支持。</p>
-<h2 id="方法中心化缩放再恢复可学习自由度">方法：中心化、缩放，再恢复可学习自由度</h2>
+<h2 id="一问题设定单个序列样本能否摆脱同批输入的统计影响">一、问题设定：单个序列样本能否摆脱同批输入的统计影响</h2>
+<p>如果一个样本的输出依赖同批其他样本，改变batch构成就可能改变计算。BatchNorm在不少视觉模型有效，但小批量、在线与可变长序列不总适合这种耦合；循环网络各时间步的分布还会变化。本篇把统计范围转为当前样本内部的一组隐藏单元。</p>
+<h2 id="二沿特征轴推导中心化尺度和反传耦合">二、沿特征轴推导中心化、尺度和反传耦合</h2>
 <p>给定一个样本的隐藏激活 <span class="reading-math" data-tex="a\in\mathbb R^H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mi>H</mi></msup></mrow><annotation encoding="application/x-tex">a\in\mathbb R^H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em;"></span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8413em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.08125em;">H</span></span></span></span></span></span></span></span></span></span></span></span>：</p>
 <p><span class="reading-math" data-tex="\mu=\frac1H\sum_i a_i,\qquad
 \sigma^2=\frac1H\sum_i(a_i-\mu)^2,
@@ -77,6 +74,34 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 <p><span class="reading-math" data-tex="H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>H</mi></mrow><annotation encoding="application/x-tex">H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span></span></span> 是被归一化的特征数，<span class="reading-math" data-tex="g_i,b_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>g</mi><mi>i</mi></msub><mo separator="true">,</mo><msub><mi>b</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">g_i,b_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 为可训练增益和偏置，<span class="reading-math" data-tex="\epsilon"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϵ</mi></mrow><annotation encoding="application/x-tex">\epsilon</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">ϵ</span></span></span></span></span> 防止数值问题。统计由当前样本计算，因此训练和推理不需要像典型 BatchNorm 那样切换到跨 batch 累积的运行均值。</p>
 <p>归一化后的特征仍通过 <span class="reading-math" data-tex="g,b"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi><mo separator="true">,</mo><mi>b</mi></mrow><annotation encoding="application/x-tex">g,b</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">b</span></span></span></span></span> 适配任务。若没有这两个自由度，网络被迫在某些位置使用固定尺度；加入它们后，模型可以学习合适量级，同时保留归一化带来的参数化性质。它不是“归一化然后原样撤销”，因为统计量依赖当前输入。</p>
 <p>对于循环网络，通常在每个时间步对该步内部激活应用归一化。它不会把未来时间步混入当前状态，因此可保持因果计算。若错误地沿整段时间轴计算统计，就可能在生成任务中泄露未来信息，这是张量维度选择造成的实际错误。</p>
+<h3 id="归一化为什么会耦合一个token的各个维度">归一化为什么会耦合一个token的各个维度</h3>
+<p>令 <span class="reading-math" data-tex="\hat x=(x-\mu)/\sigma"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>x</mi><mo>^</mo></mover><mo>=</mo><mo stretchy="false">(</mo><mi>x</mi><mo>−</mo><mi>μ</mi><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mi>σ</mi></mrow><annotation encoding="application/x-tex">\hat x=(x-\mu)/\sigma</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">x</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">^</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">μ</span><span class="mclose">)</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span></span></span></span></span>，其中 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 是同一个样本的特征向量，<span class="reading-math" data-tex="\mu,\sigma"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>μ</mi><mo separator="true">,</mo><mi>σ</mi></mrow><annotation encoding="application/x-tex">\mu,\sigma</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">μ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span></span></span></span></span> 为该向量的均值与标准差；暂忽略稳定常数 <span class="reading-math" data-tex="\epsilon"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϵ</mi></mrow><annotation encoding="application/x-tex">\epsilon</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">ϵ</span></span></span></span></span>，并假设 <span class="reading-math" data-tex="\sigma&gt;0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>σ</mi><mo>&gt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\sigma&gt;0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>。均值和尺度都依赖全部特征，因此一维输入变化不只改变同一维输出。反传到输入的梯度为 <span class="reading-math" data-tex="\partial\ell/\partial x=(g-\operatorname{mean}(g)-\hat x\operatorname{mean}(g\odot\hat x))/\sigma"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∂</mi><mi mathvariant="normal">ℓ</mi><mi mathvariant="normal">/</mi><mi mathvariant="normal">∂</mi><mi>x</mi><mo>=</mo><mo stretchy="false">(</mo><mi>g</mi><mo>−</mo><mi mathvariant="normal">mean</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>g</mi><mo stretchy="false">)</mo><mo>−</mo><mover accent="true"><mi>x</mi><mo>^</mo></mover><mi mathvariant="normal">mean</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>g</mi><mo>⊙</mo><mover accent="true"><mi>x</mi><mo>^</mo></mover><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mi>σ</mi></mrow><annotation encoding="application/x-tex">\partial\ell/\partial x=(g-\operatorname{mean}(g)-\hat x\operatorname{mean}(g\odot\hat x))/\sigma</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord">ℓ</span><span class="mord">/</span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">mean</span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">x</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">^</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mord mathrm">mean</span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊙</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">x</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">^</span></span></span></span></span></span></span><span class="mclose">))</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span></span></span></span></span>，其中 <span class="reading-math" data-tex="g=\partial\ell/\partial\hat x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi><mo>=</mo><mi mathvariant="normal">∂</mi><mi mathvariant="normal">ℓ</mi><mi mathvariant="normal">/</mi><mi mathvariant="normal">∂</mi><mover accent="true"><mi>x</mi><mo>^</mo></mover></mrow><annotation encoding="application/x-tex">g=\partial\ell/\partial\hat x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord">ℓ</span><span class="mord">/</span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">x</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">^</span></span></span></span></span></span></span></span></span></span></span>。它去掉整体平移方向及沿当前尺度方向的分量，说明LN改变的不仅是前向数值范围，也改变优化几何。此式是按原文归一化定义展开的教学推导。</p>
+<p><strong>教学算例。</strong> 向量 <span class="reading-math" data-tex="(1,3)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>3</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1,3)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">3</span><span class="mclose">)</span></span></span></span></span> 的均值2、标准差1，归一化为 <span class="reading-math" data-tex="(-1,1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mo>−</mo><mn>1</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(-1,1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">−</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span>；<span class="reading-math" data-tex="(12,16)=2(1,3)+10"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>12</mn><mo separator="true">,</mo><mn>16</mn><mo stretchy="false">)</mo><mo>=</mo><mn>2</mn><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>3</mn><mo stretchy="false">)</mo><mo>+</mo><mn>10</mn></mrow><annotation encoding="application/x-tex">(12,16)=2(1,3)+10</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">12</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">16</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">3</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">10</span></span></span></span></span> 仍得到同一结果。这个正比例与共同平移不变性不适用于任意逐维缩放，也会受 <span class="reading-math" data-tex="\epsilon"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϵ</mi></mrow><annotation encoding="application/x-tex">\epsilon</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">ϵ</span></span></span></span></span> 影响。可学习gain/bias恢复逐维输出自由度，却无法从归一化结果唯一恢复被删掉的原始均值和尺度。</p>
+<p>构造样本激活 <span class="reading-math" data-tex="(1,2,3)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>2</mn><mo separator="true">,</mo><mn>3</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1,2,3)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">3</span><span class="mclose">)</span></span></span></span></span>。均值为 2，方差为 <span class="reading-math" data-tex="2/3"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mi mathvariant="normal">/</mi><mn>3</mn></mrow><annotation encoding="application/x-tex">2/3</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2/3</span></span></span></span></span>，中心化后为 <span class="reading-math" data-tex="(-1,0,1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mo>−</mo><mn>1</mn><mo separator="true">,</mo><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(-1,0,1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">−</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span>。忽略很小的 <span class="reading-math" data-tex="\epsilon"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϵ</mi></mrow><annotation encoding="application/x-tex">\epsilon</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">ϵ</span></span></span></span></span>，归一化值为 <span class="reading-math" data-tex="(-\sqrt{3/2},0,\sqrt{3/2})"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mo>−</mo><msqrt><mrow><mn>3</mn><mi mathvariant="normal">/</mi><mn>2</mn></mrow></msqrt><mo separator="true">,</mo><mn>0</mn><mo separator="true">,</mo><msqrt><mrow><mn>3</mn><mi mathvariant="normal">/</mi><mn>2</mn></mrow></msqrt><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(-\sqrt{3/2},0,\sqrt{3/2})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.24em;vertical-align:-0.305em;"></span><span class="mopen">(</span><span class="mord">−</span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.935em;"><span class="svg-align" style="top:-3.2em;"><span class="pstrut" style="height:3.2em;"></span><span class="mord" style="padding-left:1em;"><span class="mord">3/2</span></span></span><span style="top:-2.895em;"><span class="pstrut" style="height:3.2em;"></span><span class="hide-tail" style="min-width:1.02em;height:1.28em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.28em" viewBox="0 0 400000 1296" preserveAspectRatio="xMinYMin slice"><path d="M263,681c0.7,0,18,39.7,52,119
+c34,79.3,68.167,158.7,102.5,238c34.3,79.3,51.8,119.3,52.5,120
+c340,-704.7,510.7,-1060.3,512,-1067
+l0 -0
+c4.7,-7.3,11,-11,19,-11
+H40000v40H1012.3
+s-271.3,567,-271.3,567c-38.7,80.7,-84,175,-136,283c-52,108,-89.167,185.3,-111.5,232
+c-22.3,46.7,-33.8,70.3,-34.5,71c-4.7,4.7,-12.3,7,-23,7s-12,-1,-12,-1
+s-109,-253,-109,-253c-72.7,-168,-109.3,-252,-110,-252c-10.7,8,-22,16.7,-34,26
+c-22,17.3,-33.3,26,-34,26s-26,-26,-26,-26s76,-59,76,-59s76,-60,76,-60z
+M1001 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.305em;"><span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.935em;"><span class="svg-align" style="top:-3.2em;"><span class="pstrut" style="height:3.2em;"></span><span class="mord" style="padding-left:1em;"><span class="mord">3/2</span></span></span><span style="top:-2.895em;"><span class="pstrut" style="height:3.2em;"></span><span class="hide-tail" style="min-width:1.02em;height:1.28em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.28em" viewBox="0 0 400000 1296" preserveAspectRatio="xMinYMin slice"><path d="M263,681c0.7,0,18,39.7,52,119
+c34,79.3,68.167,158.7,102.5,238c34.3,79.3,51.8,119.3,52.5,120
+c340,-704.7,510.7,-1060.3,512,-1067
+l0 -0
+c4.7,-7.3,11,-11,19,-11
+H40000v40H1012.3
+s-271.3,567,-271.3,567c-38.7,80.7,-84,175,-136,283c-52,108,-89.167,185.3,-111.5,232
+c-22.3,46.7,-33.8,70.3,-34.5,71c-4.7,4.7,-12.3,7,-23,7s-12,-1,-12,-1
+s-109,-253,-109,-253c-72.7,-168,-109.3,-252,-110,-252c-10.7,8,-22,16.7,-34,26
+c-22,17.3,-33.3,26,-34,26s-26,-26,-26,-26s76,-59,76,-59s76,-60,76,-60z
+M1001 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.305em;"><span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>。把它与一个极大值样本放在同批，LayerNorm 的这一结果不变，因为统计没有使用另一个样本。</p>
+<h3 id="沿一个token的通道做平移检查">沿一个token的通道做平移检查</h3>
+<p>取同一token的两维激活(1,3)，均值2、总体方差1；两维同时加10后，去均值结果仍为(−1,1)。在相同epsilon、增益和偏置下，归一化输出相同。若只把其中一维加10，均值和方差都会变，另一维输出也跟着变化；这正是梯度耦合，而非两个独立标量标准化。</p>
+<p>教法联系：<a href="https://jalammar.github.io/illustrated-transformer/">Jay Alammar的The Illustrated Transformer</a>。算例为本文自构。</p>
+<h2 id="三核对归一化轴时间范围与仿射参数">三、核对归一化轴、时间范围与仿射参数</h2>
 <pre><code class="language-text">输入：当前样本或当前时间步的隐藏激活 a
 mu ← mean(a，沿约定隐藏维度)
 variance ← mean((a-mu)^2，沿同一维度)
@@ -87,7 +112,10 @@ output ← gain*normalized + bias
 推理时重复相同的单样本统计过程
 </code></pre>
 <p>优化目标仍是原任务损失；机制改变中间计算的参数化；指标是训练进度与任务表现。不能把损失变化自动归因于某个未经测量的“内部协变量偏移减少”，更稳妥的解释应围绕可观察的数值和优化行为。</p>
-<h2 id="实验与证据定位">实验与证据定位</h2>
+<p>Transformer 中常见 LayerNorm，但放在残差分支之前还是之后，会改变梯度路径。原始 LayerNorm 论文没有替所有后来网络选定最佳位置，不能因为名字相同就假定训练稳定性相同。RMSNorm 去掉均值中心化，也是另一个方法选择。</p>
+<p>对于多模态或变长输入，还要说明哪些轴参与统计。归一化每个 token 的通道，与跨 token 归一化，是不同运算；前者通常不混合序列位置，后者可能改变位置间关系甚至因果性。读实现时最值得检查的往往就是这一行轴参数。</p>
+<h2 id="四分开读结构不变性recall与训练速度">四、分开读结构不变性、Recall与训练速度</h2>
+<p>轴与插入位置固定后，分别检验训练表现和特定变换下的不变性，不把后者当作任意扰动鲁棒性。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -120,57 +148,29 @@ output ← gain*normalized + bias
 <td>各任务报告形式不同，不合并为一个统一置信区间结论</td>
 </tr>
 </tbody></table></div>
-<p>**证据一，第 3 节 Layer Normalization 定义。**统计来自单训练样本的一组单元，而不是 batch；这是方法最关键的可验证区别。论文关于重参数化性质的讨论只在相应变换条件下成立。</p>
-<p>**证据二，图 1 与表 2 的图文检索。**图展示 Recall@K 随训练变化；表中 OE 与 OE+LN 的 caption retrieval R@1 分别为 46.6 与 48.5。它支持该模型上的训练和任务收益，不证明所有任务都增加相同比例。</p>
-<p>**证据三，表 1 的不变性比较。**LayerNorm 对某些整体缩放或平移不变，却不对单个神经元权重的任意缩放都不变；其他归一化方案的性质也不同。这是特定变换下的结构分析，不能当作对任意数据扰动鲁棒的实验结论。</p>
+<p><strong>证据一，第 3 节 Layer Normalization 定义。</strong>统计来自单训练样本的一组单元，而不是 batch；这是方法最关键的可验证区别。论文关于重参数化性质的讨论只在相应变换条件下成立。</p>
+<p><strong>证据二，<a href="#llm-v6-012-figure-1">图1</a> 与<a href="https://arxiv.org/html/1607.06450#S6.T2">表2</a> 的图文检索。</strong>图展示 Recall@K 随训练变化；表中 OE 与 OE+LN 的 caption retrieval R@1 分别为 46.6 与 48.5。它支持该模型上的训练和任务收益，不证明所有任务都增加相同比例。 这里的曲线测的是图文检索 Recall@K；比较同一个 K 下有无 LayerNorm 的差异，不要把它解释成语言模型困惑度曲线。</p>
+<!-- figure-ref-v6:start:012-f1-1-anchor -->
+<p><a id="llm-v6-012-figure-1"></a></p>
+<!-- figure-ref-v6:end:012-f1-1-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/012-layernorm-f1.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/012-layernorm-f1.png" width="3348" height="829" alt="有无LayerNorm时图像检索Recall@1、Recall@5和Recall@10的训练曲线" loading="lazy"></a><figcaption>原实验图摘引：Jimmy Lei Ba、Jamie Ryan Kiros、Geoffrey Hinton，2016，图1；<a href="https://arxiv.org/html/1607.06450#S6.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据三，<a href="https://arxiv.org/html/1607.06450#S5.T1">表1</a> 的不变性比较。</strong>LayerNorm 对某些整体缩放或平移不变，却不对单个神经元权重的任意缩放都不变；其他归一化方案的性质也不同。这是特定变换下的结构分析，不能当作对任意数据扰动鲁棒的实验结论。</p>
 <p>图文检索表也提醒读者：R@1 上升 1.9 个百分点不等于错误率相对降低 1.9%。指标单位要明确。曲线按迭代进展较快，与硬件墙钟更快也需要分开；原文对部分任务讨论时间，但不能把局部观察当作统一速度定律。</p>
-<h2 id="教学例子batch-变化与特征变化">教学例子：batch 变化与特征变化</h2>
-<p>构造样本激活 <span class="reading-math" data-tex="(1,2,3)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>2</mn><mo separator="true">,</mo><mn>3</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1,2,3)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">3</span><span class="mclose">)</span></span></span></span></span>。均值为 2，方差为 <span class="reading-math" data-tex="2/3"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mi mathvariant="normal">/</mi><mn>3</mn></mrow><annotation encoding="application/x-tex">2/3</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2/3</span></span></span></span></span>，中心化后为 <span class="reading-math" data-tex="(-1,0,1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mo>−</mo><mn>1</mn><mo separator="true">,</mo><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(-1,0,1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">−</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span>。忽略很小的 <span class="reading-math" data-tex="\epsilon"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϵ</mi></mrow><annotation encoding="application/x-tex">\epsilon</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">ϵ</span></span></span></span></span>，归一化值为 <span class="reading-math" data-tex="(-\sqrt{3/2},0,\sqrt{3/2})"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mo>−</mo><msqrt><mrow><mn>3</mn><mi mathvariant="normal">/</mi><mn>2</mn></mrow></msqrt><mo separator="true">,</mo><mn>0</mn><mo separator="true">,</mo><msqrt><mrow><mn>3</mn><mi mathvariant="normal">/</mi><mn>2</mn></mrow></msqrt><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(-\sqrt{3/2},0,\sqrt{3/2})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.24em;vertical-align:-0.305em;"></span><span class="mopen">(</span><span class="mord">−</span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.935em;"><span class="svg-align" style="top:-3.2em;"><span class="pstrut" style="height:3.2em;"></span><span class="mord" style="padding-left:1em;"><span class="mord">3/2</span></span></span><span style="top:-2.895em;"><span class="pstrut" style="height:3.2em;"></span><span class="hide-tail" style="min-width:1.02em;height:1.28em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.28em" viewBox="0 0 400000 1296" preserveAspectRatio="xMinYMin slice"><path d="M263,681c0.7,0,18,39.7,52,119
-c34,79.3,68.167,158.7,102.5,238c34.3,79.3,51.8,119.3,52.5,120
-c340,-704.7,510.7,-1060.3,512,-1067
-l0 -0
-c4.7,-7.3,11,-11,19,-11
-H40000v40H1012.3
-s-271.3,567,-271.3,567c-38.7,80.7,-84,175,-136,283c-52,108,-89.167,185.3,-111.5,232
-c-22.3,46.7,-33.8,70.3,-34.5,71c-4.7,4.7,-12.3,7,-23,7s-12,-1,-12,-1
-s-109,-253,-109,-253c-72.7,-168,-109.3,-252,-110,-252c-10.7,8,-22,16.7,-34,26
-c-22,17.3,-33.3,26,-34,26s-26,-26,-26,-26s76,-59,76,-59s76,-60,76,-60z
-M1001 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.305em;"><span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.935em;"><span class="svg-align" style="top:-3.2em;"><span class="pstrut" style="height:3.2em;"></span><span class="mord" style="padding-left:1em;"><span class="mord">3/2</span></span></span><span style="top:-2.895em;"><span class="pstrut" style="height:3.2em;"></span><span class="hide-tail" style="min-width:1.02em;height:1.28em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.28em" viewBox="0 0 400000 1296" preserveAspectRatio="xMinYMin slice"><path d="M263,681c0.7,0,18,39.7,52,119
-c34,79.3,68.167,158.7,102.5,238c34.3,79.3,51.8,119.3,52.5,120
-c340,-704.7,510.7,-1060.3,512,-1067
-l0 -0
-c4.7,-7.3,11,-11,19,-11
-H40000v40H1012.3
-s-271.3,567,-271.3,567c-38.7,80.7,-84,175,-136,283c-52,108,-89.167,185.3,-111.5,232
-c-22.3,46.7,-33.8,70.3,-34.5,71c-4.7,4.7,-12.3,7,-23,7s-12,-1,-12,-1
-s-109,-253,-109,-253c-72.7,-168,-109.3,-252,-110,-252c-10.7,8,-22,16.7,-34,26
-c-22,17.3,-33.3,26,-34,26s-26,-26,-26,-26s76,-59,76,-59s76,-60,76,-60z
-M1001 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.305em;"><span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>。把它与一个极大值样本放在同批，LayerNorm 的这一结果不变，因为统计没有使用另一个样本。</p>
+<h2 id="五消去的均值和尺度可能也是任务信息">五、消去的均值和尺度可能也是任务信息</h2>
 <p>如果把本样本所有激活都加 100，中心化会消除这个共同偏移；若给不同坐标加不同值，则结果会改变。所谓不变性对应特定变换，不是模型对任意扰动鲁棒。可学习 <span class="reading-math" data-tex="g,b"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi><mo separator="true">,</mo><mi>b</mi></mrow><annotation encoding="application/x-tex">g,b</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">b</span></span></span></span></span> 和后续层也需要一起考虑。</p>
 <p>再把隐藏维度降成 1。中心化后唯一坐标为零，输出主要由偏置决定，说明方法需要合适统计集合。这个极端教学例子揭示：归一化维度不是一个随便设的工程参数，而决定了哪些信息被消除。</p>
-<h2 id="与-transformer-的联系">与 Transformer 的联系</h2>
-<p>Transformer 中常见 LayerNorm，但放在残差分支之前还是之后，会改变梯度路径。原始 LayerNorm 论文没有替所有后来网络选定最佳位置，不能因为名字相同就假定训练稳定性相同。RMSNorm 去掉均值中心化，也是另一个方法选择。</p>
-<p>对于多模态或变长输入，还要说明哪些轴参与统计。归一化每个 token 的通道，与跨 token 归一化，是不同运算；前者通常不混合序列位置，后者可能改变位置间关系甚至因果性。读实现时最值得检查的往往就是这一行轴参数。</p>
-<h2 id="贡献与局限">贡献与局限</h2>
-<p>LayerNorm 提供不依赖 batch 的可训练归一化接口，使小批量和循环计算更容易采用归一化。代价包括额外计算、数值精度问题以及可能消除有用幅度信息。它不保证优化器、初始化和学习率从此无关。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>跨样本统计使归一化依赖batch构成，循环与小批量场景不方便</td>
-<td>对单样本内部特征计算均值方差，保留可学习仿射变换</td>
-<td>解耦不同样本的统计，并改变隐藏表示的数值尺度与优化参数化</td>
-<td>表1不变性分析，图1与表2图文检索</td>
-<td>统计维度和插入位置影响行为；增加计算，也可能消除任务需要的幅度信息</td>
-</tr>
-</tbody></table></div>
+<p>代价包括额外计算、数值精度问题以及可能消除有用幅度信息。它不保证优化器、初始化和学习率从此无关。</p>
+<h2 id="六把本篇机制再推进一步">六、把本篇机制再推进一步</h2>
+<details>
+<summary>1. 逐token特征归一化改为整句归一化，只是更稳定地估计均值吗？</summary>
+
+<p><strong>参考答案</strong>：不是，它改变信息范围。当前token的结果可能开始依赖后续token，生成任务就可能泄露未来信息；同时不同位置被统计量耦合。必须按任务可见输入检查统计轴，不能用样本量更多为改变算法定义辩护。</p>
+</details>
+
+<h2 id="七把归一化放进残差网络再比较rmsnorm">七、把归一化放进残差网络，再比较RMSNorm</h2>
+<p>控制单个位置尺度后，深层残差的放置与整体训练仍需设计。<a href="015-transformer.html">Transformer</a>展示模块组合，<a href="068-llama.html">LLaMA</a>采用另一种归一化配方；比较时应固定残差位置，而非把所有差异都归为归一化名称。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. batch size 为 1 时，LayerNorm 为什么仍能计算？</strong></p>
 <p>它在样本内部的多个特征上估计统计，而不是依赖多个样本。只要被归一化维度合适，单样本就有统计集合；这与跨 batch 的典型归一化不同。</p>
@@ -189,21 +189,15 @@ M1001 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 
 **论文**：Jimmy Lei Ba、Jamie Ryan Kiros、Geoffrey Hinton，*Layer Normalization*，2016。[原文](https://arxiv.org/abs/1607.06450) · [PDF](https://arxiv.org/pdf/1607.06450)。重点是统计维度、循环网络适用性及原文实验，不把后来的 Pre-LN、RMSNorm 等变体归入同一原始方法。
 
-## 一分钟理解
+### 先接住前作的问题
 
-Batch Normalization 依赖一批样本计算统计量，小批量、可变长度序列和在线执行时可能不方便。Layer Normalization 对单个样本内部的一组隐藏单元计算均值与方差，让每个样本自己的表示得到归一化，不依赖同批其他输入。
+[Adam](009-adam.md)按梯度历史调整更新，但并不决定网络中间激活怎样归一化。对[RNNLM](003-rnnlm.md)一类变长顺序计算，跨样本统计又会把当前输出与batch构成耦合。本篇提供可组合的归一化模块，和优化器是不同层面的设计。
 
-它仍保留可学习的缩放和平移，使网络不必永久受限于零均值单位尺度。作者在循环与其他模型上比较训练表现。核心价值是改变归一化统计范围，便于序列训练；边界是具体归一化位置与维度影响行为，不能笼统推断所有架构都受益。
+## 一、问题设定：单个序列样本能否摆脱同批输入的统计影响
 
-## 背景：统计范围是一项模型假设
+如果一个样本的输出依赖同批其他样本，改变batch构成就可能改变计算。BatchNorm在不少视觉模型有效，但小批量、在线与可变长序列不总适合这种耦合；循环网络各时间步的分布还会变化。本篇把统计范围转为当前样本内部的一组隐藏单元。
 
-如果一个样本的输出取决于与它同批的其他样本，那么改变 batch 构成可能改变计算。Batch Normalization 在许多视觉模型中有效，但这种跨样本耦合不一定适合每个序列场景。循环网络不同时间步的输入分布也在变化，使统一处理更加复杂。
-
-Layer Normalization 把统计范围转到单样本的特征维度。一个 token 或时间步的隐藏向量可以独立计算，不必等候大批样本。这里的“层”应结合原论文与实际张量布局理解，不能把所有轴都一起归一化而仍称相同实现。
-
-归一化也不是把文本特征变得“语义标准”。它改变数值尺度、参数化和梯度几何，能影响优化，却不会凭空加入任务信息。有效性最终需要训练与验证表现支持。
-
-## 方法：中心化、缩放，再恢复可学习自由度
+## 二、沿特征轴推导中心化、尺度和反传耦合
 
 给定一个样本的隐藏激活 $a\in\mathbb R^H$：
 
@@ -220,6 +214,22 @@ $H$ 是被归一化的特征数，$g_i,b_i$ 为可训练增益和偏置，$\epsi
 
 对于循环网络，通常在每个时间步对该步内部激活应用归一化。它不会把未来时间步混入当前状态，因此可保持因果计算。若错误地沿整段时间轴计算统计，就可能在生成任务中泄露未来信息，这是张量维度选择造成的实际错误。
 
+### 归一化为什么会耦合一个token的各个维度
+
+令 $\hat x=(x-\mu)/\sigma$，其中 $x$ 是同一个样本的特征向量，$\mu,\sigma$ 为该向量的均值与标准差；暂忽略稳定常数 $\epsilon$，并假设 $\sigma&gt;0$。均值和尺度都依赖全部特征，因此一维输入变化不只改变同一维输出。反传到输入的梯度为 $\partial\ell/\partial x=(g-\operatorname{mean}(g)-\hat x\operatorname{mean}(g\odot\hat x))/\sigma$，其中 $g=\partial\ell/\partial\hat x$。它去掉整体平移方向及沿当前尺度方向的分量，说明LN改变的不仅是前向数值范围，也改变优化几何。此式是按原文归一化定义展开的教学推导。
+
+**教学算例。** 向量 $(1,3)$ 的均值2、标准差1，归一化为 $(-1,1)$；$(12,16)=2(1,3)+10$ 仍得到同一结果。这个正比例与共同平移不变性不适用于任意逐维缩放，也会受 $\epsilon$ 影响。可学习gain/bias恢复逐维输出自由度，却无法从归一化结果唯一恢复被删掉的原始均值和尺度。
+
+构造样本激活 $(1,2,3)$。均值为 2，方差为 $2/3$，中心化后为 $(-1,0,1)$。忽略很小的 $\epsilon$，归一化值为 $(-\sqrt{3/2},0,\sqrt{3/2})$。把它与一个极大值样本放在同批，LayerNorm 的这一结果不变，因为统计没有使用另一个样本。
+
+### 沿一个token的通道做平移检查
+
+取同一token的两维激活(1,3)，均值2、总体方差1；两维同时加10后，去均值结果仍为(−1,1)。在相同epsilon、增益和偏置下，归一化输出相同。若只把其中一维加10，均值和方差都会变，另一维输出也跟着变化；这正是梯度耦合，而非两个独立标量标准化。
+
+教法联系：[Jay Alammar的The Illustrated Transformer](https://jalammar.github.io/illustrated-transformer/)。算例为本文自构。
+
+## 三、核对归一化轴、时间范围与仿射参数
+
 ```text
 输入：当前样本或当前时间步的隐藏激活 a
 mu ← mean(a，沿约定隐藏维度)
@@ -233,7 +243,13 @@ output ← gain*normalized + bias
 
 优化目标仍是原任务损失；机制改变中间计算的参数化；指标是训练进度与任务表现。不能把损失变化自动归因于某个未经测量的“内部协变量偏移减少”，更稳妥的解释应围绕可观察的数值和优化行为。
 
-## 实验与证据定位
+Transformer 中常见 LayerNorm，但放在残差分支之前还是之后，会改变梯度路径。原始 LayerNorm 论文没有替所有后来网络选定最佳位置，不能因为名字相同就假定训练稳定性相同。RMSNorm 去掉均值中心化，也是另一个方法选择。
+
+对于多模态或变长输入，还要说明哪些轴参与统计。归一化每个 token 的通道，与跨 token 归一化，是不同运算；前者通常不混合序列位置，后者可能改变位置间关系甚至因果性。读实现时最值得检查的往往就是这一行轴参数。
+
+## 四、分开读结构不变性、Recall与训练速度
+
+轴与插入位置固定后，分别检验训练表现和特定变换下的不变性，不把后者当作任意扰动鲁棒性。
 
 | 项目 | 原文范围 |
 |---|---|
@@ -246,36 +262,40 @@ output ← gain*normalized + bias
 
 **证据一，第 3 节 Layer Normalization 定义。**统计来自单训练样本的一组单元，而不是 batch；这是方法最关键的可验证区别。论文关于重参数化性质的讨论只在相应变换条件下成立。
 
-**证据二，图 1 与表 2 的图文检索。**图展示 Recall@K 随训练变化；表中 OE 与 OE+LN 的 caption retrieval R@1 分别为 46.6 与 48.5。它支持该模型上的训练和任务收益，不证明所有任务都增加相同比例。
+**证据二，[图1](#llm-v6-012-figure-1) 与[表2](https://arxiv.org/html/1607.06450#S6.T2) 的图文检索。**图展示 Recall@K 随训练变化；表中 OE 与 OE+LN 的 caption retrieval R@1 分别为 46.6 与 48.5。它支持该模型上的训练和任务收益，不证明所有任务都增加相同比例。 这里的曲线测的是图文检索 Recall@K；比较同一个 K 下有无 LayerNorm 的差异，不要把它解释成语言模型困惑度曲线。
 
-**证据三，表 1 的不变性比较。**LayerNorm 对某些整体缩放或平移不变，却不对单个神经元权重的任意缩放都不变；其他归一化方案的性质也不同。这是特定变换下的结构分析，不能当作对任意数据扰动鲁棒的实验结论。
+&lt;!-- figure-ref-v6:start:012-f1-1-anchor --&gt;
+&lt;a id=&quot;llm-v6-012-figure-1&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:012-f1-1-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/012-layernorm-f1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/012-layernorm-f1.png&quot; width=&quot;3348&quot; height=&quot;829&quot; alt=&quot;有无LayerNorm时图像检索Recall@1、Recall@5和Recall@10的训练曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原实验图摘引：Jimmy Lei Ba、Jamie Ryan Kiros、Geoffrey Hinton，2016，图1；&lt;a href=&quot;https://arxiv.org/html/1607.06450#S6.F1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+**证据三，[表1](https://arxiv.org/html/1607.06450#S5.T1) 的不变性比较。**LayerNorm 对某些整体缩放或平移不变，却不对单个神经元权重的任意缩放都不变；其他归一化方案的性质也不同。这是特定变换下的结构分析，不能当作对任意数据扰动鲁棒的实验结论。
 
 图文检索表也提醒读者：R@1 上升 1.9 个百分点不等于错误率相对降低 1.9%。指标单位要明确。曲线按迭代进展较快，与硬件墙钟更快也需要分开；原文对部分任务讨论时间，但不能把局部观察当作统一速度定律。
 
-## 教学例子：batch 变化与特征变化
-
-构造样本激活 $(1,2,3)$。均值为 2，方差为 $2/3$，中心化后为 $(-1,0,1)$。忽略很小的 $\epsilon$，归一化值为 $(-\sqrt{3/2},0,\sqrt{3/2})$。把它与一个极大值样本放在同批，LayerNorm 的这一结果不变，因为统计没有使用另一个样本。
+## 五、消去的均值和尺度可能也是任务信息
 
 如果把本样本所有激活都加 100，中心化会消除这个共同偏移；若给不同坐标加不同值，则结果会改变。所谓不变性对应特定变换，不是模型对任意扰动鲁棒。可学习 $g,b$ 和后续层也需要一起考虑。
 
 再把隐藏维度降成 1。中心化后唯一坐标为零，输出主要由偏置决定，说明方法需要合适统计集合。这个极端教学例子揭示：归一化维度不是一个随便设的工程参数，而决定了哪些信息被消除。
 
-## 与 Transformer 的联系
-
-Transformer 中常见 LayerNorm，但放在残差分支之前还是之后，会改变梯度路径。原始 LayerNorm 论文没有替所有后来网络选定最佳位置，不能因为名字相同就假定训练稳定性相同。RMSNorm 去掉均值中心化，也是另一个方法选择。
-
-对于多模态或变长输入，还要说明哪些轴参与统计。归一化每个 token 的通道，与跨 token 归一化，是不同运算；前者通常不混合序列位置，后者可能改变位置间关系甚至因果性。读实现时最值得检查的往往就是这一行轴参数。
-
-## 贡献与局限
-
-LayerNorm 提供不依赖 batch 的可训练归一化接口，使小批量和循环计算更容易采用归一化。代价包括额外计算、数值精度问题以及可能消除有用幅度信息。它不保证优化器、初始化和学习率从此无关。
+代价包括额外计算、数值精度问题以及可能消除有用幅度信息。它不保证优化器、初始化和学习率从此无关。
 
 五个前置概念是样本轴与特征轴、均值方差、可学习仿射变换、因果信息范围和训练推理一致性。理解这些即可判断一个代码实现到底是不是所讨论的方法，也能识别与其他归一化变体的区别。
 
+## 六、把本篇机制再推进一步
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 跨样本统计使归一化依赖batch构成，循环与小批量场景不方便 | 对单样本内部特征计算均值方差，保留可学习仿射变换 | 解耦不同样本的统计，并改变隐藏表示的数值尺度与优化参数化 | 表1不变性分析，图1与表2图文检索 | 统计维度和插入位置影响行为；增加计算，也可能消除任务需要的幅度信息 |
+&lt;details&gt;
+&lt;summary&gt;1. 逐token特征归一化改为整句归一化，只是更稳定地估计均值吗？&lt;/summary&gt;
+
+**参考答案**：不是，它改变信息范围。当前token的结果可能开始依赖后续token，生成任务就可能泄露未来信息；同时不同位置被统计量耦合。必须按任务可见输入检查统计轴，不能用样本量更多为改变算法定义辩护。
+
+&lt;/details&gt;
+
+## 七、把归一化放进残差网络，再比较RMSNorm
+
+控制单个位置尺度后，深层残差的放置与整体训练仍需设计。[Transformer](015-transformer.md)展示模块组合，[LLaMA](068-llama.md)采用另一种归一化配方；比较时应固定残差位置，而非把所有差异都归为归一化名称。
 
 ## 自测与参考答案
 

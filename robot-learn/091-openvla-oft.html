@@ -42,22 +42,20 @@
                 <span class="text-gray-500">OpenVLA-OFT：高效微调与动作分块</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="8fd14aa4dcffdc65ab0049d3898c1068d5cc5280c49f02004449e46a29250649"><h1>091｜OpenVLA-OFT：高效微调与动作分块</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="35add6b4e9074b0c845b632d7ac6b3dfabce35e29e25800f10aebf8ee0f2c1a4"><h1>091｜OpenVLA-OFT：高效微调与动作分块</h1>
 <p><a href="index.html">系列首页</a> · <a href="090-asap.html">上一篇</a> · <a href="092-groot.html">下一篇</a></p>
 <p><strong>原论文</strong>：<em>Fine-Tuning Vision-Language-Action Models: Optimizing Speed and Success</em>，Moo Jin Kim、Chelsea Finn、Percy Liang，2025。<a href="https://arxiv.org/abs/2502.19645">论文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p>预训练时怎样输出动作，微调时不一定还要照搬。OpenVLA最初像写句子一样逐个生成动作数字，这使双臂高频控制很慢。OFT保留已经学到的表示，却把输出改成一次并行预测整段连续动作，用简单L1损失微调。</p>
-<p>这项工作的核心是适配方法研究，而非从头预训练一个新基础模型。作者比较解码方式、动作表示与损失，并在真机加入FiLM，让语言更早影响视觉特征。</p>
-<p>实验支持复杂预训练表示可以服务于简单输出头，但不支持“L1在所有多模态动作分布中都优于扩散”。它的目标资料较集中、示范策略较一致，这恰好是直接回归较有利的条件。</p>
-<p>一句话：在将预训练VLA适配到新机器人和任务时，通过并行动作分块、连续回归和必要的语言调制，改善速度与完成表现，代价是重新设计接口及对多模态表达的限制。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="082-openvla.html">OpenVLA</a>已有视觉语言表示，却按离散自回归方式生成动作。OFT保留这些权重，在微调时改变注意力与连续动作头，追问瓶颈究竟来自表示还是下游解码；预训练目标不必原样成为部署接口。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>LoRA</strong>以低秩参数更新适配大模型；<strong>双向注意力</strong>让输出槽位在共同条件下交流；<strong>L1回归</strong>惩罚绝对偏差；<strong>FiLM</strong>用条件信号缩放和平移特征通道；<strong>动作吞吐</strong>计量单位时间生成多少动作步，不等于反馈率。</p>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<h2 id="一问题设定已有vla权重怎样适配并行动作块">一、问题设定：已有VLA权重怎样适配并行动作块</h2>
+<p>预训练时怎样输出动作，微调时不一定还要照搬。OpenVLA最初像写句子一样逐个生成动作数字，这使双臂高频控制很慢。OFT保留已经学到的表示，却把输出改成一次并行预测整段连续动作，用简单L1损失微调。</p>
 <p>任务属于离线模仿学习。LIBERO是单臂视觉操作，真实ALOHA则有两个机械臂、三个相机和14维关节状态。后者动作是绝对关节角，和原OpenVLA的相对末端动作不同。</p>
 <p>这意味着研究不是只在原网络上调学习率：输入从单视角到多视角，增加本体状态；输出维度、频率和坐标含义都发生变化。已有语义与视觉表示是否还能利用，是论文的重要问题。</p>
 <p>训练没有环境奖励或critic，评分标准只用于评估。动作回归损失更低不保证任务成功，尤其当示范含不同路线或输入不足以确定下一步时。作者因此同时测量真实完成进度、语言选物和推理性能。</p>
 <p>需要区分OFT与OFT+：后者额外加入FiLM，主要用于ALOHA实验；LIBERO主结果没有使用FiLM。不能把真机语言收益反过来当作LIBERO97.1%的解释。<a href="https://arxiv.org/html/2502.19645v1">研究设计§III–IV</a></p>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<h2 id="二以空动作槽位连续回归和film微调">二、以空动作槽位、连续回归和FiLM微调</h2>
 <h3 id="1-空动作槽位替换真实动作前缀">1. 空动作槽位替换真实动作前缀</h3>
 <p>原模型训练时输入右移的真实动作token，自回归推理时一步一步填入预测。OFT输入空动作嵌入，仅通过位置编码区分未来时间与动作维度，并采用双向注意力，单次前向填满整块。</p>
 <p>这种双向注意力并没有偷看未来真实动作，因为输入槽位是空的。它允许不同输出位置在共同观测条件下交流，从而联合组织运动；但L1头本身仍是确定性映射，不会因此自动成为完整的多模态概率生成器。</p>
@@ -76,6 +74,14 @@
 <p><span class="reading-math" data-tex="\hat F_{p,c}=(1+\gamma_c(\ell))F_{p,c}+\beta_c(\ell)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi>F</mi><mo>^</mo></mover><mrow><mi>p</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub><mo>=</mo><mo stretchy="false">(</mo><mn>1</mn><mo>+</mo><msub><mi>γ</mi><mi>c</mi></msub><mo stretchy="false">(</mo><mi mathvariant="normal">ℓ</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><msub><mi>F</mi><mrow><mi>p</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub><mo>+</mo><msub><mi>β</mi><mi>c</mi></msub><mo stretchy="false">(</mo><mi mathvariant="normal">ℓ</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\hat F_{p,c}=(1+\gamma_c(\ell))F_{p,c}+\beta_c(\ell).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.2329em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">F</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">c</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0556em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">c</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord">ℓ</span><span class="mclose">))</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">F</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">c</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0528em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">c</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord">ℓ</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="p"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi></mrow><annotation encoding="application/x-tex">p</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span></span></span></span></span> 是patch位置，<span class="reading-math" data-tex="c"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi></mrow><annotation encoding="application/x-tex">c</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">c</span></span></span></span></span> 是特征通道。相同通道的调制作用于全部patch，不是每个patch单独一组缩放。调制插在视觉Transformer块的注意力之后、前馈之前，两个视觉骨干都使用。初始接近恒等，尽量少扰动预训练表示。</p>
 <p>这给“选择红椒还是玉米”增加更直接的视觉条件路径。它不能保证完全理解所有语言，也不能单凭消融确定原失败一定由某一种视觉捷径造成；具体成因作者仍列为未解决问题。</p>
+<p>这是方法流程的教学版本。全块开环执行提高连贯性和吞吐，也拉长了新反馈影响动作的间隔。</p>
+<p>逐坐标中位数仍可能拼出未出现过的动作。教学设同一观察下，三种等概率可行二维动作是 <span class="reading-math" data-tex="(0,1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0,1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span>、<span class="reading-math" data-tex="(1,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span>、<span class="reading-math" data-tex="(-1,-1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mo>−</mo><mn>1</mn><mo separator="true">,</mo><mo>−</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(-1,-1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">−</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">−</span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span>；每维的唯一中位数均为0，L1回归会偏好 <span class="reading-math" data-tex="(0,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span>，它不属于任何示范模式。若这些模式分别绕开中央障碍，拼出的动作可能正好无效。</p>
+<p>这说明OFT的成功不应解释为L1在数学上解决了所有多模态问题。丰富视觉、本体状态和窄任务微调可能已消除大量条件歧义，确定性头于是足够有效。原文对L1与扩散头的比较支持所测适配条件下的效率折中，而非否定生成策略在其他数据分布中的价值。<a href="https://arxiv.org/html/2502.19645v1">原文§IV-B及学习目标比较</a></p>
+<h3 id="用一个例子建立理解">用一个例子建立理解</h3>
+<p>以下是未运行的教学例子。三种食材一直固定摆放，人说“舀葡萄干”，训练中却恰好多数动作都朝左边。模型可能直接学“拿勺后向左”，忽略指令。把语言用于调制视觉通道，能鼓励网络根据指定对象提取不同特征；还应改变食材位置，构造相同场景不同命令的测试，才能更清楚区分语义和位置捷径。</p>
+<p>并行输出则像一次写好一秒的动作计划，而非每生成一个关节数字都再跑模型。但计划写好之后，真实碗若被移走，尚未重新读取图像的策略仍不知道，这与语言是否正确是两个独立问题。</p>
+<h2 id="三以空槽并行输出连续动作并微调语言调制">三、以空槽并行输出连续动作并微调语言调制</h2>
+<p>双向交流的槽位不含未来真实标签，监督来自L1动作目标。新增相机、本体与FiLM还会改变可见信息，不能只把全配方收益归给并行解码。</p>
 <pre><code class="language-text">载入预训练OpenVLA
 加入多视角处理、本体投影、空动作槽位与连续动作头
 将解码注意力改为双向；配置LoRA
@@ -92,8 +98,19 @@
     按底层频率执行K步，不在块中重新规划
     再次读取观测，重复
 </code></pre>
-<p>这是方法流程的教学版本。全块开环执行提高连贯性和吞吐，也拉长了新反馈影响动作的间隔。</p>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<h2 id="四分开吞吐闭环频率与数据一致性">四、分开吞吐、闭环频率与数据一致性</h2>
+<p>这项工作的核心是适配方法研究，而非从头预训练一个新基础模型。作者比较解码方式、动作表示与损失，并在真机加入FiLM，让语言更早影响视觉特征。</p>
+<p>实验支持复杂预训练表示可以服务于简单输出头，但不支持“L1在所有多模态动作分布中都优于扩散”。它的目标资料较集中、示范策略较一致，这恰好是直接回归较有利的条件。</p>
+<p><strong>原图怎么读：</strong> <a href="#paper-091-openvla-oft-figure-5">图5，原论文图注与图像</a>。指标是靠近语言指定目标的成功率，聚焦语言接地而非完整任务所有阶段。去掉FiLM后的变化应在同一目标选择协议下解释。</p>
+<!-- figure-ref-v6:start:091-openvla-oft-license -->
+<p>原文标注 <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>。本页摘图仅保留图形区域并作栅格化；有面板重排的图另行注明，作者与原文入口见各图注。</p>
+<!-- figure-ref-v6:end:091-openvla-oft-license -->
+<!-- figure-ref-v6:start:9a4831938336-anchor -->
+<a id="paper-091-openvla-oft-figure-5"></a>
+<!-- figure-ref-v6:end:9a4831938336-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/091-openvla-oft-s6-f5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/091-openvla-oft-s6-f5.png" width="1824" height="624" alt="Fine-Tuning Vision-Language-Action Models: Optimizing Speed and Success，图5：指标是靠近语言指定目标的成功率，聚焦语言接地而非完整任务所有阶段。去掉FiLM后的变化应在同一目标选择协议下解释。" loading="lazy"></a><figcaption>实验图原图摘引：Moo Jin Kim、Chelsea Finn、Percy Liang，2025，HTML S6.F5，图5。<a href="https://arxiv.org/html/2502.19645v1#S6.F5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -138,64 +155,24 @@
 <td>延迟与动作吞吐分别报告</td>
 </tr>
 </tbody></table></div>
-<p>ALOHA每个任务单独微调，不是一个模型联合掌握四任务。数据有训练验证划分；OFT+最终各任务更新数见表V，为100k、70k、50k、100k。未逐项确认独立训练种子间置信区间。</p>
+<p>ALOHA每个任务单独微调，不是一个模型联合掌握四任务。数据有训练验证划分；OFT+最终各任务更新数见<a href="https://arxiv.org/html/2502.19645v1#A1.T5">表V</a>，为100k、70k、50k、100k。未逐项确认独立训练种子间置信区间。</p>
 <p>其他真机基线使用各自配方，算力和更新数不同：例如DP、RDT有两步历史，OFT+没有；RDT预测64步但只执行25步，DP块长24，π0块长25。比较具有实际参考价值，却不能解释为只改一个损失的严格公平实验。</p>
 <p>入锅任务的OOD主要添加未见干扰碗，锅位置固定；不是全新物体类别、全新厨房或全新动作技能。短裤初始变化也较小，说明四任务难度和泛化强度不相同。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<p><strong>表I：性能提升的分解。</strong> 原OpenVLA平均76.5%，并行加分块90.2%，再加连续L1为95.3%，连续扩散95.4%；增加腕部和状态输入后OFT为97.1%。总差20.6个百分点，不能全部记到L1头上。并行与分块同时加入，也没有单靠这一表完全隔离两者贡献。</p>
-<p><strong>表II：速度必须匹配输入。</strong> 单图像连续L1吞吐109.7动作步/秒、块延迟0.073秒，对原4.2约26.1倍；完整额外输入版本是71.4与0.112秒。不能将97.1%的丰富输入模型和单相机26倍速度合并成同一配置。v1相关工作误把约0.07、0.321写成ms，主表单位明确为秒。</p>
-<p><strong>表III：快于原OpenVLA，不是所有模型里最快。</strong> ALOHA的OFT+为77.9动作步/秒、0.321秒每块，比原1.8吞吐约43倍；ACT为432.8、π0为291.6，均更快。25步块在25 Hz执行一秒，加上实际调度延迟，其视觉反馈频率远非77.9 Hz。吞吐充足只说明一块能较快算完。</p>
-<p><strong>图5和表XII：语言调制的作用。</strong> 舀料任务去FiLM的语言选物接近三选一随机水平，整体分数35；完整OFT+为100。这个消融支持FiLM在该设置有效。入锅也改善，但完整OFT+仍只得51.25分，不能因语言选择更好就称任务已可靠解决。</p>
-<p><strong>表X–XIV：证据的上下界。</strong> 短裤所有方法100分，衬衫DP、π0和OFT+均100，优势并非每任务独占。真机采用累计阶段评分，51.25分不等于51.25%的完整成功回合。去除机器人预训练、直接从Prismatic VLM适配的LIBERO平均91.9对97.1，下降5.2个百分点；这不是随机初始化，图文预训练仍在。<a href="https://arxiv.org/html/2502.19645v1#S5">结果与附录表格</a></p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p>这篇论文说明预训练目标与下游输出头可以解耦。即使基础模型原先用离散自回归动作训练，其表示仍能迁移到连续并行控制。对工程实践而言，这是重新利用既有模型的有效路径。</p>
+<h3 id="结果证据到底有多强">结果：证据到底有多强</h3>
+<p><strong><a href="https://arxiv.org/html/2502.19645v1#S5.T1">表I</a>：性能提升的分解。</strong> 原OpenVLA平均76.5%，并行加分块90.2%，再加连续L1为95.3%，连续扩散95.4%；增加腕部和状态输入后OFT为97.1%。总差20.6个百分点，不能全部记到L1头上。并行与分块同时加入，也没有单靠这一表完全隔离两者贡献。</p>
+<p><strong><a href="https://arxiv.org/html/2502.19645v1#S5.T2">表II</a>：速度必须匹配输入。</strong> 单图像连续L1吞吐109.7动作步/秒、块延迟0.073秒，对原4.2约26.1倍；完整额外输入版本是71.4与0.112秒。不能将97.1%的丰富输入模型和单相机26倍速度合并成同一配置。v1相关工作误把约0.07、0.321写成ms，主表单位明确为秒。</p>
+<p><strong><a href="https://arxiv.org/html/2502.19645v1#S6.T3">表III</a>：快于原OpenVLA，不是所有模型里最快。</strong> ALOHA的OFT+为77.9动作步/秒、0.321秒每块，比原1.8吞吐约43倍；ACT为432.8、π0为291.6，均更快。25步块在25 Hz执行一秒，加上实际调度延迟，其视觉反馈频率远非77.9 Hz。吞吐充足只说明一块能较快算完。</p>
+<p><strong><a href="#paper-091-openvla-oft-figure-5">图5</a>和<a href="https://arxiv.org/html/2502.19645v1#A1.T12">表XII</a>：语言调制的作用。</strong> 舀料任务去FiLM的语言选物接近三选一随机水平，整体分数35；完整OFT+为100。这个消融支持FiLM在该设置有效。入锅也改善，但完整OFT+仍只得51.25分，不能因语言选择更好就称任务已可靠解决。</p>
+<p><strong><a href="https://arxiv.org/html/2502.19645v1#A1.T10">表X</a>–XIV：证据的上下界。</strong> 短裤所有方法100分，衬衫DP、π0和OFT+均100，优势并非每任务独占。真机采用累计阶段评分，51.25分不等于51.25%的完整成功回合。去除机器人预训练、直接从Prismatic VLM适配的LIBERO平均91.9对97.1，下降5.2个百分点；这不是随机初始化，图文预训练仍在。<a href="https://arxiv.org/html/2502.19645v1#S5">结果与附录表格</a></p>
+<h2 id="五l1在窄模式数据上的有效性不能普遍外推">五、L1在窄模式数据上的有效性不能普遍外推</h2>
 <p>它没有证明预训练时也该全面采用L1。作者明确承认目标资料策略较一致，对真正多峰动作分布仍需进一步研究。若同一场景有左右两条绕行路线，逐坐标中位数可能落在障碍物上；网络容量大并不能从数学上消除这种问题。</p>
 <p>我的分析是，输入设计与训练配方可能比“模型新旧”更影响某些下游结果，但这种判断应限于所测条件。跨模型资料、规模、实现和调参差异很大，不能据一次适配对照宣布基础模型预训练无关紧要。</p>
 <p>开环块的可靠性也是限制。系统每秒更新一次策略条件适合部分稳定桌面操作，但在快速移动目标或突发接触中需要专门测试。少量真机试验、最佳检查点选模及窄初始条件，也限制了对长期部署稳定性的推断。</p>
-<h2 id="七用一个例子建立理解">七、用一个例子建立理解</h2>
-<p>以下是未运行的教学例子。三种食材一直固定摆放，人说“舀葡萄干”，训练中却恰好多数动作都朝左边。模型可能直接学“拿勺后向左”，忽略指令。把语言用于调制视觉通道，能鼓励网络根据指定对象提取不同特征；还应改变食材位置，构造相同场景不同命令的测试，才能更清楚区分语义和位置捷径。</p>
-<p>并行输出则像一次写好一秒的动作计划，而非每生成一个关节数字都再跑模型。但计划写好之后，真实碗若被移走，尚未重新读取图像的策略仍不知道，这与语言是否正确是两个独立问题。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>自回归串行延迟</td>
-<td>并行分块</td>
-<td>一次生成多个时间步</td>
-<td>表II/III</td>
-<td>块内开环</td>
-</tr>
-<tr>
-<td>分箱损失精度</td>
-<td>连续L1动作头</td>
-<td>保留细动作数值</td>
-<td>表I</td>
-<td>多峰分布不充分表达</td>
-</tr>
-<tr>
-<td>新机器人接口不同</td>
-<td>多相机与本体投影</td>
-<td>利用更多可观测信息</td>
-<td>完整OFT结果</td>
-<td>额外计算与参数</td>
-</tr>
-<tr>
-<td>语言被视觉捷径忽略</td>
-<td>FiLM</td>
-<td>提早连接语言与视觉</td>
-<td>真机去FiLM消融</td>
-<td>成因和跨域效果仍待验证</td>
-</tr>
-</tbody></table></div>
-<p>阅读范围：核对arXiv v1正文、实现与训练附录、逐任务评分表。本文未独立复现，按主表秒单位解释延迟，并区分阶段评分与二元成功。</p>
-<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<h3 id="追问film收益应怎样与额外参数和新增相机信息分开">追问：FiLM收益应怎样与额外参数和新增相机信息分开？</h3>
+<p>参考答案：在相同输入与可训练参数预算下比较有无语言调制，再改变命令与物体位置的对应关系。若同时新增本体和多相机，整体提升不能唯一归于FiLM。需记录目标选择与动作精度，判断它究竟改善语言条件使用，还是只是增加了可见状态信息。</p>
+<h2 id="六沿机制关系继续读">六、沿机制关系继续读</h2>
+<p>OFT直接承接<a href="082-openvla.html">OpenVLA</a>权重，重设并行连续动作头；与<a href="089-fast.html">FAST</a>是平行提速路线，前者改变输出与目标，后者保留自回归并压缩动作编码。</p>
+<h2 id="七自测三题与参考答案">七、自测三题与参考答案</h2>
 <p><strong>问题1：双向注意力是否泄漏了未来真实动作？</strong></p>
 <p>答案：在正确实现中没有。输入的是空动作嵌入和位置编码，真实动作只用于损失监督。输出位置可以交流隐藏特征，但看不到标签。若误保留teacher forcing的真实动作输入，再开双向注意力，才会造成严重泄漏。</p>
 <p><strong>问题2：为什么95.3%的L1结果不能证明扩散没有意义？</strong></p>
@@ -213,17 +190,13 @@
 
 **原论文**：*Fine-Tuning Vision-Language-Action Models: Optimizing Speed and Success*，Moo Jin Kim、Chelsea Finn、Percy Liang，2025。[论文](https://arxiv.org/abs/2502.19645)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
+
+[OpenVLA](082-openvla.md)已有视觉语言表示，却按离散自回归方式生成动作。OFT保留这些权重，在微调时改变注意力与连续动作头，追问瓶颈究竟来自表示还是下游解码；预训练目标不必原样成为部署接口。
+
+## 一、问题设定：已有VLA权重怎样适配并行动作块
 
 预训练时怎样输出动作，微调时不一定还要照搬。OpenVLA最初像写句子一样逐个生成动作数字，这使双臂高频控制很慢。OFT保留已经学到的表示，却把输出改成一次并行预测整段连续动作，用简单L1损失微调。
-
-这项工作的核心是适配方法研究，而非从头预训练一个新基础模型。作者比较解码方式、动作表示与损失，并在真机加入FiLM，让语言更早影响视觉特征。
-
-实验支持复杂预训练表示可以服务于简单输出头，但不支持“L1在所有多模态动作分布中都优于扩散”。它的目标资料较集中、示范策略较一致，这恰好是直接回归较有利的条件。
-
-一句话：在将预训练VLA适配到新机器人和任务时，通过并行动作分块、连续回归和必要的语言调制，改善速度与完成表现，代价是重新设计接口及对多模态表达的限制。
-
-## 二、研究背景与问题定义
 
 任务属于离线模仿学习。LIBERO是单臂视觉操作，真实ALOHA则有两个机械臂、三个相机和14维关节状态。后者动作是绝对关节角，和原OpenVLA的相对末端动作不同。
 
@@ -233,7 +206,7 @@
 
 需要区分OFT与OFT+：后者额外加入FiLM，主要用于ALOHA实验；LIBERO主结果没有使用FiLM。不能把真机语言收益反过来当作LIBERO97.1%的解释。[研究设计§III–IV](https://arxiv.org/html/2502.19645v1)
 
-## 三、方法：到底改了什么
+## 二、以空动作槽位、连续回归和FiLM微调
 
 ### 1. 空动作槽位替换真实动作前缀
 
@@ -269,6 +242,22 @@ $p$ 是patch位置，$c$ 是特征通道。相同通道的调制作用于全部p
 
 这给“选择红椒还是玉米”增加更直接的视觉条件路径。它不能保证完全理解所有语言，也不能单凭消融确定原失败一定由某一种视觉捷径造成；具体成因作者仍列为未解决问题。
 
+这是方法流程的教学版本。全块开环执行提高连贯性和吞吐，也拉长了新反馈影响动作的间隔。
+
+逐坐标中位数仍可能拼出未出现过的动作。教学设同一观察下，三种等概率可行二维动作是 $(0,1)$、$(1,0)$、$(-1,-1)$；每维的唯一中位数均为0，L1回归会偏好 $(0,0)$，它不属于任何示范模式。若这些模式分别绕开中央障碍，拼出的动作可能正好无效。
+
+这说明OFT的成功不应解释为L1在数学上解决了所有多模态问题。丰富视觉、本体状态和窄任务微调可能已消除大量条件歧义，确定性头于是足够有效。原文对L1与扩散头的比较支持所测适配条件下的效率折中，而非否定生成策略在其他数据分布中的价值。[原文§IV-B及学习目标比较](https://arxiv.org/html/2502.19645v1)
+
+### 用一个例子建立理解
+
+以下是未运行的教学例子。三种食材一直固定摆放，人说“舀葡萄干”，训练中却恰好多数动作都朝左边。模型可能直接学“拿勺后向左”，忽略指令。把语言用于调制视觉通道，能鼓励网络根据指定对象提取不同特征；还应改变食材位置，构造相同场景不同命令的测试，才能更清楚区分语义和位置捷径。
+
+并行输出则像一次写好一秒的动作计划，而非每生成一个关节数字都再跑模型。但计划写好之后，真实碗若被移走，尚未重新读取图像的策略仍不知道，这与语言是否正确是两个独立问题。
+
+## 三、以空槽并行输出连续动作并微调语言调制
+
+双向交流的槽位不含未来真实标签，监督来自L1动作目标。新增相机、本体与FiLM还会改变可见信息，不能只把全配方收益归给并行解码。
+
 ~~~text
 载入预训练OpenVLA
 加入多视角处理、本体投影、空动作槽位与连续动作头
@@ -287,9 +276,23 @@ $p$ 是patch位置，$c$ 是特征通道。相同通道的调制作用于全部p
     再次读取观测，重复
 ~~~
 
-这是方法流程的教学版本。全块开环执行提高连贯性和吞吐，也拉长了新反馈影响动作的间隔。
+## 四、分开吞吐、闭环频率与数据一致性
 
-## 四、实验如何验证方法
+这项工作的核心是适配方法研究，而非从头预训练一个新基础模型。作者比较解码方式、动作表示与损失，并在真机加入FiLM，让语言更早影响视觉特征。
+
+实验支持复杂预训练表示可以服务于简单输出头，但不支持“L1在所有多模态动作分布中都优于扩散”。它的目标资料较集中、示范策略较一致，这恰好是直接回归较有利的条件。
+
+**原图怎么读：** [图5，原论文图注与图像](#paper-091-openvla-oft-figure-5)。指标是靠近语言指定目标的成功率，聚焦语言接地而非完整任务所有阶段。去掉FiLM后的变化应在同一目标选择协议下解释。
+
+
+&lt;!-- figure-ref-v6:start:091-openvla-oft-license --&gt;
+&lt;p&gt;原文标注 &lt;a href=&quot;https://creativecommons.org/licenses/by/4.0/&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;CC BY 4.0&lt;/a&gt;。本页摘图仅保留图形区域并作栅格化；有面板重排的图另行注明，作者与原文入口见各图注。&lt;/p&gt;
+&lt;!-- figure-ref-v6:end:091-openvla-oft-license --&gt;
+&lt;!-- figure-ref-v6:start:9a4831938336-anchor --&gt;
+&lt;a id=&quot;paper-091-openvla-oft-figure-5&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:9a4831938336-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/091-openvla-oft-s6-f5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/091-openvla-oft-s6-f5.png&quot; width=&quot;1824&quot; height=&quot;624&quot; alt=&quot;Fine-Tuning Vision-Language-Action Models: Optimizing Speed and Success，图5：指标是靠近语言指定目标的成功率，聚焦语言接地而非完整任务所有阶段。去掉FiLM后的变化应在同一目标选择协议下解释。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验图原图摘引：Moo Jin Kim、Chelsea Finn、Percy Liang，2025，HTML S6.F5，图5。&lt;a href=&quot;https://arxiv.org/html/2502.19645v1#S6.F5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 | 实验 | 数据、预算与对照 | 评价条件 |
 |---|---|---|
@@ -301,27 +304,25 @@ $p$ 是patch位置，$c$ 是特征通道。相同通道的调制作用于全部p
 | ALOHA接口 | 25 Hz、绝对关节角、三相机、K=25 | 执行整块后重新观察 |
 | 推理比较 | A100上100次查询均值 | 延迟与动作吞吐分别报告 |
 
-ALOHA每个任务单独微调，不是一个模型联合掌握四任务。数据有训练验证划分；OFT+最终各任务更新数见表V，为100k、70k、50k、100k。未逐项确认独立训练种子间置信区间。
+ALOHA每个任务单独微调，不是一个模型联合掌握四任务。数据有训练验证划分；OFT+最终各任务更新数见[表V](https://arxiv.org/html/2502.19645v1#A1.T5)，为100k、70k、50k、100k。未逐项确认独立训练种子间置信区间。
 
 其他真机基线使用各自配方，算力和更新数不同：例如DP、RDT有两步历史，OFT+没有；RDT预测64步但只执行25步，DP块长24，π0块长25。比较具有实际参考价值，却不能解释为只改一个损失的严格公平实验。
 
 入锅任务的OOD主要添加未见干扰碗，锅位置固定；不是全新物体类别、全新厨房或全新动作技能。短裤初始变化也较小，说明四任务难度和泛化强度不相同。
 
-## 五、结果：证据到底有多强
+### 结果：证据到底有多强
 
-**表I：性能提升的分解。** 原OpenVLA平均76.5%，并行加分块90.2%，再加连续L1为95.3%，连续扩散95.4%；增加腕部和状态输入后OFT为97.1%。总差20.6个百分点，不能全部记到L1头上。并行与分块同时加入，也没有单靠这一表完全隔离两者贡献。
+**[表I](https://arxiv.org/html/2502.19645v1#S5.T1)：性能提升的分解。** 原OpenVLA平均76.5%，并行加分块90.2%，再加连续L1为95.3%，连续扩散95.4%；增加腕部和状态输入后OFT为97.1%。总差20.6个百分点，不能全部记到L1头上。并行与分块同时加入，也没有单靠这一表完全隔离两者贡献。
 
-**表II：速度必须匹配输入。** 单图像连续L1吞吐109.7动作步/秒、块延迟0.073秒，对原4.2约26.1倍；完整额外输入版本是71.4与0.112秒。不能将97.1%的丰富输入模型和单相机26倍速度合并成同一配置。v1相关工作误把约0.07、0.321写成ms，主表单位明确为秒。
+**[表II](https://arxiv.org/html/2502.19645v1#S5.T2)：速度必须匹配输入。** 单图像连续L1吞吐109.7动作步/秒、块延迟0.073秒，对原4.2约26.1倍；完整额外输入版本是71.4与0.112秒。不能将97.1%的丰富输入模型和单相机26倍速度合并成同一配置。v1相关工作误把约0.07、0.321写成ms，主表单位明确为秒。
 
-**表III：快于原OpenVLA，不是所有模型里最快。** ALOHA的OFT+为77.9动作步/秒、0.321秒每块，比原1.8吞吐约43倍；ACT为432.8、π0为291.6，均更快。25步块在25 Hz执行一秒，加上实际调度延迟，其视觉反馈频率远非77.9 Hz。吞吐充足只说明一块能较快算完。
+**[表III](https://arxiv.org/html/2502.19645v1#S6.T3)：快于原OpenVLA，不是所有模型里最快。** ALOHA的OFT+为77.9动作步/秒、0.321秒每块，比原1.8吞吐约43倍；ACT为432.8、π0为291.6，均更快。25步块在25 Hz执行一秒，加上实际调度延迟，其视觉反馈频率远非77.9 Hz。吞吐充足只说明一块能较快算完。
 
-**图5和表XII：语言调制的作用。** 舀料任务去FiLM的语言选物接近三选一随机水平，整体分数35；完整OFT+为100。这个消融支持FiLM在该设置有效。入锅也改善，但完整OFT+仍只得51.25分，不能因语言选择更好就称任务已可靠解决。
+**[图5](#paper-091-openvla-oft-figure-5)和[表XII](https://arxiv.org/html/2502.19645v1#A1.T12)：语言调制的作用。** 舀料任务去FiLM的语言选物接近三选一随机水平，整体分数35；完整OFT+为100。这个消融支持FiLM在该设置有效。入锅也改善，但完整OFT+仍只得51.25分，不能因语言选择更好就称任务已可靠解决。
 
-**表X–XIV：证据的上下界。** 短裤所有方法100分，衬衫DP、π0和OFT+均100，优势并非每任务独占。真机采用累计阶段评分，51.25分不等于51.25%的完整成功回合。去除机器人预训练、直接从Prismatic VLM适配的LIBERO平均91.9对97.1，下降5.2个百分点；这不是随机初始化，图文预训练仍在。[结果与附录表格](https://arxiv.org/html/2502.19645v1#S5)
+**[表X](https://arxiv.org/html/2502.19645v1#A1.T10)–XIV：证据的上下界。** 短裤所有方法100分，衬衫DP、π0和OFT+均100，优势并非每任务独占。真机采用累计阶段评分，51.25分不等于51.25%的完整成功回合。去除机器人预训练、直接从Prismatic VLM适配的LIBERO平均91.9对97.1，下降5.2个百分点；这不是随机初始化，图文预训练仍在。[结果与附录表格](https://arxiv.org/html/2502.19645v1#S5)
 
-## 六、贡献、代价与局限
-
-这篇论文说明预训练目标与下游输出头可以解耦。即使基础模型原先用离散自回归动作训练，其表示仍能迁移到连续并行控制。对工程实践而言，这是重新利用既有模型的有效路径。
+## 五、L1在窄模式数据上的有效性不能普遍外推
 
 它没有证明预训练时也该全面采用L1。作者明确承认目标资料策略较一致，对真正多峰动作分布仍需进一步研究。若同一场景有左右两条绕行路线，逐坐标中位数可能落在障碍物上；网络容量大并不能从数学上消除这种问题。
 
@@ -329,24 +330,19 @@ ALOHA每个任务单独微调，不是一个模型联合掌握四任务。数据
 
 开环块的可靠性也是限制。系统每秒更新一次策略条件适合部分稳定桌面操作，但在快速移动目标或突发接触中需要专门测试。少量真机试验、最佳检查点选模及窄初始条件，也限制了对长期部署稳定性的推断。
 
-## 七、用一个例子建立理解
-
-以下是未运行的教学例子。三种食材一直固定摆放，人说“舀葡萄干”，训练中却恰好多数动作都朝左边。模型可能直接学“拿勺后向左”，忽略指令。把语言用于调制视觉通道，能鼓励网络根据指定对象提取不同特征；还应改变食材位置，构造相同场景不同命令的测试，才能更清楚区分语义和位置捷径。
-
-并行输出则像一次写好一秒的动作计划，而非每生成一个关节数字都再跑模型。但计划写好之后，真实碗若被移走，尚未重新读取图像的策略仍不知道，这与语言是否正确是两个独立问题。
+### 五个前置概念
 
 五个前置概念：**LoRA**以低秩参数更新适配大模型；**双向注意力**让输出槽位在共同条件下交流；**L1回归**惩罚绝对偏差；**FiLM**用条件信号缩放和平移特征通道；**动作吞吐**计量单位时间生成多少动作步，不等于反馈率。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 自回归串行延迟 | 并行分块 | 一次生成多个时间步 | 表II/III | 块内开环 |
-| 分箱损失精度 | 连续L1动作头 | 保留细动作数值 | 表I | 多峰分布不充分表达 |
-| 新机器人接口不同 | 多相机与本体投影 | 利用更多可观测信息 | 完整OFT结果 | 额外计算与参数 |
-| 语言被视觉捷径忽略 | FiLM | 提早连接语言与视觉 | 真机去FiLM消融 | 成因和跨域效果仍待验证 |
+### 追问：FiLM收益应怎样与额外参数和新增相机信息分开？
 
-阅读范围：核对arXiv v1正文、实现与训练附录、逐任务评分表。本文未独立复现，按主表秒单位解释延迟，并区分阶段评分与二元成功。
+参考答案：在相同输入与可训练参数预算下比较有无语言调制，再改变命令与物体位置的对应关系。若同时新增本体和多相机，整体提升不能唯一归于FiLM。需记录目标选择与动作精度，判断它究竟改善语言条件使用，还是只是增加了可见状态信息。
 
-## 八、三个问题及答案
+## 六、沿机制关系继续读
+
+OFT直接承接[OpenVLA](082-openvla.md)权重，重设并行连续动作头；与[FAST](089-fast.md)是平行提速路线，前者改变输出与目标，后者保留自回归并压缩动作编码。
+
+## 七、自测三题与参考答案
 
 **问题1：双向注意力是否泄漏了未来真实动作？**
 
@@ -359,7 +355,6 @@ ALOHA每个任务单独微调，不是一个模型联合掌握四任务。数据
 **问题3：OFT+吞吐77.9 Hz为什么不是每秒77.9次闭环决策？**
 
 答案：每次计算输出25步，吞吐等于25除以约0.321秒。这些步按25 Hz执行，整块结束才更新观测；吞吐衡量生成能力，闭环频率还由执行块长和调度决定。混用两者会高估应对突然变化的能力。
-
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

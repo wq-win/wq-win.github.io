@@ -42,15 +42,11 @@
                 <span class="text-gray-500">MBDPO：让世界模型、价值学习与扩散策略更一致</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="7d06aab1530a96ccab6518c390b61008dd0c9650f4ccf31f69744382842ee679"><h1>第 56 天｜MBDPO：让世界模型、价值学习与扩散策略更一致</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="a1f87ee4e5188a9217189c045fbe119a10684f0f4efa2f1b7f5967f28534e470"><h1>第 56 天｜MBDPO：让世界模型、价值学习与扩散策略更一致</h1>
 <p><a href="index.html">系列首页</a> · <a href="55-dr-grpo.html">上一篇</a> · <a href="57-worldsample.html">下一篇</a></p>
 <p><strong>原论文与版本</strong>：Cheng 等，<em>Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization</em>，2026-05-25。<a href="https://arxiv.org/html/2605.26282v1">正文</a>。这里的 Diffusion Policy Optimization 与直接偏好优化 DPO 不是同一算法。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p><strong>研究问题</strong>：模型搜索与价值训练的策略分布不一致</p>
-<p><strong>旧方法卡点</strong>：搜索可能挑中价值网络未训练过的动作序列，误差被下一轮继续放大</p>
-<p><strong>作者主张</strong>：加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器</p>
-<p><strong>论文证据</strong>：121任务、视觉控制和多任务扩展实验支持所报告方案</p>
-<p><strong>一句话</strong>：在模型驱动在线、离线预训练及在线微调中，作者通过“加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器”应对“模型搜索与价值训练的策略分布不一致”这一问题；证据边界或代价是：能量密度解释有采样假设；最大模型并非所有设置都继续改善。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="35-pets.html">第35天 PETS</a>展示了在学习模型中评价候选动作序列，<a href="40-dreamer.html">第40天 Dreamer</a>把行为训练放进潜在模型。它们提供共同背景，却没有使高回报搜索与价值学习的数据分布天然一致。MBDPO具体问：搜索若不断挑中缺少支持的序列，怎样约束生成分布并摊销求解？它与Dreamer是平行模型路线；名称中的扩散DPO也不同于<a href="49-dpo.html">直接偏好优化</a>。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <ol>
 <li><strong>Score</strong>：扩散分布对输入的log密度梯度。</li>
@@ -59,8 +55,9 @@
 <li><strong>摊销推断</strong>：把昂贵求解结果学习进网络。</li>
 <li><strong>策略漂移</strong>：行动分布偏离训练支持。</li>
 </ol>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
-<p>本篇将“模型搜索与价值训练的策略分布不一致”放在模型驱动在线、离线预训练及在线微调的边界内研究。搜索可能挑中价值网络未训练过的动作序列，误差被下一轮继续放大。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<h2 id="一问题设定怎样约束模型搜索与价值学习的分布失配">一、问题设定：怎样约束模型搜索与价值学习的分布失配</h2>
+<p>世界模型中的高预测回报不必对应真实好动作。搜索越偏向高值，越可能访问价值网络缺少训练证据的序列，下一轮Bellman目标又把这些估值纳入训练，形成分布失配。</p>
+<p>本篇用行为相关能量约束候选序列，把正则化回报转成分布，再训练扩散score网络。要判断它是否改善一致性，必须同时看策略漂移、价值误差代理、真实任务回报和MC/去噪成本，不能只看模型规模。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -89,9 +86,8 @@
 <td>环境终止与模型展开长度分别处理</td>
 </tr>
 </tbody></table></div>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
-<p>世界模型预测动作后果，价值网络补足后续收益，能量模型约束偏离行为分布。训练时对候选序列计算正则化想象回报，形成加权Monte Carlo score目标，再让score网络拟合。部署时使用学到的score做扩散采样，把训练中的昂贵估计摊销到网络；不是每次执行都完整重跑同样Monte Carlo规划。</p>
-<h3 id="关键公式与符号">关键公式与符号</h3>
+<h2 id="二用回报加权候选推导扩散score目标">二、用回报加权候选推导扩散score目标</h2>
+<h3 id="高斯加噪为何导出加权后验均值">高斯加噪为何导出加权后验均值</h3>
 <p><span class="reading-math" data-tex="w_i=\frac{\exp(\widetilde G_i/\kappa)}{\sum_j\exp(\widetilde G_j/\kappa)},\quad L_{score}=E\|\hat\phi(z,a^\tau,\tau)-\phi_{MC}(z,a^\tau,\tau)\|^2."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>w</mi><mi>i</mi></msub><mo>=</mo><mfrac><mrow><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mover accent="true"><mi>G</mi><mo stretchy="true">~</mo></mover><mi>i</mi></msub><mi mathvariant="normal">/</mi><mi>κ</mi><mo stretchy="false">)</mo></mrow><mrow><munder><mo>∑</mo><mi>j</mi></munder><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mover accent="true"><mi>G</mi><mo stretchy="true">~</mo></mover><mi>j</mi></msub><mi mathvariant="normal">/</mi><mi>κ</mi><mo stretchy="false">)</mo></mrow></mfrac><mo separator="true">,</mo><mspace width="1em"/><msub><mi>L</mi><mrow><mi>s</mi><mi>c</mi><mi>o</mi><mi>r</mi><mi>e</mi></mrow></msub><mo>=</mo><mi>E</mi><mi mathvariant="normal">∥</mi><mover accent="true"><mi>ϕ</mi><mo>^</mo></mover><mo stretchy="false">(</mo><mi>z</mi><mo separator="true">,</mo><msup><mi>a</mi><mi>τ</mi></msup><mo separator="true">,</mo><mi>τ</mi><mo stretchy="false">)</mo><mo>−</mo><msub><mi>ϕ</mi><mrow><mi>M</mi><mi>C</mi></mrow></msub><mo stretchy="false">(</mo><mi>z</mi><mo separator="true">,</mo><msup><mi>a</mi><mi>τ</mi></msup><mo separator="true">,</mo><mi>τ</mi><mo stretchy="false">)</mo><msup><mi mathvariant="normal">∥</mi><mn>2</mn></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">w_i=\frac{\exp(\widetilde G_i/\kappa)}{\sum_j\exp(\widetilde G_j/\kappa)},\quad L_{score}=E\|\hat\phi(z,a^\tau,\tau)-\phi_{MC}(z,a^\tau,\tau)\|^2.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.8895em;vertical-align:-1.2691em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.6203em;"><span style="top:-2.1667em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">exp</span><span class="mopen">(</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9433em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">G</span></span><span class="svg-align" style="width:calc(100% - 0.1667em);margin-left:0.1667em;top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.26em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.26em" viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M200 55.538c-77 0-168 73.953-177 73.953-3 0-7
 -2.175-9-5.437L2 97c-1-2-2-4-2-6 0-4 2-7 5-9l20-12C116 12 171 0 207 0c86 0
  114 68 191 68 78 0 168-68 177-68 4 0 7 2 9 5l12 19c1 2.175 2 4.35 2 6.525 0
@@ -102,8 +98,84 @@
  4.35-2 7.613-5 9.788l-19 13.05c-92 63.077-116.937 75.308-183 76.128
 -68.267.847-113-73.952-191-73.952z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord mathnormal">κ</span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2691em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">score</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2079em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mord">∥</span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9579em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">ϕ</span></span><span style="top:-3.2634em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">ϕ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">MC</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mclose">)</span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span>
 κ是回报权重温度；φ_MC使用噪声级别和加权干净候选序列计算，详见式15。能量用于正则化G，其与−log行为密度的联系取决于负样本分布。</p>
-<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
-<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<p><strong>为什么加权候选会变成score</strong>：前向加噪写成 <span class="reading-math" data-tex="a^\tau=\sqrt{\bar\alpha}\,a^0+\sqrt{1-\bar\alpha}\,\epsilon"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>a</mi><mi>τ</mi></msup><mo>=</mo><msqrt><mover accent="true"><mi>α</mi><mo>ˉ</mo></mover></msqrt><mtext> </mtext><msup><mi>a</mi><mn>0</mn></msup><mo>+</mo><msqrt><mrow><mn>1</mn><mo>−</mo><mover accent="true"><mi>α</mi><mo>ˉ</mo></mover></mrow></msqrt><mtext> </mtext><mi>ϵ</mi></mrow><annotation encoding="application/x-tex">a^\tau=\sqrt{\bar\alpha}\,a^0+\sqrt{1-\bar\alpha}\,\epsilon</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6644em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1711em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8689em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span></span></span><span style="top:-2.8289em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1711em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1744em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8656em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span></span></span><span style="top:-2.8256em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1744em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">ϵ</span></span></span></span></span>，<span class="reading-math" data-tex="\epsilon"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϵ</mi></mrow><annotation encoding="application/x-tex">\epsilon</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">ϵ</span></span></span></span></span> 为标准高斯，<span class="reading-math" data-tex="\bar\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>α</mi><mo>ˉ</mo></mover></mrow><annotation encoding="application/x-tex">\bar\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5678em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span></span></span></span></span> 表示保留的信号比例。对这个高斯条件密度的 <span class="reading-math" data-tex="a^\tau"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>a</mi><mi>τ</mi></msup></mrow><annotation encoding="application/x-tex">a^\tau</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6644em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span></span></span></span></span></span></span></span></span></span></span></span> 求log梯度，得到 <span class="reading-math" data-tex="-(a^\tau-\sqrt{\bar\alpha}a^0)/(1-\bar\alpha)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><mo stretchy="false">(</mo><msup><mi>a</mi><mi>τ</mi></msup><mo>−</mo><msqrt><mover accent="true"><mi>α</mi><mo>ˉ</mo></mover></msqrt><msup><mi>a</mi><mn>0</mn></msup><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mover accent="true"><mi>α</mi><mo>ˉ</mo></mover><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">-(a^\tau-\sqrt{\bar\alpha}a^0)/(1-\bar\alpha)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">−</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1189em;vertical-align:-0.25em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8689em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span></span></span><span style="top:-2.8289em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1711em;"><span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">/</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>；再对干净候选的后验取平均，就把 <span class="reading-math" data-tex="a^0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>a</mi><mn>0</mn></msup></mrow><annotation encoding="application/x-tex">a^0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span></span></span></span></span></span></span></span></span> 换成后验均值。原文的特定高斯提议与Gibbs回报权重，正是在近似这个均值，所以权重和为1、<span class="reading-math" data-tex="\kappa"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>κ</mi></mrow><annotation encoding="application/x-tex">\kappa</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">κ</span></span></span></span></span> 越小越集中到高预测回报。换成任意提议而不修正密度比，便不再是同一估计。见<a href="https://arxiv.org/html/2605.26282v1#S3.SS3">附录式49—56及正文式15</a>。</p>
+<p>给带噪序列 <span class="reading-math" data-tex="a^\tau"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>a</mi><mi>τ</mi></msup></mrow><annotation encoding="application/x-tex">a^\tau</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6644em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span></span></span></span></span></span></span></span></span></span></span></span>，从对应高斯提议分布采干净候选 <span class="reading-math" data-tex="a_i^0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>a</mi><mi>i</mi><mn>0</mn></msubsup></mrow><annotation encoding="application/x-tex">a_i^0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0728em;vertical-align:-0.2587em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-2.4413em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2587em;"><span></span></span></span></span></span></span></span></span></span></span>，在世界模型里算 <span class="reading-math" data-tex="\widetilde G_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mover accent="true"><mi>G</mi><mo stretchy="true">~</mo></mover><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">\widetilde G_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0933em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9433em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">G</span></span><span class="svg-align" style="width:calc(100% - 0.1667em);margin-left:0.1667em;top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.26em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.26em" viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M200 55.538c-77 0-168 73.953-177 73.953-3 0-7
+-2.175-9-5.437L2 97c-1-2-2-4-2-6 0-4 2-7 5-9l20-12C116 12 171 0 207 0c86 0
+ 114 68 191 68 78 0 168-68 177-68 4 0 7 2 9 5l12 19c1 2.175 2 4.35 2 6.525 0
+ 4.35-2 7.613-5 9.788l-19 13.05c-92 63.077-116.937 75.308-183 76.128
+-68.267.847-113-73.952-191-73.952z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，以softmax回报权重近似后验均值。score因此为 <span class="reading-math" data-tex="\hat\phi_{MC}=-a^\tau/(1-\bar\alpha)+\sqrt{\bar\alpha}\sum_iw_i a_i^0/(1-\bar\alpha)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mover accent="true"><mi>ϕ</mi><mo>^</mo></mover><mrow><mi>M</mi><mi>C</mi></mrow></msub><mo>=</mo><mo>−</mo><msup><mi>a</mi><mi>τ</mi></msup><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mover accent="true"><mi>α</mi><mo>ˉ</mo></mover><mo stretchy="false">)</mo><mo>+</mo><msqrt><mover accent="true"><mi>α</mi><mo>ˉ</mo></mover></msqrt><msub><mo>∑</mo><mi>i</mi></msub><msub><mi>w</mi><mi>i</mi></msub><msubsup><mi>a</mi><mi>i</mi><mn>0</mn></msubsup><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mover accent="true"><mi>α</mi><mo>ˉ</mo></mover><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\hat\phi_{MC}=-a^\tau/(1-\bar\alpha)+\sqrt{\bar\alpha}\sum_iw_i a_i^0/(1-\bar\alpha)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1523em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9579em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">ϕ</span></span><span style="top:-3.2634em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">MC</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">−</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span></span></span></span></span></span></span></span><span class="mord">/</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1686em;vertical-align:-0.2997em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8689em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span></span></span><span style="top:-2.8289em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1711em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2997em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-2.4413em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2587em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>。它不是直接朝回报梯度爬升，而是学习高回报分布经过加噪后的对数密度梯度。有限样本的自归一重要性比一般有偏；一致性或渐近无偏不能写成任意样本数都精确。</p>
+<h3 id="计算摊销把哪部分工作搬离部署">计算摊销把哪部分工作搬离部署</h3>
+<p>MC样本用来形成训练score网络的目标，部署再用已拟合score去噪。减少在线MC并不表示这部分成本消失，而是前移到训练；模型、候选数和去噪步数共同决定实际总预算。</p>
+<h3 id="两个候选的回报与能量怎样竞争">两个候选的回报与能量怎样竞争</h3>
+<p>以下是可手算的教学构造，不是论文实验。</p>
+<p>令一个一维带噪动作为0，<span class="reading-math" data-tex="\bar\alpha=1/2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>α</mi><mo>ˉ</mo></mover><mo>=</mo><mn>1</mn><mi mathvariant="normal">/</mi><mn>2</mn></mrow><annotation encoding="application/x-tex">\bar\alpha=1/2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5678em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.5678em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">ˉ</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/2</span></span></span></span></span>，提议采得两个干净候选−1与1，回报分别0和log3，κ=1。权重为1/4、3/4，加权均值0.5，score目标为 <span class="reading-math" data-tex="\sqrt{1/2}\times0.5/(1/2)=1/\sqrt2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msqrt><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mn>2</mn></mrow></msqrt><mo>×</mo><mn>0.5</mn><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mn>1</mn><mi mathvariant="normal">/</mi><mn>2</mn><mo stretchy="false">)</mo><mo>=</mo><mn>1</mn><mi mathvariant="normal">/</mi><msqrt><mn>2</mn></msqrt></mrow><annotation encoding="application/x-tex">\sqrt{1/2}\times0.5/(1/2)=1/\sqrt2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.24em;vertical-align:-0.305em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.935em;"><span class="svg-align" style="top:-3.2em;"><span class="pstrut" style="height:3.2em;"></span><span class="mord" style="padding-left:1em;"><span class="mord">1/2</span></span></span><span style="top:-2.895em;"><span class="pstrut" style="height:3.2em;"></span><span class="hide-tail" style="min-width:1.02em;height:1.28em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.28em" viewBox="0 0 400000 1296" preserveAspectRatio="xMinYMin slice"><path d="M263,681c0.7,0,18,39.7,52,119
+c34,79.3,68.167,158.7,102.5,238c34.3,79.3,51.8,119.3,52.5,120
+c340,-704.7,510.7,-1060.3,512,-1067
+l0 -0
+c4.7,-7.3,11,-11,19,-11
+H40000v40H1012.3
+s-271.3,567,-271.3,567c-38.7,80.7,-84,175,-136,283c-52,108,-89.167,185.3,-111.5,232
+c-22.3,46.7,-33.8,70.3,-34.5,71c-4.7,4.7,-12.3,7,-23,7s-12,-1,-12,-1
+s-109,-253,-109,-253c-72.7,-168,-109.3,-252,-110,-252c-10.7,8,-22,16.7,-34,26
+c-22,17.3,-33.3,26,-34,26s-26,-26,-26,-26s76,-59,76,-59s76,-60,76,-60z
+M1001 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.305em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">0.5/</span><span class="mopen">(</span><span class="mord">1/2</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1572em;vertical-align:-0.25em;"></span><span class="mord">1/</span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9072em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;">2</span></span><span style="top:-2.8672em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1328em;"><span></span></span></span></span></span></span></span></span></span>，指向正动作区域。</p>
+<p>若第二个候选因行为支持薄弱多付出能量代价log3，两者正则化回报同为0，权重各1/2，score目标变为0。该构造展示回报与支持约束如何竞争；它没有证明学到的能量就是真实行为密度。</p>
+<h2 id="三训练能量与mc目标再把去噪求解摊销进策略">三、训练能量与MC目标，再把去噪求解摊销进策略</h2>
 <pre><code class="language-text">从真实replay训练编码、潜在动态、奖励和价值模型
 训练能量模型：数据动作正例，规定的错配动作负例
 训练扩散score：
@@ -116,29 +188,7 @@
 部署：从噪声用score迭代生成动作序列并执行规定动作
 继续真实交互更新数据
 </code></pre>
-<p><strong>实现要点</strong>：能量密度解释有采样假设；最大模型并非所有设置都继续改善。</p>
-<h3 id="三种优化要分开">三种“优化”要分开</h3>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>层次</th>
-<th>这里具体是什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>数学目标／训练损失</td>
-<td>世界模型／能量训练，以及回报加权Monte Carlo score目标的回归</td>
-</tr>
-<tr>
-<td>机制改变</td>
-<td>加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器</td>
-</tr>
-<tr>
-<td>评价改善的指标</td>
-<td>回报／成功、cross TD误差、策略漂移和时间</td>
-</tr>
-</tbody></table></div>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<h2 id="四读五个任务面板并另查容量与时间曲线">四、读五个任务面板，并另查容量与时间曲线</h2>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -168,90 +218,94 @@
 </tr>
 <tr>
 <td>随机性与不确定性</td>
-<td>视觉图5各任务5种子；其他实验范围单独核对</td>
+<td>视觉<a href="#rl-56-figure-5">图5</a>各任务5种子；其他实验范围单独核对</td>
 </tr>
 <tr>
 <td>实际验证的假设</td>
 <td>分布约束和摊销扩散策略是否改善世界模型学习</td>
 </tr>
 </tbody></table></div>
-<p><strong>实验解读（本文分析）</strong>：能量密度解释有采样假设；最大模型并非所有设置都继续改善。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>证据定位</th>
-<th>比较什么／观察到什么</th>
-<th>支持什么</th>
-<th>不能证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>图3</td>
-<td>cross TD误差与策略漂移</td>
-<td>支持所测训练不一致减少</td>
-<td>不是完全无模型误差证明</td>
-</tr>
-<tr>
-<td>图4—5</td>
-<td>多基准和视觉控制</td>
-<td>支持实验覆盖内收益</td>
-<td>不代表每个子任务均更好</td>
-</tr>
-<tr>
-<td>图6</td>
-<td>30／80任务模型扩展</td>
-<td>考察容量收益</td>
-<td>30任务340M下降，非严格单调</td>
-</tr>
-<tr>
-<td>图7</td>
-<td>离线到在线微调</td>
-<td>展示可迁移性及失败例</td>
-<td>Hopper Hop仍有明显问题</td>
-</tr>
-<tr>
-<td>表1</td>
-<td>训练硬件与时间</td>
-<td>提供部分计算成本证据</td>
-<td>不能混用不同GPU时间</td>
-</tr>
-</tbody></table></div>
-<p><strong>证据疑点</strong>：正文概括“单调扩展”，同时写明30任务数据上340M模型两方法表现下降。应以分设置曲线解读，不把概括句当全范围定律。能量解释也需核对：对比估计一般学习相对负样本分布的密度比，不能不看负例分布就称为精确行为密度。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p><strong>作者解释</strong>较大模型下降可能与数据容量饱和有关；这是解释而非被独立证明的原因。<strong>本文分析</strong>：候选数、去噪步数、score拟合误差及能量正则共同决定成本和质量；只看世界模型参数量不足以解释扩展行为。</p>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<h3 id="教学例子">教学例子</h3>
-<p>以下是教学推演，不是原论文实验。</p>
-<p>模型给两序列想象回报10与9，但高分序列偏离数据很远。正则后可能变为6与8，权重转向后者。若能量模型把罕见但有效动作也当危险，它会限制真实改进。</p>
-<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
-<ol>
-<li>负样本采样如何改变能量的密度解释？</li>
-<li>固定总训练成本而非参数量时扩展趋势是否保持？</li>
-<li>score拟合与世界模型误差各贡献多少失败？</li>
-</ol>
-<h2 id="方法与证据总结">方法与证据总结</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据／理论证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>模型搜索与价值训练的策略分布不一致</td>
-<td>加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器</td>
-<td>行为相关正则减少搜索偏离，score网络摊销昂贵策略求解</td>
-<td>121任务、视觉控制和多任务扩展实验支持所报告方案</td>
-<td>能量密度解释有采样假设；最大模型并非所有设置都继续改善</td>
-</tr>
-</tbody></table></div>
-<h2 id="资料与阅读范围">资料与阅读范围</h2>
-<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
-<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<h3 id="图4五个面板的指标与交互预算">图4：五个面板的指标与交互预算</h3>
+<!-- inline-evidence-v2:start -->
+
+<!-- figure-ref-v6:start:rl-56-figure-4 -->
+<p><span id="rl-56-figure-4"></span></p>
+<p class="figure-source-links">原引用定位：<a href="https://arxiv.org/html/2605.26282v1#S4.F4" target="_blank" rel="noopener noreferrer">原文</a>。</p>
+<!-- figure-ref-v6:end:rl-56-figure-4 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/56-mbdpo-figure-4.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/56-mbdpo-figure-4.png" width="1600" height="316" alt="MBDPO在DMControl、MetaWorld、ManiSkill2、MyoSuite和视觉RL上的汇总曲线" loading="lazy"></a><figcaption>原论文图形摘引；Cheng等，2026，Figure 4；原HTML图形；可见图形有五个面板，末面板为Visual RL，按面板标签解读。<a href="https://arxiv.org/html/2605.26282v1#S4.F4" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+
+<p>图4五列按图面板依次是DMControl、Meta-World、ManiSkill2、MyoSuite和Visual RL，横轴为各自环境交互步；前四列与视觉列的预算上限不同。纵轴也不可混比：DMControl/视觉任务画回报，其余面板主要按成功指标汇总。红色MBDPO应与同面板的绿色TD-MPC2等对照；ManiSkill2后期两者接近或交错，不能把红线总体较高改写成每任务、每检查点都获胜，更不能把此图读成参数规模扩展图。</p>
+<!-- inline-evidence-v2:end -->
+
+
+<p><a href="#rl-56-figure-3">图3</a>左侧看cross-TD误差、右侧看动作漂移，检验策略与价值学习一致性代理，并非世界模型完全正确的证明。<a href="#rl-56-figure-4">图4</a>和<a href="#rl-56-figure-5">图5</a>扩大到多基准及视觉任务，<a href="#rl-56-figure-6">图6</a>的横轴才是模型参数规模，且要分别读30任务与80任务曲线；原文文字称30任务340M出现退化，并解释为数据容量饱和，但图6标值却是MBDPO 82.4→83.7、TD-MPC2 59.4→71.4；这里存在图文不一致，不能据图断言下降。<a href="#rl-56-figure-7">图7</a>还保留Hopper Hop迁移失败，表1的硬件与时间应按设备单列，不能用参数规模替代计算成本。 <a href="https://arxiv.org/html/2605.26282v1">查看原文</a>。</p>
+<!-- figure-ref-v6:start:rl-56-figure-5 -->
+<p><span id="rl-56-figure-5"></span></p>
+<figure class="reading-evidence-figure"><a href="/rl/assets/reference-v6/56-mbdpo-figure-5-full.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/56-mbdpo-figure-5-full.png" width="1800" height="633" alt="原论文Figure 5：十个视觉控制任务逐项保留，红色MBDPO对照绿色TD-MPC2。部分任务很快饱和、部分差距更大，平均收益不能替代每项任务的预算和曲线。" loading="lazy"></a><figcaption>完整原图摘引｜Cheng等，2026，Figure 5；2605.26282v1，HTML S4.F5。<a href="https://arxiv.org/html/2605.26282v1#S4.F5" target="_blank" rel="noopener noreferrer">核对原文与图号</a>。<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>；图形仅缩放／重新排版，沿用原许可。原引用定位：<a href="https://arxiv.org/html/2605.26282v1#S4.F5" target="_blank" rel="noopener noreferrer">原文</a>。</figcaption></figure>
+
+<p>读图提示：十个视觉控制任务逐项保留，红色MBDPO对照绿色TD-MPC2。部分任务很快饱和、部分差距更大，平均收益不能替代每项任务的预算和曲线。</p>
+<!-- figure-ref-v6:end:rl-56-figure-5 -->
+
+<!-- figure-ref-v6:start:rl-56-figure-3 -->
+<p><span id="rl-56-figure-3"></span></p>
+<figure class="reading-evidence-figure"><a href="/rl/assets/reference-v6/56-mbdpo-figure-3-full.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/56-mbdpo-figure-3-full.png" width="2000" height="348" alt="原论文Figure 3：左侧两图为cross-TD误差，右侧为动作漂移均值与分布。它们是策略与价值一致性的诊断代理，并非世界模型完全正确的证据。" loading="lazy"></a><figcaption>完整原图摘引｜Cheng等，2026，Figure 3；2605.26282v1，HTML S3.F3。<a href="https://arxiv.org/html/2605.26282v1#S3.F3" target="_blank" rel="noopener noreferrer">核对原文与图号</a>。<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>；图形仅缩放／重新排版，沿用原许可。原引用定位：<a href="https://arxiv.org/html/2605.26282v1#S3.F3" target="_blank" rel="noopener noreferrer">原文</a>。</figcaption></figure>
+
+<p>读图提示：左侧两图为cross-TD误差，右侧为动作漂移均值与分布。它们是策略与价值一致性的诊断代理，并非世界模型完全正确的证据。</p>
+<!-- figure-ref-v6:end:rl-56-figure-3 -->
+
+<!-- figure-ref-v6:start:rl-56-figure-6 -->
+<p><span id="rl-56-figure-6"></span></p>
+<figure class="reading-evidence-figure"><a href="/rl/assets/reference-v6/56-mbdpo-figure-6-full.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/56-mbdpo-figure-6-full.png" width="1800" height="762" alt="原论文Figure 6：左侧80任务，右侧30任务；横轴才是模型参数规模。右图MBDPO标注从82.4升至83.7，TD-MPC2从59.4升至71.4，与原文段落所称340M下降不一致。因此上文的下降说法来自作者文字叙述，不能由这张图直接验证。" loading="lazy"></a><figcaption>完整原图摘引｜Cheng等，2026，Figure 6；2605.26282v1，HTML S4.F6。<a href="https://arxiv.org/html/2605.26282v1#S4.F6" target="_blank" rel="noopener noreferrer">核对原文与图号</a>。<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>；图形仅缩放／重新排版，沿用原许可。原引用定位：<a href="https://arxiv.org/html/2605.26282v1#S4.F6" target="_blank" rel="noopener noreferrer">原文</a>。</figcaption></figure>
+
+<p>读图提示：左侧80任务，右侧30任务；横轴才是模型参数规模。右图MBDPO标注从82.4升至83.7，TD-MPC2从59.4升至71.4，与原文段落所称340M下降不一致。因此上文的下降说法来自作者文字叙述，不能由这张图直接验证。</p>
+<!-- figure-ref-v6:end:rl-56-figure-6 -->
+
+<!-- figure-ref-v6:start:rl-56-figure-7 -->
+<p><span id="rl-56-figure-7"></span></p>
+<figure class="reading-evidence-figure"><a href="/rl/assets/reference-v6/56-mbdpo-figure-7-full.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/56-mbdpo-figure-7-full.png" width="1800" height="443" alt="原论文Figure 7：左侧汇总离线到在线微调，右侧逐任务比较从头训练与微调；Hopper Hop仍保留失败。迁移收益与任务覆盖应逐项核对，不能只看汇总柱。" loading="lazy"></a><figcaption>完整原图摘引｜Cheng等，2026，Figure 7；2605.26282v1，HTML S4.F7。<a href="https://arxiv.org/html/2605.26282v1#S4.F7" target="_blank" rel="noopener noreferrer">核对原文与图号</a>。<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>；图形仅缩放／重新排版，沿用原许可。原引用定位：<a href="https://arxiv.org/html/2605.26282v1#S4.F7" target="_blank" rel="noopener noreferrer">原文</a>。</figcaption></figure>
+
+<p>读图提示：左侧汇总离线到在线微调，右侧逐任务比较从头训练与微调；Hopper Hop仍保留失败。迁移收益与任务覆盖应逐项核对，不能只看汇总柱。</p>
+<!-- figure-ref-v6:end:rl-56-figure-7 -->
+
+<h3 id="固定1000万更新的时间不等于同精度成本">固定1000万更新的时间不等于同精度成本</h3>
+<p>原文分别报告在线、多任务离线和离线到在线设置，不能把这些预算合并成一条学习曲线。表1在固定1000万训练步下比较30与80任务的离线耗时，340M模型约203与207小时；“任务数增多而时间接近”不等于大模型廉价，也不等于达到相同精度的时间相同。MC样本数与去噪步数消融需要同时看得分和运行时间；理论分布误差还依赖模型、能量与score近似条件。</p>
+<h2 id="五能量密度近似与非单调扩展都限制结论">五、能量密度近似与非单调扩展都限制结论</h2>
+<p>能量的密度解释也有条件。对比学习使用其他状态的动作作负例，若负例边缘近似均匀，才有 <span class="reading-math" data-tex="-E(z,a)\approx\log\beta(a|z)+C(z)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><mi>E</mi><mo stretchy="false">(</mo><mi>z</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>≈</mo><mi>log</mi><mo>⁡</mo><mi>β</mi><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">∣</mi><mi>z</mi><mo stretchy="false">)</mo><mo>+</mo><mi>C</mi><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">-E(z,a)\approx\log\beta(a|z)+C(z)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">−</span><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">∣</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">C</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mclose">)</span></span></span></span></span>。附录从逐步能量推向行为正则轨迹分布时，还近似短展开中的状态常数 <span class="reading-math" data-tex="C(z_h)\approx C(z_t)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>C</mi><mo stretchy="false">(</mo><msub><mi>z</mi><mi>h</mi></msub><mo stretchy="false">)</mo><mo>≈</mo><mi>C</mi><mo stretchy="false">(</mo><msub><mi>z</mi><mi>t</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">C(z_h)\approx C(z_t)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">C</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">h</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">C</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，不能把它当无条件恒等式。</p>
+<p>候选数、去噪步数、score拟合与能量正则共同决定成本和质量；121任务、视觉及多任务结果不取消有限MC和密度近似条件。</p>
+<h2 id="六三个值得继续追问的问题与参考答案">六、三个值得继续追问的问题与参考答案</h2>
+<details>
+<summary>1. 负样本采样如何改变能量的密度解释？</summary>
+
+<p>二分类式对比学习的最优打分一般对应数据密度与负样本密度之比；若负例来自 <span class="reading-math" data-tex="q(a|s)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">∣</mi><mi>s</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">q(a|s)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">∣</span><span class="mord mathnormal">s</span><span class="mclose">)</span></span></span></span></span>，能量或score中会包含与 <span class="reading-math" data-tex="\log q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>log</mi><mo>⁡</mo><mi>q</mi></mrow><annotation encoding="application/x-tex">\log q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span></span></span></span> 有关的项。只有明确负例分布及归一化假设，才能把它换算成行为密度或其梯度。改变负采样而不调整推导，会改变解释甚至策略引导方向；应比较已知密度的合成分布并检查校准。</p>
+</details>
+
+<details>
+<summary>2. 固定总训练成本而非参数量时扩展趋势是否保持？</summary>
+
+<p>需要同总FLOPs、加速器时间、训练数据和推理预算的额外对照。较大模型参数可能提高表示能力，也增加模型、扩散采样和规划成本；参数曲线不能替代成本曲线。作者文字所称30任务340M下降与图6标值不一致，不能据图断言退化，也不能据这一处图文冲突概括严格单调性。应报告各数据设置的成本-收益前沿和不同种子，不据摘要措辞推断固定成本规律。</p>
+</details>
+
+<details>
+<summary>3. score拟合与世界模型误差各贡献多少失败？</summary>
+
+<p>可做二维消融：在可查询真实动力学的任务中替换学习世界模型，在可解析或高精度参考策略上替换score，再比较两类误差的单独与联合影响。固定轨迹预算，分别测动作score偏差、模型多步误差及真实收益，检查交互项。原文cross-TD和动作漂移是机制诊断，不足以直接分解所有失败比例，不能为两种误差分配未测百分比。</p>
+</details>
+
+<h2 id="七沿未解决的问题继续读">七、沿未解决的问题继续读</h2>
+<ul>
+<li><p><a href="57-worldsample.html">WorldSample</a>：如果风险发生在合成转移进入Critic，而非候选动作生成分布，应该在哪个接口控制？WorldSample用Q筛选和熵调度处理，属于随后出现的平行模型路线。（后续平行路线）</p>
+</li>
+<li><p><a href="48-dreamerv3.html">DreamerV3</a>：固定配方的尺度稳健与分布一致性究竟各解决什么？回看DreamerV3的组件消融，能把数值训练问题与本篇策略生成问题分开；这是前作对照，不是继承声明。（早期平行路线回看）</p>
+</li>
+</ul>
+<h3 id="原文核对与路线出处">原文核对与路线出处</h3>
+<ul>
+<li><a href="https://arxiv.org/html/2605.26282v1">原论文与图表入口</a>。主方法式15、附录score推导与能量密度近似、表1计算成本及消融。</li>
+<li><strong>并行路线</strong>：<a href="40-dreamer.html">Dreamer</a>。同用潜在世界模型，但本篇以回报加权score学习动作序列分布，而非直接复制想象Actor更新。</li>
+<li><strong>教学对应</strong>：<a href="49-dpo.html">直接偏好优化DPO</a>。缩写相近而目标、数据和优化对象不同，应主动辨别。</li>
+<li><strong>历史背景</strong>：<a href="35-pets.html">PETS</a>。模型中评价候选序列是共同规划问题，MBDPO把生成分布摊销到扩散策略。</li>
+</ul>
 <h2 id="自测两题">自测两题</h2>
 <p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
 <p><strong>问题 1</strong>：搜索策略与价值学习的策略不一致，为什么会出问题？</p>
@@ -270,21 +324,15 @@
 
 **原论文与版本**：Cheng 等，*Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization*，2026-05-25。[正文](https://arxiv.org/html/2605.26282v1)。这里的 Diffusion Policy Optimization 与直接偏好优化 DPO 不是同一算法。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：模型搜索与价值训练的策略分布不一致
+[第35天 PETS](35-pets.md)展示了在学习模型中评价候选动作序列，[第40天 Dreamer](40-dreamer.md)把行为训练放进潜在模型。它们提供共同背景，却没有使高回报搜索与价值学习的数据分布天然一致。MBDPO具体问：搜索若不断挑中缺少支持的序列，怎样约束生成分布并摊销求解？它与Dreamer是平行模型路线；名称中的扩散DPO也不同于[直接偏好优化](49-dpo.md)。
 
-**旧方法卡点**：搜索可能挑中价值网络未训练过的动作序列，误差被下一轮继续放大
+## 一、问题设定：怎样约束模型搜索与价值学习的分布失配
 
-**作者主张**：加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器
+世界模型中的高预测回报不必对应真实好动作。搜索越偏向高值，越可能访问价值网络缺少训练证据的序列，下一轮Bellman目标又把这些估值纳入训练，形成分布失配。
 
-**论文证据**：121任务、视觉控制和多任务扩展实验支持所报告方案
-
-**一句话**：在模型驱动在线、离线预训练及在线微调中，作者通过“加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器”应对“模型搜索与价值训练的策略分布不一致”这一问题；证据边界或代价是：能量密度解释有采样假设；最大模型并非所有设置都继续改善。
-
-## 二、研究背景与问题定义
-
-本篇将“模型搜索与价值训练的策略分布不一致”放在模型驱动在线、离线预训练及在线微调的边界内研究。搜索可能挑中价值网络未训练过的动作序列，误差被下一轮继续放大。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+本篇用行为相关能量约束候选序列，把正则化回报转成分布，再训练扩散score网络。要判断它是否改善一致性，必须同时看策略漂移、价值误差代理、真实任务回报和MC/去噪成本，不能只看模型规模。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -294,18 +342,30 @@
 | 奖励或学习信号 | 预测任务回报加能量相关正则 |
 | 终止／边界 | 环境终止与模型展开长度分别处理 |
 
-## 三、方法：到底改了什么
+## 二、用回报加权候选推导扩散score目标
 
-世界模型预测动作后果，价值网络补足后续收益，能量模型约束偏离行为分布。训练时对候选序列计算正则化想象回报，形成加权Monte Carlo score目标，再让score网络拟合。部署时使用学到的score做扩散采样，把训练中的昂贵估计摊销到网络；不是每次执行都完整重跑同样Monte Carlo规划。
-
-### 关键公式与符号
+### 高斯加噪为何导出加权后验均值
 
 $$w_i=\frac{\exp(\widetilde G_i/\kappa)}{\sum_j\exp(\widetilde G_j/\kappa)},\quad L_{score}=E\|\hat\phi(z,a^\tau,\tau)-\phi_{MC}(z,a^\tau,\tau)\|^2.$$
 κ是回报权重温度；φ_MC使用噪声级别和加权干净候选序列计算，详见式15。能量用于正则化G，其与−log行为密度的联系取决于负样本分布。
 
-### 输入 → 处理 → 输出：教学伪代码
+**为什么加权候选会变成score**：前向加噪写成 $a^\tau=\sqrt{\bar\alpha}\,a^0+\sqrt{1-\bar\alpha}\,\epsilon$，$\epsilon$ 为标准高斯，$\bar\alpha$ 表示保留的信号比例。对这个高斯条件密度的 $a^\tau$ 求log梯度，得到 $-(a^\tau-\sqrt{\bar\alpha}a^0)/(1-\bar\alpha)$；再对干净候选的后验取平均，就把 $a^0$ 换成后验均值。原文的特定高斯提议与Gibbs回报权重，正是在近似这个均值，所以权重和为1、$\kappa$ 越小越集中到高预测回报。换成任意提议而不修正密度比，便不再是同一估计。见[附录式49—56及正文式15](https://arxiv.org/html/2605.26282v1#S3.SS3)。
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+给带噪序列 $a^\tau$，从对应高斯提议分布采干净候选 $a_i^0$，在世界模型里算 $\widetilde G_i$，以softmax回报权重近似后验均值。score因此为 $\hat\phi_{MC}=-a^\tau/(1-\bar\alpha)+\sqrt{\bar\alpha}\sum_iw_i a_i^0/(1-\bar\alpha)$。它不是直接朝回报梯度爬升，而是学习高回报分布经过加噪后的对数密度梯度。有限样本的自归一重要性比一般有偏；一致性或渐近无偏不能写成任意样本数都精确。
+
+### 计算摊销把哪部分工作搬离部署
+
+MC样本用来形成训练score网络的目标，部署再用已拟合score去噪。减少在线MC并不表示这部分成本消失，而是前移到训练；模型、候选数和去噪步数共同决定实际总预算。
+
+### 两个候选的回报与能量怎样竞争
+
+以下是可手算的教学构造，不是论文实验。
+
+令一个一维带噪动作为0，$\bar\alpha=1/2$，提议采得两个干净候选−1与1，回报分别0和log3，κ=1。权重为1/4、3/4，加权均值0.5，score目标为 $\sqrt{1/2}\times0.5/(1/2)=1/\sqrt2$，指向正动作区域。
+
+若第二个候选因行为支持薄弱多付出能量代价log3，两者正则化回报同为0，权重各1/2，score目标变为0。该构造展示回报与支持约束如何竞争；它没有证明学到的能量就是真实行为密度。
+
+## 三、训练能量与MC目标，再把去噪求解摊销进策略
 
 ```text
 从真实replay训练编码、潜在动态、奖励和价值模型
@@ -321,17 +381,7 @@ $$w_i=\frac{\exp(\widetilde G_i/\kappa)}{\sum_j\exp(\widetilde G_j/\kappa)},\qua
 继续真实交互更新数据
 ```
 
-**实现要点**：能量密度解释有采样假设；最大模型并非所有设置都继续改善。
-
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | 世界模型／能量训练，以及回报加权Monte Carlo score目标的回归 |
-| 机制改变 | 加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器 |
-| 评价改善的指标 | 回报／成功、cross TD误差、策略漂移和时间 |
-
-## 四、实验如何验证方法
+## 四、读五个任务面板，并另查容量与时间曲线
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
@@ -340,34 +390,69 @@ $$w_i=\frac{\exp(\widetilde G_i/\kappa)}{\sum_j\exp(\widetilde G_j/\kappa)},\qua
 | 对比基线 | TD-MPC、TD-MPC2、SAC、DreamerV3 |
 | 训练预算与资源 | 模型1.7M—340M；表1在线A800、离线H200上10M更新成本 |
 | 指标及其含义 | 回报／成功、cross TD误差、策略漂移和时间 |
-| 随机性与不确定性 | 视觉图5各任务5种子；其他实验范围单独核对 |
+| 随机性与不确定性 | 视觉[图5](#rl-56-figure-5)各任务5种子；其他实验范围单独核对 |
 | 实际验证的假设 | 分布约束和摊销扩散策略是否改善世界模型学习 |
 
-**实验解读（本文分析）**：能量密度解释有采样假设；最大模型并非所有设置都继续改善。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+### 图4：五个面板的指标与交互预算
 
-## 五、结果：证据到底有多强
+&lt;!-- inline-evidence-v2:start --&gt;
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 图3 | cross TD误差与策略漂移 | 支持所测训练不一致减少 | 不是完全无模型误差证明 |
-| 图4—5 | 多基准和视觉控制 | 支持实验覆盖内收益 | 不代表每个子任务均更好 |
-| 图6 | 30／80任务模型扩展 | 考察容量收益 | 30任务340M下降，非严格单调 |
-| 图7 | 离线到在线微调 | 展示可迁移性及失败例 | Hopper Hop仍有明显问题 |
-| 表1 | 训练硬件与时间 | 提供部分计算成本证据 | 不能混用不同GPU时间 |
+&lt;!-- figure-ref-v6:start:rl-56-figure-4 --&gt;
+&lt;span id=&quot;rl-56-figure-4&quot;&gt;&lt;/span&gt;
 
-**证据疑点**：正文概括“单调扩展”，同时写明30任务数据上340M模型两方法表现下降。应以分设置曲线解读，不把概括句当全范围定律。能量解释也需核对：对比估计一般学习相对负样本分布的密度比，不能不看负例分布就称为精确行为密度。
+&lt;p class=&quot;figure-source-links&quot;&gt;原引用定位：&lt;a href=&quot;https://arxiv.org/html/2605.26282v1#S4.F4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文&lt;/a&gt;。&lt;/p&gt;
+&lt;!-- figure-ref-v6:end:rl-56-figure-4 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/papers/56-mbdpo-figure-4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/56-mbdpo-figure-4.png&quot; width=&quot;1600&quot; height=&quot;316&quot; alt=&quot;MBDPO在DMControl、MetaWorld、ManiSkill2、MyoSuite和视觉RL上的汇总曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引；Cheng等，2026，Figure 4；原HTML图形；可见图形有五个面板，末面板为Visual RL，按面板标签解读。&lt;a href=&quot;https://arxiv.org/html/2605.26282v1#S4.F4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-## 六、贡献、代价与局限
 
-**作者解释**较大模型下降可能与数据容量饱和有关；这是解释而非被独立证明的原因。**本文分析**：候选数、去噪步数、score拟合误差及能量正则共同决定成本和质量；只看世界模型参数量不足以解释扩展行为。
+图4五列按图面板依次是DMControl、Meta-World、ManiSkill2、MyoSuite和Visual RL，横轴为各自环境交互步；前四列与视觉列的预算上限不同。纵轴也不可混比：DMControl/视觉任务画回报，其余面板主要按成功指标汇总。红色MBDPO应与同面板的绿色TD-MPC2等对照；ManiSkill2后期两者接近或交错，不能把红线总体较高改写成每任务、每检查点都获胜，更不能把此图读成参数规模扩展图。
 
-## 七、帮助建立理解
+&lt;!-- inline-evidence-v2:end --&gt;
 
-### 教学例子
 
-以下是教学推演，不是原论文实验。
+[图3](#rl-56-figure-3)左侧看cross-TD误差、右侧看动作漂移，检验策略与价值学习一致性代理，并非世界模型完全正确的证明。[图4](#rl-56-figure-4)和[图5](#rl-56-figure-5)扩大到多基准及视觉任务，[图6](#rl-56-figure-6)的横轴才是模型参数规模，且要分别读30任务与80任务曲线；原文文字称30任务340M出现退化，并解释为数据容量饱和，但图6标值却是MBDPO 82.4→83.7、TD-MPC2 59.4→71.4；这里存在图文不一致，不能据图断言下降。[图7](#rl-56-figure-7)还保留Hopper Hop迁移失败，表1的硬件与时间应按设备单列，不能用参数规模替代计算成本。 [查看原文](https://arxiv.org/html/2605.26282v1)。
 
-模型给两序列想象回报10与9，但高分序列偏离数据很远。正则后可能变为6与8，权重转向后者。若能量模型把罕见但有效动作也当危险，它会限制真实改进。
+&lt;!-- figure-ref-v6:start:rl-56-figure-5 --&gt;
+&lt;span id=&quot;rl-56-figure-5&quot;&gt;&lt;/span&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/56-mbdpo-figure-5-full.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/56-mbdpo-figure-5-full.png&quot; width=&quot;1800&quot; height=&quot;633&quot; alt=&quot;原论文Figure 5：十个视觉控制任务逐项保留，红色MBDPO对照绿色TD-MPC2。部分任务很快饱和、部分差距更大，平均收益不能替代每项任务的预算和曲线。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;完整原图摘引｜Cheng等，2026，Figure 5；2605.26282v1，HTML S4.F5。&lt;a href=&quot;https://arxiv.org/html/2605.26282v1#S4.F5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文与图号&lt;/a&gt;。&lt;a href=&quot;https://creativecommons.org/licenses/by/4.0/&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;CC BY 4.0&lt;/a&gt;；图形仅缩放／重新排版，沿用原许可。原引用定位：&lt;a href=&quot;https://arxiv.org/html/2605.26282v1#S4.F5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图提示：十个视觉控制任务逐项保留，红色MBDPO对照绿色TD-MPC2。部分任务很快饱和、部分差距更大，平均收益不能替代每项任务的预算和曲线。
+&lt;!-- figure-ref-v6:end:rl-56-figure-5 --&gt;
+
+&lt;!-- figure-ref-v6:start:rl-56-figure-3 --&gt;
+&lt;span id=&quot;rl-56-figure-3&quot;&gt;&lt;/span&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/56-mbdpo-figure-3-full.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/56-mbdpo-figure-3-full.png&quot; width=&quot;2000&quot; height=&quot;348&quot; alt=&quot;原论文Figure 3：左侧两图为cross-TD误差，右侧为动作漂移均值与分布。它们是策略与价值一致性的诊断代理，并非世界模型完全正确的证据。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;完整原图摘引｜Cheng等，2026，Figure 3；2605.26282v1，HTML S3.F3。&lt;a href=&quot;https://arxiv.org/html/2605.26282v1#S3.F3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文与图号&lt;/a&gt;。&lt;a href=&quot;https://creativecommons.org/licenses/by/4.0/&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;CC BY 4.0&lt;/a&gt;；图形仅缩放／重新排版，沿用原许可。原引用定位：&lt;a href=&quot;https://arxiv.org/html/2605.26282v1#S3.F3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图提示：左侧两图为cross-TD误差，右侧为动作漂移均值与分布。它们是策略与价值一致性的诊断代理，并非世界模型完全正确的证据。
+&lt;!-- figure-ref-v6:end:rl-56-figure-3 --&gt;
+
+&lt;!-- figure-ref-v6:start:rl-56-figure-6 --&gt;
+&lt;span id=&quot;rl-56-figure-6&quot;&gt;&lt;/span&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/56-mbdpo-figure-6-full.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/56-mbdpo-figure-6-full.png&quot; width=&quot;1800&quot; height=&quot;762&quot; alt=&quot;原论文Figure 6：左侧80任务，右侧30任务；横轴才是模型参数规模。右图MBDPO标注从82.4升至83.7，TD-MPC2从59.4升至71.4，与原文段落所称340M下降不一致。因此上文的下降说法来自作者文字叙述，不能由这张图直接验证。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;完整原图摘引｜Cheng等，2026，Figure 6；2605.26282v1，HTML S4.F6。&lt;a href=&quot;https://arxiv.org/html/2605.26282v1#S4.F6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文与图号&lt;/a&gt;。&lt;a href=&quot;https://creativecommons.org/licenses/by/4.0/&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;CC BY 4.0&lt;/a&gt;；图形仅缩放／重新排版，沿用原许可。原引用定位：&lt;a href=&quot;https://arxiv.org/html/2605.26282v1#S4.F6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图提示：左侧80任务，右侧30任务；横轴才是模型参数规模。右图MBDPO标注从82.4升至83.7，TD-MPC2从59.4升至71.4，与原文段落所称340M下降不一致。因此上文的下降说法来自作者文字叙述，不能由这张图直接验证。
+&lt;!-- figure-ref-v6:end:rl-56-figure-6 --&gt;
+
+&lt;!-- figure-ref-v6:start:rl-56-figure-7 --&gt;
+&lt;span id=&quot;rl-56-figure-7&quot;&gt;&lt;/span&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/56-mbdpo-figure-7-full.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/56-mbdpo-figure-7-full.png&quot; width=&quot;1800&quot; height=&quot;443&quot; alt=&quot;原论文Figure 7：左侧汇总离线到在线微调，右侧逐任务比较从头训练与微调；Hopper Hop仍保留失败。迁移收益与任务覆盖应逐项核对，不能只看汇总柱。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;完整原图摘引｜Cheng等，2026，Figure 7；2605.26282v1，HTML S4.F7。&lt;a href=&quot;https://arxiv.org/html/2605.26282v1#S4.F7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文与图号&lt;/a&gt;。&lt;a href=&quot;https://creativecommons.org/licenses/by/4.0/&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;CC BY 4.0&lt;/a&gt;；图形仅缩放／重新排版，沿用原许可。原引用定位：&lt;a href=&quot;https://arxiv.org/html/2605.26282v1#S4.F7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图提示：左侧汇总离线到在线微调，右侧逐任务比较从头训练与微调；Hopper Hop仍保留失败。迁移收益与任务覆盖应逐项核对，不能只看汇总柱。
+&lt;!-- figure-ref-v6:end:rl-56-figure-7 --&gt;
+
+### 固定1000万更新的时间不等于同精度成本
+
+原文分别报告在线、多任务离线和离线到在线设置，不能把这些预算合并成一条学习曲线。表1在固定1000万训练步下比较30与80任务的离线耗时，340M模型约203与207小时；“任务数增多而时间接近”不等于大模型廉价，也不等于达到相同精度的时间相同。MC样本数与去噪步数消融需要同时看得分和运行时间；理论分布误差还依赖模型、能量与score近似条件。
+
+## 五、能量密度近似与非单调扩展都限制结论
+
+能量的密度解释也有条件。对比学习使用其他状态的动作作负例，若负例边缘近似均匀，才有 $-E(z,a)\approx\log\beta(a|z)+C(z)$。附录从逐步能量推向行为正则轨迹分布时，还近似短展开中的状态常数 $C(z_h)\approx C(z_t)$，不能把它当无条件恒等式。
+
+候选数、去噪步数、score拟合与能量正则共同决定成本和质量；121任务、视觉及多任务结果不取消有限MC和密度近似条件。
 
 ### 五个前置概念
 
@@ -377,23 +462,41 @@ $$w_i=\frac{\exp(\widetilde G_i/\kappa)}{\sum_j\exp(\widetilde G_j/\kappa)},\qua
 4. **摊销推断**：把昂贵求解结果学习进网络。
 5. **策略漂移**：行动分布偏离训练支持。
 
-### 三个值得继续追问的问题
+## 六、三个值得继续追问的问题与参考答案
 
-1. 负样本采样如何改变能量的密度解释？
-2. 固定总训练成本而非参数量时扩展趋势是否保持？
-3. score拟合与世界模型误差各贡献多少失败？
+&lt;details&gt;
+&lt;summary&gt;1. 负样本采样如何改变能量的密度解释？&lt;/summary&gt;
 
-## 方法与证据总结
+二分类式对比学习的最优打分一般对应数据密度与负样本密度之比；若负例来自 $q(a|s)$，能量或score中会包含与 $\log q$ 有关的项。只有明确负例分布及归一化假设，才能把它换算成行为密度或其梯度。改变负采样而不调整推导，会改变解释甚至策略引导方向；应比较已知密度的合成分布并检查校准。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| 模型搜索与价值训练的策略分布不一致 | 加入行为相关能量约束，用模型回报加权估计score，再训练扩散策略生成器 | 行为相关正则减少搜索偏离，score网络摊销昂贵策略求解 | 121任务、视觉控制和多任务扩展实验支持所报告方案 | 能量密度解释有采样假设；最大模型并非所有设置都继续改善 |
+&lt;/details&gt;
 
-## 资料与阅读范围
+&lt;details&gt;
+&lt;summary&gt;2. 固定总训练成本而非参数量时扩展趋势是否保持？&lt;/summary&gt;
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+需要同总FLOPs、加速器时间、训练数据和推理预算的额外对照。较大模型参数可能提高表示能力，也增加模型、扩散采样和规划成本；参数曲线不能替代成本曲线。作者文字所称30任务340M下降与图6标值不一致，不能据图断言退化，也不能据这一处图文冲突概括严格单调性。应报告各数据设置的成本-收益前沿和不同种子，不据摘要措辞推断固定成本规律。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;3. score拟合与世界模型误差各贡献多少失败？&lt;/summary&gt;
+
+可做二维消融：在可查询真实动力学的任务中替换学习世界模型，在可解析或高精度参考策略上替换score，再比较两类误差的单独与联合影响。固定轨迹预算，分别测动作score偏差、模型多步误差及真实收益，检查交互项。原文cross-TD和动作漂移是机制诊断，不足以直接分解所有失败比例，不能为两种误差分配未测百分比。
+
+&lt;/details&gt;
+
+## 七、沿未解决的问题继续读
+
+- [WorldSample](57-worldsample.md)：如果风险发生在合成转移进入Critic，而非候选动作生成分布，应该在哪个接口控制？WorldSample用Q筛选和熵调度处理，属于随后出现的平行模型路线。（后续平行路线）
+
+- [DreamerV3](48-dreamerv3.md)：固定配方的尺度稳健与分布一致性究竟各解决什么？回看DreamerV3的组件消融，能把数值训练问题与本篇策略生成问题分开；这是前作对照，不是继承声明。（早期平行路线回看）
+
+### 原文核对与路线出处
+
+- [原论文与图表入口](https://arxiv.org/html/2605.26282v1)。主方法式15、附录score推导与能量密度近似、表1计算成本及消融。
+- **并行路线**：[Dreamer](40-dreamer.md)。同用潜在世界模型，但本篇以回报加权score学习动作序列分布，而非直接复制想象Actor更新。
+- **教学对应**：[直接偏好优化DPO](49-dpo.md)。缩写相近而目标、数据和优化对象不同，应主动辨别。
+- **历史背景**：[PETS](35-pets.md)。模型中评价候选序列是共同规划问题，MBDPO把生成分布摊销到扩散策略。
 
 ## 自测两题
 

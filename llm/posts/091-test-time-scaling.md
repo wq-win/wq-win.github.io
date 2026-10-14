@@ -2,27 +2,25 @@
 
 [返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
 
-论文：Charlie Snell、Jaehoon Lee、Kelvin Xu、Aviral Kumar，*Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters*，2024。依据[原文 v1](https://arxiv.org/html/2408.03314v1)的搜索、修订、成本比较与附录。主要模型为 PaLM 2-S*，并非公开权重的完整可复现实验；下文不把图上的估计值写成未经报告的精确成绩。
+论文：Charlie Snell、Jaehoon Lee、Kelvin Xu、Aviral Kumar，*Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters*，2024。采用[原文 v1](https://arxiv.org/html/2408.03314v1)。主要模型为 PaLM 2-S*，并非公开权重的完整可复现实验；下文不把图上的估计值写成未经报告的精确成绩。
 
-## 一分钟理解：同样生成 64 次，可以有很多花法
+<!-- figure-ref-v6:start:llm-license-091-test-time-scaling -->
+图表来源：Charlie Snell、Jaehoon Lee、Kelvin Xu、Aviral Kumar，2024，[原文](https://arxiv.org/html/2408.03314v1)；[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)。本篇展示做了PNG格式转换，图中数据与标签未改动。
+<!-- figure-ref-v6:end:llm-license-091-test-time-scaling -->
 
-面对一道题，可以独立生成 64 个答案，也可以沿一个答案反复修订 64 次，还可以开 8 条路线、每条修订 8 次。即使生成数量相同，这些策略探索的答案分布也不同。
+### 先接住前作的问题
 
-论文研究两根调节杆：用验证器引导搜索，或训练模型根据先前尝试修订回答。作者发现哪种方法划算取决于题目对当前模型有多难。简单题适合局部改进，中等难题可能需要多路线搜索；最难题则未必能靠增加尝试解决。
+[Self-Consistency](056-self-consistency.md)把预算用于独立完整解答，[ToT](072-tree-of-thoughts.md)提前搜索部分解。本篇沿测试时多算的问题比较顺序修订与并行探索，追问同样生成数量怎样花更有效，以及选择策略本身是否也耗费预算。
 
-按难度选择策略，在部分曲线中能以约四分之一的所计生成预算达到更好的结果。但难度估计本身很昂贵，原文没有把这部分计入主要比较。这是一项预算分配的潜力研究，还不是完整部署方案的成本保证。
+## 一、问题设定：相同生成预算怎样分给搜索、修订与不同难度题
 
-一句话：在模型已有部分解题能力的数学任务中，通过按难度分配搜索与修订预算，提高推理计算的利用率，代价是验证器训练、难度识别开销以及最难题上的能力上限。
-
-## 背景：推理预算扩大有两个前提
-
-首先，生成器必须有机会提出有用路径。若它对题目需要的核心方法完全不会，反复采样可能只得到更多错误。其次，系统要能把较好的候选留下；如果评分器容易被骗，更强搜索反而更快找到它的漏洞。
+生成器首先要有机会提出有用路径，选择器还要把它留下。若前者缺少核心方法，增加尝试可能只有更多错解；若后者有漏洞，搜索可能更快找到高分错误。本篇因此同时比较候选分布、选择方式和题目难度。
 
 这里要分清 proposer 与 verifier。前者生成候选，后者评价候选；修订模型通过把历史答案放进输入来改变生成分布，搜索算法通过筛选和扩展来改变最终输出分布。测试时没有为每个问题重新训练所有权重，但前期专门训练了修订和验证能力。
 
 题目难度也是相对模型定义的。人类标成难题，不代表某模型不会；人类觉得简单，也可能是模型的盲点。作者因此用该模型的成功概率分组，而不单靠 MATH 的人工难度等级。
 
-## 方法一：验证器引导的搜索
+## 二、定义前缀价值、修订分布和难度条件策略
 
 ### PRM 预测的是后续成功，不只是本步逻辑对错
 
@@ -48,15 +46,11 @@ Beam search 在每层生成候选，保留高分前缀，再从保留项扩展�
 
 Lookahead 在评分前再向前模拟若干步，用更晚的价值估计评价当前前缀。它可能看得更远，也消耗更多生成；本文不能作为所有 MCTS 变体的穷尽比较。
 
-## 方法二：让模型学会根据历史尝试修订
-
 作者并非只加一句“请检查”。先每题采样 64 个答案，将正确答案与若干错误答案组成训练序列，优先使最后一个错误答案在字符编辑距离上接近正确答案。模型学习在错误历史条件下生成正确回答。
 
 训练最多放入四个错误尝试；测试时可运行更长链，但仅保留最近四次回答。多条链还可以并行运行，最后用验证器或多数投票选答案。
 
 这里存在分布变化：训练历史都是错误答案，测试历史可能已经正确。论文观察到朴素修订会把约 38% 的正确答案改错，因此“最后一版最好”不是可靠选择规则。候选保存和答案选择是完整方法的一部分。
-
-## 方法三：按难度选择策略，而非求出万能最优
 
 令 $\eta$ 表示搜索宽度、前瞻长度或顺序与并行比例，预算为 $B$。理想目标是：
 
@@ -68,6 +62,26 @@ $$
 部署不知道真实答案，不能直接计算这个最优值。论文用五个难度分组近似，对每个组选择较好的配置。Oracle 难度来自 2048 次采样的真实正确率；predicted 难度来自同样规模采样的验证器平均分。
 
 两者都要花计算，后者只是去掉真实答案依赖，没有去掉费用。原文 §3.2 与附录 C 明确未计这部分成本，并用分组内两折交叉验证减少“同一数据既挑配置又测配置”的偏差。这不等于已证明难度是严格统计意义上的充分统计量。
+
+### 自适应方法多了一个分类器，它错到什么程度还值得用？
+
+理想难度已知时，每组挑最优策略自然不会差于固定同一策略；难点是实际路由错误与路由成本。下面用可核算例子拆开这两项，而不把论文的理想分组当作免费的部署能力。
+
+**原创教学例。** 问题各有一半属于甲、乙两类。在同一生成预算下，修订对甲、乙的成功率分别为0.9、0.3，搜索分别为0.7、0.6。全部修订的平均为0.6，全部搜索为0.65；完美路由给甲修订、给乙搜索，平均为0.75。如果两类的分类正确率同为 $a$，且错分就选相反策略，平均成功率为
+
+$$\tfrac12[0.9a+0.7(1-a)]+\tfrac12[0.6a+0.3(1-a)]=0.5+0.25a.$$
+
+因此只在 $a>0.6$ 时超过固定搜索的0.65。$a=0.8$ 时为0.70，而非理想0.75。这里假设分类误差在每类内不额外偏向更难的实例；现实中若错分集中在最难题，平均分类准确率还不足以推得这个收益。
+
+以上仍没有扣难度估计费用。若总预算为 $B$、估计难度花 $d$，真正供所选策略使用的是 $B-d$，必须重新测这个较小预算下的四个成功率，不能在原曲线上只减一个固定百分点。论文两折验证控制了选配置的部分乐观偏差，却没有自动解决 $d$；附录C明确留下了这一部署问题。
+
+假设 16 次尝试预算。一道题模型总能列出正确方程，只在末尾加减出错，4 条路线各修订 4 次可能比 16 条从头解答更经济。另一道题必须想到特殊几何构造，反复修改同一错误方程可能没有帮助，独立探索更有价值。
+
+### 前缀价值依赖的是哪个继续生成策略
+
+同一前缀交给两个后续策略，一个有0.8概率完成，另一个只有0.2，其rollout标签就不同。PRM所估的是指定生成器继续时的成功机会，不是脱离策略的数学真理分数。若换生成模型、温度或修订方式，验证器分数是否仍可排序必须再测，不能沿用旧校准自动解释新搜索。
+
+## 三、在预算中记录选择、前瞻与难度估计的成本
 
 ```text
 离线：训练生成器所需的修订能力与验证器
@@ -86,7 +100,9 @@ $$
 
 后半段是面向实现的建议，不是论文已经验证的廉价端到端算法。研究目标、近似机制和未来可部署版本需要明确分层。
 
-## 实验如何配置预算
+## 四、按难度、预算和生命周期FLOPs比较前沿
+
+先在同一生成预算内读搜索与修订，再把2048次难度估计等成本加回；局部曲线节省不等于部署总费用节省。
 
 | 项目 | 设置与预算 | 解释 |
 |---|---|---|
@@ -100,19 +116,57 @@ $$
 
 设置依据 §3–7、附录 D–J。修订阶段使用适配其输出分布的 ORM；不能把搜索实验的 PRM 原封不动写成所有实验的统一验证器。作者没有报告覆盖所有配置的多随机种子置信区间，500 道题的分组结果也存在有限样本波动。
 
-## 证据：更多计算何时有效，何时被浪费
+**证据一：[图3](#llm-v6-091-figure-3)，最强搜索不一定最划算。** 小预算时 beam search 优于 best-of-N，预算增大后优势缩小甚至反转；lookahead 在匹配生成预算下通常更差。简单组容易过度优化评分器，中等难度组更受益，最难组各方法进展有限。这支持因题选择算法，而非一律加深搜索。 难度分组柱状图内部又区分生成预算；oracle 难度使用正确标签，predicted 难度使用验证器估计。两者曲线接近不能抹去难度估计本身的费用。
 
-**证据一：图 3，最强搜索不一定最划算。** 小预算时 beam search 优于 best-of-N，预算增大后优势缩小甚至反转；lookahead 在匹配生成预算下通常更差。简单组容易过度优化评分器，中等难度组更受益，最难组各方法进展有限。这支持因题选择算法，而非一律加深搜索。
+<!-- figure-ref-v6:start:091-f3-1 -->
+<a id="llm-v6-091-figure-3"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/091-test-time-scaling-f3-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/091-test-time-scaling-f3-v6.png" width="1800" height="626" alt="PRM搜索策略的预算曲线与按问题难度分组的比较" loading="lazy"></a><figcaption>原文图形摘引：Charlie Snell、Jaehoon Lee、Kelvin Xu、Aviral Kumar，2024，图3，PDF第9页；<a href="https://arxiv.org/html/2408.03314v1#S5.F3" target="_blank" rel="noopener noreferrer">核对原文</a>。</figcaption></figure>
+<!-- figure-ref-v6:end:091-f3-1 -->
 
-**证据二：图 4，难度分配可以提高局部预算效率。** 在部分比较点，约 16 次生成的自适应策略接近或超过 64 次 best-of-N 的水平。准确表述是给定所用难度估计与预算口径下的曲线结果；若再加 2048 次难度采样，就不是完整流程节省四倍。
+**证据二：[图4](#llm-v6-091-figure-4)，难度分配可以提高局部预算效率。** 在部分比较点，约 16 次生成的自适应策略接近或超过 64 次 best-of-N 的水平。准确表述是给定所用难度估计与预算口径下的曲线结果；若再加 2048 次难度采样，就不是完整流程节省四倍。
 
-**证据三：图 6–8，顺序与并行互补。** 单条修订链的逐步成功率能提高，但过度坚持一条路线不总是最好。高预算和较难题存在更合适的混合比例；图 8 给出 64 对 256 次生成的效率例子。验证器或投票选择不可省略，因为修订也会破坏正确答案。
+<!-- figure-ref-v6:start:091-f4-2-anchor -->
+<a id="llm-v6-091-figure-4"></a>
+<!-- figure-ref-v6:end:091-f4-2-anchor -->
 
-**证据四：图 9，大模型与多次推理的交换依赖工作负载。** 论文分别分析推理与预训练 token 比例 $R=0.16,0.79,22$。简单题或较少推理需求下，小模型加推理更有吸引力；很难的题或很大的推理负载下，增加模型规模更有利。标题中的“can”是条件判断，不是取代预训练的普遍定律。
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/091-test-time-scaling-f4.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/091-test-time-scaling-f4.png" width="1600" height="1126" alt="根据题目难度分配测试时计算与固定搜索策略的预算—准确率曲线" loading="lazy"></a><figcaption>原实验图摘引：Charlie Snell、Jaehoon Lee、Kelvin Xu、Aviral Kumar，2024，图4；<a href="https://arxiv.org/html/2408.03314v1#S5.F4" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
 
-**证据五：附录 K、图 16，更多自训练也可能损害修订。** 使用 ReST-EM 式数据再训练后，增加顺序修订反而显著变差。作者推测数据中的伪相关被强化。这个反例说明生成训练数据、验证和修订能力之间存在闭环偏差，不能用“自我改进”一词跳过验证。
+**证据三：[图6](#llm-v6-091-figure-6)、[图7](#llm-v6-091-figure-7)、[图8](#llm-v6-091-figure-8)，顺序与并行互补。** 单条修订链的逐步成功率能提高，但过度坚持一条路线不总是最好。高预算和较难题存在更合适的混合比例；[图8](#llm-v6-091-figure-8) 给出 64 对 256 次生成的效率例子。验证器或投票选择不可省略，因为修订也会破坏正确答案。
 
-## 成本公式与适用边界
+<!-- figure-ref-v6:start:091-f8-5 -->
+<a id="llm-v6-091-figure-8"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/091-test-time-scaling-f8-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/091-test-time-scaling-f8-v6.png" width="1800" height="1294" alt="按难度预测或理想分配修订预算与固定并行策略的比较" loading="lazy"></a><figcaption>原文图形摘引：Charlie Snell、Jaehoon Lee、Kelvin Xu、Aviral Kumar，2024，图8，PDF第13页；<a href="https://arxiv.org/html/2408.03314v1#S6.F8" target="_blank" rel="noopener noreferrer">核对原文</a>。</figcaption></figure>
+<!-- figure-ref-v6:end:091-f8-5 -->
+
+<!-- figure-ref-v6:start:091-f7-4 -->
+<a id="llm-v6-091-figure-7"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/091-test-time-scaling-f7-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/091-test-time-scaling-f7-v6.png" width="2034" height="710" alt="串行并行计算配比对总体准确率及不同难度问题的影响" loading="lazy"></a><figcaption>原文图形摘引：Charlie Snell、Jaehoon Lee、Kelvin Xu、Aviral Kumar，2024，图7，PDF第13页；<a href="https://arxiv.org/html/2408.03314v1#S6.F7" target="_blank" rel="noopener noreferrer">核对原文</a>。</figcaption></figure>
+<!-- figure-ref-v6:end:091-f7-4 -->
+
+<!-- figure-ref-v6:start:091-f6-3 -->
+<a id="llm-v6-091-figure-6"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/091-test-time-scaling-f6-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/091-test-time-scaling-f6-v6.png" width="1800" height="626" alt="迭代修订每步通过率与串行、并行生成策略的比较" loading="lazy"></a><figcaption>原文图形摘引：Charlie Snell、Jaehoon Lee、Kelvin Xu、Aviral Kumar，2024，图6，PDF第12页；<a href="https://arxiv.org/html/2408.03314v1#S6.F6" target="_blank" rel="noopener noreferrer">核对原文</a>。</figcaption></figure>
+<!-- figure-ref-v6:end:091-f6-3 -->
+
+**证据四：[图9](#llm-v6-091-figure-9)，大模型与多次推理的交换依赖工作负载。** 论文分别分析推理与预训练 token 比例 $R=0.16,0.79,22$。简单题或较少推理需求下，小模型加推理更有吸引力；很难的题或很大的推理负载下，增加模型规模更有利。标题中的“can”是条件判断，不是取代预训练的普遍定律。
+
+<!-- figure-ref-v6:start:091-f9-6 -->
+<a id="llm-v6-091-figure-9"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/091-test-time-scaling-f9-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/091-test-time-scaling-f9-v6.png" width="2040" height="722" alt="迭代修订和PRM搜索的推理计算与更大预训练模型之间的比较" loading="lazy"></a><figcaption>原文图形摘引：Charlie Snell、Jaehoon Lee、Kelvin Xu、Aviral Kumar，2024，图9，PDF第15页；<a href="https://arxiv.org/html/2408.03314v1#S7.F9" target="_blank" rel="noopener noreferrer">核对原文</a>。</figcaption></figure>
+<!-- figure-ref-v6:end:091-f9-6 -->
+
+**证据五：附录 K、[图16](#llm-v6-091-figure-16)，更多自训练也可能损害修订。** 使用 ReST-EM 式数据再训练后，增加顺序修订反而显著变差。作者推测数据中的伪相关被强化。这个反例说明生成训练数据、验证和修订能力之间存在闭环偏差，不能用“自我改进”一词跳过验证。
+
+<!-- figure-ref-v6:start:091-f16-7 -->
+<a id="llm-v6-091-figure-16"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/091-test-time-scaling-f16-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/091-test-time-scaling-f16-v6.png" width="980" height="702" alt="去除验证器的修订实验中串行并行比例与准确率的关系" loading="lazy"></a><figcaption>原文图形摘引：Charlie Snell、Jaehoon Lee、Kelvin Xu、Aviral Kumar，2024，图16，PDF第28页；<a href="https://arxiv.org/html/2408.03314v1#A11.F16" target="_blank" rel="noopener noreferrer">核对原文</a>。</figcaption></figure>
+<!-- figure-ref-v6:end:091-f16-7 -->
+
+## 五、理想难度分组与验证器误差仍限制部署收益
+
+但系统不知道属于哪种题。若为了判断先生成 200 次，就已经超出预算。这个例子显示调度器本身也是算法，必须计算自己的代价。
+
+五个前置概念：**proposal distribution**决定候选从哪里来；**PRM**评估中间推理前缀；**beam search**按分数保留有限前缀；**交叉验证**把配置选择与效果测量分开；**生命周期 FLOPs**同时考虑一次训练和累计推理需求。
 
 用 $P$ 表示参数数，$D_p$ 表示预训练 token，$D_i$ 表示推理 token，论文近似总 FLOPs 为：
 
@@ -130,19 +184,9 @@ $$
 
 本文真正的新意是系统分析预算分配和问题难度，而非首次提出采样、beam search 或修订。其主要限制是特定模型、数学数据和不完整端到端成本。过程评分过度优化可生成重复低信息步骤，或极短但高分答案，说明奖励投机也会发生在冻结模型的推理搜索中。
 
-## 一个自构例子与五个前置概念
+## 六、将预算选择具体化为停止干预和可执行控制器
 
-假设 16 次尝试预算。一道题模型总能列出正确方程，只在末尾加减出错，4 条路线各修订 4 次可能比 16 条从头解答更经济。另一道题必须想到特殊几何构造，反复修改同一错误方程可能没有帮助，独立探索更有价值。
-
-但系统不知道属于哪种题。若为了判断先生成 200 次，就已经超出预算。这个例子显示调度器本身也是算法，必须计算自己的代价。
-
-五个前置概念：**proposal distribution**决定候选从哪里来；**PRM**评估中间推理前缀；**beam search**按分数保留有限前缀；**交叉验证**把配置选择与效果测量分开；**生命周期 FLOPs**同时考虑一次训练和累计推理需求。
-
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 统一采样策略浪费预算 | 按模型相对难度选配置 | 匹配局部修订或全局探索需要 | 图 3–4、7–8 | 难度识别费用未计入主曲线 |
-| 修订可能把正确答案改错 | 专门训练修订并保留候选选择 | 将改进概率与最终选择分开 | 图 6、约 38% 正确变错观察 | 依赖验证器和训练分布 |
-| 只比较模型参数忽略推理负载 | 匹配训练加推理近似 FLOPs | 反映成本摊销随使用量变化 | 图 9 | 固定训练数据量、闭源模型及成本近似 |
+[s1](095-s1.md)把停止干预缩成可检查实验，[AutoTTS](099-autotts.md)搜索分支与停止控制程序。它们提供不同后续方向；本篇昂贵难度估计并不是这些系统已经免费获得的能力。
 
 ## 自测：能否把论文标题讲完整
 

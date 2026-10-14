@@ -42,15 +42,11 @@
                 <span class="text-gray-500">优先经验回放：经验并非都值得同样多次重读</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="1f67d87ec50dd4d3c228e5469539d668a9f8fa30ba6718bcd30b559dc1ffcd38"><h1>第 19 天｜优先经验回放：经验并非都值得同样多次重读</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="7408d7cf592356322fd5160888662f5f4fa582269a061299040e2f4ced5ca9c5"><h1>第 19 天｜优先经验回放：经验并非都值得同样多次重读</h1>
 <p><a href="index.html">系列首页</a> · <a href="18-double-dqn.html">上一篇</a> · <a href="20-dueling-dqn.html">下一篇</a></p>
 <p><strong>原论文与版本</strong>：<em>Prioritized Experience Replay</em>，2015。<a href="https://arxiv.org/abs/1511.05952">原论文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p><strong>研究问题</strong>：replay中有限梯度预算怎样分配</p>
-<p><strong>旧方法卡点</strong>：均匀采样把罕见但重要的误差稀释</p>
-<p><strong>作者主张</strong>：按 TD 误差优先采样并用重要性权重修正分布</p>
-<p><strong>论文证据</strong>：Blind Cliffwalk 与 Atari 实验显示学习速度和分数收益</p>
-<p><strong>一句话</strong>：在off-policy经验回放机制，可与DQN等组合中，作者通过“按 TD 误差优先采样并用重要性权重修正分布”应对“replay中有限梯度预算怎样分配”这一问题；证据边界或代价是：大 TD 误差也可能只是噪声，采样偏差与存储维护有代价。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="16-dqn.html">DQN</a>通过回放重复利用历史经验，通常均匀抽取；<a href="18-double-dqn.html">Double DQN</a>修正目标，却没有决定有限更新预算怎样分配。PER与它们是可组合模块：按TD冲突安排重读，同时补偿非均匀采样的影响。它处理已收集数据的利用，不能替代首次探索。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <ol>
 <li><strong>优先级</strong>：决定经验抽取倾向的数值。</li>
@@ -59,8 +55,8 @@
 <li><strong>排序采样</strong>：按误差名次而非数值抽样。</li>
 <li><strong>过期优先级</strong>：网络更新后旧误差不再准确。</li>
 </ol>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
-<p>本篇将“replay中有限梯度预算怎样分配”放在off-policy经验回放机制，可与DQN等组合的边界内研究。均匀采样把罕见但重要的误差稀释。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。</p>
+<h2 id="一问题设定经验已经在池中下一次应该重读哪一条">一、问题设定：经验已经在池中，下一次应该重读哪一条</h2>
+<p>一个回放池里既有已经预测得很好的转移，也有刚暴露明显错误的转移。优先处理后者可能更快传播信息，却也可能把随机噪声误认为学习价值。若抽样频率改变，还要说明优化目标是否仍是均匀回放下的平均更新。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -89,13 +85,23 @@
 <td>沿用真实转移终止</td>
 </tr>
 </tbody></table></div>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
-<p>比例版本令优先级为 |δ|+ε，按幂次采样；排序版本按误差排名分配。被频繁抽取的数据会改变梯度分布，因此用重要性权重减轻偏差。优先级过期、新样本初始优先级与零概率保护都是算法一部分。</p>
-<h3 id="关键公式与符号">关键公式与符号</h3>
+<h2 id="二用误差分配抽样概率并修正权重">二、用误差分配抽样概率并修正权重</h2>
+<p>优先回放问的是“已经存下来的经验，下一次应重读哪条”，不是直接解决首次探索。TD误差衡量当前预测与自举目标的冲突，因而可作学习价值的代理；但奖励噪声、部分可观测和估计错误也会制造大误差。</p>
+<p>比例采样与排序采样在异常值上的行为不同。前者保留幅值，后者只保留次序；两者都用α调节集中程度，并保留小概率避免经验永远饿死。旧优先级只有样本被重读时才更新，因此采样依据本身也会过期。</p>
+<p>重要性权重解释了偏差：目标若仍是均匀回放下的平均梯度，就应乘 <span class="reading-math" data-tex="(NP(i))^{-1}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>N</mi><mi>P</mi><mo stretchy="false">(</mo><mi>i</mi><mo stretchy="false">)</mo><msup><mo stretchy="false">)</mo><mrow><mo>−</mo><mn>1</mn></mrow></msup></mrow><annotation encoding="application/x-tex">(NP(i))^{-1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.13889em;">NP</span><span class="mopen">(</span><span class="mord mathnormal">i</span><span class="mclose">)</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span></span></span></span></span>。β&lt;1只做部分修正；归一化权重又缩放整体学习率。高优先级负责“多抽”，重要性修正负责“不把多抽全算成更大权重”，两者并不矛盾。</p>
+<h3 id="把多抽与重要性补偿写进同一期望">把多抽与重要性补偿写进同一期望</h3>
 <p><span class="reading-math" data-tex="P(i)=p_i^\alpha/\sum_jp_j^\alpha,\quad w_i=(N P(i))^{-\beta}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>P</mi><mo stretchy="false">(</mo><mi>i</mi><mo stretchy="false">)</mo><mo>=</mo><msubsup><mi>p</mi><mi>i</mi><mi>α</mi></msubsup><mi mathvariant="normal">/</mi><munder><mo>∑</mo><mi>j</mi></munder><msubsup><mi>p</mi><mi>j</mi><mi>α</mi></msubsup><mo separator="true">,</mo><mspace width="1em"/><msub><mi>w</mi><mi>i</mi></msub><mo>=</mo><mo stretchy="false">(</mo><mi>N</mi><mi>P</mi><mo stretchy="false">(</mo><mi>i</mi><mo stretchy="false">)</mo><msup><mo stretchy="false">)</mo><mrow><mo>−</mo><mi>β</mi></mrow></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">P(i)=p_i^\alpha/\sum_jp_j^\alpha,\quad w_i=(N P(i))^{-\beta}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mopen">(</span><span class="mord mathnormal">i</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4638em;vertical-align:-1.4138em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0037em;">α</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0037em;">α</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3831em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1491em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.13889em;">NP</span><span class="mopen">(</span><span class="mord mathnormal">i</span><span class="mclose">)</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mathnormal mtight" style="margin-right:0.05278em;">β</span></span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span>
 α=0恢复均匀；β控制修正强度，常逐步趋近1。权重归一化影响整体步幅；α与β的角色不同。</p>
-<h3 id="输入--处理--输出教学伪代码">输入 → 处理 → 输出：教学伪代码</h3>
-<p>以下伪代码展示核心更新流程；简化条件见代码注释与后文。</p>
+<p>令 <span class="reading-math" data-tex="g_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>g</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">g_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 为当前固定回放池中第 <span class="reading-math" data-tex="i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span></span> 条转移的更新向量，若使用抽样时的真实概率且 <span class="reading-math" data-tex="\beta=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>β</mi><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\beta=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>，则</p>
+<p><span class="reading-math" data-tex="\mathbb E_{i\sim P}\!\left[\frac{g_i}{NP(i)}\right]=\sum_iP(i)\frac{g_i}{NP(i)}=\frac1N\sum_i g_i."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="double-struck">E</mi><mrow><mi>i</mi><mo>∼</mo><mi>P</mi></mrow></msub><mtext> ⁣</mtext><mrow><mo fence="true">[</mo><mfrac><msub><mi>g</mi><mi>i</mi></msub><mrow><mi>N</mi><mi>P</mi><mo stretchy="false">(</mo><mi>i</mi><mo stretchy="false">)</mo></mrow></mfrac><mo fence="true">]</mo></mrow><mo>=</mo><munder><mo>∑</mo><mi>i</mi></munder><mi>P</mi><mo stretchy="false">(</mo><mi>i</mi><mo stretchy="false">)</mo><mfrac><msub><mi>g</mi><mi>i</mi></msub><mrow><mi>N</mi><mi>P</mi><mo stretchy="false">(</mo><mi>i</mi><mo stretchy="false">)</mo></mrow></mfrac><mo>=</mo><mfrac><mn>1</mn><mi>N</mi></mfrac><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>g</mi><mi>i</mi></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\mathbb E_{i\sim P}\!\left[\frac{g_i}{NP(i)}\right]=\sum_iP(i)\frac{g_i}{NP(i)}=\frac1N\sum_i g_i.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">∼</span><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:-0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">[</span></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.1076em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">NP</span><span class="mopen">(</span><span class="mord mathnormal">i</span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.936em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">]</span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3852em;vertical-align:-1.2777em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mopen">(</span><span class="mord mathnormal">i</span><span class="mclose">)</span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.1076em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">NP</span><span class="mopen">(</span><span class="mord mathnormal">i</span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.936em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.5991em;vertical-align:-1.2777em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这是<a href="https://arxiv.org/html/1511.05952v4#S3.SS4">§3.4重要性修正</a>恢复的对象。<span class="reading-math" data-tex="N"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi></mrow><annotation encoding="application/x-tex">N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span></span> 是池大小，比例版 <span class="reading-math" data-tex="p_i=|\delta_i|+\varepsilon"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mi>i</mi></msub><mo>=</mo><mi mathvariant="normal">∣</mi><msub><mi>δ</mi><mi>i</mi></msub><mi mathvariant="normal">∣</mi><mo>+</mo><mi>ε</mi></mrow><annotation encoding="application/x-tex">p_i=|\delta_i|+\varepsilon</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">∣</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0379em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">∣</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">ε</span></span></span></span></span>，排序版则按误差名次给优先级。即使优先级来自旧误差，只要分母仍是本次实际抽样概率，上式仍成立；旧优先级主要可能让更新预算分配低效。用另一个版本的概率作分母，才破坏这里的相消。</p>
+<h3 id="抽样概率为零为何不能靠权重补救">抽样概率为零为何不能靠权重补救</h3>
+<p>重要性相消要求均匀目标中的每条经验都具有正抽样概率。若某条 <span class="reading-math" data-tex="P(i)=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi><mo stretchy="false">(</mo><mi>i</mi><mo stretchy="false">)</mo><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">P(i)=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mopen">(</span><span class="mord mathnormal">i</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，它永远不被抽到，除以概率也无从执行；优先级中的正数偏置因此保护的是更新支持，而不只避免一次数值除零。</p>
+<h3 id="核对两条经验修正后的贡献系数">核对两条经验修正后的贡献系数</h3>
+<p>以下是可手算的教学构造，不是论文实验。</p>
+<p>两条样本优先级(1,3)，α=1，抽样概率(0.25,0.75)。均匀目标对每条权重0.5。β=1给重要性权重(2,2/3)，因此期望贡献系数分别<span class="reading-math" data-tex="0.25\times2=0.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0.25</mn><mo>×</mo><mn>2</mn><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">0.25\times2=0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">0.25</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span>、<span class="reading-math" data-tex="0.75\times2/3=0.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0.75</mn><mo>×</mo><mn>2</mn><mi mathvariant="normal">/</mi><mn>3</mn><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">0.75\times2/3=0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">0.75</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2/3</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span>。</p>
+<p>若将权重除最大值2，系数都变0.25，方向保持但整体步幅减半。β=0则不修正，真正改变了优化时经验的权重。</p>
+<h2 id="三保存优先级实际概率与重读后的残差">三、保存优先级、实际概率与重读后的残差</h2>
 <pre><code class="language-text">每个新转移以较高初始优先级加入 replay
 每次更新：
   按 P(i) 抽 minibatch
@@ -107,28 +113,7 @@
 输出：相同任务策略及非均匀 replay
 </code></pre>
 <p><strong>实现要点</strong>：大 TD 误差也可能只是噪声，采样偏差与存储维护有代价。</p>
-<h3 id="三种优化要分开">三种“优化”要分开</h3>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>层次</th>
-<th>这里具体是什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>数学目标／训练损失</td>
-<td>底层TD目标不变；改变抽样分布并用权重调整梯度</td>
-</tr>
-<tr>
-<td>机制改变</td>
-<td>按 TD 误差优先采样并用重要性权重修正分布</td>
-</tr>
-<tr>
-<td>评价改善的指标</td>
-<td>学习所需更新、归一化分数</td>
-</tr>
-</tbody></table></div>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<h2 id="四在固定回放库中检验重读效率">四、在固定回放库中检验重读效率</h2>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -158,78 +143,75 @@
 </tr>
 <tr>
 <td>随机性与不确定性</td>
-<td>Cliffwalk图2含10初始化的范围</td>
+<td>Cliffwalk<a href="#rl-19-figure-2">图2</a>含10初始化的范围</td>
 </tr>
 <tr>
 <td>实际验证的假设</td>
 <td>重新分配训练注意力是否更有效</td>
 </tr>
 </tbody></table></div>
-<p><strong>实验解读（本文分析）</strong>：大 TD 误差也可能只是噪声，采样偏差与存储维护有代价。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>证据定位</th>
-<th>比较什么／观察到什么</th>
-<th>支持什么</th>
-<th>不能证明什么</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>图2</td>
-<td>Cliffwalk所需更新</td>
-<td>稀有成功经验传播更快</td>
-<td>不等于真实采样也自动更多成功</td>
-</tr>
-<tr>
-<td>图3</td>
-<td>Double DQN加／不加优先回放</td>
-<td>多数游戏受益</td>
-<td>不是全部游戏提高</td>
-</tr>
-<tr>
-<td>图4／表1</td>
-<td>学习速度与汇总成绩</td>
-<td>支持预算内效果</td>
-<td>步数不含树结构维护时间</td>
-</tr>
-</tbody></table></div>
-<p><strong>结论边界</strong>：Blind Cliffwalk 与 Atari 实验显示学习速度和分数收益。大 TD 误差也可能只是噪声，采样偏差与存储维护有代价。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p><strong>作者机制</strong>包含随机化与重要性修正。<strong>本文分析</strong>：过度追逐随机奖励会浪费更新，完全低优先的经验也可能未来重要。优先回放只改变已有数据的利用，不能生成未见过的关键行为。</p>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<h3 id="教学例子">教学例子</h3>
-<p>以下是教学推演，不是原论文实验。</p>
-<p>三条误差1、2、7，α=1且忽略ε，采样概率0.1、0.2、0.7。β=1时未归一化权重为3.33、1.67、0.476：第三条出现频繁，但每次贡献被缩小。</p>
-<h3 id="三个值得继续追问的问题">三个值得继续追问的问题</h3>
-<ol>
-<li>高噪声转移会否长期霸占训练？</li>
-<li>β=1是否在所有实现下完全消除偏差？</li>
-<li>额外采样维护时间怎样计入效率？</li>
-</ol>
-<h2 id="方法与证据总结">方法与证据总结</h2>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据／理论证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>replay中有限梯度预算怎样分配</td>
-<td>按 TD 误差优先采样并用重要性权重修正分布</td>
-<td>把更多更新分给当前误差大的经验，加快有用信息传播</td>
-<td>Blind Cliffwalk 与 Atari 实验显示学习速度和分数收益</td>
-<td>大 TD 误差也可能只是噪声，采样偏差与存储维护有代价</td>
-</tr>
-</tbody></table></div>
-<h2 id="资料与阅读范围">资料与阅读范围</h2>
-<p>资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。</p>
-<p>文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。</p>
+<p><strong>实验解读（本文分析）</strong>：Blind Cliffwalk<a href="#rl-19-figure-2">图2</a>使用同一份回放库，只有一条非零奖励经验，报告10次初始化的中位更新次数及min/max范围。因此它验证重读顺序的效率，不能证明更快探索到第一份成功。原文明确TD误差只是代理；Atari结果还涉及维护优先数据结构的额外成本。</p>
+<h3 id="blind-cliffwalk检验的是重读而非首次发现">Blind Cliffwalk检验的是重读而非首次发现</h3>
+<!-- inline-evidence-v2:start -->
+
+<!-- figure-ref-v6:start:anchor-rl-19-figure-2 -->
+<p><span id="rl-19-figure-2"></span></p>
+<!-- figure-ref-v6:end:anchor-rl-19-figure-2 -->
+<figure class="reading-evidence-figure"><a href="/rl/assets/papers/19-per-figure-2.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/19-per-figure-2.png" width="1800" height="646" alt="Blind Cliffwalk中均匀和优先回放所需更新数的双对数图" loading="lazy"></a><figcaption>原论文图形摘引；Schaul等，2015/2016，Figure 2；原HTML图形。<a href="https://arxiv.org/html/1511.05952v4#S3.F2" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>两边都是双对数坐标，纵轴越低表示所需更新越少，曲线垂直差距对应倍数而非固定次数。左图是表格与贪心优先，右图是线性逼近与随机优先，不能把左右红线当成同一个配置。青色oracle利用事后知识作参照，不是可直接部署的探索算法；淡线为多次初始化的极值范围，不是标准误。</p>
+<!-- inline-evidence-v2:end -->
+
+
+<p><a href="#rl-19-figure-2">图2</a>的横轴是Blind Cliffwalk转移总数、纵轴是学会价值所需更新数，且只有一个成功转移；这隔离了稀有经验如何传播，未声称重新收集到更多成功。<a href="#rl-19-figure-3">图3</a>按游戏比较Double DQN加优先回放的归一化分差，左右方向分别代表提升和下降。<a href="#rl-19-figure-4">图4</a>的速度汇总使用截至当前的最好分数口径，因此步数效率仍要与树结构维护时间及最终检查点结果区分。 <a href="https://arxiv.org/html/1511.05952">查看原文</a>。</p>
+<!-- figure-ref-v6:start:rl-19-figure-4 -->
+<figure class="reading-evidence-figure" id="rl-19-figure-4"><a href="/rl/assets/reference-v6/19-figure-4.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/19-figure-4.png" width="2400" height="942" alt="左图汇总训练中达到的最佳成绩，右图汇总平均成绩；100%对应各自Double DQN基线口径。两图到达100%的步数不同，比较提速时先说明采用峰值还是累计表现。" loading="lazy"></a><figcaption>原论文图形摘引｜Schaul等，2015，图4（完整面板）。<a href="https://arxiv.org/html/1511.05952v4#S4.F4" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留；多面板仅重新排版，未改数据。</figcaption></figure>
+
+<p>左图汇总训练中达到的最佳成绩，右图汇总平均成绩；100%对应各自Double DQN基线口径。两图到达100%的步数不同，比较提速时先说明采用峰值还是累计表现。</p>
+<!-- figure-ref-v6:end:rl-19-figure-4 -->
+
+<!-- figure-ref-v6:start:rl-19-figure-3 -->
+<figure class="reading-evidence-figure" id="rl-19-figure-3"><a href="/rl/assets/reference-v6/19-figure-3.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/19-figure-3.png" width="2400" height="1239" alt="纵轴是相对Double DQN的归一化分数差，零线以下的游戏仍会退步。红蓝表示两种优先级方案，不能只统计正柱或将两者平均后声称逐游戏一致改善。" loading="lazy"></a><figcaption>原论文图形摘引｜Schaul等，2015，图3（完整面板）。<a href="https://arxiv.org/html/1511.05952v4#S3.F3" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留；多面板仅重新排版，未改数据。</figcaption></figure>
+
+<p>纵轴是相对Double DQN的归一化分数差，零线以下的游戏仍会退步。红蓝表示两种优先级方案，不能只统计正柱或将两者平均后声称逐游戏一致改善。</p>
+<!-- figure-ref-v6:end:rl-19-figure-3 -->
+
+<h2 id="五辨认大残差陈旧优先级与未知经验">五、辨认大残差、陈旧优先级与未知经验</h2>
+<p>TD误差是更新价值的代理，可能把随机奖励噪声排得很高，也可能长期忽略以后才变重要的经验。维护优先级和重要性权重有存储与计算代价；它重新安排已有证据，不能生成尚未访问的关键行为。</p>
+<h2 id="六继续追问概率版本噪声与更新预算">六、继续追问：概率版本、噪声与更新预算</h2>
+<details>
+<summary>1. 高噪声转移会否长期霸占训练？</summary>
+
+<p>会有这种风险。TD 误差既含可学习误差，也含不可约奖励或转移噪声；重复采样噪声点未必降低其优先级。可对比秩优先、优先级上限、均匀混合和基于学习进展的调度，记录单条经验被采样份额与真实收益。降低噪声点权重同样可能丢掉罕见重要事件，因此应以受控噪声消融而非一刀切阈值判断。</p>
+</details>
+
+<details>
+<summary>2. β=1是否在所有实现下完全消除偏差？</summary>
+
+<p>在给定有限回放池、按已知概率独立采样且使用精确 <span class="reading-math" data-tex="1/(N P(i))"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mi>N</mi><mi>P</mi><mo stretchy="false">(</mo><mi>i</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">1/(N P(i))</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1/</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.13889em;">NP</span><span class="mopen">(</span><span class="mord mathnormal">i</span><span class="mclose">))</span></span></span></span></span> 权重时，<span class="reading-math" data-tex="\beta=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>β</mi><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\beta=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span> 可恢复均匀池目标的期望更新。批内最大权重归一化、裁剪、无放回采样或非线性优化器会改变这一结论、尺度或从期望梯度到参数更新的对应关系。优先级陈旧本身不破坏上述相消，前提是权重分母与实际抽样概率一致；若二者取自不同版本，修正才会失配。即使池内校正正确，也不修复离策略状态分布、函数逼近和自举偏差。</p>
+</details>
+
+<details>
+<summary>3. 额外采样维护时间怎样计入效率？</summary>
+
+<p>除环境步数外，单列优先级计算、树结构更新/检索、CPU到GPU传输、锁竞争与存储开销，再报告端到端墙钟和总更新次数。若优先回放用较少更新达到同分数，应检验节省的训练时间是否超过维护开销。不同硬件上树查询与网络推理比例不同，因此只能在明确实现和预算下声称效率更高。</p>
+</details>
+
+<h2 id="七把抽样频率与目标重标记分别组合">七、把抽样频率与目标重标记分别组合</h2>
+<ul>
+<li><p><strong>目标重标记模块组合</strong>：<a href="26-her.html">HER</a>。HER改变一条经验按哪个目标解释，PER改变抽到它的频率，两项需要各自核对偏差。</p>
+</li>
+<li><p><strong>组合系统检验</strong>：<a href="29-rainbow.html">Rainbow</a>。当训练对象变成回报分布，优先级的误差度量也随之变化，不能机械复制标量TD优先级。</p>
+</li>
+<li><p><a href="https://arxiv.org/html/1511.05952">原论文与图表入口</a>。§3.1—3.4；<a href="#rl-19-figure-1">图1</a>、<a href="#rl-19-figure-2">图2</a>；附录B.1。</p>
+</li>
+</ul>
+<!-- figure-ref-v6:start:rl-19-figure-1 -->
+<figure class="reading-evidence-figure" id="rl-19-figure-1"><a href="/rl/assets/reference-v6/19-figure-1.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/reference-v6/19-figure-1.png" width="2200" height="789" alt="左侧链必须连续选对才能得到末端奖励，右侧在双对数轴比较均匀回放与知道有用样本的oracle。oracle是一种潜力上界对照，不能当成优先级方法实际已实现的速度。" loading="lazy"></a><figcaption>原论文图形摘引｜Schaul等，2015，图1（完整面板）。<a href="https://arxiv.org/html/1511.05952v4#S3.F1" target="_blank" rel="noopener noreferrer">核对原文</a> · 点图放大。原版权保留；多面板仅重新排版，未改数据。</figcaption></figure>
+
+<p>左侧链必须连续选对才能得到末端奖励，右侧在双对数轴比较均匀回放与知道有用样本的oracle。oracle是一种潜力上界对照，不能当成优先级方法实际已实现的速度。</p>
+<!-- figure-ref-v6:end:rl-19-figure-1 -->
+
 <h2 id="自测两题">自测两题</h2>
 <p>第一题考查核心机制，第二题考查边界与辨析。建议先自行作答，再对照参考答案。以下数值小例子均为教学构造。</p>
 <p><strong>问题 1</strong>：为什么优先学习 TD 误差大的样本？</p>
@@ -248,21 +230,13 @@
 
 **原论文与版本**：*Prioritized Experience Replay*，2015。[原论文](https://arxiv.org/abs/1511.05952)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-**研究问题**：replay中有限梯度预算怎样分配
+[DQN](16-dqn.md)通过回放重复利用历史经验，通常均匀抽取；[Double DQN](18-double-dqn.md)修正目标，却没有决定有限更新预算怎样分配。PER与它们是可组合模块：按TD冲突安排重读，同时补偿非均匀采样的影响。它处理已收集数据的利用，不能替代首次探索。
 
-**旧方法卡点**：均匀采样把罕见但重要的误差稀释
+## 一、问题设定：经验已经在池中，下一次应该重读哪一条
 
-**作者主张**：按 TD 误差优先采样并用重要性权重修正分布
-
-**论文证据**：Blind Cliffwalk 与 Atari 实验显示学习速度和分数收益
-
-**一句话**：在off-policy经验回放机制，可与DQN等组合中，作者通过“按 TD 误差优先采样并用重要性权重修正分布”应对“replay中有限梯度预算怎样分配”这一问题；证据边界或代价是：大 TD 误差也可能只是噪声，采样偏差与存储维护有代价。
-
-## 二、研究背景与问题定义
-
-本篇将“replay中有限梯度预算怎样分配”放在off-policy经验回放机制，可与DQN等组合的边界内研究。均匀采样把罕见但重要的误差稀释。先固定下表中的任务、反馈与信息权限，再判断后面哪一项改动真正回答了这个问题；算法机制有效与适用于任意环境是不同结论。
+一个回放池里既有已经预测得很好的转移，也有刚暴露明显错误的转移。优先处理后者可能更快传播信息，却也可能把随机噪声误认为学习价值。若抽样频率改变，还要说明优化目标是否仍是均匀回放下的平均更新。
 
 | 要素 | 本文设定 |
 |---|---|
@@ -272,18 +246,41 @@
 | 奖励或学习信号 | 原任务奖励；优先级不是环境奖励 |
 | 终止／边界 | 沿用真实转移终止 |
 
-## 三、方法：到底改了什么
+## 二、用误差分配抽样概率并修正权重
 
-比例版本令优先级为 |δ|+ε，按幂次采样；排序版本按误差排名分配。被频繁抽取的数据会改变梯度分布，因此用重要性权重减轻偏差。优先级过期、新样本初始优先级与零概率保护都是算法一部分。
+优先回放问的是“已经存下来的经验，下一次应重读哪条”，不是直接解决首次探索。TD误差衡量当前预测与自举目标的冲突，因而可作学习价值的代理；但奖励噪声、部分可观测和估计错误也会制造大误差。
 
-### 关键公式与符号
+比例采样与排序采样在异常值上的行为不同。前者保留幅值，后者只保留次序；两者都用α调节集中程度，并保留小概率避免经验永远饿死。旧优先级只有样本被重读时才更新，因此采样依据本身也会过期。
+
+重要性权重解释了偏差：目标若仍是均匀回放下的平均梯度，就应乘 $(NP(i))^{-1}$。β&lt;1只做部分修正；归一化权重又缩放整体学习率。高优先级负责“多抽”，重要性修正负责“不把多抽全算成更大权重”，两者并不矛盾。
+
+### 把多抽与重要性补偿写进同一期望
 
 $$P(i)=p_i^\alpha/\sum_jp_j^\alpha,\quad w_i=(N P(i))^{-\beta}.$$
 α=0恢复均匀；β控制修正强度，常逐步趋近1。权重归一化影响整体步幅；α与β的角色不同。
 
-### 输入 → 处理 → 输出：教学伪代码
+令 $g_i$ 为当前固定回放池中第 $i$ 条转移的更新向量，若使用抽样时的真实概率且 $\beta=1$，则
 
-以下伪代码展示核心更新流程；简化条件见代码注释与后文。
+$$
+\mathbb E_{i\sim P}\!\left[\frac{g_i}{NP(i)}\right]=\sum_iP(i)\frac{g_i}{NP(i)}=\frac1N\sum_i g_i.
+$$
+
+这是[§3.4重要性修正](https://arxiv.org/html/1511.05952v4#S3.SS4)恢复的对象。$N$ 是池大小，比例版 $p_i=|\delta_i|+\varepsilon$，排序版则按误差名次给优先级。即使优先级来自旧误差，只要分母仍是本次实际抽样概率，上式仍成立；旧优先级主要可能让更新预算分配低效。用另一个版本的概率作分母，才破坏这里的相消。
+
+### 抽样概率为零为何不能靠权重补救
+
+重要性相消要求均匀目标中的每条经验都具有正抽样概率。若某条 $P(i)=0$，它永远不被抽到，除以概率也无从执行；优先级中的正数偏置因此保护的是更新支持，而不只避免一次数值除零。
+
+### 核对两条经验修正后的贡献系数
+
+以下是可手算的教学构造，不是论文实验。
+
+两条样本优先级(1,3)，α=1，抽样概率(0.25,0.75)。均匀目标对每条权重0.5。β=1给重要性权重(2,2/3)，因此期望贡献系数分别$0.25\times2=0.5$、$0.75\times2/3=0.5$。
+
+若将权重除最大值2，系数都变0.25，方向保持但整体步幅减半。β=0则不修正，真正改变了优化时经验的权重。
+
+## 三、保存优先级、实际概率与重读后的残差
+
 
 ```text
 每个新转移以较高初始优先级加入 replay
@@ -299,15 +296,7 @@ $$P(i)=p_i^\alpha/\sum_jp_j^\alpha,\quad w_i=(N P(i))^{-\beta}.$$
 
 **实现要点**：大 TD 误差也可能只是噪声，采样偏差与存储维护有代价。
 
-### 三种“优化”要分开
-
-| 层次 | 这里具体是什么 |
-|---|---|
-| 数学目标／训练损失 | 底层TD目标不变；改变抽样分布并用权重调整梯度 |
-| 机制改变 | 按 TD 误差优先采样并用重要性权重修正分布 |
-| 评价改善的指标 | 学习所需更新、归一化分数 |
-
-## 四、实验如何验证方法
+## 四、在固定回放库中检验重读效率
 
 | 实验要素 | 原文设定与证据范围 |
 |---|---|
@@ -316,32 +305,43 @@ $$P(i)=p_i^\alpha/\sum_jp_j^\alpha,\quad w_i=(N P(i))^{-\beta}.$$
 | 对比基线 | 均匀replay、Double DQN、两类优先机制 |
 | 训练预算与资源 | 曲线按环境帧或更新次数分别报告 |
 | 指标及其含义 | 学习所需更新、归一化分数 |
-| 随机性与不确定性 | Cliffwalk图2含10初始化的范围 |
+| 随机性与不确定性 | Cliffwalk[图2](#rl-19-figure-2)含10初始化的范围 |
 | 实际验证的假设 | 重新分配训练注意力是否更有效 |
 
-**实验解读（本文分析）**：大 TD 误差也可能只是噪声，采样偏差与存储维护有代价。比较时应分别核对真实交互、更新次数和计算时间；论文曲线的横轴只支持相应预算下的结论。
+**实验解读（本文分析）**：Blind Cliffwalk[图2](#rl-19-figure-2)使用同一份回放库，只有一条非零奖励经验，报告10次初始化的中位更新次数及min/max范围。因此它验证重读顺序的效率，不能证明更快探索到第一份成功。原文明确TD误差只是代理；Atari结果还涉及维护优先数据结构的额外成本。
 
-## 五、结果：证据到底有多强
+### Blind Cliffwalk检验的是重读而非首次发现
 
-| 证据定位 | 比较什么／观察到什么 | 支持什么 | 不能证明什么 |
-|---|---|---|---|
-| 图2 | Cliffwalk所需更新 | 稀有成功经验传播更快 | 不等于真实采样也自动更多成功 |
-| 图3 | Double DQN加／不加优先回放 | 多数游戏受益 | 不是全部游戏提高 |
-| 图4／表1 | 学习速度与汇总成绩 | 支持预算内效果 | 步数不含树结构维护时间 |
+&lt;!-- inline-evidence-v2:start --&gt;
 
-**结论边界**：Blind Cliffwalk 与 Atari 实验显示学习速度和分数收益。大 TD 误差也可能只是噪声，采样偏差与存储维护有代价。
+&lt;!-- figure-ref-v6:start:anchor-rl-19-figure-2 --&gt;
+&lt;span id=&quot;rl-19-figure-2&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:anchor-rl-19-figure-2 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/papers/19-per-figure-2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/19-per-figure-2.png&quot; width=&quot;1800&quot; height=&quot;646&quot; alt=&quot;Blind Cliffwalk中均匀和优先回放所需更新数的双对数图&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引；Schaul等，2015/2016，Figure 2；原HTML图形。&lt;a href=&quot;https://arxiv.org/html/1511.05952v4#S3.F2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-## 六、贡献、代价与局限
+两边都是双对数坐标，纵轴越低表示所需更新越少，曲线垂直差距对应倍数而非固定次数。左图是表格与贪心优先，右图是线性逼近与随机优先，不能把左右红线当成同一个配置。青色oracle利用事后知识作参照，不是可直接部署的探索算法；淡线为多次初始化的极值范围，不是标准误。
 
-**作者机制**包含随机化与重要性修正。**本文分析**：过度追逐随机奖励会浪费更新，完全低优先的经验也可能未来重要。优先回放只改变已有数据的利用，不能生成未见过的关键行为。
 
-## 七、帮助建立理解
+&lt;!-- inline-evidence-v2:end --&gt;
 
-### 教学例子
 
-以下是教学推演，不是原论文实验。
+[图2](#rl-19-figure-2)的横轴是Blind Cliffwalk转移总数、纵轴是学会价值所需更新数，且只有一个成功转移；这隔离了稀有经验如何传播，未声称重新收集到更多成功。[图3](#rl-19-figure-3)按游戏比较Double DQN加优先回放的归一化分差，左右方向分别代表提升和下降。[图4](#rl-19-figure-4)的速度汇总使用截至当前的最好分数口径，因此步数效率仍要与树结构维护时间及最终检查点结果区分。 [查看原文](https://arxiv.org/html/1511.05952)。
 
-三条误差1、2、7，α=1且忽略ε，采样概率0.1、0.2、0.7。β=1时未归一化权重为3.33、1.67、0.476：第三条出现频繁，但每次贡献被缩小。
+&lt;!-- figure-ref-v6:start:rl-19-figure-4 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-19-figure-4&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/19-figure-4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/19-figure-4.png&quot; width=&quot;2400&quot; height=&quot;942&quot; alt=&quot;左图汇总训练中达到的最佳成绩，右图汇总平均成绩；100%对应各自Double DQN基线口径。两图到达100%的步数不同，比较提速时先说明采用峰值还是累计表现。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜Schaul等，2015，图4（完整面板）。&lt;a href=&quot;https://arxiv.org/html/1511.05952v4#S4.F4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt; · 点图放大。原版权保留；多面板仅重新排版，未改数据。&lt;/figcaption&gt;&lt;/figure&gt;
+
+左图汇总训练中达到的最佳成绩，右图汇总平均成绩；100%对应各自Double DQN基线口径。两图到达100%的步数不同，比较提速时先说明采用峰值还是累计表现。
+&lt;!-- figure-ref-v6:end:rl-19-figure-4 --&gt;
+
+&lt;!-- figure-ref-v6:start:rl-19-figure-3 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-19-figure-3&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/19-figure-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/19-figure-3.png&quot; width=&quot;2400&quot; height=&quot;1239&quot; alt=&quot;纵轴是相对Double DQN的归一化分数差，零线以下的游戏仍会退步。红蓝表示两种优先级方案，不能只统计正柱或将两者平均后声称逐游戏一致改善。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜Schaul等，2015，图3（完整面板）。&lt;a href=&quot;https://arxiv.org/html/1511.05952v4#S3.F3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt; · 点图放大。原版权保留；多面板仅重新排版，未改数据。&lt;/figcaption&gt;&lt;/figure&gt;
+
+纵轴是相对Double DQN的归一化分数差，零线以下的游戏仍会退步。红蓝表示两种优先级方案，不能只统计正柱或将两者平均后声称逐游戏一致改善。
+&lt;!-- figure-ref-v6:end:rl-19-figure-3 --&gt;
+
+## 五、辨认大残差、陈旧优先级与未知经验
+
+TD误差是更新价值的代理，可能把随机奖励噪声排得很高，也可能长期忽略以后才变重要的经验。维护优先级和重要性权重有存储与计算代价；它重新安排已有证据，不能生成尚未访问的关键行为。
 
 ### 五个前置概念
 
@@ -351,23 +351,41 @@ $$P(i)=p_i^\alpha/\sum_jp_j^\alpha,\quad w_i=(N P(i))^{-\beta}.$$
 4. **排序采样**：按误差名次而非数值抽样。
 5. **过期优先级**：网络更新后旧误差不再准确。
 
-### 三个值得继续追问的问题
+## 六、继续追问：概率版本、噪声与更新预算
 
-1. 高噪声转移会否长期霸占训练？
-2. β=1是否在所有实现下完全消除偏差？
-3. 额外采样维护时间怎样计入效率？
+&lt;details&gt;
+&lt;summary&gt;1. 高噪声转移会否长期霸占训练？&lt;/summary&gt;
 
-## 方法与证据总结
+会有这种风险。TD 误差既含可学习误差，也含不可约奖励或转移噪声；重复采样噪声点未必降低其优先级。可对比秩优先、优先级上限、均匀混合和基于学习进展的调度，记录单条经验被采样份额与真实收益。降低噪声点权重同样可能丢掉罕见重要事件，因此应以受控噪声消融而非一刀切阈值判断。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据／理论证据 | 代价与局限 |
-|---|---|---|---|---|
-| replay中有限梯度预算怎样分配 | 按 TD 误差优先采样并用重要性权重修正分布 | 把更多更新分给当前误差大的经验，加快有用信息传播 | Blind Cliffwalk 与 Atari 实验显示学习速度和分数收益 | 大 TD 误差也可能只是噪声，采样偏差与存储维护有代价 |
+&lt;/details&gt;
 
-## 资料与阅读范围
+&lt;details&gt;
+&lt;summary&gt;2. β=1是否在所有实现下完全消除偏差？&lt;/summary&gt;
 
-资料以原论文的方法与相关理论、实验段落为主，证据定位见第五部分。完整证明、附录、代码与训练日志未逐项审核；本文未独立复现实验。
+在给定有限回放池、按已知概率独立采样且使用精确 $1/(N P(i))$ 权重时，$\beta=1$ 可恢复均匀池目标的期望更新。批内最大权重归一化、裁剪、无放回采样或非线性优化器会改变这一结论、尺度或从期望梯度到参数更新的对应关系。优先级陈旧本身不破坏上述相消，前提是权重分母与实际抽样概率一致；若二者取自不同版本，修正才会失配。即使池内校正正确，也不修复离策略状态分布、函数逼近和自举偏差。
 
-文中“作者主张”概括论文的解释，“论文证据”指原文的理论或实验；“教学推演”与“本文分析”是辅助理解的例子和判断。“尚未核实”表示本文的证据缺口，不等于论文未报告。资料核对日期：2026-09-08。
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;3. 额外采样维护时间怎样计入效率？&lt;/summary&gt;
+
+除环境步数外，单列优先级计算、树结构更新/检索、CPU到GPU传输、锁竞争与存储开销，再报告端到端墙钟和总更新次数。若优先回放用较少更新达到同分数，应检验节省的训练时间是否超过维护开销。不同硬件上树查询与网络推理比例不同，因此只能在明确实现和预算下声称效率更高。
+
+&lt;/details&gt;
+
+## 七、把抽样频率与目标重标记分别组合
+
+- **目标重标记模块组合**：[HER](26-her.md)。HER改变一条经验按哪个目标解释，PER改变抽到它的频率，两项需要各自核对偏差。
+- **组合系统检验**：[Rainbow](29-rainbow.md)。当训练对象变成回报分布，优先级的误差度量也随之变化，不能机械复制标量TD优先级。
+
+- [原论文与图表入口](https://arxiv.org/html/1511.05952)。§3.1—3.4；[图1](#rl-19-figure-1)、[图2](#rl-19-figure-2)；附录B.1。
+
+&lt;!-- figure-ref-v6:start:rl-19-figure-1 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-19-figure-1&quot;&gt;&lt;a href=&quot;/rl/assets/reference-v6/19-figure-1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/reference-v6/19-figure-1.png&quot; width=&quot;2200&quot; height=&quot;789&quot; alt=&quot;左侧链必须连续选对才能得到末端奖励，右侧在双对数轴比较均匀回放与知道有用样本的oracle。oracle是一种潜力上界对照，不能当成优先级方法实际已实现的速度。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜Schaul等，2015，图1（完整面板）。&lt;a href=&quot;https://arxiv.org/html/1511.05952v4#S3.F1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt; · 点图放大。原版权保留；多面板仅重新排版，未改数据。&lt;/figcaption&gt;&lt;/figure&gt;
+
+左侧链必须连续选对才能得到末端奖励，右侧在双对数轴比较均匀回放与知道有用样本的oracle。oracle是一种潜力上界对照，不能当成优先级方法实际已实现的速度。
+&lt;!-- figure-ref-v6:end:rl-19-figure-1 --&gt;
 
 ## 自测两题
 

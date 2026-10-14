@@ -7,7 +7,7 @@ let Window;
 const root=path.resolve(__dirname,'..');
 let runtimeChecks=0;
 async function testRuntime(){
- for(const [series,slug] of [['rl','01-actor-critic'],['rl','00-reading-guide'],['llm','001-lstm'],['llm','00-reading-guide'],['robot-learn','001-dmp'],['robot-learn','00-reading-guide'],['robot-classic','001-dh'],['robot-classic','00-reading-guide']]){
+ for(const [series,slug] of [['rl','01-actor-critic'],['rl','00-reading-guide'],['rl','00-timeline'],['rl','61-epilogue'],['llm','001-lstm'],['llm','00-reading-guide'],['llm','00-timeline'],['llm','101-epilogue'],['robot-learn','001-dmp'],['robot-learn','00-reading-guide'],['robot-learn','00-timeline'],['robot-learn','101-epilogue'],['robot-classic','001-dh'],['robot-classic','00-reading-guide'],['robot-classic','00-timeline'],['robot-classic','101-epilogue']]){
   const w=new Window({url:`https://mylog.test/${series}/${slug}.html`,settings:{disableJavaScriptFileLoading:true,disableCSSFileLoading:true}}),d=w.document;
   w.HTMLElement.prototype.scrollIntoView=function(){};
   const html=fs.readFileSync(`${root}/${series}/${slug}.html`,'utf8');

@@ -42,19 +42,18 @@
                 <span class="text-gray-500">可学习对齐：解码每个词时，重新决定该看输入的哪里</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="912e96c949b0f92edd43ed782882a15edf30ba59b7adf81e054f4799cc4b2bbf"><h1>007｜可学习对齐：解码每个词时，重新决定该看输入的哪里</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="251af0a7c5c8d3bc9a615bce1705ef4cb8500fa8a47f7e780f7348ff244cb774"><h1>007｜可学习对齐：解码每个词时，重新决定该看输入的哪里</h1>
 <p><a href="index.html">目录</a> · <a href="006-seq2seq.html">上一篇</a> · <a href="008-glove.html">下一篇</a></p>
 <p><strong>论文</strong>：Dzmitry Bahdanau、Kyunghyun Cho、Yoshua Bengio，<em>Neural Machine Translation by Jointly Learning to Align and Translate</em>，2014 年预印本、ICLR 2015。<a href="https://arxiv.org/abs/1409.0473">原文</a> · <a href="https://arxiv.org/pdf/1409.0473">PDF</a>。讨论对象是循环编码解码器中的软对齐，不是后来的 Transformer 自注意力。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>如果源句很长，让编码器先把全部信息压成一个向量，再要求解码器逐词取用，可能形成瓶颈。本文为源句每个位置保留一个表示，并让解码器每生成一个词，都计算一组对齐权重，形成当前需要的上下文向量。</p>
-<p>作者把翻译与对齐一起训练，不需要额外人工对齐标签。实验显示相较其基础编码解码器，长句翻译更稳健。核心变化是按输出位置动态读取源信息；代价是每个输出步骤都要与源位置交互。注意力权重提供可观察的内部量，但不自动成为可靠的因果解释。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="006-seq2seq.html">Seq2Seq</a>所代表的固定摘要接口留下一个具体瓶颈：编码结束时要把哪些源细节保存在同一向量里，才能服务全部输出位置？本篇与该工作同期发展，以每步重新读取多个源表示回答这一问题，属于平行编码解码路线；不能据目录相邻伪造直接继承。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念分别是双向编码、条件生成、softmax、可微加权和与教师强制。它们对应输入信息范围、任务目标、权重尺度、梯度通路和训练前缀来源。区分源侧双向与目标侧因果尤其重要。</p>
-<h2 id="问题定义一个摘要为什么不够">问题定义：一个摘要为什么不够</h2>
-<p>固定向量模型必须在读完整句之前决定哪些细节最终有用。对短句尚可，对包含多个实体、修饰和重排的长句，有限状态既要保存内容又要组织顺序。本文不要求把所有细节放进同一个最终状态，而是保留源位置对应的注释向量。</p>
+<h2 id="一问题设定每个目标词需要的源信息是否必须提前挤进一个摘要">一、问题设定：每个目标词需要的源信息是否必须提前挤进一个摘要</h2>
+<p>长源句包含多个实体、修饰和重排，固定向量接口要求编码器在解码开始前把所有有用细节压到同一状态。可是生成不同目标词需要不同信息：本篇保留每个源位置的注释，让“此刻读哪里”随解码状态改变。</p>
 <p>双向循环编码器让每个注释 <span class="reading-math" data-tex="h_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>h</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">h_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 包含该位置附近的左右上下文。解码器仍是顺序生成模型：当前状态依赖之前输出，当前输出不能使用未来目标答案。编码源句时使用右侧源信息是合法的，因为完整源句本来就是输入，两种“未来”必须区分。</p>
-<p>翻译目标仍然是 <span class="reading-math" data-tex="P(y\mid x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi><mo stretchy="false">(</mo><mi>y</mi><mo>∣</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">P(y\mid x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span>。对齐没有单独的人类标签，而是作为帮助预测目标词的内部计算学习。这样的潜变量式分工可以让模型自行形成有效读写策略，但也意味着权重不必与语言学词对齐完全一致。</p>
-<h2 id="方法打分归一化加权读取">方法：打分、归一化、加权读取</h2>
+<p>翻译目标仍然是 <span class="reading-math" data-tex="P(y\mid x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi><mo stretchy="false">(</mo><mi>y</mi><mo>∣</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">P(y\mid x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span>。</p>
+<h2 id="二由软加权推导对齐网络接收翻译梯度">二、由软加权推导对齐网络接收翻译梯度</h2>
 <p>设解码器上一状态为 <span class="reading-math" data-tex="s_{i-1}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mrow><mi>i</mi><mo>−</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">s_{i-1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span>，源位置表示为 <span class="reading-math" data-tex="h_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>h</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">h_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>：</p>
 <p><span class="reading-math" data-tex="e_{ij}=a(s_{i-1},h_j),\qquad
 \alpha_{ij}=\frac{\exp(e_{ij})}{\sum_k\exp(e_{ik})},\qquad
@@ -64,6 +63,14 @@ c_i=\sum_j\alpha_{ij}h_j.</annotation></semantics></math></span><span class="kat
 <p><span class="reading-math" data-tex="a"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi></mrow><annotation encoding="application/x-tex">a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span></span></span></span></span> 是可训练的对齐打分网络，<span class="reading-math" data-tex="\alpha_{ij}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>α</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\alpha_{ij}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是归一化权重，<span class="reading-math" data-tex="c_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>c</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">c_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是本次解码读取到的上下文。随后解码器结合 <span class="reading-math" data-tex="c_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>c</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">c_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>、上一状态和前一目标词更新，并预测当前词。每个输出位置都有自己的 <span class="reading-math" data-tex="c_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>c</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">c_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，而非全句固定一个摘要。</p>
 <p>软加权让梯度可以通过上下文向量回到权重和源表示，所以翻译损失同时训练“读哪里”和“读到后怎么输出”。这里没有非可微的硬位置选择，也不需要 REINFORCE 来训练一个离散指针。把所有注意力都理解为强化学习选动作，会误读最基本的训练机制。</p>
 <p>权重归一化使它们便于比较，但一个高权重源位置的注释本身已经包含邻近上下文。因而“权重落在第六个词”不等于输出只由第六个表面词决定。双向编码与下游变换共同参与结果，这也是解释热图时必须保留的边界。</p>
+<h3 id="对齐网络为什么能收到翻译误差">对齐网络为什么能收到翻译误差</h3>
+<p>固定当前解码步，令 <span class="reading-math" data-tex="c=\sum_j\alpha_jh_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi><mo>=</mo><msub><mo>∑</mo><mi>j</mi></msub><msub><mi>α</mi><mi>j</mi></msub><msub><mi>h</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">c=\sum_j\alpha_jh_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">c</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1858em;vertical-align:-0.4358em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>。这里 <span class="reading-math" data-tex="h_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>h</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">h_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是源位置 <span class="reading-math" data-tex="j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span></span></span></span></span> 的编码向量，<span class="reading-math" data-tex="e_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>e</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">e_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是匹配分数，<span class="reading-math" data-tex="\alpha_j=\operatorname{softmax}(e)_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>α</mi><mi>j</mi></msub><mo>=</mo><mi mathvariant="normal">softmax</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>e</mi><msub><mo stretchy="false">)</mo><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">\alpha_j=\operatorname{softmax}(e)_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span><span class="mopen">(</span><span class="mord mathnormal">e</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是读取权重，<span class="reading-math" data-tex="\ell"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">ℓ</mi></mrow><annotation encoding="application/x-tex">\ell</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">ℓ</span></span></span></span></span> 是下游损失；<span class="reading-math" data-tex="\mathbf1[k=j]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn mathvariant="bold">1</mn><mo stretchy="false">[</mo><mi>k</mi><mo>=</mo><mi>j</mi><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">\mathbf1[k=j]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathbf">1</span><span class="mopen">[</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span><span class="mclose">]</span></span></span></span></span> 为相等时取 1 的指示量。softmax 的导数为 <span class="reading-math" data-tex="\partial\alpha_k/\partial e_j=\alpha_k(\mathbf1[k=j]-\alpha_j)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∂</mi><msub><mi>α</mi><mi>k</mi></msub><mi mathvariant="normal">/</mi><mi mathvariant="normal">∂</mi><msub><mi>e</mi><mi>j</mi></msub><mo>=</mo><msub><mi>α</mi><mi>k</mi></msub><mo stretchy="false">(</mo><mn mathvariant="bold">1</mn><mo stretchy="false">[</mo><mi>k</mi><mo>=</mo><mi>j</mi><mo stretchy="false">]</mo><mo>−</mo><msub><mi>α</mi><mi>j</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\partial\alpha_k/\partial e_j=\alpha_k(\mathbf1[k=j]-\alpha_j)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathbf">1</span><span class="mopen">[</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span><span class="mclose">]</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，代入可得 <span class="reading-math" data-tex="\partial c/\partial e_j=\alpha_j(h_j-c)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∂</mi><mi>c</mi><mi mathvariant="normal">/</mi><mi mathvariant="normal">∂</mi><msub><mi>e</mi><mi>j</mi></msub><mo>=</mo><msub><mi>α</mi><mi>j</mi></msub><mo stretchy="false">(</mo><msub><mi>h</mi><mi>j</mi></msub><mo>−</mo><mi>c</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\partial c/\partial e_j=\alpha_j(h_j-c)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal">c</span><span class="mord">/</span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">c</span><span class="mclose">)</span></span></span></span></span>。若下游误差梯度为 <span class="reading-math" data-tex="g=\partial\ell/\partial c"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi><mo>=</mo><mi mathvariant="normal">∂</mi><mi mathvariant="normal">ℓ</mi><mi mathvariant="normal">/</mi><mi mathvariant="normal">∂</mi><mi>c</mi></mrow><annotation encoding="application/x-tex">g=\partial\ell/\partial c</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord">ℓ</span><span class="mord">/</span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal">c</span></span></span></span></span>，则 <span class="reading-math" data-tex="\partial\ell/\partial e_j=\alpha_jg^\top(h_j-c)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∂</mi><mi mathvariant="normal">ℓ</mi><mi mathvariant="normal">/</mi><mi mathvariant="normal">∂</mi><msub><mi>e</mi><mi>j</mi></msub><mo>=</mo><msub><mi>α</mi><mi>j</mi></msub><msup><mi>g</mi><mi mathvariant="normal">⊤</mi></msup><mo stretchy="false">(</mo><msub><mi>h</mi><mi>j</mi></msub><mo>−</mo><mi>c</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\partial\ell/\partial e_j=\alpha_jg^\top(h_j-c)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord">ℓ</span><span class="mord">/</span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1352em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">c</span><span class="mclose">)</span></span></span></span></span>。某个位置能否提高分数，取决于它相对当前加权摘要的内容是否有助于降低损失，而非另有一名老师告诉它“应该对齐第几词”。</p>
+<p><strong>教学算例。</strong> 两个标量注释为1与3，分数同为0，则权重各半、上下文为2。若目标希望上下文接近3，使用 <span class="reading-math" data-tex="\ell=(c-3)^2/2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">ℓ</mi><mo>=</mo><mo stretchy="false">(</mo><mi>c</mi><mo>−</mo><mn>3</mn><msup><mo stretchy="false">)</mo><mn>2</mn></msup><mi mathvariant="normal">/</mi><mn>2</mn></mrow><annotation encoding="application/x-tex">\ell=(c-3)^2/2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">ℓ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">c</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord">3</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord">/2</span></span></span></span></span>，可得两个分数梯度分别为0.5与−0.5；梯度下降压低第一个分数、抬高第二个。连续权重让正确读取方向从任务误差中产生，无需采样离散位置或策略梯度。</p>
+<p>构造源句“昨天，来自巴黎的工程师把红色箱子交给了医生”。生成目标语言中的“red box”时，模型可以对相关注释分配较大权重；生成“doctor”时再调整读取位置。原模型不再要求最后编码状态一次性承载所有细节的全部可用形式。</p>
+<h3 id="把对齐向量的归一化轴写进尺寸">把对齐向量的归一化轴写进尺寸</h3>
+<p>若源句有4个位置、编码状态宽度6，则一次解码的对齐权重是4项，和为1；将它与4个六维状态加权相加，得到的上下文仍是六维。下一解码步重新得到另一组4项权重。归一化沿源位置，不是在六个特征通道上选一个，也不要求每个源词只被读一次。</p>
+<p>教法联系：<a href="https://jalammar.github.io/illustrated-transformer/">Jay Alammar的The Illustrated Transformer</a>。算例为本文自构。</p>
+<h2 id="三联合训练注释打分和解码推理时替换前缀">三、联合训练注释、打分和解码，推理时替换前缀</h2>
 <pre><code class="language-text">输入：源句 x 和训练目标 y
 H ← 双向循环编码器对每个源位置的注释
 初始化解码器状态 s
@@ -77,8 +84,9 @@ H ← 双向循环编码器对每个源位置的注释
 联合更新编码器、对齐网络与解码器
 推理时用已生成目标词替代真实前缀，并进行候选搜索
 </code></pre>
-<p>数学目标没有变成“最大化对齐准确率”；机制是动态上下文读取；实验观察翻译 BLEU 与句长敏感性。对齐图像是辅助分析，不应取代翻译性能或被当作独立证明。</p>
-<h2 id="实验设计">实验设计</h2>
+<h2 id="四分开读句长曲线bleu列与四个对齐样例">四、分开读句长曲线、BLEU列与四个对齐样例</h2>
+<p>对齐图像是辅助分析，不应取代翻译性能或被当作独立证明。</p>
+<p>如果动态读取确实缓解摘要瓶颈，句长分析应提供线索；但词表、训练时长和样例筛选必须先固定。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -100,7 +108,7 @@ H ← 双向循环编码器对每个源位置的注释
 </tr>
 <tr>
 <td>词表</td>
-<td>有限词表；表 1 分全部句子与无未知词条件</td>
+<td>有限词表；<a href="https://arxiv.org/html/1409.0473#S5.T1.fig1">表1</a> 分全部句子与无未知词条件</td>
 </tr>
 <tr>
 <td>指标</td>
@@ -115,35 +123,36 @@ H ← 双向循环编码器对每个源位置的注释
 <td>未报告覆盖所有模型的现代统一随机种子置信区间</td>
 </tr>
 </tbody></table></div>
-<p>**证据一，第 3 节方法。**公式定义每个输出位置的软对齐，建立可微路径。这证明算法能联合训练，但不保证得到唯一或语言学正确的对齐。</p>
-<p>**证据二，表 1。**全部句子列中，RNNencdec-50 为 17.82 BLEU，RNNsearch-50 为 26.75；更久训练的带星号版本为 28.45。这里同时需要保留词表条件：无未知词子集是另一列，不能拿其分数与全部句子列混比。</p>
-<p>**证据三，第 5.1 节与按句长图，以及第 5.2 节对齐分析。**长句趋势支持固定摘要瓶颈的解释，对齐图帮助理解动态读取。但曲线不能证明对任意长度都不退化，少数可视化也不能证明所有输出都忠实使用正确源词。</p>
+<p><strong>证据一，第 3 节方法。</strong>公式定义每个输出位置的软对齐，建立可微路径。这证明算法能联合训练，但不保证得到唯一或语言学正确的对齐。</p>
+<p><strong>证据二，<a href="https://arxiv.org/html/1409.0473#S5.T1.fig1">表1</a>。</strong>全部句子列中，RNNencdec-50 为 17.82 BLEU，RNNsearch-50 为 26.75；更久训练的带星号版本为 28.45。这里同时需要保留词表条件：无未知词子集是另一列，不能拿其分数与全部句子列混比。</p>
+<p><strong>证据三，<a href="#llm-v6-007-figure-2">图2的句长曲线</a>与<a href="#llm-v6-007-figure-3">图3的对齐热图</a>。</strong>长句趋势支持固定摘要瓶颈的解释，对齐图帮助理解动态读取。<a href="#llm-v6-007-figure-2">图2</a>包含未知词的完整测试集；<a href="#llm-v6-007-figure-3">图3</a>横轴是英语源词，纵轴是生成的法语词，黑到白表示权重由0到1。热图只有四个样例，后三个来自长度10—20且无未知词的子集。曲线不能证明任意长度都不退化，少数可视化也不能证明所有输出都忠实使用正确源词。</p>
+<!-- figure-ref-v6:start:007-f2-2-anchor -->
+<p><a id="llm-v6-007-figure-2"></a></p>
+<!-- figure-ref-v6:end:007-f2-2-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/007-attention-f2.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/007-attention-f2.png" width="1600" height="914" alt="RNNsearch与固定摘要编码器的BLEU随源句长度变化" loading="lazy"></a><figcaption>原实验图摘引：Dzmitry Bahdanau、Kyunghyun Cho、Yoshua Bengio，2014，图2；<a href="https://arxiv.org/html/1409.0473#S4.F2.fig1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<!-- figure-ref-v6:start:007-f3-3-anchor -->
+<p><a id="llm-v6-007-figure-3"></a></p>
+<!-- figure-ref-v6:end:007-f3-3-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/007-attention-f3.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/007-attention-f3.png" width="1082" height="1158" alt="四个英语到法语翻译样例中的源词与目标词注意力对齐热图" loading="lazy"></a><figcaption>对齐权重可视化摘引：Dzmitry Bahdanau、Kyunghyun Cho、Yoshua Bengio，2014，图3；<a href="https://arxiv.org/html/1409.0473#S4.F3" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <p>评价更长输入时，还要区分训练分布内长句和远超训练长度的外推。模型在长度约 50 的测试句子上稳健，不等于能处理数千词文档。源位置交互数量、隐藏状态表达与搜索问题仍会随长度变化。</p>
-<h2 id="教学例子动态读取与固定摘要">教学例子：动态读取与固定摘要</h2>
-<p>构造源句“昨天，来自巴黎的工程师把红色箱子交给了医生”。生成目标语言中的“red box”时，模型可以对相关注释分配较大权重；生成“doctor”时再调整读取位置。原模型不再要求最后编码状态一次性承载所有细节的全部可用形式。</p>
-<p>如果两个源位置都是同名人物，模型仍可能把角色弄反。注意力只提供读取机制，不保证关系推理正确。若源表示已经混淆两个实体，动态访问也不能完全修复。因此适合做的自构测试是保留词汇但交换人物关系，看翻译是否随关系改变，而非仅检查热图是否漂亮。</p>
 <p>还可以把无关插入语加长，比较基础模型与注意力模型的性能变化。若收益主要来自更容易访问远处信息，长度增长时差距可能扩大。但这只是待验证的假设，应控制词汇难度、搜索预算和训练量，避免把多种因素一起改变。</p>
-<h2 id="贡献与限制">贡献与限制</h2>
-<p>本文将“对齐”和“翻译”变成同一模型中的共同学习过程，改变了编码解码器的信息瓶颈。后续注意力架构继承了按查询读取多个表示的思想，但原论文仍依赖循环计算，不能把 Transformer 的完全训练并行性归给它。</p>
+<h2 id="五可访问源位置仍不保证读对实体关系">五、可访问源位置，仍不保证读对实体关系</h2>
+<p>如果两个源位置都是同名人物，模型仍可能把角色弄反。注意力只提供读取机制，不保证关系推理正确。若源表示已经混淆两个实体，动态访问也不能完全修复。因此适合做的自构测试是保留词汇但交换人物关系，看翻译是否随关系改变，而非仅检查热图是否漂亮。</p>
+<p>后续注意力架构继承了按查询读取多个表示的思想，但原论文仍依赖循环计算，不能把 Transformer 的完全训练并行性归给它。</p>
 <p>代价是源长乘目标长的交互计算，以及对源表示和打分质量的依赖。注意力可能分散、重复或漏读；它不自动提供覆盖约束、事实校验或长文档可靠性。本文的分析是，它的重要性在于给模型可学习的访问接口，而不是以一种权重图解决全部语言理解问题。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>所有源信息挤入单个固定摘要，长句读取困难</td>
-<td>按每个目标位置学习软对齐，并加权读取源注释</td>
-<td>解码器可随生成阶段选择不同源信息，形成可微的信息通路</td>
-<td>表1 BLEU、§5.1句长分析、§5.2对齐分析</td>
-<td>额外对齐计算；权重可视化不保证唯一、因果或语言学正确的解释</td>
-</tr>
-</tbody></table></div>
+<h2 id="六把本篇机制再推进一步">六、把本篇机制再推进一步</h2>
+<details>
+<summary>1. 若全部源注释完全相同，单改对齐权重还可能改变读取内容吗？</summary>
+
+<p><strong>参考答案</strong>：不能。在本篇的加权和中，权重之和为一；相同注释的任意加权和仍是该注释。推导中的注释与当前上下文之差也变为零，因此单靠打分网络无法恢复被编码器抹掉的区分。这说明保留多个位置与保留有用差异是两项条件。</p>
+</details>
+
+<h2 id="七把动态读取扩为注意力架构">七、把动态读取扩为注意力架构</h2>
+<p>读取全部源位置已经可微，顺序解码与循环编码的路径仍在。<a href="015-transformer.html">Transformer</a>进一步重排序列计算；可沿本篇的归一化轴与梯度检查，比较多头和位置表示引入了什么新约束。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 为什么软对齐可以不依赖人工词对齐标签？</strong></p>
 <p>加权上下文进入目标词预测，翻译损失可以通过它反传到对齐打分网络。凡是能帮助预测的读取方式都可能得到强化，因此无需独立标签。但学到的权重只受预测目标约束，不保证等于人工对齐。</p>
@@ -162,21 +171,19 @@ H ← 双向循环编码器对每个源位置的注释
 
 **论文**：Dzmitry Bahdanau、Kyunghyun Cho、Yoshua Bengio，*Neural Machine Translation by Jointly Learning to Align and Translate*，2014 年预印本、ICLR 2015。[原文](https://arxiv.org/abs/1409.0473) · [PDF](https://arxiv.org/pdf/1409.0473)。讨论对象是循环编码解码器中的软对齐，不是后来的 Transformer 自注意力。
 
-## 一分钟理解
+### 先接住前作的问题
 
-如果源句很长，让编码器先把全部信息压成一个向量，再要求解码器逐词取用，可能形成瓶颈。本文为源句每个位置保留一个表示，并让解码器每生成一个词，都计算一组对齐权重，形成当前需要的上下文向量。
+[Seq2Seq](006-seq2seq.md)所代表的固定摘要接口留下一个具体瓶颈：编码结束时要把哪些源细节保存在同一向量里，才能服务全部输出位置？本篇与该工作同期发展，以每步重新读取多个源表示回答这一问题，属于平行编码解码路线；不能据目录相邻伪造直接继承。
 
-作者把翻译与对齐一起训练，不需要额外人工对齐标签。实验显示相较其基础编码解码器，长句翻译更稳健。核心变化是按输出位置动态读取源信息；代价是每个输出步骤都要与源位置交互。注意力权重提供可观察的内部量，但不自动成为可靠的因果解释。
+## 一、问题设定：每个目标词需要的源信息是否必须提前挤进一个摘要
 
-## 问题定义：一个摘要为什么不够
-
-固定向量模型必须在读完整句之前决定哪些细节最终有用。对短句尚可，对包含多个实体、修饰和重排的长句，有限状态既要保存内容又要组织顺序。本文不要求把所有细节放进同一个最终状态，而是保留源位置对应的注释向量。
+长源句包含多个实体、修饰和重排，固定向量接口要求编码器在解码开始前把所有有用细节压到同一状态。可是生成不同目标词需要不同信息：本篇保留每个源位置的注释，让“此刻读哪里”随解码状态改变。
 
 双向循环编码器让每个注释 $h_j$ 包含该位置附近的左右上下文。解码器仍是顺序生成模型：当前状态依赖之前输出，当前输出不能使用未来目标答案。编码源句时使用右侧源信息是合法的，因为完整源句本来就是输入，两种“未来”必须区分。
 
-翻译目标仍然是 $P(y\mid x)$。对齐没有单独的人类标签，而是作为帮助预测目标词的内部计算学习。这样的潜变量式分工可以让模型自行形成有效读写策略，但也意味着权重不必与语言学词对齐完全一致。
+翻译目标仍然是 $P(y\mid x)$。
 
-## 方法：打分、归一化、加权读取
+## 二、由软加权推导对齐网络接收翻译梯度
 
 设解码器上一状态为 $s_{i-1}$，源位置表示为 $h_j$：
 
@@ -191,6 +198,22 @@ $a$ 是可训练的对齐打分网络，$\alpha_{ij}$ 是归一化权重，$c_i$
 软加权让梯度可以通过上下文向量回到权重和源表示，所以翻译损失同时训练“读哪里”和“读到后怎么输出”。这里没有非可微的硬位置选择，也不需要 REINFORCE 来训练一个离散指针。把所有注意力都理解为强化学习选动作，会误读最基本的训练机制。
 
 权重归一化使它们便于比较，但一个高权重源位置的注释本身已经包含邻近上下文。因而“权重落在第六个词”不等于输出只由第六个表面词决定。双向编码与下游变换共同参与结果，这也是解释热图时必须保留的边界。
+
+### 对齐网络为什么能收到翻译误差
+
+固定当前解码步，令 $c=\sum_j\alpha_jh_j$。这里 $h_j$ 是源位置 $j$ 的编码向量，$e_j$ 是匹配分数，$\alpha_j=\operatorname{softmax}(e)_j$ 是读取权重，$\ell$ 是下游损失；$\mathbf1[k=j]$ 为相等时取 1 的指示量。softmax 的导数为 $\partial\alpha_k/\partial e_j=\alpha_k(\mathbf1[k=j]-\alpha_j)$，代入可得 $\partial c/\partial e_j=\alpha_j(h_j-c)$。若下游误差梯度为 $g=\partial\ell/\partial c$，则 $\partial\ell/\partial e_j=\alpha_jg^\top(h_j-c)$。某个位置能否提高分数，取决于它相对当前加权摘要的内容是否有助于降低损失，而非另有一名老师告诉它“应该对齐第几词”。
+
+**教学算例。** 两个标量注释为1与3，分数同为0，则权重各半、上下文为2。若目标希望上下文接近3，使用 $\ell=(c-3)^2/2$，可得两个分数梯度分别为0.5与−0.5；梯度下降压低第一个分数、抬高第二个。连续权重让正确读取方向从任务误差中产生，无需采样离散位置或策略梯度。
+
+构造源句“昨天，来自巴黎的工程师把红色箱子交给了医生”。生成目标语言中的“red box”时，模型可以对相关注释分配较大权重；生成“doctor”时再调整读取位置。原模型不再要求最后编码状态一次性承载所有细节的全部可用形式。
+
+### 把对齐向量的归一化轴写进尺寸
+
+若源句有4个位置、编码状态宽度6，则一次解码的对齐权重是4项，和为1；将它与4个六维状态加权相加，得到的上下文仍是六维。下一解码步重新得到另一组4项权重。归一化沿源位置，不是在六个特征通道上选一个，也不要求每个源词只被读一次。
+
+教法联系：[Jay Alammar的The Illustrated Transformer](https://jalammar.github.io/illustrated-transformer/)。算例为本文自构。
+
+## 三、联合训练注释、打分和解码，推理时替换前缀
 
 ```text
 输入：源句 x 和训练目标 y
@@ -207,47 +230,66 @@ H ← 双向循环编码器对每个源位置的注释
 推理时用已生成目标词替代真实前缀，并进行候选搜索
 ```
 
-数学目标没有变成“最大化对齐准确率”；机制是动态上下文读取；实验观察翻译 BLEU 与句长敏感性。对齐图像是辅助分析，不应取代翻译性能或被当作独立证明。
+## 四、分开读句长曲线、BLEU列与四个对齐样例
 
-## 实验设计
+对齐图像是辅助分析，不应取代翻译性能或被当作独立证明。
+
+如果动态读取确实缓解摘要瓶颈，句长分析应提供线索；但词表、训练时长和样例筛选必须先固定。
 
 | 项目 | 原文范围 |
 |---|---|
 | 任务 | 英语到法语神经机器翻译 |
 | 对照 | 固定摘要 RNNencdec 与带对齐 RNNsearch，以及 Moses |
 | 长度 | 训练长度限制 30 与 50 的不同配置，需分别读 |
-| 词表 | 有限词表；表 1 分全部句子与无未知词条件 |
+| 词表 | 有限词表；[表1](https://arxiv.org/html/1409.0473#S5.T1.fig1) 分全部句子与无未知词条件 |
 | 指标 | BLEU，附按句长分析和对齐可视化 |
 | 预算 | 带星号配置训练更久；不能当作完全等训练量对照 |
 | 重复 | 未报告覆盖所有模型的现代统一随机种子置信区间 |
 
 **证据一，第 3 节方法。**公式定义每个输出位置的软对齐，建立可微路径。这证明算法能联合训练，但不保证得到唯一或语言学正确的对齐。
 
-**证据二，表 1。**全部句子列中，RNNencdec-50 为 17.82 BLEU，RNNsearch-50 为 26.75；更久训练的带星号版本为 28.45。这里同时需要保留词表条件：无未知词子集是另一列，不能拿其分数与全部句子列混比。
+**证据二，[表1](https://arxiv.org/html/1409.0473#S5.T1.fig1)。**全部句子列中，RNNencdec-50 为 17.82 BLEU，RNNsearch-50 为 26.75；更久训练的带星号版本为 28.45。这里同时需要保留词表条件：无未知词子集是另一列，不能拿其分数与全部句子列混比。
 
-**证据三，第 5.1 节与按句长图，以及第 5.2 节对齐分析。**长句趋势支持固定摘要瓶颈的解释，对齐图帮助理解动态读取。但曲线不能证明对任意长度都不退化，少数可视化也不能证明所有输出都忠实使用正确源词。
+**证据三，[图2的句长曲线](#llm-v6-007-figure-2)与[图3的对齐热图](#llm-v6-007-figure-3)。**长句趋势支持固定摘要瓶颈的解释，对齐图帮助理解动态读取。[图2](#llm-v6-007-figure-2)包含未知词的完整测试集；[图3](#llm-v6-007-figure-3)横轴是英语源词，纵轴是生成的法语词，黑到白表示权重由0到1。热图只有四个样例，后三个来自长度10—20且无未知词的子集。曲线不能证明任意长度都不退化，少数可视化也不能证明所有输出都忠实使用正确源词。
+
+&lt;!-- figure-ref-v6:start:007-f2-2-anchor --&gt;
+&lt;a id=&quot;llm-v6-007-figure-2&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:007-f2-2-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/007-attention-f2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/007-attention-f2.png&quot; width=&quot;1600&quot; height=&quot;914&quot; alt=&quot;RNNsearch与固定摘要编码器的BLEU随源句长度变化&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原实验图摘引：Dzmitry Bahdanau、Kyunghyun Cho、Yoshua Bengio，2014，图2；&lt;a href=&quot;https://arxiv.org/html/1409.0473#S4.F2.fig1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+&lt;!-- figure-ref-v6:start:007-f3-3-anchor --&gt;
+&lt;a id=&quot;llm-v6-007-figure-3&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:007-f3-3-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/007-attention-f3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/007-attention-f3.png&quot; width=&quot;1082&quot; height=&quot;1158&quot; alt=&quot;四个英语到法语翻译样例中的源词与目标词注意力对齐热图&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;对齐权重可视化摘引：Dzmitry Bahdanau、Kyunghyun Cho、Yoshua Bengio，2014，图3；&lt;a href=&quot;https://arxiv.org/html/1409.0473#S4.F3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 评价更长输入时，还要区分训练分布内长句和远超训练长度的外推。模型在长度约 50 的测试句子上稳健，不等于能处理数千词文档。源位置交互数量、隐藏状态表达与搜索问题仍会随长度变化。
 
-## 教学例子：动态读取与固定摘要
+还可以把无关插入语加长，比较基础模型与注意力模型的性能变化。若收益主要来自更容易访问远处信息，长度增长时差距可能扩大。但这只是待验证的假设，应控制词汇难度、搜索预算和训练量，避免把多种因素一起改变。
 
-构造源句“昨天，来自巴黎的工程师把红色箱子交给了医生”。生成目标语言中的“red box”时，模型可以对相关注释分配较大权重；生成“doctor”时再调整读取位置。原模型不再要求最后编码状态一次性承载所有细节的全部可用形式。
+## 五、可访问源位置，仍不保证读对实体关系
 
 如果两个源位置都是同名人物，模型仍可能把角色弄反。注意力只提供读取机制，不保证关系推理正确。若源表示已经混淆两个实体，动态访问也不能完全修复。因此适合做的自构测试是保留词汇但交换人物关系，看翻译是否随关系改变，而非仅检查热图是否漂亮。
 
-还可以把无关插入语加长，比较基础模型与注意力模型的性能变化。若收益主要来自更容易访问远处信息，长度增长时差距可能扩大。但这只是待验证的假设，应控制词汇难度、搜索预算和训练量，避免把多种因素一起改变。
-
-## 贡献与限制
-
-本文将“对齐”和“翻译”变成同一模型中的共同学习过程，改变了编码解码器的信息瓶颈。后续注意力架构继承了按查询读取多个表示的思想，但原论文仍依赖循环计算，不能把 Transformer 的完全训练并行性归给它。
+后续注意力架构继承了按查询读取多个表示的思想，但原论文仍依赖循环计算，不能把 Transformer 的完全训练并行性归给它。
 
 代价是源长乘目标长的交互计算，以及对源表示和打分质量的依赖。注意力可能分散、重复或漏读；它不自动提供覆盖约束、事实校验或长文档可靠性。本文的分析是，它的重要性在于给模型可学习的访问接口，而不是以一种权重图解决全部语言理解问题。
 
 五个前置概念分别是双向编码、条件生成、softmax、可微加权和与教师强制。它们对应输入信息范围、任务目标、权重尺度、梯度通路和训练前缀来源。区分源侧双向与目标侧因果尤其重要。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 所有源信息挤入单个固定摘要，长句读取困难 | 按每个目标位置学习软对齐，并加权读取源注释 | 解码器可随生成阶段选择不同源信息，形成可微的信息通路 | 表1 BLEU、§5.1句长分析、§5.2对齐分析 | 额外对齐计算；权重可视化不保证唯一、因果或语言学正确的解释 |
+## 六、把本篇机制再推进一步
+
+&lt;details&gt;
+&lt;summary&gt;1. 若全部源注释完全相同，单改对齐权重还可能改变读取内容吗？&lt;/summary&gt;
+
+**参考答案**：不能。在本篇的加权和中，权重之和为一；相同注释的任意加权和仍是该注释。推导中的注释与当前上下文之差也变为零，因此单靠打分网络无法恢复被编码器抹掉的区分。这说明保留多个位置与保留有用差异是两项条件。
+
+&lt;/details&gt;
+
+## 七、把动态读取扩为注意力架构
+
+读取全部源位置已经可微，顺序解码与循环编码的路径仍在。[Transformer](015-transformer.md)进一步重排序列计算；可沿本篇的归一化轴与梯度检查，比较多头和位置表示引入了什么新约束。
 
 ## 自测与参考答案
 

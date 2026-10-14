@@ -42,22 +42,19 @@
                 <span class="text-gray-500">DPPO：扩散策略如何在线优化回报</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="056d3c4f426562fb70a77b778e6a54ca8f897ccc63c19662854eedce15ead0ef"><h1>083｜DPPO：扩散策略如何在线优化回报</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="618e2f0c1a5472afae5621774131d803fa5ce2378cefd35cabbbb4085731a01b"><h1>083｜DPPO：扩散策略如何在线优化回报</h1>
 <p><a href="index.html">系列首页</a> · <a href="082-openvla.html">上一篇</a> · <a href="084-robotwin.html">下一篇</a></p>
 <p><strong>原论文</strong>：<em>Diffusion Policy Policy Optimization</em>，Allen Z. Ren 等，2024。<a href="https://arxiv.org/abs/2409.00588">论文</a>。</p>
-<h2 id="一一分钟理解让扩散策略从奖励中继续进步">一、一分钟理解：让扩散策略从奖励中继续进步</h2>
-<p>Diffusion Policy 能模仿复杂动作，但示范有限时，它也会继承数据中的盲区。DPPO 研究如何利用在线强化学习继续改善这种策略，而不把多模态动作分布压成一个普通高斯。</p>
-<p>困难在于最终动作的概率不好直接计算：动作经过多次随机去噪才产生。DPPO 把每次去噪视为内部决策，将内部过程与真实环境决策连接起来。每个内部转移都有可计算的高斯概率，于是可以使用 PPO 更新。</p>
-<p>论文不仅提出这一表示，还研究哪些去噪步骤需要微调、噪声多大、价值函数应读取什么。实验支持其在若干稀疏奖励操作任务中的稳定性，并展示仿真训练后的真实桌腿装配。</p>
-<p>一句话：在已有扩散模仿策略的连续控制场景，通过对去噪链进行策略梯度微调，改善奖励与扰动鲁棒性，代价是在线交互和额外去噪计算，收益依赖示范、噪声与控制设置。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="061-diffusion-policy.html">Diffusion Policy</a>从示范学动作分布，却不能单靠监督补齐部署时的失败状态。DPPO保留去噪生成，把内部随机步骤接到PPO，追问怎样用真实奖励改进这种策略而不放弃多模态表示。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>动作块</strong>代表多个未来控制量；<strong>去噪链</strong>逐步生成动作样本；<strong>得分函数梯度</strong>通过采样概率优化回报；<strong>GAE</strong>估计动作相对基线的优势；<strong>域随机化</strong>改变训练环境分布以提高鲁棒性。</p>
-<h2 id="二背景与问题定义">二、背景与问题定义</h2>
+<h2 id="一问题设定多步去噪策略怎样计算可用的更新概率">一、问题设定：多步去噪策略怎样计算可用的更新概率</h2>
 <p>这是先离线模仿、后在线强化学习的无模型方案。策略可以读取状态或图像，输出连续动作块；没有学习环境模型。奖励来自任务完成或阶段完成，Gym 运动任务则使用原来的稠密奖励。</p>
 <p>它与“用 Q 函数梯度指导扩散采样”不同，也与单纯对高回报动作加权回归不同。DPPO 直接提高那些产生较高后续回报的内部去噪决策的概率。</p>
 <p>应用范围需要分开：图像控制在仿真 Robomimic 中验证；真实装配使用状态策略，通过 AprilTag 获取物体位姿。不能把两项实验合成“端到端 RGB 策略直接零样本装桌子”。</p>
-<p><strong>阅读范围</strong>：依据 <a href="https://arxiv.org/html/2409.00588v1">2024 年 v1 正文及实验附录</a>，核查两层 MDP、PPO 设计、各数据与硬件设置。本文未独立复现；部分逐任务完整墙钟预算未逐项核实。</p>
-<h2 id="三方法两种时间尺度怎样接起来">三、方法：两种时间尺度怎样接起来</h2>
+<h2 id="二把去噪内部决策与环境决策连接起来">二、把去噪内部决策与环境决策连接起来</h2>
+<p>困难在于最终动作的概率不好直接计算：动作经过多次随机去噪才产生。DPPO 把每次去噪视为内部决策，将内部过程与真实环境决策连接起来。每个内部转移都有可计算的高斯概率，于是可以使用 PPO 更新。</p>
 <h3 id="1-内部去噪不是环境动作">1. 内部去噪不是环境动作</h3>
 <p>令 <span class="reading-math" data-tex="t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>t</mi></mrow><annotation encoding="application/x-tex">t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6151em;"></span><span class="mord mathnormal">t</span></span></span></span></span> 表示环境决策，<span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 表示去噪阶段：</p>
 <p><span class="reading-math" data-tex="A_t^{k-1}\sim
@@ -102,6 +99,12 @@ c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg><
 <p>论文还区分采样噪声下界与计算概率时使用的下界。前者影响探索，后者避免过小方差造成极大概率比。它们属于实践稳定化选择，不能省略后仍宣称完全复现了算法。</p>
 <h3 id="5-只微调部分去噪步骤">5. 只微调部分去噪步骤</h3>
 <p>可以保留一个冻结预训练网络负责前期高噪声步骤，用可训练副本负责末尾步骤。也可减少采样步数；训练时保持随机性以计算概率，评价时使用确定性采样。</p>
+<p>局部去噪更新幅度与整条生成路径不同。教学上，即使十个内部转移的新旧密度比分别都为1.1，该条路径的联合概率比也会是 <span class="reading-math" data-tex="1.1^{10}\approx2.59"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1.</mn><msup><mn>1</mn><mn>10</mn></msup><mo>≈</mo><mn>2.59</mn></mrow><annotation encoding="application/x-tex">1.1^{10}\approx2.59</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">1.</span><span class="mord"><span class="mord">1</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">10</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2.59</span></span></span></span></span>。这只是假设同一路径上各条件概率比相乘，不能当成最终动作边缘概率比，因为后者还要对内部路径积分。</p>
+<p>更重要的是PPO裁剪是代理目标的形状，并非把所有新旧概率比硬限制在区间内。因此“用了小clip”不能单独保证完整去噪策略变化小。原文对clip、噪声下界和末尾步骤微调进行实践选择，正是两层决策链需要额外稳定化的证据。<a href="https://arxiv.org/html/2409.00588v1">原文§4与附录D.4</a></p>
+<h3 id="教学例子与前置概念">教学例子与前置概念</h3>
+<p><strong>自构例子，未运行</strong>：绕过障碍可以走左边或右边，示范两种都有，但在线奖励只认可右边到达。比较扩散、高斯和混合高斯：除了最终回报，还记录撞障比例、左右路线占比及更新后的分布坍缩。若初始拟合误差不同，先让各模型达到接近的模仿质量再比较，才能避免把预训练差异误认为 RL 优势。</p>
+<h2 id="三沿内部高斯转移计算ppo比率">三、沿内部高斯转移计算PPO比率</h2>
+<p>每次去噪有可计算的条件概率，内部过程与环境决策共同构成优化对象。内部步数增加并不增加真实物理转移，两个时间尺度的折扣与成本必须分开。</p>
 <pre><code class="language-text">用示范训练扩散行为克隆策略
 复制冻结策略和可微调策略，初始化环境价值函数
 重复在线训练：
@@ -113,7 +116,18 @@ c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg><
     用内部概率比进行 PPO 更新，更新价值函数
 固定策略，减少探索噪声进行独立闭环评价
 </code></pre>
-<h2 id="四实验如何验证">四、实验如何验证</h2>
+<h2 id="四分开预训在线交互与内部去噪预算">四、分开预训、在线交互与内部去噪预算</h2>
+<p>论文不仅提出这一表示，还研究哪些去噪步骤需要微调、噪声多大、价值函数应读取什么。实验支持其在若干稀疏奖励操作任务中的稳定性，并展示仿真训练后的真实桌腿装配。</p>
+<p><strong>原图怎么读：</strong> <a href="#paper-083-diffusion-rl-figure-7">图7，原论文图注与图像</a>。上排是仿真家具任务曲线，下排才是真实One-leg迁移；不能把另一处像素策略结果套到这组依赖状态观测的真机实验。</p>
+<!-- figure-ref-v6:start:083-diffusion-rl-license -->
+<p>原文标注 <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>。本页摘图仅保留图形区域并作栅格化；有面板重排的图另行注明，作者与原文入口见各图注。</p>
+<!-- figure-ref-v6:end:083-diffusion-rl-license -->
+<!-- figure-ref-v6:start:e78ca32e1ccc-anchor -->
+<a id="paper-083-diffusion-rl-figure-7"></a>
+<!-- figure-ref-v6:end:e78ca32e1ccc-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/083-diffusion-rl-s5-f7.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/083-diffusion-rl-s5-f7.png" width="1824" height="763" alt="Diffusion Policy Policy Optimization，图7：上排是仿真家具任务曲线，下排才是真实One-leg迁移；不能把另一处像素策略结果套到这组依赖状态观测的真机实验。" loading="lazy"></a><figcaption>实验图原图摘引：Allen Z. Ren 等，2024，HTML S5.F7，图7。<a href="https://arxiv.org/html/2409.00588v1#S5.F7" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -160,38 +174,39 @@ c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg><
 </tbody></table></div>
 <p>不同策略的预训练轮数不相同，例如家具任务扩散与高斯使用不同 epoch 数；参数规模、架构也不完全一致。论文努力调优基线并保持动作块可比，但不能把结果解释为严格等总计算的分布族比较。</p>
 <p>家具奖励包含阶段完成指标，不是只在整个装配结束才给唯一奖励。硬件使用物体标签定位和坐标标定；随机化噪声也参考了静止硬件观测。这意味着“没有真机策略微调”不等于完全没用真机测量信息。</p>
-<h2 id="五五组证据结果与机制分开">五、五组证据：结果与机制分开</h2>
-<p><strong>图 5：不同扩散 RL 方法。</strong> DPPO 在稀疏操作任务尤其 Transport 中有优势，Gym 上部分方法也有竞争力。这支持任务相关的稳定性收益，不支持所有离策略算法必然不适合扩散。</p>
-<p><strong>图 6：不同动作分布。</strong> 状态 Transport 达到超过 90% 的表现，视觉困难任务中也表现较强。较容易任务差距较小，说明多步去噪优势并不在所有任务上同样明显。</p>
-<p><strong>图 7：真机。</strong> DPPO 为 16/20，即 80%；高斯微调在模拟中 88%，真实为零；加入行为克隆约束后真实为 50%。这说明模拟高回报不足以保证部署，也显示合理基线改进能缩小差距。20 次试验仍不足以证明跨家具、跨硬件普遍可靠。</p>
-<p><strong>图 8：纠错行为。</strong> 示例展示插入失败后的修正，说明强化学习可能扩展示范之外的状态覆盖。但展示轨迹不能单独量化所有扰动下的恢复概率，需要随机扰动和预先定义的成功标准。</p>
+<h3 id="五组证据结果与机制分开">五组证据：结果与机制分开</h3>
+<p><strong><a href="#paper-083-diffusion-rl-figure-5">图5</a>：不同扩散 RL 方法。</strong> DPPO 在稀疏操作任务尤其 Transport 中有优势，Gym 上部分方法也有竞争力。这支持任务相关的稳定性收益，不支持所有离策略算法必然不适合扩散。</p>
+<!-- figure-ref-v6:start:64fc4a0b6dee -->
+<p><a id="paper-083-diffusion-rl-figure-5"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/083-diffusion-rl-v6-figure-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/083-diffusion-rl-v6-figure-5.png" width="2132" height="923" alt="Diffusion Policy Policy Optimization，图5：不同扩散 RL 方法。 DPPO 在稀疏操作任务尤其 Transport 中有优势，Gym 上部分方法也有竞争力。这支持任务相关的稳定性收益，不支持所有离策略算法必然不适合扩散。" loading="lazy"></a><figcaption>原图摘引：Allen Z. Ren 等，2024，HTML S5.F5，图5。<a href="https://arxiv.org/html/2409.00588v1#S5.F5" target="_blank" rel="noopener noreferrer">核对原文</a>。不同扩散 RL 方法。 DPPO 在稀疏操作任务尤其 Transport 中有优势，Gym 上部分方法也有竞争力。这支持任务相关的稳定性收益，不支持所有离策略算法必然不适合扩散。</figcaption></figure>
+<!-- figure-ref-v6:end:64fc4a0b6dee -->
+
+
+<p><strong><a href="#paper-083-diffusion-rl-figure-6">图6</a>：不同动作分布。</strong> 状态 Transport 达到超过 90% 的表现，视觉困难任务中也表现较强。较容易任务差距较小，说明多步去噪优势并不在所有任务上同样明显。</p>
+<!-- figure-ref-v6:start:067872ca7300 -->
+<p><a id="paper-083-diffusion-rl-figure-6"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/083-diffusion-rl-v6-figure-6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/083-diffusion-rl-v6-figure-6.png" width="2132" height="558" alt="Diffusion Policy Policy Optimization，图6：不同动作分布。 状态 Transport 达到超过 90% 的表现，视觉困难任务中也表现较强。较容易任务差距较小，说明多步去噪优势并不在所有任务上同样明显。" loading="lazy"></a><figcaption>原图摘引：Allen Z. Ren 等，2024，HTML S5.F6，图6。<a href="https://arxiv.org/html/2409.00588v1#S5.F6" target="_blank" rel="noopener noreferrer">核对原文</a>。不同动作分布。 状态 Transport 达到超过 90% 的表现，视觉困难任务中也表现较强。较容易任务差距较小，说明多步去噪优势并不在所有任务上同样明显。</figcaption></figure>
+<!-- figure-ref-v6:end:067872ca7300 -->
+
+
+<p><strong><a href="#paper-083-diffusion-rl-figure-7">图7</a>：真机。</strong> DPPO 为 16/20，即 80%；高斯微调在模拟中 88%，真实为零；加入行为克隆约束后真实为 50%。这说明模拟高回报不足以保证部署，也显示合理基线改进能缩小差距。20 次试验仍不足以证明跨家具、跨硬件普遍可靠。</p>
+<p><strong><a href="#paper-083-diffusion-rl-figure-8">图8</a>：纠错行为。</strong> 示例展示插入失败后的修正，说明强化学习可能扩展示范之外的状态覆盖。但展示轨迹不能单独量化所有扰动下的恢复概率，需要随机扰动和预先定义的成功标准。</p>
+<!-- figure-ref-v6:start:47d90d4d76ee -->
+<p><a id="paper-083-diffusion-rl-figure-8"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/083-diffusion-rl-v6-figure-8.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/083-diffusion-rl-v6-figure-8.png" width="2132" height="1740" alt="Diffusion Policy Policy Optimization，图8：纠错行为。 示例展示插入失败后的修正，说明强化学习可能扩展示范之外的状态覆盖。但展示轨迹不能单独量化所有扰动下的恢复概率，需要随机扰动和预先定义的成功标准。" loading="lazy"></a><figcaption>原图摘引：Allen Z. Ren 等，2024，HTML S5.F8，图8。<a href="https://arxiv.org/html/2409.00588v1#S5.F8" target="_blank" rel="noopener noreferrer">核对原文</a>。纠错行为。 示例展示插入失败后的修正，说明强化学习可能扩展示范之外的状态覆盖。但展示轨迹不能单独量化所有扰动下的恢复概率，需要随机扰动和预先定义的成功标准。</figcaption></figure>
+<!-- figure-ref-v6:end:47d90d4d76ee -->
+
+
 <p><strong>§6 与附录 B：探索解释和消融。</strong> 简化绕障任务支持扩散探索更贴近已有行为分布，以及噪声和去噪阶段设计影响稳定性。这是机制证据和作者推断，尚非“策略永不离开安全流形”的定理。</p>
 <p>附录 D.4 关于 clipping 的文字方向与给出的阶段比值容易产生歧义：文字说早期更大，而索引关系给出另一种直观读法。复现应按代码版本核实具体调度，不能凭一句文字决定实现。该疑点不否定实验结果，但影响精确复现。</p>
-<h2 id="六贡献成本与边界">六、贡献、成本与边界</h2>
-<p>贡献是把扩散的内部概率结构与连续环境决策连接，再通过经验设计使其可训练。PPO、扩散 MDP 和模仿预训练都不是独立新发明，组合后的控制框架与实证分析才是重点。</p>
+<h2 id="五奖励改进仍受支持和控制接口约束">五、奖励改进仍受支持和控制接口约束</h2>
 <p>多步采样和保存去噪路径增加计算、显存；论文说明与部分其他策略参数化相比墙钟可更慢。样本效率、最终成功率、计算速度应分别比较，不能看到更陡的交互曲线就说训练更快。</p>
 <p>我的分析是，它尤其适合已有相对可用示范、在线奖励可信的情况。若初始策略几乎永远到不了任何奖励区域，扩散结构并不能凭空产生正确技能；如果成功判据奖励危险捷径，PPO 仍会沿奖励优化。</p>
-<h2 id="七教学例子与前置概念">七、教学例子与前置概念</h2>
-<p><strong>自构例子，未运行</strong>：绕过障碍可以走左边或右边，示范两种都有，但在线奖励只认可右边到达。比较扩散、高斯和混合高斯：除了最终回报，还记录撞障比例、左右路线占比及更新后的分布坍缩。若初始拟合误差不同，先让各模型达到接近的模仿质量再比较，才能避免把预训练差异误认为 RL 优势。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>扩散策略难用标准 RL 微调</td>
-<td>两层 MDP、内部 PPO 与噪声设计</td>
-<td>显式条件概率，保留结构化探索</td>
-<td>操作对照、消融和真机装配</td>
-<td>交互与计算成本；依赖示范及奖励</td>
-</tr>
-</tbody></table></div>
-<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<h3 id="追问减少可训练去噪步骤时怎样区分节省计算与限制改进能力">追问：减少可训练去噪步骤时，怎样区分节省计算与限制改进能力？</h3>
+<p>参考答案：固定预训练策略和环境交互预算，改变被微调的步骤集合，另外记录梯度计算和采样延迟。只更新部分步骤保留更多原分布结构，也可能限制策略摆脱次优模式。最终回报、示范保持和样本覆盖应共同查看，不能只用相同环境步数断言优化工作量相同。</p>
+<h2 id="六沿机制关系继续读">六、沿机制关系继续读</h2>
+<p>DPPO直接从<a href="061-diffusion-policy.html">Diffusion Policy</a>式示范策略出发，组合PPO优化内部去噪决策；与<a href="039-awac.html">AWAC</a>是平行的示范后改进路线，前者主要在线on-policy采样，后者依赖离策略价值与回放。</p>
+<h2 id="七自测三题与参考答案">七、自测三题与参考答案</h2>
 <p><strong>问题1：为什么不需要知道最终动作的精确边缘概率？</strong></p>
 <p>答案：可以把内部随机去噪决策一起纳入扩展 MDP，针对已采样路径的条件概率求策略梯度。每步高斯可计算，不必先对全部内部路径积分。</p>
 <p><strong>问题2：去噪十步是否意味着环境样本量增加十倍？</strong></p>
@@ -209,17 +224,11 @@ c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg><
 
 **原论文**：*Diffusion Policy Policy Optimization*，Allen Z. Ren 等，2024。[论文](https://arxiv.org/abs/2409.00588)。
 
-## 一、一分钟理解：让扩散策略从奖励中继续进步
+### 先接住前作的问题
 
-Diffusion Policy 能模仿复杂动作，但示范有限时，它也会继承数据中的盲区。DPPO 研究如何利用在线强化学习继续改善这种策略，而不把多模态动作分布压成一个普通高斯。
+[Diffusion Policy](061-diffusion-policy.md)从示范学动作分布，却不能单靠监督补齐部署时的失败状态。DPPO保留去噪生成，把内部随机步骤接到PPO，追问怎样用真实奖励改进这种策略而不放弃多模态表示。
 
-困难在于最终动作的概率不好直接计算：动作经过多次随机去噪才产生。DPPO 把每次去噪视为内部决策，将内部过程与真实环境决策连接起来。每个内部转移都有可计算的高斯概率，于是可以使用 PPO 更新。
-
-论文不仅提出这一表示，还研究哪些去噪步骤需要微调、噪声多大、价值函数应读取什么。实验支持其在若干稀疏奖励操作任务中的稳定性，并展示仿真训练后的真实桌腿装配。
-
-一句话：在已有扩散模仿策略的连续控制场景，通过对去噪链进行策略梯度微调，改善奖励与扰动鲁棒性，代价是在线交互和额外去噪计算，收益依赖示范、噪声与控制设置。
-
-## 二、背景与问题定义
+## 一、问题设定：多步去噪策略怎样计算可用的更新概率
 
 这是先离线模仿、后在线强化学习的无模型方案。策略可以读取状态或图像，输出连续动作块；没有学习环境模型。奖励来自任务完成或阶段完成，Gym 运动任务则使用原来的稠密奖励。
 
@@ -227,9 +236,9 @@ Diffusion Policy 能模仿复杂动作，但示范有限时，它也会继承数
 
 应用范围需要分开：图像控制在仿真 Robomimic 中验证；真实装配使用状态策略，通过 AprilTag 获取物体位姿。不能把两项实验合成“端到端 RGB 策略直接零样本装桌子”。
 
-**阅读范围**：依据 [2024 年 v1 正文及实验附录](https://arxiv.org/html/2409.00588v1)，核查两层 MDP、PPO 设计、各数据与硬件设置。本文未独立复现；部分逐任务完整墙钟预算未逐项核实。
+## 二、把去噪内部决策与环境决策连接起来
 
-## 三、方法：两种时间尺度怎样接起来
+困难在于最终动作的概率不好直接计算：动作经过多次随机去噪才产生。DPPO 把每次去噪视为内部决策，将内部过程与真实环境决策连接起来。每个内部转移都有可计算的高斯概率，于是可以使用 PPO 更新。
 
 ### 1. 内部去噪不是环境动作
 
@@ -291,6 +300,18 @@ $$
 
 可以保留一个冻结预训练网络负责前期高噪声步骤，用可训练副本负责末尾步骤。也可减少采样步数；训练时保持随机性以计算概率，评价时使用确定性采样。
 
+局部去噪更新幅度与整条生成路径不同。教学上，即使十个内部转移的新旧密度比分别都为1.1，该条路径的联合概率比也会是 $1.1^{10}\approx2.59$。这只是假设同一路径上各条件概率比相乘，不能当成最终动作边缘概率比，因为后者还要对内部路径积分。
+
+更重要的是PPO裁剪是代理目标的形状，并非把所有新旧概率比硬限制在区间内。因此“用了小clip”不能单独保证完整去噪策略变化小。原文对clip、噪声下界和末尾步骤微调进行实践选择，正是两层决策链需要额外稳定化的证据。[原文§4与附录D.4](https://arxiv.org/html/2409.00588v1)
+
+### 教学例子与前置概念
+
+**自构例子，未运行**：绕过障碍可以走左边或右边，示范两种都有，但在线奖励只认可右边到达。比较扩散、高斯和混合高斯：除了最终回报，还记录撞障比例、左右路线占比及更新后的分布坍缩。若初始拟合误差不同，先让各模型达到接近的模仿质量再比较，才能避免把预训练差异误认为 RL 优势。
+
+## 三、沿内部高斯转移计算PPO比率
+
+每次去噪有可计算的条件概率，内部过程与环境决策共同构成优化对象。内部步数增加并不增加真实物理转移，两个时间尺度的折扣与成本必须分开。
+
 ~~~text
 用示范训练扩散行为克隆策略
 复制冻结策略和可微调策略，初始化环境价值函数
@@ -304,7 +325,21 @@ $$
 固定策略，减少探索噪声进行独立闭环评价
 ~~~
 
-## 四、实验如何验证
+## 四、分开预训、在线交互与内部去噪预算
+
+论文不仅提出这一表示，还研究哪些去噪步骤需要微调、噪声多大、价值函数应读取什么。实验支持其在若干稀疏奖励操作任务中的稳定性，并展示仿真训练后的真实桌腿装配。
+
+**原图怎么读：** [图7，原论文图注与图像](#paper-083-diffusion-rl-figure-7)。上排是仿真家具任务曲线，下排才是真实One-leg迁移；不能把另一处像素策略结果套到这组依赖状态观测的真机实验。
+
+
+&lt;!-- figure-ref-v6:start:083-diffusion-rl-license --&gt;
+&lt;p&gt;原文标注 &lt;a href=&quot;https://creativecommons.org/licenses/by/4.0/&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;CC BY 4.0&lt;/a&gt;。本页摘图仅保留图形区域并作栅格化；有面板重排的图另行注明，作者与原文入口见各图注。&lt;/p&gt;
+&lt;!-- figure-ref-v6:end:083-diffusion-rl-license --&gt;
+&lt;!-- figure-ref-v6:start:e78ca32e1ccc-anchor --&gt;
+&lt;a id=&quot;paper-083-diffusion-rl-figure-7&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:e78ca32e1ccc-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/083-diffusion-rl-s5-f7.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/083-diffusion-rl-s5-f7.png&quot; width=&quot;1824&quot; height=&quot;763&quot; alt=&quot;Diffusion Policy Policy Optimization，图7：上排是仿真家具任务曲线，下排才是真实One-leg迁移；不能把另一处像素策略结果套到这组依赖状态观测的真机实验。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验图原图摘引：Allen Z. Ren 等，2024，HTML S5.F7，图7。&lt;a href=&quot;https://arxiv.org/html/2409.00588v1#S5.F7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 | 实验组 | 数据和任务 | 评价问题 |
 |---|---|---|
@@ -320,39 +355,57 @@ $$
 
 家具奖励包含阶段完成指标，不是只在整个装配结束才给唯一奖励。硬件使用物体标签定位和坐标标定；随机化噪声也参考了静止硬件观测。这意味着“没有真机策略微调”不等于完全没用真机测量信息。
 
-## 五、五组证据：结果与机制分开
+### 五组证据：结果与机制分开
 
-**图 5：不同扩散 RL 方法。** DPPO 在稀疏操作任务尤其 Transport 中有优势，Gym 上部分方法也有竞争力。这支持任务相关的稳定性收益，不支持所有离策略算法必然不适合扩散。
+**[图5](#paper-083-diffusion-rl-figure-5)：不同扩散 RL 方法。** DPPO 在稀疏操作任务尤其 Transport 中有优势，Gym 上部分方法也有竞争力。这支持任务相关的稳定性收益，不支持所有离策略算法必然不适合扩散。
 
-**图 6：不同动作分布。** 状态 Transport 达到超过 90% 的表现，视觉困难任务中也表现较强。较容易任务差距较小，说明多步去噪优势并不在所有任务上同样明显。
+&lt;!-- figure-ref-v6:start:64fc4a0b6dee --&gt;
+&lt;a id=&quot;paper-083-diffusion-rl-figure-5&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/083-diffusion-rl-v6-figure-5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/083-diffusion-rl-v6-figure-5.png&quot; width=&quot;2132&quot; height=&quot;923&quot; alt=&quot;Diffusion Policy Policy Optimization，图5：不同扩散 RL 方法。 DPPO 在稀疏操作任务尤其 Transport 中有优势，Gym 上部分方法也有竞争力。这支持任务相关的稳定性收益，不支持所有离策略算法必然不适合扩散。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Allen Z. Ren 等，2024，HTML S5.F5，图5。&lt;a href=&quot;https://arxiv.org/html/2409.00588v1#S5.F5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。不同扩散 RL 方法。 DPPO 在稀疏操作任务尤其 Transport 中有优势，Gym 上部分方法也有竞争力。这支持任务相关的稳定性收益，不支持所有离策略算法必然不适合扩散。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:64fc4a0b6dee --&gt;
 
-**图 7：真机。** DPPO 为 16/20，即 80%；高斯微调在模拟中 88%，真实为零；加入行为克隆约束后真实为 50%。这说明模拟高回报不足以保证部署，也显示合理基线改进能缩小差距。20 次试验仍不足以证明跨家具、跨硬件普遍可靠。
 
-**图 8：纠错行为。** 示例展示插入失败后的修正，说明强化学习可能扩展示范之外的状态覆盖。但展示轨迹不能单独量化所有扰动下的恢复概率，需要随机扰动和预先定义的成功标准。
+**[图6](#paper-083-diffusion-rl-figure-6)：不同动作分布。** 状态 Transport 达到超过 90% 的表现，视觉困难任务中也表现较强。较容易任务差距较小，说明多步去噪优势并不在所有任务上同样明显。
+
+&lt;!-- figure-ref-v6:start:067872ca7300 --&gt;
+&lt;a id=&quot;paper-083-diffusion-rl-figure-6&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/083-diffusion-rl-v6-figure-6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/083-diffusion-rl-v6-figure-6.png&quot; width=&quot;2132&quot; height=&quot;558&quot; alt=&quot;Diffusion Policy Policy Optimization，图6：不同动作分布。 状态 Transport 达到超过 90% 的表现，视觉困难任务中也表现较强。较容易任务差距较小，说明多步去噪优势并不在所有任务上同样明显。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Allen Z. Ren 等，2024，HTML S5.F6，图6。&lt;a href=&quot;https://arxiv.org/html/2409.00588v1#S5.F6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。不同动作分布。 状态 Transport 达到超过 90% 的表现，视觉困难任务中也表现较强。较容易任务差距较小，说明多步去噪优势并不在所有任务上同样明显。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:067872ca7300 --&gt;
+
+
+**[图7](#paper-083-diffusion-rl-figure-7)：真机。** DPPO 为 16/20，即 80%；高斯微调在模拟中 88%，真实为零；加入行为克隆约束后真实为 50%。这说明模拟高回报不足以保证部署，也显示合理基线改进能缩小差距。20 次试验仍不足以证明跨家具、跨硬件普遍可靠。
+
+**[图8](#paper-083-diffusion-rl-figure-8)：纠错行为。** 示例展示插入失败后的修正，说明强化学习可能扩展示范之外的状态覆盖。但展示轨迹不能单独量化所有扰动下的恢复概率，需要随机扰动和预先定义的成功标准。
+
+&lt;!-- figure-ref-v6:start:47d90d4d76ee --&gt;
+&lt;a id=&quot;paper-083-diffusion-rl-figure-8&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/083-diffusion-rl-v6-figure-8.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/083-diffusion-rl-v6-figure-8.png&quot; width=&quot;2132&quot; height=&quot;1740&quot; alt=&quot;Diffusion Policy Policy Optimization，图8：纠错行为。 示例展示插入失败后的修正，说明强化学习可能扩展示范之外的状态覆盖。但展示轨迹不能单独量化所有扰动下的恢复概率，需要随机扰动和预先定义的成功标准。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Allen Z. Ren 等，2024，HTML S5.F8，图8。&lt;a href=&quot;https://arxiv.org/html/2409.00588v1#S5.F8&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。纠错行为。 示例展示插入失败后的修正，说明强化学习可能扩展示范之外的状态覆盖。但展示轨迹不能单独量化所有扰动下的恢复概率，需要随机扰动和预先定义的成功标准。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:47d90d4d76ee --&gt;
+
 
 **§6 与附录 B：探索解释和消融。** 简化绕障任务支持扩散探索更贴近已有行为分布，以及噪声和去噪阶段设计影响稳定性。这是机制证据和作者推断，尚非“策略永不离开安全流形”的定理。
 
 附录 D.4 关于 clipping 的文字方向与给出的阶段比值容易产生歧义：文字说早期更大，而索引关系给出另一种直观读法。复现应按代码版本核实具体调度，不能凭一句文字决定实现。该疑点不否定实验结果，但影响精确复现。
 
-## 六、贡献、成本与边界
-
-贡献是把扩散的内部概率结构与连续环境决策连接，再通过经验设计使其可训练。PPO、扩散 MDP 和模仿预训练都不是独立新发明，组合后的控制框架与实证分析才是重点。
+## 五、奖励改进仍受支持和控制接口约束
 
 多步采样和保存去噪路径增加计算、显存；论文说明与部分其他策略参数化相比墙钟可更慢。样本效率、最终成功率、计算速度应分别比较，不能看到更陡的交互曲线就说训练更快。
 
 我的分析是，它尤其适合已有相对可用示范、在线奖励可信的情况。若初始策略几乎永远到不了任何奖励区域，扩散结构并不能凭空产生正确技能；如果成功判据奖励危险捷径，PPO 仍会沿奖励优化。
 
-## 七、教学例子与前置概念
-
-**自构例子，未运行**：绕过障碍可以走左边或右边，示范两种都有，但在线奖励只认可右边到达。比较扩散、高斯和混合高斯：除了最终回报，还记录撞障比例、左右路线占比及更新后的分布坍缩。若初始拟合误差不同，先让各模型达到接近的模仿质量再比较，才能避免把预训练差异误认为 RL 优势。
+### 五个前置概念
 
 五个前置概念：**动作块**代表多个未来控制量；**去噪链**逐步生成动作样本；**得分函数梯度**通过采样概率优化回报；**GAE**估计动作相对基线的优势；**域随机化**改变训练环境分布以提高鲁棒性。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 扩散策略难用标准 RL 微调 | 两层 MDP、内部 PPO 与噪声设计 | 显式条件概率，保留结构化探索 | 操作对照、消融和真机装配 | 交互与计算成本；依赖示范及奖励 |
+### 追问：减少可训练去噪步骤时，怎样区分节省计算与限制改进能力？
 
-## 八、三个问题及答案
+参考答案：固定预训练策略和环境交互预算，改变被微调的步骤集合，另外记录梯度计算和采样延迟。只更新部分步骤保留更多原分布结构，也可能限制策略摆脱次优模式。最终回报、示范保持和样本覆盖应共同查看，不能只用相同环境步数断言优化工作量相同。
+
+## 六、沿机制关系继续读
+
+DPPO直接从[Diffusion Policy](061-diffusion-policy.md)式示范策略出发，组合PPO优化内部去噪决策；与[AWAC](039-awac.md)是平行的示范后改进路线，前者主要在线on-policy采样，后者依赖离策略价值与回放。
+
+## 七、自测三题与参考答案
 
 **问题1：为什么不需要知道最终动作的精确边缘概率？**
 
@@ -365,7 +418,6 @@ $$
 **问题3：真实 80% 装配是否证明视觉策略已泛化到任意家具？**
 
 答案：不能。硬件实验是特定 One-leg 任务的状态策略，依赖 AprilTag 位姿和标定。视觉输入结果来自另一组仿真实验，不能将二者合并成未做过的实验结论。
-
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

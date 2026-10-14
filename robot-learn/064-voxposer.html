@@ -42,14 +42,11 @@
                 <span class="text-gray-500">VoxPoser：从语言构造三维价值地图</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="0b649b03471fdb3b16fe6b21e2c00d310c0f63150e96de1e8bccdaa15f266001"><h1>064｜VoxPoser：从语言构造三维价值地图</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="cc0737da2a6fb728fb6eef9d27c7cf8874a629198a88249dfa5106d14461a41f"><h1>064｜VoxPoser：从语言构造三维价值地图</h1>
 <p><a href="index.html">系列首页</a> · <a href="063-furniturebench.html">上一篇</a> · <a href="065-rt2.html">下一篇</a></p>
 <p><strong>原论文</strong>：<em>VoxPoser: Composable 3D Value Maps for Robotic Manipulation with Language Models</em>，Wenlong Huang 等，2023，本文对应 arXiv v2。<a href="https://arxiv.org/abs/2307.05973">论文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p>“把杯子拿过来，避开花瓶，经过桌沿时慢一点。”这句话包含目标、障碍和速度要求。把它翻译成几个动作名称容易，变成机器人此刻能执行的空间轨迹却困难。</p>
-<p>VoxPoser 的做法是让语言模型写程序：调用视觉接口找到对象，在三维空间里构造吸引区域、回避区域、姿态与速度要求，再交给运动规划器求轨迹。语言负责描述“哪些位置有意义”，规划器负责计算“怎样走过去”。</p>
-<p>这里的 value map 不是通过 Bellman 方程学出的 Q 值，也不是每个体素对应长期回报的统计估计。它首先是语言与感知组合出来的任务目标表示。</p>
-<p>作者的真实测试支持这种表示比所用动作原语基线更适合空间约束与扰动恢复；这没有证明语言模型能独立处理任意接触动力学。<strong>在语言指定的桌面操作中，通过可组合空间地图连接语义与规划，改善了任务表达和闭环执行，代价是对感知、地图设计及低层模型的依赖。</strong></p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="051-saycan.html">SayCan</a>在固定技能中做选择，但“避开花瓶、沿桌边慢走”包含连续空间约束，未必能由几个技能名称表达。VoxPoser让语言程序构造空间代价，再由规划器求轨迹；它生成任务表示，不学习Bellman价值。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：</p>
 <ol>
@@ -59,13 +56,16 @@
 <li><strong>操作空间控制</strong>：把末端目标转换为底层机器人控制。</li>
 <li><strong>探索先验</strong>：让动作采样更偏向可能相关的区域，而非均匀尝试。</li>
 </ol>
-<h2 id="二从语言计划到物理动作中间缺少什么">二、从语言计划到物理动作，中间缺少什么</h2>
+<h2 id="一问题设定语言里的目标障碍和速度怎样变成轨迹">一、问题设定：语言里的目标、障碍和速度怎样变成轨迹</h2>
+<p>“把杯子拿过来，避开花瓶，经过桌沿时慢一点。”这句话包含目标、障碍和速度要求。把它翻译成几个动作名称容易，变成机器人此刻能执行的空间轨迹却困难。</p>
 <p>SayCan 一类方法擅长从技能库中选择下一步；如果技能库没有“沿杯子左边绕过去”，语言理解再好也不能直接补出这个运动。</p>
 <p>VoxPoser 把重点放在每个子任务的轨迹生成。输入包括自然语言、RGB-D 观测和机器人状态；输出是带姿态、速度及夹爪命令的末端路点。子任务排序也由语言程序参与完成，但并非论文重点。</p>
 <p>一个容易忽略的区分是“关注实体”。它可能是末端，也可能是被推动的物体。如果目标是让杯子到达桌角，优化的应是杯子的位置；末端路径只是一种实现手段。这时系统必须知道末端动作如何改变杯子，不能只在杯子周围画一个高分区域。</p>
 <p>原文主要包含无额外任务训练的规划，以及单独的在线动力学学习实验。前者的“零样本”不意味着没有预训练模型、提示示例或人工接口。GPT-4 的语言程序提示包含示例，视觉模块也使用预训练模型。机器人交互数据、互联网预训练数据与上下文示例是三种不同资源。</p>
-<h2 id="三核心机制语言输出目标规划器求解动作">三、核心机制：语言输出目标，规划器求解动作</h2>
-<h3 id="31-从代价函数理解整体架构">3.1 从代价函数理解整体架构</h3>
+<h2 id="二用可组合空间地图连接感知与规划">二、用可组合空间地图连接感知与规划</h2>
+<p>VoxPoser 的做法是让语言模型写程序：调用视觉接口找到对象，在三维空间里构造吸引区域、回避区域、姿态与速度要求，再交给运动规划器求轨迹。语言负责描述“哪些位置有意义”，规划器负责计算“怎样走过去”。</p>
+<p>这里的 value map 不是通过 Bellman 方程学出的 Q 值，也不是每个体素对应长期回报的统计估计。它首先是语言与感知组合出来的任务目标表示。</p>
+<h3 id="从代价函数理解整体架构">从代价函数理解整体架构</h3>
 <p>原文式 1 的核心是：</p>
 <p><span class="reading-math" data-tex="\min_{\tau^r}\;
 F_{\rm task}(T,\ell)+F_{\rm control}(\tau^r)
@@ -76,14 +76,28 @@ F_{\rm task}(T,\ell)+F_{\rm control}(\tau^r)
 <p>若关注实体在第 <span class="reading-math" data-tex="j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span></span></span></span></span> 步的位置为 <span class="reading-math" data-tex="p_j^e"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>p</mi><mi>j</mi><mi>e</mi></msubsup></mrow><annotation encoding="application/x-tex">p_j^e</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0592em;vertical-align:-0.3948em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-2.4413em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">e</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3948em;"><span></span></span></span></span></span></span></span></span></span></span>，空间地图为 <span class="reading-math" data-tex="V"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>V</mi></mrow><annotation encoding="application/x-tex">V</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span></span></span></span></span>，论文用沿轨迹累积地图值近似任务目标：</p>
 <p><span class="reading-math" data-tex="F_{\rm task}=-\sum_jV(p_j^e)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>F</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">s</mi><mi mathvariant="normal">k</mi></mrow></msub><mo>=</mo><mo>−</mo><munder><mo>∑</mo><mi>j</mi></munder><mi>V</mi><mo stretchy="false">(</mo><msubsup><mi>p</mi><mi>j</mi><mi>e</mi></msubsup><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">F_{\rm task}=-\sum_jV(p_j^e).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">F</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">task</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4638em;vertical-align:-1.4138em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">e</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3831em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
 <p>负号表示高地图分数对应低代价。这不是价值学习的自举：地图并未由下一状态的价值回传而来。它更接近根据语义构造的空间势场。</p>
-<h3 id="32-地图为什么能组合">3.2 地图为什么能组合</h3>
+<h3 id="地图为什么能组合">地图为什么能组合</h3>
 <p>“接近把手”给出目标区域，“远离花瓶”给出避让区域。把它们组合，就可以同时考虑两件事，而不是先生成一条直线、碰上障碍后才临时改命令。</p>
 <p>位置分数仍不足以表达拧瓶盖。系统还构造旋转、速度和夹爪地图，作为轨迹参数。它们不是都被压成一个实数：姿态是旋转，夹爪是离散开合，速度是缩放量。把这些统称为 value maps 是接口设计，不代表数学对象完全相同。</p>
 <p>感知链条先定位语义对象，再分割和跟踪，结合深度得到几何信息。语言程序据此操作体素数组。地图的平滑能让目标附近存在可优化的梯度或邻域趋势，却不能纠正对象识别错误。</p>
-<h3 id="33-闭环的关键不是每一步重问语言模型">3.3 闭环的关键不是每一步重问语言模型</h3>
+<h3 id="闭环的关键不是每一步重问语言模型">闭环的关键不是每一步重问语言模型</h3>
 <p>语言生成的程序可以缓存，随着最新观测重新计算目标位置和地图。规划器只执行部分计划，随后重新观察并规划。因此目标移动时，空间约束能够更新。</p>
 <p>论文实际实现对末端位置地图进行规划，再附加其余轨迹参数；这比式 1 的一般约束优化描述更具体。物体推动还使用简化动力学及推动原语。不能把标题理解为彻底取消所有手工结构。</p>
 <p>教学伪代码如下：</p>
+<p>这个流程里的“可执行”必须依赖真实控制接口。体素路径没有碰到花瓶，不等于整条机械臂的肘部都安全。</p>
+<h3 id="在线学习究竟优化什么">在线学习究竟优化什么</h3>
+<p>可选动力学模型用实际转移监督：</p>
+<p><span class="reading-math" data-tex="L_{\rm dyn}(\theta)
+=\mathbb E\left[\|g_\theta(o_t,a_t)-o_{t+1}\|^2\right]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mrow><mi mathvariant="normal">d</mi><mi mathvariant="normal">y</mi><mi mathvariant="normal">n</mi></mrow></msub><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="double-struck">E</mi><mrow><mo fence="true">[</mo><mi mathvariant="normal">∥</mi><msub><mi>g</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>o</mi><mi>t</mi></msub><mo separator="true">,</mo><msub><mi>a</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mo>−</mo><msub><mi>o</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><msup><mi mathvariant="normal">∥</mi><mn>2</mn></msup><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_{\rm dyn}(\theta)
+=\mathbb E\left[\|g_\theta(o_t,a_t)-o_{t+1}\|^2\right].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">dyn</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2141em;vertical-align:-0.35em;"></span><span class="mord mathbb">E</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size1">[</span></span><span class="mord">∥</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size1">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>语言轨迹主要改变采样分布，使数据集中在与目标有关的接触附近。模型误差下降和任务成功率提高是两个不同指标：如果采到的只是无接触动作，预测很准也可能毫无帮助。</p>
+<p>空间地图的加权和通常是软偏好，不是硬安全约束。教学例：目标区域得分+2，穿过花瓶区域惩罚−1，若两项直接相加，规划器仍可能认为穿过障碍净收益为正；要保证禁入需显式可行域过滤或无穷代价，而不能只把它称为avoidance map。原文实际采用归一化地图加权与末端路径搜索，地图权重因此会改变行为。<a href="https://arxiv.org/html/2307.05973v2">原文Motion Planner</a></p>
+<p>即使末端路径全部在自由体素，肘部扫过花瓶仍可能碰撞。需要区分实体路径的任务评分与整机运动学碰撞检查；更好的语言程序不能弥补后者缺失。这个反例是系统分析，不是报告论文发生了该事故。</p>
+<h3 id="一个小例子与五个前置概念">一个小例子与五个前置概念</h3>
+<p>以下是自构例子，未运行。设目标在桌面右侧，花瓶在直线路径中央。只给末端一个目标坐标，求最短距离会穿过花瓶；给花瓶附近附加代价后，规划器可以选择绕行。</p>
+<p>但若避让项权重太小，穿过障碍的总分仍可能更高。因此“语言说了避开”不代表数学上已经硬性禁止碰撞。软代价与硬约束必须区分。如果任务涉及脆弱物体，规划表示应把不可碰撞区域作为可行域限制，而不是只期待权重足够大。这是对架构的教学分析，不是论文已验证的保证。</p>
+<h2 id="三缓存空间程序并随新观测重建地图">三、缓存空间程序并随新观测重建地图</h2>
+<p>代码可被复用，地图仍根据当前物体位置重新计算。规划器用这次地图搜索动作，因而缓存程序不等于开环重放旧轨迹。</p>
 <pre><code class="language-text">输入：自然语言任务、RGB-D 图像、机器人状态
 语言规划器给出子任务序列
 对每个子任务：
@@ -101,14 +115,15 @@ F_{\rm task}(T,\ell)+F_{\rm control}(\tau^r)
     用实际转移更新动力学模型，再规划
 输出：执行轨迹及任务结果
 </code></pre>
-<p>这个流程里的“可执行”必须依赖真实控制接口。体素路径没有碰到花瓶，不等于整条机械臂的肘部都安全。</p>
-<h3 id="34-在线学习究竟优化什么">3.4 在线学习究竟优化什么</h3>
-<p>可选动力学模型用实际转移监督：</p>
-<p><span class="reading-math" data-tex="L_{\rm dyn}(\theta)
-=\mathbb E\left[\|g_\theta(o_t,a_t)-o_{t+1}\|^2\right]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mrow><mi mathvariant="normal">d</mi><mi mathvariant="normal">y</mi><mi mathvariant="normal">n</mi></mrow></msub><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="double-struck">E</mi><mrow><mo fence="true">[</mo><mi mathvariant="normal">∥</mi><msub><mi>g</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>o</mi><mi>t</mi></msub><mo separator="true">,</mo><msub><mi>a</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mo>−</mo><msub><mi>o</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><msup><mi mathvariant="normal">∥</mi><mn>2</mn></msup><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_{\rm dyn}(\theta)
-=\mathbb E\left[\|g_\theta(o_t,a_t)-o_{t+1}\|^2\right].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">dyn</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2141em;vertical-align:-0.35em;"></span><span class="mord mathbb">E</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size1">[</span></span><span class="mord">∥</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size1">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
-<p>语言轨迹主要改变采样分布，使数据集中在与目标有关的接触附近。模型误差下降和任务成功率提高是两个不同指标：如果采到的只是无接触动作，预测很准也可能毫无帮助。</p>
-<h2 id="四实验设置与公平性">四、实验设置与公平性</h2>
+<h2 id="四分开空间约束能力与低层模型贡献">四、分开空间约束能力与低层模型贡献</h2>
+<p>作者的真实测试支持这种表示比所用动作原语基线更适合空间约束与扰动恢复；这没有证明语言模型能独立处理任意接触动力学。</p>
+<p><strong>原图怎么读：</strong> <a href="#paper-064-voxposer-figure-4">图4，原论文图注与图像</a>。按错误类别拆分系统失败，观察任务规格错误与其他执行错误是否同步下降。语言程序更准确不保证感知、规划与底层动作的错误也一并消失。</p>
+<!-- figure-ref-v6:start:1ddd48f95384-anchor -->
+<p><a id="paper-064-voxposer-figure-4"></a></p>
+<!-- figure-ref-v6:end:1ddd48f95384-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/064-voxposer-s4-f4-fig2.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/064-voxposer-s4-f4-fig2.png" width="1824" height="1053" alt="VoxPoser: Composable 3D Value Maps for Robotic Manipulation with Language Models，图4：按错误类别拆分系统失败，观察任务规格错误与其他执行错误是否同步下降。语言程序更准确不保证感知、规划与底层动作的错误也一并消失。" loading="lazy"></a><figcaption>实验图原图摘引：Wenlong Huang 等，2023，HTML S4.F4.fig2，图4。<a href="https://arxiv.org/html/2307.05973v2#S4.F4.fig2" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -151,55 +166,22 @@ F_{\rm task}(T,\ell)+F_{\rm control}(\tau^r)
 </tbody></table></div>
 <p>对照确实回答了“空间组合是否比这套顺序原语表达更有效”，但它不是对所有技能库系统的最终比较。更强的闭环原语、碰撞规划和对象跟踪，也可能改善对照。</p>
 <p>此外，未见属性是相对于提示或监督基线训练划分而言，并不表示颜色词、空间关系从未出现在基础模型预训练中。测试的是知识如何进入机器人接口，不是从零学会这些概念。</p>
-<h2 id="五五处证据及其边界">五、五处证据及其边界</h2>
-<p>证据定位见<a href="https://arxiv.org/html/2307.05973">原文 v2 的方法、结果和附录</a>。</p>
-<p><strong>表 1：真实执行。</strong> 静态条件总体成功率为 88%，所用原语基线为 24%；扰动条件下分别为 70% 与 0%。前一差值是 64 个百分点，不能写成“提高 64%”。表格支持这套系统在选定任务上的优势，不支持开放世界任意任务成功率。</p>
-<p><strong>表 2：语言与属性泛化。</strong> 地图规划在所列汇总条件下优于两类对照。这里必须连同任务模板和属性划分阅读；一个未见模板不是一个全新物理技能的同义词。</p>
+<h3 id="五处证据及其边界">五处证据及其边界</h3>
+<p><strong><a href="https://arxiv.org/html/2307.05973v2#S4.T1">表1</a>：真实执行。</strong> 静态条件总体成功率为 88%，所用原语基线为 24%；扰动条件下分别为 70% 与 0%。前一差值是 64 个百分点，不能写成“提高 64%”。表格支持这套系统在选定任务上的优势，不支持开放世界任意任务成功率。</p>
+<p><strong><a href="https://arxiv.org/html/2307.05973v2#S4.T2">表2</a>：语言与属性泛化。</strong> 地图规划在所列汇总条件下优于两类对照。这里必须连同任务模板和属性划分阅读；一个未见模板不是一个全新物理技能的同义词。</p>
 <p><strong>附录 A.5.2：汇总优势不等于逐任务领先。</strong> 细分结果中存在基线更好的任务。读者应检查抓取、空间移动和推动分别发生了什么，而不是用总体均值宣布一种接口永远更强。</p>
-<p><strong>表 3：在线交互的价值。</strong> 语言轨迹先验帮助动力学学习，但零样本轨迹本身在这些接触任务上表现较弱。这组结果说明常识能引导探索，而不能替代物理识别；它发生在仿真，不是几分钟真实机器人学习的证据。</p>
-<p><strong>图 4 与 §4.4：错误来自哪一层。</strong> 作者利用仿真中的真值感知和动力学分析误差来源。消除某层误差后的改善说明该层是瓶颈之一；模块互相影响，所以这种分解不一定能简单相加为独立因果贡献。</p>
+<p><strong><a href="https://arxiv.org/html/2307.05973v2#S4.T3">表3</a>：在线交互的价值。</strong> 语言轨迹先验帮助动力学学习，但零样本轨迹本身在这些接触任务上表现较弱。这组结果说明常识能引导探索，而不能替代物理识别；它发生在仿真，不是几分钟真实机器人学习的证据。</p>
+<p><strong><a href="#paper-064-voxposer-figure-4">图4</a> 与 §4.4：错误来自哪一层。</strong> 作者利用仿真中的真值感知和动力学分析误差来源。消除某层误差后的改善说明该层是瓶颈之一；模块互相影响，所以这种分解不一定能简单相加为独立因果贡献。</p>
 <p>还有一个有教育意义的反例在附录 A.2：语言模型提出的物理实验并不必然正确。能写出连贯程序，只说明指令可被执行，不保证实验能识别目标物理量。</p>
-<h2 id="六真正贡献与适用边界">六、真正贡献与适用边界</h2>
+<h2 id="五地图正确仍依赖对象定位和动力学接口">五、地图正确仍依赖对象定位和动力学接口</h2>
 <p>本论文把语言知识落到一个规划器容易消费、研究者也能检查的中间表示。看到机器人走偏时，可以分别检查对象检测、地图位置、约束组合和执行轨迹，这比只观察一个高维隐状态更容易诊断。</p>
 <p>但可解释不等于正确。语义地图可能把目标放错；避让权重可能不足；未知接触可能使预测失真；末端可行轨迹也可能对应全臂不可行运动。作者明确指出感知、通用动力学、全臂规划及提示工程的局限。</p>
 <p>本文的进一步分析是：空间地图适合“哪里、朝哪、快慢、避开什么”这类要求，却不天然表达所有时间关系。例如“只有杯子放稳以后才松手”包含事件条件，不能只靠当前位置决定。高层程序和状态判定仍然重要。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>技能名称难表达空间关系</td>
-<td>语言程序生成三维地图</td>
-<td>同时组合目标和约束</td>
-<td>真实任务、仿真泛化</td>
-<td>地图与感知可能错误</td>
-</tr>
-<tr>
-<td>目标移动后原计划失效</td>
-<td>最新观测下重新规划</td>
-<td>更新目标几何位置</td>
-<td>扰动测试</td>
-<td>不保证全臂或任意扰动安全</td>
-</tr>
-<tr>
-<td>无目的交互低效</td>
-<td>在语义轨迹附近探索</td>
-<td>更常接触任务相关部位</td>
-<td>仿真动力学实验</td>
-<td>错误先验会限制探索</td>
-</tr>
-</tbody></table></div>
-<h2 id="七一个小例子与五个前置概念">七、一个小例子与五个前置概念</h2>
-<p>以下是自构例子，未运行。设目标在桌面右侧，花瓶在直线路径中央。只给末端一个目标坐标，求最短距离会穿过花瓶；给花瓶附近附加代价后，规划器可以选择绕行。</p>
-<p>但若避让项权重太小，穿过障碍的总分仍可能更高。因此“语言说了避开”不代表数学上已经硬性禁止碰撞。软代价与硬约束必须区分。如果任务涉及脆弱物体，规划表示应把不可碰撞区域作为可行域限制，而不是只期待权重足够大。这是对架构的教学分析，不是论文已验证的保证。</p>
-<p>阅读范围：核对原文 v2 的方法、主实验和有关系统、任务、接口的附录；未独立运行语言程序或机器人系统，未验证各组件当前版本兼容性。</p>
-<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<h3 id="追问多个地图提出互相冲突的要求时高分轨迹还能代表任务完成吗">追问：多个地图提出互相冲突的要求时，高分轨迹还能代表任务完成吗？</h3>
+<p>参考答案：地图加权后的最优解可能只是各要求之间的折中。例如目标吸引与障碍回避权重失衡，规划仍可能穿过不能碰的区域。应区分软偏好和硬约束，检查每项条件是否满足，而不只报告总代价。语言生成了可计算地图，也没有自动解决约束优先级与不可行任务检测。</p>
+<h2 id="六沿机制关系继续读">六、沿机制关系继续读</h2>
+<p>与<a href="051-saycan.html">SayCan</a>是平行语言接地：本篇生成空间代价供规划器使用，SayCan对固定技能打分；与<a href="055-peract.html">PerAct</a>只有三维空间表示的教学联系，VoxPoser地图不是通过行为克隆得到的动作分类logit。</p>
+<h2 id="七自测三题与参考答案">七、自测三题与参考答案</h2>
 <p><strong>问题1：VoxPoser 的 value map 与强化学习的 <span class="reading-math" data-tex="Q(s,a)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Q</mi><mo stretchy="false">(</mo><mi>s</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">Q(s,a)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">Q</span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span></span></span></span></span> 有什么本质区别？</strong></p>
 <p>答案：前者主要由语言程序和几何观测构造，描述位置或参数的任务偏好；后者通常估计在某策略下采取动作后的累积回报。前者不自动包含未来可达性、接触后果和策略表现，必须与规划及模型配合。</p>
 <p><strong>问题2：为什么缓存代码仍然可以是闭环控制？</strong></p>
@@ -217,17 +199,13 @@ F_{\rm task}(T,\ell)+F_{\rm control}(\tau^r)
 
 **原论文**：*VoxPoser: Composable 3D Value Maps for Robotic Manipulation with Language Models*，Wenlong Huang 等，2023，本文对应 arXiv v2。[论文](https://arxiv.org/abs/2307.05973)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
+
+[SayCan](051-saycan.md)在固定技能中做选择，但“避开花瓶、沿桌边慢走”包含连续空间约束，未必能由几个技能名称表达。VoxPoser让语言程序构造空间代价，再由规划器求轨迹；它生成任务表示，不学习Bellman价值。
+
+## 一、问题设定：语言里的目标、障碍和速度怎样变成轨迹
 
 “把杯子拿过来，避开花瓶，经过桌沿时慢一点。”这句话包含目标、障碍和速度要求。把它翻译成几个动作名称容易，变成机器人此刻能执行的空间轨迹却困难。
-
-VoxPoser 的做法是让语言模型写程序：调用视觉接口找到对象，在三维空间里构造吸引区域、回避区域、姿态与速度要求，再交给运动规划器求轨迹。语言负责描述“哪些位置有意义”，规划器负责计算“怎样走过去”。
-
-这里的 value map 不是通过 Bellman 方程学出的 Q 值，也不是每个体素对应长期回报的统计估计。它首先是语言与感知组合出来的任务目标表示。
-
-作者的真实测试支持这种表示比所用动作原语基线更适合空间约束与扰动恢复；这没有证明语言模型能独立处理任意接触动力学。**在语言指定的桌面操作中，通过可组合空间地图连接语义与规划，改善了任务表达和闭环执行，代价是对感知、地图设计及低层模型的依赖。**
-
-## 二、从语言计划到物理动作，中间缺少什么
 
 SayCan 一类方法擅长从技能库中选择下一步；如果技能库没有“沿杯子左边绕过去”，语言理解再好也不能直接补出这个运动。
 
@@ -237,9 +215,13 @@ VoxPoser 把重点放在每个子任务的轨迹生成。输入包括自然语�
 
 原文主要包含无额外任务训练的规划，以及单独的在线动力学学习实验。前者的“零样本”不意味着没有预训练模型、提示示例或人工接口。GPT-4 的语言程序提示包含示例，视觉模块也使用预训练模型。机器人交互数据、互联网预训练数据与上下文示例是三种不同资源。
 
-## 三、核心机制：语言输出目标，规划器求解动作
+## 二、用可组合空间地图连接感知与规划
 
-### 3.1 从代价函数理解整体架构
+VoxPoser 的做法是让语言模型写程序：调用视觉接口找到对象，在三维空间里构造吸引区域、回避区域、姿态与速度要求，再交给运动规划器求轨迹。语言负责描述“哪些位置有意义”，规划器负责计算“怎样走过去”。
+
+这里的 value map 不是通过 Bellman 方程学出的 Q 值，也不是每个体素对应长期回报的统计估计。它首先是语言与感知组合出来的任务目标表示。
+
+### 从代价函数理解整体架构
 
 原文式 1 的核心是：
 
@@ -259,7 +241,7 @@ $$
 
 负号表示高地图分数对应低代价。这不是价值学习的自举：地图并未由下一状态的价值回传而来。它更接近根据语义构造的空间势场。
 
-### 3.2 地图为什么能组合
+### 地图为什么能组合
 
 “接近把手”给出目标区域，“远离花瓶”给出避让区域。把它们组合，就可以同时考虑两件事，而不是先生成一条直线、碰上障碍后才临时改命令。
 
@@ -267,13 +249,40 @@ $$
 
 感知链条先定位语义对象，再分割和跟踪，结合深度得到几何信息。语言程序据此操作体素数组。地图的平滑能让目标附近存在可优化的梯度或邻域趋势，却不能纠正对象识别错误。
 
-### 3.3 闭环的关键不是每一步重问语言模型
+### 闭环的关键不是每一步重问语言模型
 
 语言生成的程序可以缓存，随着最新观测重新计算目标位置和地图。规划器只执行部分计划，随后重新观察并规划。因此目标移动时，空间约束能够更新。
 
 论文实际实现对末端位置地图进行规划，再附加其余轨迹参数；这比式 1 的一般约束优化描述更具体。物体推动还使用简化动力学及推动原语。不能把标题理解为彻底取消所有手工结构。
 
 教学伪代码如下：
+
+这个流程里的“可执行”必须依赖真实控制接口。体素路径没有碰到花瓶，不等于整条机械臂的肘部都安全。
+
+### 在线学习究竟优化什么
+
+可选动力学模型用实际转移监督：
+
+$$
+L_{\rm dyn}(\theta)
+=\mathbb E\left[\|g_\theta(o_t,a_t)-o_{t+1}\|^2\right].
+$$
+
+语言轨迹主要改变采样分布，使数据集中在与目标有关的接触附近。模型误差下降和任务成功率提高是两个不同指标：如果采到的只是无接触动作，预测很准也可能毫无帮助。
+
+空间地图的加权和通常是软偏好，不是硬安全约束。教学例：目标区域得分+2，穿过花瓶区域惩罚−1，若两项直接相加，规划器仍可能认为穿过障碍净收益为正；要保证禁入需显式可行域过滤或无穷代价，而不能只把它称为avoidance map。原文实际采用归一化地图加权与末端路径搜索，地图权重因此会改变行为。[原文Motion Planner](https://arxiv.org/html/2307.05973v2)
+
+即使末端路径全部在自由体素，肘部扫过花瓶仍可能碰撞。需要区分实体路径的任务评分与整机运动学碰撞检查；更好的语言程序不能弥补后者缺失。这个反例是系统分析，不是报告论文发生了该事故。
+
+### 一个小例子与五个前置概念
+
+以下是自构例子，未运行。设目标在桌面右侧，花瓶在直线路径中央。只给末端一个目标坐标，求最短距离会穿过花瓶；给花瓶附近附加代价后，规划器可以选择绕行。
+
+但若避让项权重太小，穿过障碍的总分仍可能更高。因此“语言说了避开”不代表数学上已经硬性禁止碰撞。软代价与硬约束必须区分。如果任务涉及脆弱物体，规划表示应把不可碰撞区域作为可行域限制，而不是只期待权重足够大。这是对架构的教学分析，不是论文已验证的保证。
+
+## 三、缓存空间程序并随新观测重建地图
+
+代码可被复用，地图仍根据当前物体位置重新计算。规划器用这次地图搜索动作，因而缓存程序不等于开环重放旧轨迹。
 
 ~~~text
 输入：自然语言任务、RGB-D 图像、机器人状态
@@ -294,20 +303,18 @@ $$
 输出：执行轨迹及任务结果
 ~~~
 
-这个流程里的“可执行”必须依赖真实控制接口。体素路径没有碰到花瓶，不等于整条机械臂的肘部都安全。
+## 四、分开空间约束能力与低层模型贡献
 
-### 3.4 在线学习究竟优化什么
+作者的真实测试支持这种表示比所用动作原语基线更适合空间约束与扰动恢复；这没有证明语言模型能独立处理任意接触动力学。
 
-可选动力学模型用实际转移监督：
+**原图怎么读：** [图4，原论文图注与图像](#paper-064-voxposer-figure-4)。按错误类别拆分系统失败，观察任务规格错误与其他执行错误是否同步下降。语言程序更准确不保证感知、规划与底层动作的错误也一并消失。
 
-$$
-L_{\rm dyn}(\theta)
-=\mathbb E\left[\|g_\theta(o_t,a_t)-o_{t+1}\|^2\right].
-$$
 
-语言轨迹主要改变采样分布，使数据集中在与目标有关的接触附近。模型误差下降和任务成功率提高是两个不同指标：如果采到的只是无接触动作，预测很准也可能毫无帮助。
+&lt;!-- figure-ref-v6:start:1ddd48f95384-anchor --&gt;
+&lt;a id=&quot;paper-064-voxposer-figure-4&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:1ddd48f95384-anchor --&gt;
 
-## 四、实验设置与公平性
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/064-voxposer-s4-f4-fig2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/064-voxposer-s4-f4-fig2.png&quot; width=&quot;1824&quot; height=&quot;1053&quot; alt=&quot;VoxPoser: Composable 3D Value Maps for Robotic Manipulation with Language Models，图4：按错误类别拆分系统失败，观察任务规格错误与其他执行错误是否同步下降。语言程序更准确不保证感知、规划与底层动作的错误也一并消失。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验图原图摘引：Wenlong Huang 等，2023，HTML S4.F4.fig2，图4。&lt;a href=&quot;https://arxiv.org/html/2307.05973v2#S4.F4.fig2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 | 项目 | 原文设定及应有解释 |
 |---|---|
@@ -324,23 +331,21 @@ $$
 
 此外，未见属性是相对于提示或监督基线训练划分而言，并不表示颜色词、空间关系从未出现在基础模型预训练中。测试的是知识如何进入机器人接口，不是从零学会这些概念。
 
-## 五、五处证据及其边界
+### 五处证据及其边界
 
-证据定位见[原文 v2 的方法、结果和附录](https://arxiv.org/html/2307.05973)。
+**[表1](https://arxiv.org/html/2307.05973v2#S4.T1)：真实执行。** 静态条件总体成功率为 88%，所用原语基线为 24%；扰动条件下分别为 70% 与 0%。前一差值是 64 个百分点，不能写成“提高 64%”。表格支持这套系统在选定任务上的优势，不支持开放世界任意任务成功率。
 
-**表 1：真实执行。** 静态条件总体成功率为 88%，所用原语基线为 24%；扰动条件下分别为 70% 与 0%。前一差值是 64 个百分点，不能写成“提高 64%”。表格支持这套系统在选定任务上的优势，不支持开放世界任意任务成功率。
-
-**表 2：语言与属性泛化。** 地图规划在所列汇总条件下优于两类对照。这里必须连同任务模板和属性划分阅读；一个未见模板不是一个全新物理技能的同义词。
+**[表2](https://arxiv.org/html/2307.05973v2#S4.T2)：语言与属性泛化。** 地图规划在所列汇总条件下优于两类对照。这里必须连同任务模板和属性划分阅读；一个未见模板不是一个全新物理技能的同义词。
 
 **附录 A.5.2：汇总优势不等于逐任务领先。** 细分结果中存在基线更好的任务。读者应检查抓取、空间移动和推动分别发生了什么，而不是用总体均值宣布一种接口永远更强。
 
-**表 3：在线交互的价值。** 语言轨迹先验帮助动力学学习，但零样本轨迹本身在这些接触任务上表现较弱。这组结果说明常识能引导探索，而不能替代物理识别；它发生在仿真，不是几分钟真实机器人学习的证据。
+**[表3](https://arxiv.org/html/2307.05973v2#S4.T3)：在线交互的价值。** 语言轨迹先验帮助动力学学习，但零样本轨迹本身在这些接触任务上表现较弱。这组结果说明常识能引导探索，而不能替代物理识别；它发生在仿真，不是几分钟真实机器人学习的证据。
 
-**图 4 与 §4.4：错误来自哪一层。** 作者利用仿真中的真值感知和动力学分析误差来源。消除某层误差后的改善说明该层是瓶颈之一；模块互相影响，所以这种分解不一定能简单相加为独立因果贡献。
+**[图4](#paper-064-voxposer-figure-4) 与 §4.4：错误来自哪一层。** 作者利用仿真中的真值感知和动力学分析误差来源。消除某层误差后的改善说明该层是瓶颈之一；模块互相影响，所以这种分解不一定能简单相加为独立因果贡献。
 
 还有一个有教育意义的反例在附录 A.2：语言模型提出的物理实验并不必然正确。能写出连贯程序，只说明指令可被执行，不保证实验能识别目标物理量。
 
-## 六、真正贡献与适用边界
+## 五、地图正确仍依赖对象定位和动力学接口
 
 本论文把语言知识落到一个规划器容易消费、研究者也能检查的中间表示。看到机器人走偏时，可以分别检查对象检测、地图位置、约束组合和执行轨迹，这比只观察一个高维隐状态更容易诊断。
 
@@ -348,17 +353,7 @@ $$
 
 本文的进一步分析是：空间地图适合“哪里、朝哪、快慢、避开什么”这类要求，却不天然表达所有时间关系。例如“只有杯子放稳以后才松手”包含事件条件，不能只靠当前位置决定。高层程序和状态判定仍然重要。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 技能名称难表达空间关系 | 语言程序生成三维地图 | 同时组合目标和约束 | 真实任务、仿真泛化 | 地图与感知可能错误 |
-| 目标移动后原计划失效 | 最新观测下重新规划 | 更新目标几何位置 | 扰动测试 | 不保证全臂或任意扰动安全 |
-| 无目的交互低效 | 在语义轨迹附近探索 | 更常接触任务相关部位 | 仿真动力学实验 | 错误先验会限制探索 |
-
-## 七、一个小例子与五个前置概念
-
-以下是自构例子，未运行。设目标在桌面右侧，花瓶在直线路径中央。只给末端一个目标坐标，求最短距离会穿过花瓶；给花瓶附近附加代价后，规划器可以选择绕行。
-
-但若避让项权重太小，穿过障碍的总分仍可能更高。因此“语言说了避开”不代表数学上已经硬性禁止碰撞。软代价与硬约束必须区分。如果任务涉及脆弱物体，规划表示应把不可碰撞区域作为可行域限制，而不是只期待权重足够大。这是对架构的教学分析，不是论文已验证的保证。
+### 五个前置概念
 
 五个前置概念：
 
@@ -368,9 +363,15 @@ $$
 4. **操作空间控制**：把末端目标转换为底层机器人控制。
 5. **探索先验**：让动作采样更偏向可能相关的区域，而非均匀尝试。
 
-阅读范围：核对原文 v2 的方法、主实验和有关系统、任务、接口的附录；未独立运行语言程序或机器人系统，未验证各组件当前版本兼容性。
+### 追问：多个地图提出互相冲突的要求时，高分轨迹还能代表任务完成吗？
 
-## 八、三个问题及答案
+参考答案：地图加权后的最优解可能只是各要求之间的折中。例如目标吸引与障碍回避权重失衡，规划仍可能穿过不能碰的区域。应区分软偏好和硬约束，检查每项条件是否满足，而不只报告总代价。语言生成了可计算地图，也没有自动解决约束优先级与不可行任务检测。
+
+## 六、沿机制关系继续读
+
+与[SayCan](051-saycan.md)是平行语言接地：本篇生成空间代价供规划器使用，SayCan对固定技能打分；与[PerAct](055-peract.md)只有三维空间表示的教学联系，VoxPoser地图不是通过行为克隆得到的动作分类logit。
+
+## 七、自测三题与参考答案
 
 **问题1：VoxPoser 的 value map 与强化学习的 $Q(s,a)$ 有什么本质区别？**
 
@@ -383,7 +384,6 @@ $$
 **问题3：语言探索先验可能什么时候反而有害？**
 
 答案：当它把正确动作区域排除在采样范围之外。例如假定抽屉向外拉，但实际需要先解除锁扣，局部扰动可能始终收不到关键转移。可以设置先验与广域采样的混合、监测长期无进展并扩大探索；这种修正需要单独实验验证。
-
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

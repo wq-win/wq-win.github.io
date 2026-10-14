@@ -42,13 +42,11 @@
                 <span class="text-gray-500">Transporter：用空间对应关系学习操作</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="16b46d128846b7e2b0282a3df36322f805ace82a20349e23df4e28f9717c9d3d"><h1>040｜Transporter：用空间对应关系学习操作</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="5ba7bf5df58809e8846ce0c80ee62ec004a21322fe3a9b5d47957d26c1e467ca"><h1>040｜Transporter：用空间对应关系学习操作</h1>
 <p><a href="index.html">系列首页</a> · <a href="039-awac.html">上一篇</a> · <a href="041-amp.html">下一篇</a></p>
 <p><strong>原论文</strong>：<em>Transporter Networks: Rearranging the Visual World for Robotic Manipulation</em>，Andy Zeng 等，首次公开于2020；本文核对2022年的 arXiv v3。<a href="https://arxiv.org/abs/2010.14406">论文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p>拿起一个物体再放进槽里，放哪里取决于<strong>刚才抓在哪里</strong>。从物体左边缘吸起，与从中心吸起，末端最终位置不能一样。若把抓取和放置分别回归成两个互不相关坐标，网络要用很多数据才能学会这种几何关系。</p>
-<p>Transporter Networks 先选抓取位置，再截取其附近的视觉特征，把这块特征在场景中平移、旋转并匹配，预测对应放置位置。它把操作问题中的空间结构写进网络。</p>
-<p>一句话总结：在由抓放或推移动作基元组成的桌面操作中，通过抓取条件化的特征搬运改善示范效率与空间泛化，限制是依赖标定、动作基元与相应几何假设。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="020-dexnet2.html">Dex-Net 2.0</a>提供一个阅读起点。Dex-Net可以给抓取候选打分，但完整抓放还要决定抓点改变后应把物体放到哪里。Transporter把抓点附近特征带入放置匹配，用几何关系减少独立坐标回归的负担；这是操作接口的教学延伸，不是解析抓取质量的直接继承。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：</p>
 <ul>
@@ -58,12 +56,26 @@
 <li><strong>多模态动作</strong>：同一场景存在多个分离的正确动作。</li>
 <li><strong>动作基元</strong>：由少量参数驱动的一段已有控制程序。</li>
 </ul>
-<h2 id="二研究背景与任务定义">二、研究背景与任务定义</h2>
+<details>
+<summary>进阶追问与参考答案（3题）</summary>
+
+<p><strong>进阶问题1：标定误差多大开始破坏空间输运收益？</strong></p>
+<p>参考答案：没有统一厘米阈值，它取决于像素尺度、物体尺寸、抓取容差和旋转误差。可对相机外参施加已知平移/旋转扰动，分别报告抓点偏差、放置偏差和任务成功，比较Transporter与无输运基线的退化曲线。误差应换算到动作平面，不能只用图像像素偏移作为跨装置结论。</p>
+<p><strong>进阶问题2：抓取滑移是否需要执行中重观察？</strong></p>
+<p>参考答案：只要滑移改变物体相对夹爪的变换，抓取时建立的几何对应就可能过时。可在受控滑移条件下比较固定放置计划、抓后重观察和执行中更新，并记录额外感知延迟。没有滑移且动作短时，频繁观察的成本可能大于收益；滑移风险高时还应加入持物状态或触觉，视觉未必能看清夹持接触。</p>
+<p><strong>进阶问题3：语言语义与几何分支应在哪里融合？</strong></p>
+<p>参考答案：若语言主要选择对象，语义可较早调制视觉特征；若它还指定相对位置和操作关系，放置查询也需要条件化。可在相同预训练与示范预算下比较输入拼接、编码器中间融合和抓放头融合，并分别评估新词义、空间关系与抓放精度。CLIPort提供具体的双流方案，但不能证明它是所有任务的唯一最优融合位置。</p>
+<p>这些回答给出机制分析与待检验设计，不是已经运行的新实验结果。</p>
+</details>
+
+<h2 id="一问题设定抓取点改变时怎样保持正确放置关系">一、问题设定：抓取点改变时怎样保持正确放置关系</h2>
+<p>拿起一个物体再放进槽里，放哪里取决于<strong>刚才抓在哪里</strong>。从物体左边缘吸起，与从中心吸起，末端最终位置不能一样。若把抓取和放置分别回归成两个互不相关坐标，网络要用很多数据才能学会这种几何关系。</p>
 <p>这是从示范学习的视觉操作方法，不是靠 Bellman 更新训练的 Q-learning。论文虽然使用 <span class="reading-math" data-tex="\mathcal Q_{\mathrm{pick}}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="script">Q</mi><mrow><mi mathvariant="normal">p</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">c</mi><mi mathvariant="normal">k</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\mathcal Q_{\mathrm{pick}}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathcal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">pick</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 等符号表示动作评分，训练目标实际是专家位置标签的交叉熵。</p>
 <p>输入来自校准 RGB-D 相机，先重建点云，再投影成正交俯视的颜色与高度图。动作是两个末端位姿，交给预定义运动基元执行抓放或推移。底层轨迹和逆运动学已承担一部分控制工作。</p>
-<p>仿真 Ravens 用于受控比较，真实机器人另用真实示范训练。**原论文没有把仿真训练模型直接迁移到真机。**因此它的真实结果不能作为域随机化迁移的证据。</p>
+<p>仿真 Ravens 用于受控比较，真实机器人另用真实示范训练。<strong>原论文没有把仿真训练模型直接迁移到真机。</strong>因此它的真实结果不能作为域随机化迁移的证据。</p>
 <p>每个任务单独训练模型，原始方法没有语言任务条件。后来 CLIPort 才进一步把语言语义与这套空间机制结合。任务序列依赖当前视觉场景判断，模型本身没有循环记忆。</p>
-<h2 id="三方法把抓哪里和放哪里联系起来">三、方法：把“抓哪里”和“放哪里”联系起来</h2>
+<h2 id="二用抓取条件特征输运预测放置位置">二、用抓取条件特征输运预测放置位置</h2>
+<p>Transporter Networks 先选抓取位置，再截取其附近的视觉特征，把这块特征在场景中平移、旋转并匹配，预测对应放置位置。它把操作问题中的空间结构写进网络。</p>
 <h3 id="1-正交图让像素对应固定物理尺度">1. 正交图让像素对应固定物理尺度</h3>
 <p>透视图中，同一物体远近不同会改变像素大小。正交投影让一个像素对应工作空间中固定的竖直柱，便于把图像位置直接转成机器人平面位置。</p>
 <p>这一步是几何先验，也需要相机内外参。它没有消除遮挡，只是改变坐标表达。如果目标表面从未被看到，高度图不能凭空恢复它。</p>
@@ -91,6 +103,14 @@
 -\log p_{\mathrm{place}}(\tau^*\mid o,p^*).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">pick</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">o</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">place</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">o</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="p^*,\tau^*"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>p</mi><mo>∗</mo></msup><mo separator="true">,</mo><msup><mi>τ</mi><mo>∗</mo></msup></mrow><annotation encoding="application/x-tex">p^*,\tau^*</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8831em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6887em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6887em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span></span></span></span></span> 是示范标签。目标是提高专家动作似然，没有折扣回报目标，也没有用预测奖励训练 critic。六自由度连续部分另用回归损失。</p>
 <p>不需要对象CAD模型，不代表不需要先验。模型明确使用空间投影、局部搬运、离散旋转和动作基元。这些先验恰好是样本效率的来源，不能在宣传时一起抹掉。</p>
+<p>闭环发生在动作基元之间。不能把一次抓放决策的模型推理时间，直接解释成机器人每个关节的高频反馈控制周期。</p>
+<p>抓取点偏移怎样传到放置点？教学设定：物体中心在 <span class="reading-math" data-tex="x=0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">x=0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，夹爪抓在右侧偏移 <span class="reading-math" data-tex="d=2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo>=</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">d=2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span></span></span></span></span>厘米，要把物体中心放到 <span class="reading-math" data-tex="x=10"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo>=</mo><mn>10</mn></mrow><annotation encoding="application/x-tex">x=10</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">10</span></span></span></span></span>厘米且不旋转，末端应到12厘米；若仍输出10厘米，物体只到8厘米。Transporter以抓点裁剪query再搜索放置，把这种相对几何写入结构。</p>
+<p>推广到二维，把 <span class="reading-math" data-tex="d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi></mrow><annotation encoding="application/x-tex">d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span> 改记为抓取点相对物体中心的偏移向量；若物体还旋转角度 <span class="reading-math" data-tex="\theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>θ</mi></mrow><annotation encoding="application/x-tex">\theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span></span></span></span></span>，偏移应随旋转变为 <span class="reading-math" data-tex="R_\theta d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>R</mi><mi>θ</mi></msub><mi>d</mi></mrow><annotation encoding="application/x-tex">R_\theta d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal">d</span></span></span></span></span>，其中 <span class="reading-math" data-tex="R_\theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>R</mi><mi>θ</mi></msub></mrow><annotation encoding="application/x-tex">R_\theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 为平面旋转矩阵，所以末端目标为物体目标加旋转后的抓取偏移。离散角度枚举近似这组关系，也引入角度分辨率误差。原文少样本证据应和这类强几何先验一起读，而不能概括为无先验的通用动作学习。<a href="https://arxiv.org/html/2010.14406v3">原文transport互相关</a></p>
+<h3 id="帮助建立理解">帮助建立理解</h3>
+<p><strong>自构例子，未运行</strong>：吸盘从长条左端抓起，目标要求长条中心落在槽中心。若网络只预测“槽中心”作为末端目标，物体会错位。Transporter 把以左端为中心的局部特征移到槽上，匹配时对应的末端目标也落在槽的左端，于是物体整体对齐。</p>
+<p>如果抓取后物体在吸盘上滑动，这个刚性对应就会失效。下一次视觉反馈或更丰富的夹持状态才能修正，空间先验并不等于完整接触动力学。</p>
+<h2 id="三预测抓点后用特征互相关搜索放点">三、预测抓点后用特征互相关搜索放点</h2>
+<p>几何增强必须对输入与动作标签施加同一变换。若正交图整体平移像素向量<span class="reading-math" data-tex="\delta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>δ</mi></mrow><annotation encoding="application/x-tex">\delta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span></span></span></span></span>，抓点与放点都应分别变为<span class="reading-math" data-tex="p_{\rm pick}+\delta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mrow><mi mathvariant="normal">p</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">c</mi><mi mathvariant="normal">k</mi></mrow></msub><mo>+</mo><mi>δ</mi></mrow><annotation encoding="application/x-tex">p_{\rm pick}+\delta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">pick</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span></span></span></span></span>、<span class="reading-math" data-tex="p_{\rm place}+\delta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mrow><mi mathvariant="normal">p</mi><mi mathvariant="normal">l</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">c</mi><mi mathvariant="normal">e</mi></mrow></msub><mo>+</mo><mi>δ</mi></mrow><annotation encoding="application/x-tex">p_{\rm place}+\delta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">place</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span></span></span></span></span>；只移动图像而不移动标签，训练会要求网络对相同物体选择错误世界位置。旋转还要同步改变放置方向。等变结构减轻学习负担，不能修正一份违反几何关系的数据。</p>
 <pre><code class="language-text">输入专家抓放／推移示范
 每次训练：
     把 RGB-D 转成标定工作空间的正交颜色高度图
@@ -106,8 +126,21 @@
     执行动作基元
     重新观察，再决定下一个动作
 </code></pre>
-<p>闭环发生在动作基元之间。不能把一次抓放决策的模型推理时间，直接解释成机器人每个关节的高频反馈控制周期。</p>
-<h2 id="四实验如何验证">四、实验如何验证</h2>
+<h2 id="四核对空间泛化与动作基元分担的难度">四、核对空间泛化与动作基元分担的难度</h2>
+<p><strong>原图怎么读：</strong> <a href="#paper-040-transporter-figure-2">图2，原论文图注与图像</a>。先看可成功抓取的位置分布，再看每个抓取位置对应的放置分布。它说明抓放联合结构：固定物体目标并不能唯一确定末端该到哪里。</p>
+<!-- figure-ref-v6:start:76fed902ba33 -->
+<p><a id="paper-040-transporter-figure-2"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/040-transporter-v6-figure-2.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/040-transporter-v6-figure-2.png" width="2132" height="1040" alt="Transporter Networks: Rearranging the Visual World for Robotic Manipulation，图2： 图2，原论文图注与图像。先看可成功抓取的位置分布，再看每个抓取位置对应的放置分布。它说明抓放联合结构：固定物体目标并不能唯一确定末端该到哪里。" loading="lazy"></a><figcaption>原图摘引：Andy Zeng 等，首次公开于2020，HTML S3.F2，图2。<a href="https://arxiv.org/html/2010.14406v3#S3.F2" target="_blank" rel="noopener noreferrer">核对原文</a>。 图2，原论文图注与图像。先看可成功抓取的位置分布，再看每个抓取位置对应的放置分布。它说明抓放联合结构：固定物体目标并不能唯一确定末端该到哪里。</figcaption></figure>
+<!-- figure-ref-v6:end:76fed902ba33 -->
+
+
+<p><strong>结果图怎么读：</strong> 内嵌图9把每次测试放回工作空间：蓝色为成功，红色为失败，灰色标出训练配置，虚线是训练样本凸包。列间改变示范数、行间改变模型；凸包外的蓝点才针对外推，不能把同一区域内插值成功概括为任意物体泛化。</p>
+<!-- figure-ref-v6:start:3600067d9d55-anchor -->
+<p><a id="paper-040-transporter-figure-9"></a></p>
+<!-- figure-ref-v6:end:3600067d9d55-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/040-transporter-s6-f9.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/040-transporter-s6-f9.png" width="1824" height="1714" alt="Transporter Networks: Rearranging the Visual World for Robotic Manipulation，图9：内嵌图9把每次测试放回工作空间：蓝色为成功，红色为失败，灰色标出训练配置，虚线是训练样本凸包。列间改变示范数、行间改变模型；凸包外的蓝点才针对外推，不能把同一区域内插值成功概括为任意物体泛化。" loading="lazy"></a><figcaption>实验图原图摘引：Andy Zeng 等，首次公开于2020，HTML S6.F9，图9。<a href="https://arxiv.org/html/2010.14406v3#S6.F9" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -147,66 +180,23 @@
 <p>表格中“条示范”是轨迹，不一定只有一个动作；真实表格的样本数则是动作转移。比较样本效率前必须确认单位，不能把两类数量直接除出倍数。</p>
 <p>带真实对象状态的基线拥有额外信息，但其结构未必善于表达几何对应。因此“视觉模型胜过状态MLP”支持架构归纳偏置的重要性，不意味着状态信息本身有害。</p>
 <p>任务通过验证集选择模型，再在测试场景评估。模型选择预算与训练种子统计仍应明确；一百次测试场景不是一百次独立训练。</p>
-<h2 id="五结果读懂漂亮分数背后的定义">五、结果：读懂漂亮分数背后的定义</h2>
+<h3 id="结果读懂漂亮分数背后的定义">结果：读懂漂亮分数背后的定义</h3>
 <p>依据<a href="https://arxiv.org/html/2010.14406">原文表2—5及附录6.5、6.14</a>。</p>
 <ol>
-<li><strong>表2，仿真示范效率</strong>：简单插入任务在一条示范时得分100，说明结构先验在特定几何任务中很强；不能推广成任意操作都能一示范学习。</li>
+<li><strong><a href="https://arxiv.org/html/2010.14406v3#S4.T2">表2</a>，仿真示范效率</strong>：简单插入任务在一条示范时得分100，说明结构先验在特定几何任务中很强；不能推广成任意操作都能一示范学习。</li>
 <li><strong>同表，复杂堆叠</strong>：金字塔任务一百条示范得56.2，一千条得78.2，显示长序列和多物体关系仍困难。</li>
-<li><strong>表3，专家随机性</strong>：比较多种正确抓放对应，支持抓取条件化搬运更适合处理多模态；不是因为所有基线都只用了简单均方误差。</li>
-<li><strong>表4，六自由度插入</strong>：一百条示范得84.0，一千条得91.0，支持扩展可行；六自由度一示范结果明显不能照搬平面任务结论。</li>
-<li><strong>表5及真实附录</strong>：报告真实任务高分，并说明数据来自人类操作；它验证真实可用性，不验证仿真到真实迁移。</li>
+<li><strong><a href="https://arxiv.org/html/2010.14406v3#S4.T3">表3</a>，专家随机性</strong>：比较多种正确抓放对应，支持抓取条件化搬运更适合处理多模态；不是因为所有基线都只用了简单均方误差。</li>
+<li><strong><a href="https://arxiv.org/html/2010.14406v3#S4.T4">表4</a>，六自由度插入</strong>：一百条示范得84.0，一千条得91.0，支持扩展可行；六自由度一示范结果明显不能照搬平面任务结论。</li>
+<li><strong><a href="https://arxiv.org/html/2010.14406v3#S4.T5">表5</a>及真实附录</strong>：报告真实任务高分，并说明数据来自人类操作；它验证真实可用性，不验证仿真到真实迁移。</li>
 </ol>
 <p>尤其要回看评价定义：有些任务按已完成步骤给部分分，有些按物体处在目标区域的比例给分。因此表中的98分不一定意味着98%的回合完整成功。任务名称相同也要检查计分方式。</p>
 <p>真实装配用了8141次抓放动作，扫棋子用了6759次推移动作。它们不是八千多个完整套件，也不是几条示范；数据量与主文少示范仿真实验的语境不同。</p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p>作者贡献在于用空间搬运表达动作之间的几何关系，同时保留多模态分布，而无需显式识别对象类别、标准姿态或关键点。它也说明合适结构可让视觉策略具有很强的低数据性能。</p>
+<h2 id="五平面等变结构不自动覆盖三维接触">五、平面等变结构不自动覆盖三维接触</h2>
 <p>作者明确指出标定敏感性，以及如何加入力／力矩动作尚不清楚。几何目标能决定物体应到哪里，却未必能决定插接过程中应施加多大力。</p>
 <p>本文分析：局部特征匹配可能把相似但语义不同的槽位混淆；无语言条件模型也不能在同一画面下区分“放红色”还是“放蓝色”的新命令。后来的语义操作论文会针对这个缺口继续发展。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>抓放坐标关联难学</td>
-<td>抓取条件化搬运</td>
-<td>保留相对几何</td>
-<td>随机专家实验</td>
-<td>抓取点错误会传递</td>
-</tr>
-<tr>
-<td>位置变化需要大量数据</td>
-<td>正交图与空间共享</td>
-<td>复用平移旋转结构</td>
-<td>少示范实验</td>
-<td>依赖标定和离散分辨率</td>
-</tr>
-<tr>
-<td>动作存在多个正确答案</td>
-<td>密集空间分布</td>
-<td>避免直接平均动作</td>
-<td>表3及预测图</td>
-<td>仍会有对称性假峰</td>
-</tr>
-<tr>
-<td>六维离散太昂贵</td>
-<td>平面分类再回归</td>
-<td>降低搜索维度</td>
-<td>表4</td>
-<td>更复杂姿态仍难</td>
-</tr>
-</tbody></table></div>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<p><strong>自构例子，未运行</strong>：吸盘从长条左端抓起，目标要求长条中心落在槽中心。若网络只预测“槽中心”作为末端目标，物体会错位。Transporter 把以左端为中心的局部特征移到槽上，匹配时对应的末端目标也落在槽的左端，于是物体整体对齐。</p>
-<p>如果抓取后物体在吸盘上滑动，这个刚性对应就会失效。下一次视觉反馈或更丰富的夹持状态才能修正，空间先验并不等于完整接触动力学。</p>
-<p>可进一步实验的问题：标定误差多大开始破坏收益？抓取滑移是否需要执行中重观察？加语言后语义与几何分支应在哪里融合？这些问题自然通向后面的 CLIPort 和三维操作方法。</p>
-<p>阅读范围为原文架构、训练、主实验与关键附录；全部消融代码未逐项复核，本文未独立复现。</p>
-<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<h2 id="六沿机制关系继续读">六、沿机制关系继续读</h2>
+<p><a href="046-clipport.html">CLIPort</a>直接承接Transporter的空间动作结构，再加入语言语义；<a href="055-peract.html">PerAct</a>则在体素三维空间组织动作，是平行空间表示。共同强调几何，不表示平面等变性自动推广为完整三维接触控制。</p>
+<h2 id="七自测三题与参考答案">七、自测三题与参考答案</h2>
 <p><strong>问题1：论文写了 Q_pick，为什么不能称它是深度Q学习？</strong></p>
 <p>答：符号用于动作评分，但训练采用示范位置的交叉熵，没有 Bellman 自举和折扣回报目标。算法类别由学习目标和数据流决定，不能只看字母Q。</p>
 <p><strong>问题2：为什么放置一定要知道抓取点？</strong></p>
@@ -224,15 +214,13 @@
 
 **原论文**：*Transporter Networks: Rearranging the Visual World for Robotic Manipulation*，Andy Zeng 等，首次公开于2020；本文核对2022年的 arXiv v3。[论文](https://arxiv.org/abs/2010.14406)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
+
+[Dex-Net 2.0](020-dexnet2.md)提供一个阅读起点。Dex-Net可以给抓取候选打分，但完整抓放还要决定抓点改变后应把物体放到哪里。Transporter把抓点附近特征带入放置匹配，用几何关系减少独立坐标回归的负担；这是操作接口的教学延伸，不是解析抓取质量的直接继承。
+
+## 一、问题设定：抓取点改变时怎样保持正确放置关系
 
 拿起一个物体再放进槽里，放哪里取决于**刚才抓在哪里**。从物体左边缘吸起，与从中心吸起，末端最终位置不能一样。若把抓取和放置分别回归成两个互不相关坐标，网络要用很多数据才能学会这种几何关系。
-
-Transporter Networks 先选抓取位置，再截取其附近的视觉特征，把这块特征在场景中平移、旋转并匹配，预测对应放置位置。它把操作问题中的空间结构写进网络。
-
-一句话总结：在由抓放或推移动作基元组成的桌面操作中，通过抓取条件化的特征搬运改善示范效率与空间泛化，限制是依赖标定、动作基元与相应几何假设。
-
-## 二、研究背景与任务定义
 
 这是从示范学习的视觉操作方法，不是靠 Bellman 更新训练的 Q-learning。论文虽然使用 $\mathcal Q_{\mathrm{pick}}$ 等符号表示动作评分，训练目标实际是专家位置标签的交叉熵。
 
@@ -242,7 +230,9 @@ Transporter Networks 先选抓取位置，再截取其附近的视觉特征，�
 
 每个任务单独训练模型，原始方法没有语言任务条件。后来 CLIPort 才进一步把语言语义与这套空间机制结合。任务序列依赖当前视觉场景判断，模型本身没有循环记忆。
 
-## 三、方法：把“抓哪里”和“放哪里”联系起来
+## 二、用抓取条件特征输运预测放置位置
+
+Transporter Networks 先选抓取位置，再截取其附近的视觉特征，把这块特征在场景中平移、旋转并匹配，预测对应放置位置。它把操作问题中的空间结构写进网络。
 
 ### 1. 正交图让像素对应固定物理尺度
 
@@ -297,6 +287,22 @@ $p^*,\tau^*$ 是示范标签。目标是提高专家动作似然，没有折扣�
 
 不需要对象CAD模型，不代表不需要先验。模型明确使用空间投影、局部搬运、离散旋转和动作基元。这些先验恰好是样本效率的来源，不能在宣传时一起抹掉。
 
+闭环发生在动作基元之间。不能把一次抓放决策的模型推理时间，直接解释成机器人每个关节的高频反馈控制周期。
+
+抓取点偏移怎样传到放置点？教学设定：物体中心在 $x=0$，夹爪抓在右侧偏移 $d=2$厘米，要把物体中心放到 $x=10$厘米且不旋转，末端应到12厘米；若仍输出10厘米，物体只到8厘米。Transporter以抓点裁剪query再搜索放置，把这种相对几何写入结构。
+
+推广到二维，把 $d$ 改记为抓取点相对物体中心的偏移向量；若物体还旋转角度 $\theta$，偏移应随旋转变为 $R_\theta d$，其中 $R_\theta$ 为平面旋转矩阵，所以末端目标为物体目标加旋转后的抓取偏移。离散角度枚举近似这组关系，也引入角度分辨率误差。原文少样本证据应和这类强几何先验一起读，而不能概括为无先验的通用动作学习。[原文transport互相关](https://arxiv.org/html/2010.14406v3)
+
+### 帮助建立理解
+
+**自构例子，未运行**：吸盘从长条左端抓起，目标要求长条中心落在槽中心。若网络只预测“槽中心”作为末端目标，物体会错位。Transporter 把以左端为中心的局部特征移到槽上，匹配时对应的末端目标也落在槽的左端，于是物体整体对齐。
+
+如果抓取后物体在吸盘上滑动，这个刚性对应就会失效。下一次视觉反馈或更丰富的夹持状态才能修正，空间先验并不等于完整接触动力学。
+
+## 三、预测抓点后用特征互相关搜索放点
+
+几何增强必须对输入与动作标签施加同一变换。若正交图整体平移像素向量$\delta$，抓点与放点都应分别变为$p_{\rm pick}+\delta$、$p_{\rm place}+\delta$；只移动图像而不移动标签，训练会要求网络对相同物体选择错误世界位置。旋转还要同步改变放置方向。等变结构减轻学习负担，不能修正一份违反几何关系的数据。
+
 ~~~text
 输入专家抓放／推移示范
 每次训练：
@@ -314,9 +320,24 @@ $p^*,\tau^*$ 是示范标签。目标是提高专家动作似然，没有折扣�
     重新观察，再决定下一个动作
 ~~~
 
-闭环发生在动作基元之间。不能把一次抓放决策的模型推理时间，直接解释成机器人每个关节的高频反馈控制周期。
+## 四、核对空间泛化与动作基元分担的难度
 
-## 四、实验如何验证
+**原图怎么读：** [图2，原论文图注与图像](#paper-040-transporter-figure-2)。先看可成功抓取的位置分布，再看每个抓取位置对应的放置分布。它说明抓放联合结构：固定物体目标并不能唯一确定末端该到哪里。
+
+&lt;!-- figure-ref-v6:start:76fed902ba33 --&gt;
+&lt;a id=&quot;paper-040-transporter-figure-2&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/040-transporter-v6-figure-2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/040-transporter-v6-figure-2.png&quot; width=&quot;2132&quot; height=&quot;1040&quot; alt=&quot;Transporter Networks: Rearranging the Visual World for Robotic Manipulation，图2： 图2，原论文图注与图像。先看可成功抓取的位置分布，再看每个抓取位置对应的放置分布。它说明抓放联合结构：固定物体目标并不能唯一确定末端该到哪里。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Andy Zeng 等，首次公开于2020，HTML S3.F2，图2。&lt;a href=&quot;https://arxiv.org/html/2010.14406v3#S3.F2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。 图2，原论文图注与图像。先看可成功抓取的位置分布，再看每个抓取位置对应的放置分布。它说明抓放联合结构：固定物体目标并不能唯一确定末端该到哪里。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:76fed902ba33 --&gt;
+
+
+**结果图怎么读：** 内嵌图9把每次测试放回工作空间：蓝色为成功，红色为失败，灰色标出训练配置，虚线是训练样本凸包。列间改变示范数、行间改变模型；凸包外的蓝点才针对外推，不能把同一区域内插值成功概括为任意物体泛化。
+
+
+&lt;!-- figure-ref-v6:start:3600067d9d55-anchor --&gt;
+&lt;a id=&quot;paper-040-transporter-figure-9&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:3600067d9d55-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/040-transporter-s6-f9.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/040-transporter-s6-f9.png&quot; width=&quot;1824&quot; height=&quot;1714&quot; alt=&quot;Transporter Networks: Rearranging the Visual World for Robotic Manipulation，图9：内嵌图9把每次测试放回工作空间：蓝色为成功，红色为失败，灰色标出训练配置，虚线是训练样本凸包。列间改变示范数、行间改变模型；凸包外的蓝点才针对外推，不能把同一区域内插值成功概括为任意物体泛化。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验图原图摘引：Andy Zeng 等，首次公开于2020，HTML S6.F9，图9。&lt;a href=&quot;https://arxiv.org/html/2010.14406v3#S6.F9&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 | 项目 | 论文设计 |
 |---|---|
@@ -334,40 +355,27 @@ $p^*,\tau^*$ 是示范标签。目标是提高专家动作似然，没有折扣�
 
 任务通过验证集选择模型，再在测试场景评估。模型选择预算与训练种子统计仍应明确；一百次测试场景不是一百次独立训练。
 
-## 五、结果：读懂漂亮分数背后的定义
+### 结果：读懂漂亮分数背后的定义
 
 依据[原文表2—5及附录6.5、6.14](https://arxiv.org/html/2010.14406)。
 
-1. **表2，仿真示范效率**：简单插入任务在一条示范时得分100，说明结构先验在特定几何任务中很强；不能推广成任意操作都能一示范学习。
+1. **[表2](https://arxiv.org/html/2010.14406v3#S4.T2)，仿真示范效率**：简单插入任务在一条示范时得分100，说明结构先验在特定几何任务中很强；不能推广成任意操作都能一示范学习。
 2. **同表，复杂堆叠**：金字塔任务一百条示范得56.2，一千条得78.2，显示长序列和多物体关系仍困难。
-3. **表3，专家随机性**：比较多种正确抓放对应，支持抓取条件化搬运更适合处理多模态；不是因为所有基线都只用了简单均方误差。
-4. **表4，六自由度插入**：一百条示范得84.0，一千条得91.0，支持扩展可行；六自由度一示范结果明显不能照搬平面任务结论。
-5. **表5及真实附录**：报告真实任务高分，并说明数据来自人类操作；它验证真实可用性，不验证仿真到真实迁移。
+3. **[表3](https://arxiv.org/html/2010.14406v3#S4.T3)，专家随机性**：比较多种正确抓放对应，支持抓取条件化搬运更适合处理多模态；不是因为所有基线都只用了简单均方误差。
+4. **[表4](https://arxiv.org/html/2010.14406v3#S4.T4)，六自由度插入**：一百条示范得84.0，一千条得91.0，支持扩展可行；六自由度一示范结果明显不能照搬平面任务结论。
+5. **[表5](https://arxiv.org/html/2010.14406v3#S4.T5)及真实附录**：报告真实任务高分，并说明数据来自人类操作；它验证真实可用性，不验证仿真到真实迁移。
 
 尤其要回看评价定义：有些任务按已完成步骤给部分分，有些按物体处在目标区域的比例给分。因此表中的98分不一定意味着98%的回合完整成功。任务名称相同也要检查计分方式。
 
 真实装配用了8141次抓放动作，扫棋子用了6759次推移动作。它们不是八千多个完整套件，也不是几条示范；数据量与主文少示范仿真实验的语境不同。
 
-## 六、贡献、代价与局限
-
-作者贡献在于用空间搬运表达动作之间的几何关系，同时保留多模态分布，而无需显式识别对象类别、标准姿态或关键点。它也说明合适结构可让视觉策略具有很强的低数据性能。
+## 五、平面等变结构不自动覆盖三维接触
 
 作者明确指出标定敏感性，以及如何加入力／力矩动作尚不清楚。几何目标能决定物体应到哪里，却未必能决定插接过程中应施加多大力。
 
 本文分析：局部特征匹配可能把相似但语义不同的槽位混淆；无语言条件模型也不能在同一画面下区分“放红色”还是“放蓝色”的新命令。后来的语义操作论文会针对这个缺口继续发展。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 抓放坐标关联难学 | 抓取条件化搬运 | 保留相对几何 | 随机专家实验 | 抓取点错误会传递 |
-| 位置变化需要大量数据 | 正交图与空间共享 | 复用平移旋转结构 | 少示范实验 | 依赖标定和离散分辨率 |
-| 动作存在多个正确答案 | 密集空间分布 | 避免直接平均动作 | 表3及预测图 | 仍会有对称性假峰 |
-| 六维离散太昂贵 | 平面分类再回归 | 降低搜索维度 | 表4 | 更复杂姿态仍难 |
-
-## 七、帮助建立理解
-
-**自构例子，未运行**：吸盘从长条左端抓起，目标要求长条中心落在槽中心。若网络只预测“槽中心”作为末端目标，物体会错位。Transporter 把以左端为中心的局部特征移到槽上，匹配时对应的末端目标也落在槽的左端，于是物体整体对齐。
-
-如果抓取后物体在吸盘上滑动，这个刚性对应就会失效。下一次视觉反馈或更丰富的夹持状态才能修正，空间先验并不等于完整接触动力学。
+### 五个前置概念
 
 五个前置概念：
 
@@ -377,11 +385,30 @@ $p^*,\tau^*$ 是示范标签。目标是提高专家动作似然，没有折扣�
 - **多模态动作**：同一场景存在多个分离的正确动作。
 - **动作基元**：由少量参数驱动的一段已有控制程序。
 
-可进一步实验的问题：标定误差多大开始破坏收益？抓取滑移是否需要执行中重观察？加语言后语义与几何分支应在哪里融合？这些问题自然通向后面的 CLIPort 和三维操作方法。
+&lt;details&gt;
+&lt;summary&gt;进阶追问与参考答案（3题）&lt;/summary&gt;
 
-阅读范围为原文架构、训练、主实验与关键附录；全部消融代码未逐项复核，本文未独立复现。
+**进阶问题1：标定误差多大开始破坏空间输运收益？**
 
-## 八、三个问题及答案
+参考答案：没有统一厘米阈值，它取决于像素尺度、物体尺寸、抓取容差和旋转误差。可对相机外参施加已知平移/旋转扰动，分别报告抓点偏差、放置偏差和任务成功，比较Transporter与无输运基线的退化曲线。误差应换算到动作平面，不能只用图像像素偏移作为跨装置结论。
+
+**进阶问题2：抓取滑移是否需要执行中重观察？**
+
+参考答案：只要滑移改变物体相对夹爪的变换，抓取时建立的几何对应就可能过时。可在受控滑移条件下比较固定放置计划、抓后重观察和执行中更新，并记录额外感知延迟。没有滑移且动作短时，频繁观察的成本可能大于收益；滑移风险高时还应加入持物状态或触觉，视觉未必能看清夹持接触。
+
+**进阶问题3：语言语义与几何分支应在哪里融合？**
+
+参考答案：若语言主要选择对象，语义可较早调制视觉特征；若它还指定相对位置和操作关系，放置查询也需要条件化。可在相同预训练与示范预算下比较输入拼接、编码器中间融合和抓放头融合，并分别评估新词义、空间关系与抓放精度。CLIPort提供具体的双流方案，但不能证明它是所有任务的唯一最优融合位置。
+
+这些回答给出机制分析与待检验设计，不是已经运行的新实验结果。
+
+&lt;/details&gt;
+
+## 六、沿机制关系继续读
+
+[CLIPort](046-clipport.md)直接承接Transporter的空间动作结构，再加入语言语义；[PerAct](055-peract.md)则在体素三维空间组织动作，是平行空间表示。共同强调几何，不表示平面等变性自动推广为完整三维接触控制。
+
+## 七、自测三题与参考答案
 
 **问题1：论文写了 Q_pick，为什么不能称它是深度Q学习？**
 
@@ -394,7 +421,6 @@ $p^*,\tau^*$ 是示范标签。目标是提高专家动作似然，没有折扣�
 **问题3：一条示范插入成功，是否证明一般机器人操作只需一条数据？**
 
 答：不证明。该任务具有强空间对称性、固定动作基元和特定场景结构；复杂堆叠与六自由度实验需要更多示范。应把样本效率结论限定在相应任务和先验下。
-
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

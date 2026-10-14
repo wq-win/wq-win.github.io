@@ -10,6 +10,25 @@
 
 年份以首次公开的论文版本为主；期刊扩展、会议发表与后续模型版本在对应文章单独区分。2026 年条目是截至 2026-09-09 的研究样例，其长期影响仍需更多独立证据。
 
+## 带着问题进入，而不是只按模型名字跳读
+
+第一次读建议先完成[Day 0：接口与闭环](00-reading-guide.md)，再选一条短线。每个箭头是阅读顺序；是否直接继承，要以各篇开头和正文标出的关系为准。
+
+| 你想回答的问题 | 建议顺序 | 读完应能解释 |
+|---|---|---|
+| 演示很准，为什么自己做就错？ | [DAgger](006-dagger.md) → [DART](021-dart.md) → [robomimic](043-robomimic.md) | 访问状态、恢复数据、选模预算分别改变了什么 |
+| 同一观察有多条好路线，怎么输出动作？ | [IBC](044-ibc.md) → [Diffusion Policy](061-diffusion-policy.md) / [ACT](062-act.md) → [OFT](091-openvla-oft.md) | 能量、去噪、潜变量与确定性回归的条件歧义 |
+| 预测模型究竟在哪一步省真机尝试？ | [PILCO](007-pilco.md) → [PETS](029-pets.md) / [Dreamer](037-dreamer.md) → [MBDPO](097-mbdpo.md) / [WorldSample](099-worldsample.md) | 部署规划、想象训练、合成回放是不同用法 |
+| 更多数据怎样变成可学的机器人经验？ | [Open X](068-openx.md) / [DROID](078-droid.md) → [MimicGen](071-mimicgen.md) → [DexMimicGen](088-dexmimicgen.md) | 数据来源、物理执行筛选、初态覆盖与双手时序 |
+| 语言知识为什么还不够控制接触？ | [SayCan](051-saycan.md) → [RT-2](065-rt2.md) → [π0](087-pi0.md) → [π0.5](093-pi05.md) | 技能选择、动作token、连续专家和语义子任务的边界 |
+| 模型快了，机器人就更快更稳吗？ | [Mobile ALOHA](073-mobile-aloha.md) → [FAST](089-fast.md) → [SmolVLA](095-smolvla.md) → [Xiaomi-Robotics-0](096-xiaomi0.md) | 编码压缩、设备延迟、推理等待和动作反馈频率 |
+
+训练来源请始终分四栏看：真实机器人交互、物理仿真、固定离线轨迹、生成模型合成轨迹。离线数据可能原本来自真机或仿真，所以这四栏是记录来源和使用方式的账目，不是互斥算法类别。比如[WorldSample原文](https://arxiv.org/html/2607.02431v1)仍靠真实闭环约束合成经验，[DexMimicGen原文](https://arxiv.org/html/2410.24185v1)则通过执行筛选形成模仿资料。
+
+## 证据怎样使用
+
+每篇提供可打开的原图或原表入口，读图说明紧邻对应机制与实验结论；具体版本、统计口径和未确认条件也放在相关段落。先从 [DMP](001-dmp.md)理解运动生成，再比较 [Diffusion Policy](061-diffusion-policy.md)的动作分布，最后用 [SmolVLA](095-smolvla.md)检查推理与执行时序。自构算例不充当论文实测结果，原图链接也不意味着已经独立复现。
+
 ## 100 篇阅读目录
 
 | 篇 | 年份 | 论文与阅读主题 | 分支 | 原文 |

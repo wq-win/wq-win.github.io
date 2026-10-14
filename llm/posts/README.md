@@ -2,7 +2,7 @@
 
 语言模型的发展，既是表示能力的变化，也是数据、计算与评价方式的变化。从循环状态到注意力，从预训练到指令学习，从一次生成到检索、工具和验证，新的能力往往来自多个环节共同改变。理解论文的关键，是找到它真正修改的对象，并把性能结论放回数据与预算条件中。
 
-[发展时间线与技术地图](00-发展时间线总览.md) · [跨论文总结与实验](101-系列总结.md)
+[零基础导读与手算](00-reading-guide.md) · [发展时间线与技术地图](00-发展时间线总览.md) · [跨论文总结与实验](101-系列总结.md)
 
 ## 阅读方法
 
@@ -11,6 +11,29 @@
 先读 15 Transformer、18 BERT、35 GPT-3，可以建立预训练与上下文学习的框架；再读 47 LoRA、54 InstructGPT、75 DPO，区分参数适配与偏好优化；最后把 34 RAG、60 ReAct、91 推理计算扩展放在一起，理解模型之外的系统。需要历史脉络时，从第一篇顺序阅读。
 
 年份以论文首次公开为原则，部分早期论文以正式发表年计；同年顺序兼顾先修关系。近期研究样例截至 2026 年 9 月 9 日，尚未形成与经典工作相同程度的复现积累。
+
+## 不同问题的连续阅读路线
+
+下面的箭头表示推荐阅读次序；只有明确写为“继承”的关系才主张技术承接。每条路线都带着一个未解决的问题往下读。
+
+1. **梯度为什么传不动？** [LSTM](001-lstm.md) → [LayerNorm](012-layernorm.md) → [Transformer](015-transformer.md)。先区分时间路径、层内尺度与信息交互，再问残差和归一化各改变哪条导数路径。这是教学联系，不是 LayerNorm 由 LSTM 推导而来。
+2. **同一个词为什么需要不同表示？** [NNLM](002-nnlm.md) → [word2vec](004-word2vec.md) → [ELMo](016-elmo.md) → [BERT](018-bert.md)。一路记录上下文窗口、损失位置和下游更新方式，避免把“词向量更好”和“整个任务更好”合为同一结论。
+3. **数据少时到底改什么？** [Adapters](020-adapters.md) → [Prefix-Tuning](044-prefix-tuning.md) → [LoRA](047-lora.md) → [QLoRA](074-qlora.md)。前三者是不同适配位置的平行选择；QLoRA 则直接承接低秩更新，进一步压缩冻结基座。画出每种方法哪些张量有梯度，比只抄可训练参数比例更有用。
+4. **知道答案却不按要求回答？** [FLAN](050-flan.md) → [InstructGPT](054-instructgpt.md) → [DPO](075-dpo.md) → [RLAIF](080-rlaif.md)。分别观察任务分布、监督/奖励、优化器和标签来源。后两篇是可交叉的设计轴，不是按年份替换整条训练管线。
+5. **资料进了上下文，为什么还答错？** [DPR](032-dpr.md) → [RAG](034-rag.md) → [FiD](036-fid.md) → [Lost in the Middle](077-lost-middle.md) → [Self-RAG](082-self-rag.md)。将召回、证据融合、位置敏感性和自我评价分开，给每个环节保留一个单独的诊断指标。
+6. **更多计算为什么没有更多正确答案？** [Codex](048-codex.md) → [GSM8K 验证器](052-gsm8k.md) → [Self-Consistency](056-self-consistency.md) → [ToT](072-tree-of-thoughts.md) → [推理预算](091-test-time-scaling.md)。区分候选覆盖、实际选择、早期剪枝和难度分配，所有比较都同时记生成与评价成本。
+7. **模型能装下，为什么服务仍慢？** [FlashAttention](059-flashattention.md) → [GQA](073-gqa.md) → [AWQ](076-awq.md) → [vLLM](079-vllm.md)。四者可以模块组合，分别处理注意力IO、KV状态、权重表示和动态分配。每读一篇都写清收益发生在预填充还是解码、单请求还是并发服务。
+
+## 读懂一篇的最小产物
+
+不要只留一句摘要。给自己写四行：
+
+- **可检查的机制：** 写一个带维度和条件的公式，或走完一条两三步算法轨迹。
+- **最小反例：** 改变哪个条件，论文的直觉就可能失效？例如验证器偏差、校准分布变化或搜索误剪。
+- **最强证据：** 指定原文哪张表或哪个消融，写清固定了什么、改变了什么；看过摘要不能替代看过实验设置。
+- **通向下一篇的问题：** 是前作遗留瓶颈、可组合模块，还是平行解法？把关系说完整再画箭头。
+
+各篇新增数值例都是明确标注的教学构造；原文结果保留图表、任务和比较口径。阅读记录中的章节核读不意味着所有附录与代码都已审计，更不意味着实验已经重跑。近期论文尤其应按具体版本阅读。
 
 ## 论文目录
 
@@ -95,7 +118,7 @@
 | 077 | 2023 | [Lost in the Middle: How Language Models Use Long Contexts](077-lost-middle.md) | 长上下文评估 |
 | 078 | 2023 | [Llama 2: Open Foundation and Fine-Tuned Chat Models](078-llama2.md) | 预训练与对齐 |
 | 079 | 2023 | [Efficient Memory Management for Large Language Model Serving with PagedAttention](079-vllm.md) | 推理系统 |
-| 080 | 2023 | [RLAIF: Scaling Reinforcement Learning from Human Feedback with AI Feedback](080-rlaif.md) | 对齐 |
+| 080 | 2023 | [RLAIF vs. RLHF: Scaling Reinforcement Learning from Human Feedback with AI Feedback](080-rlaif.md) | 对齐 |
 | 081 | 2023 | [SWE-bench: Can Language Models Resolve Real-World GitHub Issues?](081-swebench.md) | Agent评估 |
 | 082 | 2023 | [Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection](082-self-rag.md) | 检索增强 |
 | 083 | 2023 | [Mamba: Linear-Time Sequence Modeling with Selective State Spaces](083-mamba.md) | 序列架构 |

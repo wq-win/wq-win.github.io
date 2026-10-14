@@ -42,13 +42,11 @@
                 <span class="text-gray-500">Dreamer：在潜在世界里训练控制策略</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="79add2343f32ebd9ba22e05ec3daa67f1f48469464e05a7f7549cdc6066389a7"><h1>037｜Dreamer：在潜在世界里训练控制策略</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="699cf8915b5ad099fdd180e776fdbb4d6a02a44327f8c9be3ad18341f04e3f3d"><h1>037｜Dreamer：在潜在世界里训练控制策略</h1>
 <p><a href="index.html">系列首页</a> · <a href="036-metaworld.html">上一篇</a> · <a href="038-cql.html">下一篇</a></p>
 <p><strong>原论文</strong>：<em>Dream to Control: Learning Behaviors by Latent Imagination</em>，Danijar Hafner 等，首次公开于2019；本文核对2020年的 arXiv v3。<a href="https://arxiv.org/abs/1912.01603">论文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p>机器人从图像学习控制，既要理解画面，又要判断动作会造成什么。直接靠环境试错很贵；在像素空间反复生成完整视频又很耗计算。Dreamer 把经验压缩成可预测的潜在状态，然后在这个空间里训练策略。</p>
-<p>它不只预测短期奖励，还学习价值函数，把想象范围之外的后果接回来。策略梯度可以穿过学习到的动力学，直接调整那些会让未来更好的动作。</p>
-<p>一句话总结：在视觉连续控制中，通过潜在世界模型中的可微想象和价值自举，改善样本与计算效率，限制是策略会依赖模型表示和预测梯度的正确性。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="016-visual-foresight.html">视觉预见</a>提供一个阅读起点。Visual Foresight在像素未来中在线搜索，但持续生成完整画面会消耗控制计算。Dreamer把经验压缩到潜在状态，在想象中训练能直接执行的策略；未解问题是表示和模型梯度是否保留了控制所需信息。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：</p>
 <ul>
@@ -58,12 +56,25 @@
 <li><strong>路径导数</strong>：沿动作到状态再到回报的计算链求梯度。</li>
 <li><strong>lambda 回报</strong>：混合不同步数自举目标以平衡估计误差。</li>
 </ul>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<details>
+<summary>进阶追问与参考答案（3题）</summary>
+
+<p><strong>进阶问题1：无关背景重构是否会分散模型容量？</strong></p>
+<p>参考答案：在容量有限且背景变化比控制目标更容易主导像素损失时可能会，但重构也可能保留任务尚未识别的重要信息。用相同前景轨迹合成不同背景，只改变背景熵；固定模型和训练预算，比较目标区域预测、潜在状态可预测性与闭环回报。只有控制表现下降，才支持背景重构在该条件下有害。</p>
+<p><strong>进阶问题2：模型导数误差能否预测闭环失败？</strong></p>
+<p>参考答案：它比平均图像误差更接近策略更新方向，但仍不是充分条件。可在可查询的仿真状态上，对相同小动作扰动比较真实回报差分与模型预测梯度方向，再按误差分层评估更新后的策略。真实硬件上无法无代价重置时，应采用受限扰动与重复试验；不能把不可测的精确真实梯度当作已知量。</p>
+<p><strong>进阶问题3：相同模型用于规划或策略训练，预算怎样分配最划算？</strong></p>
+<p>参考答案：答案取决于部署决策次数、延迟上限和环境变化速度。少量决策且场景常变时，在线搜索可能值得；大量重复决策时，把搜索摊销为策略训练可能更省。固定模型与数据，画出总训练算力、单次决策延迟和闭环回报的帕累托曲线，并把端到端延迟纳入控制测试，不能只比较模型调用次数。</p>
+<p>这些回答给出机制分析与待检验设计，不是已经运行的新实验结果。</p>
+</details>
+
+<h2 id="一问题设定怎样在不反复生成图像的想象中学控制">一、问题设定：怎样在不反复生成图像的想象中学控制</h2>
 <p>这是在线、基于模型的视觉强化学习。输入是图像，动作是连续控制，真实环境反馈任务奖励。这里“纯粹在想象中学习行为”指 actor 和 critic 的训练来源，并不意味着世界模型不需要环境经验。</p>
 <p>单张画面可能无法确定速度、接触或被遮挡部分，因此问题属于部分可观测控制。Dreamer 用带记忆的潜在动力学维护状态估计，而不是把每帧独立压成一个向量就宣称满足马尔可夫性。</p>
 <p>主实验来自仿真控制套件，包含多种运动和接触任务。它是机器人学习的重要算法基础，却不是原论文已经完成真实机械臂部署的证据。后面的 DayDreamer 才进一步面对真实机器人持续收集经验的问题。</p>
 <p>与 PlaNet 相比，Dreamer 沿用潜在动力学思路，但把在线动作序列搜索转成学习参数化策略。与 MBPO 相比，两者都从真实经验附近开始想象，但 Dreamer 还沿动力学计算图反传策略梯度，而非仅把模型生成的转移交给普通 SAC。</p>
-<h2 id="三方法世界模型策略价值分别学什么">三、方法：世界模型、策略、价值分别学什么</h2>
+<h2 id="二连接潜在动力学可微回报与价值自举">二、连接潜在动力学、可微回报与价值自举</h2>
+<p>它不只预测短期奖励，还学习价值函数，把想象范围之外的后果接回来。策略梯度可以穿过学习到的动力学，直接调整那些会让未来更好的动作。</p>
 <h3 id="1-看见现在与想象未来使用不同分布">1. 看见现在与想象未来使用不同分布</h3>
 <p>为避免与原文符号习惯混淆，以下采用教学记号 <span class="reading-math" data-tex="q_\theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>q</mi><mi>θ</mi></msub></mrow><annotation encoding="application/x-tex">q_\theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 表示看到图像后的状态后验，<span class="reading-math" data-tex="p_\theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mi>θ</mi></msub></mrow><annotation encoding="application/x-tex">p_\theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 表示不看下一图像时的先验：</p>
 <p><span class="reading-math" data-tex="z_t\sim q_\theta(z_t\mid z_{t-1},a_{t-1},o_t),
@@ -100,7 +111,14 @@
 +\lambda G_{t+1}^\lambda].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1461em;vertical-align:-0.247em;"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">λ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">[(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathnormal">λ</span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">ψ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.2044em;vertical-align:-0.3053em;"></span><span class="mord mathnormal">λ</span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">λ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3053em;"><span></span></span></span></span></span></span><span class="mclose">]</span><span class="mord">.</span></span></span></span></span></span></p>
 <p>在想象边界以价值预测结束递推。<span class="reading-math" data-tex="\lambda"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi></mrow><annotation encoding="application/x-tex">\lambda</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">λ</span></span></span></span></span> 控制不同长度回报的权衡；<span class="reading-math" data-tex="v_\psi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>v</mi><mi>ψ</mi></msub></mrow><annotation encoding="application/x-tex">v_\psi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">ψ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 估计从该状态继续行动的收益。</p>
 <p>价值网络拟合停止梯度的 <span class="reading-math" data-tex="G_t^\lambda"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>G</mi><mi>t</mi><mi>λ</mi></msubsup></mrow><annotation encoding="application/x-tex">G_t^\lambda</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0961em;vertical-align:-0.247em;"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">λ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span></span></span></span></span>，策略则最大化想象回报，并允许梯度沿奖励、价值与转移路径回到动作。两个更新不能混用：训练 critic 时让目标和预测互相追逐，可能产生不合理的捷径。</p>
-<h3 id="5-教学伪代码">5. 教学伪代码</h3>
+<p>训练时的图像解码提供监督；想象行为不需要逐步把状态画成图片。省去这一步，是潜在想象能并行生成许多轨迹的重要原因。</p>
+<p>想象梯度的风险不同于预测误差。局部设 <span class="reading-math" data-tex="z_{t+1}=f(z_t,a_t)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>z</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>=</mo><mi>f</mi><mo stretchy="false">(</mo><msub><mi>z</mi><mi>t</mi></msub><mo separator="true">,</mo><msub><mi>a</mi><mi>t</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">z_{t+1}=f(z_t,a_t)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，远期奖励对早期动作的梯度包含一串雅可比乘积 <span class="reading-math" data-tex="\prod_j\partial f/\partial z_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mo>∏</mo><mi>j</mi></msub><mi mathvariant="normal">∂</mi><mi>f</mi><mi mathvariant="normal">/</mi><mi mathvariant="normal">∂</mi><msub><mi>z</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">\prod_j\partial f/\partial z_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1858em;vertical-align:-0.4358em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∏</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mord">/</span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>；这里 <span class="reading-math" data-tex="z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>z</mi></mrow><annotation encoding="application/x-tex">z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span></span></span></span></span> 是潜在状态，<span class="reading-math" data-tex="f"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>f</mi></mrow><annotation encoding="application/x-tex">f</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span></span></span></span></span> 是固定世界模型。即使每步位置预测误差小，斜率略错也可能随长度放大，或让梯度消失。更准确的画面不自动意味着更可靠的策略更新方向。</p>
+<p>教学例：真实局部斜率1.0、模型斜率1.1，20次连乘相差约6.7倍。这个线性例子未运行，也不描述原文具体网络；它解释为何要控制想象长度并用价值自举接远期。实验应分别看模型预测、策略回报与想象长度敏感性。<a href="https://arxiv.org/html/1912.01603v3">原文潜在想象与策略梯度</a></p>
+<h3 id="帮助建立理解">帮助建立理解</h3>
+<p><strong>自构例子，未运行</strong>：摆杆要先向反方向运动，才能积累能量最终立起。如果只看很短奖励，反向摆动可能显得不值得。价值网络若已知道“有足够角速度的中间状态”有前景，短想象达到这个状态后便能通过自举得到较高评价，进而鼓励前面的蓄力动作。</p>
+<p>这个例子也说明模型风险：如果模型虚构某个动作能无代价增加角速度，梯度会鼓励利用它。下一轮环境数据应纠正错误，但纠正是否足够快是实验问题。</p>
+<h2 id="三交替收集真实经验学习模型与想象行为">三、交替收集真实经验、学习模型与想象行为</h2>
+<p>固定模型参数<span class="reading-math" data-tex="\psi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ψ</mi></mrow><annotation encoding="application/x-tex">\psi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">ψ</span></span></span></span></span>并不等于把想象状态全部detach。以<span class="reading-math" data-tex="z_{t+1}=f_\psi(z_t,a_t)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>z</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>=</mo><msub><mi>f</mi><mi>ψ</mi></msub><mo stretchy="false">(</mo><msub><mi>z</mi><mi>t</mi></msub><mo separator="true">,</mo><msub><mi>a</mi><mi>t</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">z_{t+1}=f_\psi(z_t,a_t)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">ψ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>为例，Actor需要保留<span class="reading-math" data-tex="\partial f_\psi/\partial a_t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∂</mi><msub><mi>f</mi><mi>ψ</mi></msub><mi mathvariant="normal">/</mi><mi mathvariant="normal">∂</mi><msub><mi>a</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">\partial f_\psi/\partial a_t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">ψ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>这条输入导数，才能沿未来回报更新当前动作；只是不在Actor步更新<span class="reading-math" data-tex="\psi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ψ</mi></mrow><annotation encoding="application/x-tex">\psi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">ψ</span></span></span></span></span>。反过来，价值网络拟合的回报标签需要按规定停止梯度，避免标签随同一次价值拟合一起逃走。两个“冻结”发生在不同位置。</p>
 <pre><code class="language-text">用少量随机交互初始化环境序列池
 重复：
     抽取连续图像、动作、奖励序列
@@ -122,8 +140,14 @@
         执行策略动作并记录反馈
     把新序列加入环境池
 </code></pre>
-<p>训练时的图像解码提供监督；想象行为不需要逐步把状态画成图片。省去这一步，是潜在想象能并行生成许多轨迹的重要原因。</p>
-<h2 id="四实验如何验证">四、实验如何验证</h2>
+<h2 id="四从表现对照检验想象训练的作用">四、从表现对照检验想象训练的作用</h2>
+<p><strong>原图怎么读：</strong> <a href="#paper-037-dreamer-figure-4">图4，原论文图注与图像</a>。改变想象长度时，比较有无价值预测以及在线规划。价值模型承接时域之外的收益，因此曲线检验的是长期信用分配，不是未来视频生成得有多远。</p>
+<!-- figure-ref-v6:start:c013c64ca838-anchor -->
+<p><a id="paper-037-dreamer-figure-4"></a></p>
+<!-- figure-ref-v6:end:c013c64ca838-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/037-dreamer-s3-f4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/037-dreamer-s3-f4.png" width="1824" height="426" alt="Dream to Control: Learning Behaviors by Latent Imagination，图4：改变想象长度时，比较有无价值预测以及在线规划。价值模型承接时域之外的收益，因此曲线检验的是长期信用分配，不是未来视频生成得有多远。" loading="lazy"></a><figcaption>实验图原图摘引：Danijar Hafner 等，首次公开于2019，HTML S3.F4，图4。<a href="https://arxiv.org/html/1912.01603v3#S3.F4" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -163,66 +187,41 @@
 <p>公平性最清楚的对照是共享世界模型而改变行为学习方式的 PlaNet。其他基线部分采用已有论文结果，输入信息与实现体系不完全相同，不能把所有比较都视作同一代码与机器上的重跑。</p>
 <p>动作重复尤其影响预算。一个策略动作保持多个仿真步，会改变控制频率和有效规划跨度。论文统一主要连续控制实验的重复设置，并有专门消融；读后续论文时仍需确认“环境步数”与“决策次数”口径。</p>
 <p>奖励来自任务环境，并非人类偏好或语言反馈。训练评估图像来自同一套基准范围，不能据此推断对真实光照、相机和物体类别都有广泛泛化。</p>
-<h2 id="五结果从表现到机制">五、结果：从表现到机制</h2>
+<h3 id="结果从表现到机制">结果：从表现到机制</h3>
 <p>依据<a href="https://arxiv.org/html/1912.01603">原文第3—6节与附录A</a>。</p>
 <ol>
-<li><strong>图6，总体性能</strong>：Dreamer 在五百万环境步后平均分 823，D4PG 参照在一亿步为 786。它支持所测任务中的样本效率与表现收益；两种预算不同，不应称同预算提升。</li>
-<li><strong>图4，想象长度消融</strong>：有价值预测时对长度更稳健，支持自举缓解短视；并不意味着长度完全不影响训练。</li>
-<li><strong>图7，长期任务</strong>：比较只优化有限想象奖励与带价值的方法，检验是否需要跨越短期回报；不能自动推广到任意长操作链。</li>
-<li><strong>图8，表示学习</strong>：重构目标在该实验中比只预测奖励更有效；这不是“像素重构永远最好”的定理。</li>
-<li><strong>图5，预测可视化</strong>：展示保留轨迹的预测，说明模型捕捉到可见动态；漂亮视频不足以证明动作梯度或接触物理完全正确。</li>
+<li><strong><a href="#paper-037-dreamer-figure-6">图6</a>，总体性能</strong>：Dreamer 在五百万环境步后平均分 823，D4PG 参照在一亿步为 786。它支持所测任务中的样本效率与表现收益；两种预算不同，不应称同预算提升。</li>
+<li><strong><a href="#paper-037-dreamer-figure-4">图4</a>，想象长度消融</strong>：有价值预测时对长度更稳健，支持自举缓解短视；并不意味着长度完全不影响训练。</li>
+<li><strong><a href="#paper-037-dreamer-figure-7">图7</a>，长期任务</strong>：比较只优化有限想象奖励与带价值的方法，检验是否需要跨越短期回报；不能自动推广到任意长操作链。</li>
+<li><strong><a href="#paper-037-dreamer-figure-8">图8</a>，表示学习</strong>：重构目标在该实验中比只预测奖励更有效；这不是“像素重构永远最好”的定理。</li>
+<li><strong><a href="#paper-037-dreamer-figure-5">图5</a>，预测可视化</strong>：展示保留轨迹的预测，说明模型捕捉到可见动态；漂亮视频不足以证明动作梯度或接触物理完全正确。</li>
 </ol>
+<!-- figure-ref-v6:start:b93831525d2c -->
+<p><a id="paper-037-dreamer-figure-5"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/037-dreamer-v6-figure-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/037-dreamer-v6-figure-5.png" width="1566" height="496" alt="Dream to Control: Learning Behaviors by Latent Imagination，图5：展示保留轨迹的预测，说明模型捕捉到可见动态；漂亮视频不足以证明动作梯度或接触物理完全正确。" loading="lazy"></a><figcaption>原图摘引：Danijar Hafner 等，首次公开于2019，HTML S4.F5，图5。<a href="https://arxiv.org/html/1912.01603v3#S4.F5" target="_blank" rel="noopener noreferrer">核对原文</a>。展示保留轨迹的预测，说明模型捕捉到可见动态；漂亮视频不足以证明动作梯度或接触物理完全正确。</figcaption></figure>
+<!-- figure-ref-v6:end:b93831525d2c -->
+<!-- figure-ref-v6:start:520b4765aaa0 -->
+<a id="paper-037-dreamer-figure-6"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/037-dreamer-v6-figure-6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/037-dreamer-v6-figure-6.png" width="2132" height="638" alt="Dream to Control: Learning Behaviors by Latent Imagination，图6：Dreamer 在五百万环境步后平均分 823，D4PG 参照在一亿步为 786。它支持所测任务中的样本效率与表现收益；两种预算不同，不应称同预算提升。" loading="lazy"></a><figcaption>原图摘引：Danijar Hafner 等，首次公开于2019，HTML S4.F6，图6。<a href="https://arxiv.org/html/1912.01603v3#S4.F6" target="_blank" rel="noopener noreferrer">核对原文</a>。Dreamer 在五百万环境步后平均分 823，D4PG 参照在一亿步为 786。它支持所测任务中的样本效率与表现收益；两种预算不同，不应称同预算提升。</figcaption></figure>
+<!-- figure-ref-v6:end:520b4765aaa0 -->
+<!-- figure-ref-v6:start:d48a8ab71514 -->
+<a id="paper-037-dreamer-figure-7"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/037-dreamer-v6-figure-7.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/037-dreamer-v6-figure-7.png" width="2132" height="1051" alt="Dream to Control: Learning Behaviors by Latent Imagination，图7：比较只优化有限想象奖励与带价值的方法，检验是否需要跨越短期回报；不能自动推广到任意长操作链。" loading="lazy"></a><figcaption>原图摘引：Danijar Hafner 等，首次公开于2019，HTML S4.F7，图7。<a href="https://arxiv.org/html/1912.01603v3#S4.F7" target="_blank" rel="noopener noreferrer">核对原文</a>。比较只优化有限想象奖励与带价值的方法，检验是否需要跨越短期回报；不能自动推广到任意长操作链。</figcaption></figure>
+<!-- figure-ref-v6:end:d48a8ab71514 -->
+<!-- figure-ref-v6:start:a484cedab188 -->
+<a id="paper-037-dreamer-figure-8"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/037-dreamer-v6-figure-8.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/037-dreamer-v6-figure-8.png" width="2132" height="1051" alt="Dream to Control: Learning Behaviors by Latent Imagination，图8：重构目标在该实验中比只预测奖励更有效；这不是“像素重构永远最好”的定理。" loading="lazy"></a><figcaption>原图摘引：Danijar Hafner 等，首次公开于2019，HTML S6.F8，图8。<a href="https://arxiv.org/html/1912.01603v3#S6.F8" target="_blank" rel="noopener noreferrer">核对原文</a>。重构目标在该实验中比只预测奖励更有效；这不是“像素重构永远最好”的定理。</figcaption></figure>
+<!-- figure-ref-v6:end:a484cedab188 -->
+
+
 <p>论文还报告训练时间比较，因此不只讨论交互数。不过不同基线来源和实现必须保留，硬件相同也不能自动消除并行采样、软件优化等因素。</p>
 <p>一个关键解释是：Dreamer 的长期能力来自“短想象加已学习的长期价值”，而非声称模型已经能准确生成无限远未来。价值误差和模型误差依旧会共同影响策略。</p>
-<h2 id="六贡献与局限">六、贡献与局限</h2>
-<p>作者把潜在世界模型与路径梯度 actor–critic 结合，使参数化策略能够从大量想象轨迹学习。实验支持这种组合在视觉控制基准中有效，也显示行为学习方式与表示学习方式可以分别研究。</p>
+<h2 id="五冻结模型参数不能保证模型梯度正确">五、冻结模型参数不能保证模型梯度正确</h2>
 <p>代价包括世界模型训练、图像重构和反向传播。潜在表示若遗漏重要信息，后续 actor–critic 再强也无法凭空恢复。模型梯度若在数据稀少区域错误，策略可能朝错误方向优化。</p>
 <p>本文分析：世界模型的预测误差和导数误差是不同问题。两个模型可以在已观察点给出接近结果，却在附近动作方向上给出不同斜率。Dreamer 使用这些斜率优化策略，因此闭环评估比单看重构损失更加必要。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>像素想象成本高</td>
-<td>紧凑潜在动力学</td>
-<td>避免逐步渲染</td>
-<td>系统与时间比较</td>
-<td>表示可能遗漏任务细节</td>
-</tr>
-<tr>
-<td>有限预测导致短视</td>
-<td>价值函数与混合回报</td>
-<td>补充边界之后收益</td>
-<td>图4、图7</td>
-<td>自举仍会有偏差</td>
-</tr>
-<tr>
-<td>在线搜索昂贵</td>
-<td>学习参数化策略</td>
-<td>把计算移到训练</td>
-<td>PlaNet对照</td>
-<td>策略需要持续更新</td>
-</tr>
-<tr>
-<td>策略梯度利用信息不足</td>
-<td>沿动力学反传</td>
-<td>直接联系动作与未来</td>
-<td>行为学习实验</td>
-<td>错误导数会误导优化</td>
-</tr>
-</tbody></table></div>
-<h2 id="七帮助建立理解">七、帮助建立理解</h2>
-<p><strong>自构例子，未运行</strong>：摆杆要先向反方向运动，才能积累能量最终立起。如果只看很短奖励，反向摆动可能显得不值得。价值网络若已知道“有足够角速度的中间状态”有前景，短想象达到这个状态后便能通过自举得到较高评价，进而鼓励前面的蓄力动作。</p>
-<p>这个例子也说明模型风险：如果模型虚构某个动作能无代价增加角速度，梯度会鼓励利用它。下一轮环境数据应纠正错误，但纠正是否足够快是实验问题。</p>
-<p>可进一步检验：加入无关背景后重构是否分散容量？模型导数误差能否预测闭环失败？将相同模型用于规划与策略训练时，预算怎样分配最划算？这些是从 Dreamer 出发的具体研究方向。</p>
-<p>阅读范围为原文方法、主要实验和附录超参数；离散控制附录未逐项审查，本文未独立复现，也不把后续 Dreamer 版本机制混入本篇。</p>
-<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<h2 id="六沿机制关系继续读">六、沿机制关系继续读</h2>
+<p>与<a href="033-mbpo.html">MBPO</a>是平行模型策略学习路线：Dreamer让梯度穿过潜在动力学，MBPO将合成转移交给离策略更新；<a href="054-daydreamer.html">DayDreamer</a>后续承接世界模型行为学习并验证真实机器人系统。</p>
+<h2 id="七自测三题与参考答案">七、自测三题与参考答案</h2>
 <p><strong>问题1：Dreamer 想象时是不是每一步都生成图片再识别？</strong></p>
 <p>答：不是。图像解码主要用于训练表示，想象在潜在状态之间推进。策略和价值模型直接使用潜在状态，因此省去反复图像生成与编码的成本。</p>
 <p><strong>问题2：冻结世界模型参数，会不会让策略无法获得模型梯度？</strong></p>
@@ -240,15 +239,11 @@
 
 **原论文**：*Dream to Control: Learning Behaviors by Latent Imagination*，Danijar Hafner 等，首次公开于2019；本文核对2020年的 arXiv v3。[论文](https://arxiv.org/abs/1912.01603)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
 
-机器人从图像学习控制，既要理解画面，又要判断动作会造成什么。直接靠环境试错很贵；在像素空间反复生成完整视频又很耗计算。Dreamer 把经验压缩成可预测的潜在状态，然后在这个空间里训练策略。
+[视觉预见](016-visual-foresight.md)提供一个阅读起点。Visual Foresight在像素未来中在线搜索，但持续生成完整画面会消耗控制计算。Dreamer把经验压缩到潜在状态，在想象中训练能直接执行的策略；未解问题是表示和模型梯度是否保留了控制所需信息。
 
-它不只预测短期奖励，还学习价值函数，把想象范围之外的后果接回来。策略梯度可以穿过学习到的动力学，直接调整那些会让未来更好的动作。
-
-一句话总结：在视觉连续控制中，通过潜在世界模型中的可微想象和价值自举，改善样本与计算效率，限制是策略会依赖模型表示和预测梯度的正确性。
-
-## 二、研究背景与问题定义
+## 一、问题设定：怎样在不反复生成图像的想象中学控制
 
 这是在线、基于模型的视觉强化学习。输入是图像，动作是连续控制，真实环境反馈任务奖励。这里“纯粹在想象中学习行为”指 actor 和 critic 的训练来源，并不意味着世界模型不需要环境经验。
 
@@ -258,7 +253,9 @@
 
 与 PlaNet 相比，Dreamer 沿用潜在动力学思路，但把在线动作序列搜索转成学习参数化策略。与 MBPO 相比，两者都从真实经验附近开始想象，但 Dreamer 还沿动力学计算图反传策略梯度，而非仅把模型生成的转移交给普通 SAC。
 
-## 三、方法：世界模型、策略、价值分别学什么
+## 二、连接潜在动力学、可微回报与价值自举
+
+它不只预测短期奖励，还学习价值函数，把想象范围之外的后果接回来。策略梯度可以穿过学习到的动力学，直接调整那些会让未来更好的动作。
 
 ### 1. 看见现在与想象未来使用不同分布
 
@@ -316,7 +313,21 @@ $$
 
 价值网络拟合停止梯度的 $G_t^\lambda$，策略则最大化想象回报，并允许梯度沿奖励、价值与转移路径回到动作。两个更新不能混用：训练 critic 时让目标和预测互相追逐，可能产生不合理的捷径。
 
-### 5. 教学伪代码
+训练时的图像解码提供监督；想象行为不需要逐步把状态画成图片。省去这一步，是潜在想象能并行生成许多轨迹的重要原因。
+
+想象梯度的风险不同于预测误差。局部设 $z_{t+1}=f(z_t,a_t)$，远期奖励对早期动作的梯度包含一串雅可比乘积 $\prod_j\partial f/\partial z_j$；这里 $z$ 是潜在状态，$f$ 是固定世界模型。即使每步位置预测误差小，斜率略错也可能随长度放大，或让梯度消失。更准确的画面不自动意味着更可靠的策略更新方向。
+
+教学例：真实局部斜率1.0、模型斜率1.1，20次连乘相差约6.7倍。这个线性例子未运行，也不描述原文具体网络；它解释为何要控制想象长度并用价值自举接远期。实验应分别看模型预测、策略回报与想象长度敏感性。[原文潜在想象与策略梯度](https://arxiv.org/html/1912.01603v3)
+
+### 帮助建立理解
+
+**自构例子，未运行**：摆杆要先向反方向运动，才能积累能量最终立起。如果只看很短奖励，反向摆动可能显得不值得。价值网络若已知道“有足够角速度的中间状态”有前景，短想象达到这个状态后便能通过自举得到较高评价，进而鼓励前面的蓄力动作。
+
+这个例子也说明模型风险：如果模型虚构某个动作能无代价增加角速度，梯度会鼓励利用它。下一轮环境数据应纠正错误，但纠正是否足够快是实验问题。
+
+## 三、交替收集真实经验、学习模型与想象行为
+
+固定模型参数$\psi$并不等于把想象状态全部detach。以$z_{t+1}=f_\psi(z_t,a_t)$为例，Actor需要保留$\partial f_\psi/\partial a_t$这条输入导数，才能沿未来回报更新当前动作；只是不在Actor步更新$\psi$。反过来，价值网络拟合的回报标签需要按规定停止梯度，避免标签随同一次价值拟合一起逃走。两个“冻结”发生在不同位置。
 
 ~~~text
 用少量随机交互初始化环境序列池
@@ -341,9 +352,16 @@ $$
     把新序列加入环境池
 ~~~
 
-训练时的图像解码提供监督；想象行为不需要逐步把状态画成图片。省去这一步，是潜在想象能并行生成许多轨迹的重要原因。
+## 四、从表现对照检验想象训练的作用
 
-## 四、实验如何验证
+**原图怎么读：** [图4，原论文图注与图像](#paper-037-dreamer-figure-4)。改变想象长度时，比较有无价值预测以及在线规划。价值模型承接时域之外的收益，因此曲线检验的是长期信用分配，不是未来视频生成得有多远。
+
+
+&lt;!-- figure-ref-v6:start:c013c64ca838-anchor --&gt;
+&lt;a id=&quot;paper-037-dreamer-figure-4&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:c013c64ca838-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/037-dreamer-s3-f4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/037-dreamer-s3-f4.png&quot; width=&quot;1824&quot; height=&quot;426&quot; alt=&quot;Dream to Control: Learning Behaviors by Latent Imagination，图4：改变想象长度时，比较有无价值预测以及在线规划。价值模型承接时域之外的收益，因此曲线检验的是长期信用分配，不是未来视频生成得有多远。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验图原图摘引：Danijar Hafner 等，首次公开于2019，HTML S3.F4，图4。&lt;a href=&quot;https://arxiv.org/html/1912.01603v3#S3.F4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 | 项目 | 原论文设置 |
 |---|---|
@@ -361,40 +379,45 @@ $$
 
 奖励来自任务环境，并非人类偏好或语言反馈。训练评估图像来自同一套基准范围，不能据此推断对真实光照、相机和物体类别都有广泛泛化。
 
-## 五、结果：从表现到机制
+### 结果：从表现到机制
 
 依据[原文第3—6节与附录A](https://arxiv.org/html/1912.01603)。
 
-1. **图6，总体性能**：Dreamer 在五百万环境步后平均分 823，D4PG 参照在一亿步为 786。它支持所测任务中的样本效率与表现收益；两种预算不同，不应称同预算提升。
-2. **图4，想象长度消融**：有价值预测时对长度更稳健，支持自举缓解短视；并不意味着长度完全不影响训练。
-3. **图7，长期任务**：比较只优化有限想象奖励与带价值的方法，检验是否需要跨越短期回报；不能自动推广到任意长操作链。
-4. **图8，表示学习**：重构目标在该实验中比只预测奖励更有效；这不是“像素重构永远最好”的定理。
-5. **图5，预测可视化**：展示保留轨迹的预测，说明模型捕捉到可见动态；漂亮视频不足以证明动作梯度或接触物理完全正确。
+1. **[图6](#paper-037-dreamer-figure-6)，总体性能**：Dreamer 在五百万环境步后平均分 823，D4PG 参照在一亿步为 786。它支持所测任务中的样本效率与表现收益；两种预算不同，不应称同预算提升。
+2. **[图4](#paper-037-dreamer-figure-4)，想象长度消融**：有价值预测时对长度更稳健，支持自举缓解短视；并不意味着长度完全不影响训练。
+3. **[图7](#paper-037-dreamer-figure-7)，长期任务**：比较只优化有限想象奖励与带价值的方法，检验是否需要跨越短期回报；不能自动推广到任意长操作链。
+4. **[图8](#paper-037-dreamer-figure-8)，表示学习**：重构目标在该实验中比只预测奖励更有效；这不是“像素重构永远最好”的定理。
+5. **[图5](#paper-037-dreamer-figure-5)，预测可视化**：展示保留轨迹的预测，说明模型捕捉到可见动态；漂亮视频不足以证明动作梯度或接触物理完全正确。
+
+&lt;!-- figure-ref-v6:start:b93831525d2c --&gt;
+&lt;a id=&quot;paper-037-dreamer-figure-5&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/037-dreamer-v6-figure-5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/037-dreamer-v6-figure-5.png&quot; width=&quot;1566&quot; height=&quot;496&quot; alt=&quot;Dream to Control: Learning Behaviors by Latent Imagination，图5：展示保留轨迹的预测，说明模型捕捉到可见动态；漂亮视频不足以证明动作梯度或接触物理完全正确。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Danijar Hafner 等，首次公开于2019，HTML S4.F5，图5。&lt;a href=&quot;https://arxiv.org/html/1912.01603v3#S4.F5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。展示保留轨迹的预测，说明模型捕捉到可见动态；漂亮视频不足以证明动作梯度或接触物理完全正确。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:b93831525d2c --&gt;
+&lt;!-- figure-ref-v6:start:520b4765aaa0 --&gt;
+&lt;a id=&quot;paper-037-dreamer-figure-6&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/037-dreamer-v6-figure-6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/037-dreamer-v6-figure-6.png&quot; width=&quot;2132&quot; height=&quot;638&quot; alt=&quot;Dream to Control: Learning Behaviors by Latent Imagination，图6：Dreamer 在五百万环境步后平均分 823，D4PG 参照在一亿步为 786。它支持所测任务中的样本效率与表现收益；两种预算不同，不应称同预算提升。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Danijar Hafner 等，首次公开于2019，HTML S4.F6，图6。&lt;a href=&quot;https://arxiv.org/html/1912.01603v3#S4.F6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。Dreamer 在五百万环境步后平均分 823，D4PG 参照在一亿步为 786。它支持所测任务中的样本效率与表现收益；两种预算不同，不应称同预算提升。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:520b4765aaa0 --&gt;
+&lt;!-- figure-ref-v6:start:d48a8ab71514 --&gt;
+&lt;a id=&quot;paper-037-dreamer-figure-7&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/037-dreamer-v6-figure-7.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/037-dreamer-v6-figure-7.png&quot; width=&quot;2132&quot; height=&quot;1051&quot; alt=&quot;Dream to Control: Learning Behaviors by Latent Imagination，图7：比较只优化有限想象奖励与带价值的方法，检验是否需要跨越短期回报；不能自动推广到任意长操作链。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Danijar Hafner 等，首次公开于2019，HTML S4.F7，图7。&lt;a href=&quot;https://arxiv.org/html/1912.01603v3#S4.F7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。比较只优化有限想象奖励与带价值的方法，检验是否需要跨越短期回报；不能自动推广到任意长操作链。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:d48a8ab71514 --&gt;
+&lt;!-- figure-ref-v6:start:a484cedab188 --&gt;
+&lt;a id=&quot;paper-037-dreamer-figure-8&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/037-dreamer-v6-figure-8.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/037-dreamer-v6-figure-8.png&quot; width=&quot;2132&quot; height=&quot;1051&quot; alt=&quot;Dream to Control: Learning Behaviors by Latent Imagination，图8：重构目标在该实验中比只预测奖励更有效；这不是“像素重构永远最好”的定理。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Danijar Hafner 等，首次公开于2019，HTML S6.F8，图8。&lt;a href=&quot;https://arxiv.org/html/1912.01603v3#S6.F8&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。重构目标在该实验中比只预测奖励更有效；这不是“像素重构永远最好”的定理。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:a484cedab188 --&gt;
+
 
 论文还报告训练时间比较，因此不只讨论交互数。不过不同基线来源和实现必须保留，硬件相同也不能自动消除并行采样、软件优化等因素。
 
 一个关键解释是：Dreamer 的长期能力来自“短想象加已学习的长期价值”，而非声称模型已经能准确生成无限远未来。价值误差和模型误差依旧会共同影响策略。
 
-## 六、贡献与局限
-
-作者把潜在世界模型与路径梯度 actor–critic 结合，使参数化策略能够从大量想象轨迹学习。实验支持这种组合在视觉控制基准中有效，也显示行为学习方式与表示学习方式可以分别研究。
+## 五、冻结模型参数不能保证模型梯度正确
 
 代价包括世界模型训练、图像重构和反向传播。潜在表示若遗漏重要信息，后续 actor–critic 再强也无法凭空恢复。模型梯度若在数据稀少区域错误，策略可能朝错误方向优化。
 
 本文分析：世界模型的预测误差和导数误差是不同问题。两个模型可以在已观察点给出接近结果，却在附近动作方向上给出不同斜率。Dreamer 使用这些斜率优化策略，因此闭环评估比单看重构损失更加必要。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 像素想象成本高 | 紧凑潜在动力学 | 避免逐步渲染 | 系统与时间比较 | 表示可能遗漏任务细节 |
-| 有限预测导致短视 | 价值函数与混合回报 | 补充边界之后收益 | 图4、图7 | 自举仍会有偏差 |
-| 在线搜索昂贵 | 学习参数化策略 | 把计算移到训练 | PlaNet对照 | 策略需要持续更新 |
-| 策略梯度利用信息不足 | 沿动力学反传 | 直接联系动作与未来 | 行为学习实验 | 错误导数会误导优化 |
-
-## 七、帮助建立理解
-
-**自构例子，未运行**：摆杆要先向反方向运动，才能积累能量最终立起。如果只看很短奖励，反向摆动可能显得不值得。价值网络若已知道“有足够角速度的中间状态”有前景，短想象达到这个状态后便能通过自举得到较高评价，进而鼓励前面的蓄力动作。
-
-这个例子也说明模型风险：如果模型虚构某个动作能无代价增加角速度，梯度会鼓励利用它。下一轮环境数据应纠正错误，但纠正是否足够快是实验问题。
+### 五个前置概念
 
 五个前置概念：
 
@@ -404,11 +427,30 @@ $$
 - **路径导数**：沿动作到状态再到回报的计算链求梯度。
 - **lambda 回报**：混合不同步数自举目标以平衡估计误差。
 
-可进一步检验：加入无关背景后重构是否分散容量？模型导数误差能否预测闭环失败？将相同模型用于规划与策略训练时，预算怎样分配最划算？这些是从 Dreamer 出发的具体研究方向。
+&lt;details&gt;
+&lt;summary&gt;进阶追问与参考答案（3题）&lt;/summary&gt;
 
-阅读范围为原文方法、主要实验和附录超参数；离散控制附录未逐项审查，本文未独立复现，也不把后续 Dreamer 版本机制混入本篇。
+**进阶问题1：无关背景重构是否会分散模型容量？**
 
-## 八、三个问题及答案
+参考答案：在容量有限且背景变化比控制目标更容易主导像素损失时可能会，但重构也可能保留任务尚未识别的重要信息。用相同前景轨迹合成不同背景，只改变背景熵；固定模型和训练预算，比较目标区域预测、潜在状态可预测性与闭环回报。只有控制表现下降，才支持背景重构在该条件下有害。
+
+**进阶问题2：模型导数误差能否预测闭环失败？**
+
+参考答案：它比平均图像误差更接近策略更新方向，但仍不是充分条件。可在可查询的仿真状态上，对相同小动作扰动比较真实回报差分与模型预测梯度方向，再按误差分层评估更新后的策略。真实硬件上无法无代价重置时，应采用受限扰动与重复试验；不能把不可测的精确真实梯度当作已知量。
+
+**进阶问题3：相同模型用于规划或策略训练，预算怎样分配最划算？**
+
+参考答案：答案取决于部署决策次数、延迟上限和环境变化速度。少量决策且场景常变时，在线搜索可能值得；大量重复决策时，把搜索摊销为策略训练可能更省。固定模型与数据，画出总训练算力、单次决策延迟和闭环回报的帕累托曲线，并把端到端延迟纳入控制测试，不能只比较模型调用次数。
+
+这些回答给出机制分析与待检验设计，不是已经运行的新实验结果。
+
+&lt;/details&gt;
+
+## 六、沿机制关系继续读
+
+与[MBPO](033-mbpo.md)是平行模型策略学习路线：Dreamer让梯度穿过潜在动力学，MBPO将合成转移交给离策略更新；[DayDreamer](054-daydreamer.md)后续承接世界模型行为学习并验证真实机器人系统。
+
+## 七、自测三题与参考答案
 
 **问题1：Dreamer 想象时是不是每一步都生成图片再识别？**
 
@@ -421,7 +463,6 @@ $$
 **问题3：为什么模型只需想象有限步，也可能学会较长任务？**
 
 答：想象末端的价值估计承接更远的回报，反复自举把后续收益传播回来。但这依赖价值和模型足够可靠，不表示有限想象自动解决所有长期规划问题。
-
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

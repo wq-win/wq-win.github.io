@@ -42,24 +42,23 @@
                 <span class="text-gray-500">ORB-SLAM3：跟踪丢了以后，地图还能继续生长吗</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="b5a79a36c8165417f45d53068a0bc54298278addf1c918a308a485d8a4053fb4"><h1>098｜ORB-SLAM3：跟踪丢了以后，地图还能继续生长吗</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="df35627d302ed97d461d0ab72feca7c17595816e60c33878fa1deb13734547db"><h1>098｜ORB-SLAM3：跟踪丢了以后，地图还能继续生长吗</h1>
 <p><a href="00-timeline.html">总览</a> · <a href="index.html">目录</a> · <a href="097-liosam.html">上一篇</a> · <a href="099-fastlio2.html">下一篇</a></p>
-<p><strong>论文</strong>：Carlos Campos 等，<em>ORB-SLAM3: An Accurate Open-Source Library for Visual, Visual-Inertial, and Multimap SLAM</em>，2020 年预印本，后发表于 IEEE T-RO。<a href="https://arxiv.org/html/2007.11898">原文</a> · <a href="https://github.com/UZ-SLAMLab/ORB_SLAM3">官方代码</a>。</p>
-<p><strong>阅读范围</strong>：核对系统架构、视觉惯性初始化、地图合并及实验正文；公式以下以简化符号解释，不复刻全部优化实现。代码仓库用于确认运行与系统边界，未独立执行基准。</p>
-<h2 id="一分钟理解允许暂时不知道自己在哪里">一分钟理解：允许暂时不知道自己在哪里</h2>
-<p>相机被手挡住，或者机器人突然转向，视觉 SLAM 就可能跟不上原来的特征。一个脆弱的系统会因此丢掉整段运行；另一个危险做法是继续输出貌似平滑但其实已经失真的轨迹。</p>
-<p>ORB-SLAM3 的重要思想是把失踪处理纳入系统：视觉与 IMU 联合估计，暂时无法连回旧地图时可以建立新地图，以后找到可靠联系再合并。它还改进了惯性初始化和场所识别，使历史观测更早、更有效地参与估计。</p>
-<p>一句话：在视觉或视觉惯性定位中，通过更完整的数据关联、惯性初始化和多地图管理，改善精度与跟踪丢失后的恢复能力，代价是更复杂的地图状态、优化调度和标定要求。</p>
-<p>这里的“多地图”是同一个系统维护和关联多个地图片段，不等于论文已经解决多机器人通信、异构传感器协商或无限期开放世界建图。</p>
+<p><strong>论文</strong>：Carlos Campos 等，<em>ORB-SLAM3: An Accurate Open-Source Library for Visual, Visual-Inertial and Multi-Map SLAM</em>，2020 年预印本，后发表于 IEEE T-RO。<a href="https://arxiv.org/html/2007.11898">原文</a> · <a href="https://github.com/UZ-SLAMLab/ORB_SLAM3">官方代码</a>。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="089-orbslam2.html">ORB-SLAM2</a>已经能回环和复用地图，但长时间丢失仍会断开运行；ORB-SLAM3 直接扩展这一系统，加入视觉惯性初始化与 Atlas 地图管理。它与<a href="092-vinsmono.html">VINS-Mono</a>是完整视觉惯性系统的平行选择。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
-<p>五个前置概念：<strong>重投影误差</strong>检查三维点是否投到观测位置；<strong>BA</strong>联合调整位姿和地图点；<strong>预积分</strong>压缩区间惯性约束；**Sim(3)**在刚体变换外允许尺度变化；<strong>场所识别</strong>提出历史地点候选，仍需要几何验证。</p>
-<h2 id="背景地图不只是最近两帧之间的位移">背景：地图不只是最近两帧之间的位移</h2>
+<p>五个前置概念：<strong>重投影误差</strong>检查三维点是否投到观测位置；<strong>BA</strong>联合调整位姿和地图点；<strong>预积分</strong>压缩区间惯性约束；<strong>Sim(3)</strong>在刚体变换外允许尺度变化；<strong>场所识别</strong>提出历史地点候选，仍需要几何验证。</p>
+<h2 id="一问题设定跟踪断裂后怎样保留地图片段并在以后重接">一、问题设定：跟踪断裂后怎样保留地图片段并在以后重接</h2>
+<p>相机被手挡住，或者机器人突然转向，视觉 SLAM 就可能跟不上原来的特征。一个脆弱的系统会因此丢掉整段运行；另一个危险做法是继续输出貌似平滑但其实已经失真的轨迹。</p>
+<h3 id="背景地图不只是最近两帧之间的位移">背景：地图不只是最近两帧之间的位移</h3>
 <p>只比较相邻图像，误差会随时间积累。保留三维地图点，可以让当前帧与更早的帧共同约束同一个位置；识别重访还能把相隔很久的片段连接起来。数据关联因而有不同时间跨度，而不只是“特征检测是否够快”。</p>
 <p>输入可以是相机图像，或相机加 IMU；不同传感器配置对应不同可观测量。单目几何一般没有绝对尺度：把所有点和相机平移一起放大，图像投影仍可不变。双目的已知基线或具有充分运动激励的惯性观测，可提供尺度信息。</p>
 <p>本任务没有策略、奖励或试错训练。变量是相机/机体位姿、地图点，以及惯性配置中的速度、偏置和重力相关量。本文讨论的是稀疏定位建图；它不自动生成可抓取物体语义或高质量稠密网格。</p>
-<h2 id="方法用不同观测反复约束同一组未知量">方法：用不同观测反复约束同一组未知量</h2>
+<h2 id="二联合惯性初始化与atlas数据关联">二、联合惯性初始化与Atlas数据关联</h2>
+<p>ORB-SLAM3 的重要思想是把失踪处理纳入系统：视觉与 IMU 联合估计，暂时无法连回旧地图时可以建立新地图，以后找到可靠联系再合并。它还改进了惯性初始化和场所识别，使历史观测更早、更有效地参与估计。</p>
 <h3 id="视觉误差是什么">视觉误差是什么</h3>
-<p>设世界点为 <span class="reading-math" data-tex="P_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>P</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">P_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，相机位姿为 <span class="reading-math" data-tex="T_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">T_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，<span class="reading-math" data-tex="T_{CB}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mrow><mi>C</mi><mi>B</mi></mrow></msub></mrow><annotation encoding="application/x-tex">T_{CB}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">CB</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是机体到相机的已知外参。观察像素为 <span class="reading-math" data-tex="u_{ij}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>u</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub></mrow><annotation encoding="application/x-tex">u_{ij}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，则简化重投影残差为：</p>
+<p>设世界点为 <span class="reading-math" data-tex="P_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>P</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">P_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，<span class="reading-math" data-tex="T_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">T_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是机体到世界的变换，<span class="reading-math" data-tex="T_{CB}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mrow><mi>C</mi><mi>B</mi></mrow></msub></mrow><annotation encoding="application/x-tex">T_{CB}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">CB</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是机体到相机的已知外参。观察像素为 <span class="reading-math" data-tex="u_{ij}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>u</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub></mrow><annotation encoding="application/x-tex">u_{ij}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，则简化重投影残差为：</p>
 <p><span class="reading-math" data-tex="r_{ij}=u_{ij}-\pi(T_{CB}T_i^{-1}P_j)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>r</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>=</mo><msub><mi>u</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>−</mo><mi>π</mi><mo stretchy="false">(</mo><msub><mi>T</mi><mrow><mi>C</mi><mi>B</mi></mrow></msub><msubsup><mi>T</mi><mi>i</mi><mrow><mo>−</mo><mn>1</mn></mrow></msubsup><msub><mi>P</mi><mi>j</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">r_{ij}=u_{ij}-\pi(T_{CB}T_i^{-1}P_j).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1502em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">CB</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.433em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.267em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="\pi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>π</mi></mrow><annotation encoding="application/x-tex">\pi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">π</span></span></span></span></span> 是相机投影模型。它表达的不是“两个描述子相差多少”，而是同一个三维点在当前位姿下应该落在哪个像素。描述子用于提出对应，几何误差用于检查和优化，两者不能混为一个步骤。</p>
 <p>如果相机内参、畸变或外参错误，即使点匹配正确，预测像素也可能系统偏移。增加优化迭代不能保证消除这种模型错误。</p>
@@ -76,6 +75,14 @@
 <h3 id="atlas先保留片段再证明它们属于同一世界">Atlas：先保留片段，再证明它们属于同一世界</h3>
 <p>用自构例子理解：机器人在 A 房间建图，经过一段完全黑暗的走廊后进入 B 房间。此时没有足够观测证明 B 相对 A 的位置，可以先建立独立片段。稍后从另一条明亮路径回到 A，若得到可靠的共同几何，就能估计片段变换并融合。</p>
 <p>合并地图至少涉及三个不同动作：提出候选地点、验证几何变换、消除重复点并传播校正。只因两张图像看起来像，就强行合并，会把整张地图拉坏。另一方面，没有重叠或可辨认的历史观测时，保留两个片段是诚实的状态，不是算法忘了按某个按钮。</p>
+<p>地图对齐还必须作用于同一坐标系中的所有状态。设 <span class="reading-math" data-tex="S_{AB}:p_B\mapsto sRp_B+t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>S</mi><mrow><mi>A</mi><mi>B</mi></mrow></msub><mo>:</mo><msub><mi>p</mi><mi>B</mi></msub><mo>↦</mo><mi>s</mi><mi>R</mi><msub><mi>p</mi><mi>B</mi></msub><mo>+</mo><mi>t</mi></mrow><annotation encoding="application/x-tex">S_{AB}:p_B\mapsto sRp_B+t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">S</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">A</span><span class="mord mathnormal mtight" style="margin-right:0.05017em;">B</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">:</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7054em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">B</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">↦</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">s</span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">B</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6151em;"></span><span class="mord mathnormal">t</span></span></span></span></span> 把地图 B 的坐标变到地图 A；<span class="reading-math" data-tex="s&gt;0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi><mo>&gt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">s&gt;0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em;"></span><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">&gt;</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span> 是尺度、<span class="reading-math" data-tex="R"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>R</mi></mrow><annotation encoding="application/x-tex">R</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span></span></span></span> 为旋转、<span class="reading-math" data-tex="t"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>t</mi></mrow><annotation encoding="application/x-tex">t</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6151em;"></span><span class="mord mathnormal">t</span></span></span></span></span> 为平移。对于尚未定尺度、位置与速度使用同一图单位且时间单位不变的状态，正确变换为</p>
+<p><span class="reading-math" data-tex="p_A=sRp_B+t,\qquad v_A=sRv_B,\qquad R_{AI}=RR_{BI}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>p</mi><mi>A</mi></msub><mo>=</mo><mi>s</mi><mi>R</mi><msub><mi>p</mi><mi>B</mi></msub><mo>+</mo><mi>t</mi><mo separator="true">,</mo><mspace width="2em"/><msub><mi>v</mi><mi>A</mi></msub><mo>=</mo><mi>s</mi><mi>R</mi><msub><mi>v</mi><mi>B</mi></msub><mo separator="true">,</mo><mspace width="2em"/><msub><mi>R</mi><mrow><mi>A</mi><mi>I</mi></mrow></msub><mo>=</mo><mi>R</mi><msub><mi>R</mi><mrow><mi>B</mi><mi>I</mi></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">p_A=sRp_B+t,\qquad v_A=sRv_B,\qquad R_{AI}=RR_{BI}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">A</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">s</span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">B</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8095em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">t</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">A</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">s</span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">B</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">A</span><span class="mord mathnormal mtight" style="margin-right:0.07847em;">I</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">B</span><span class="mord mathnormal mtight" style="margin-right:0.07847em;">I</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p><span class="reading-math" data-tex="I"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi></mrow><annotation encoding="application/x-tex">I</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">I</span></span></span></span></span> 表示机体/IMU 系，<span class="reading-math" data-tex="R_{BI}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>R</mi><mrow><mi>B</mi><mi>I</mi></mrow></msub></mrow><annotation encoding="application/x-tex">R_{BI}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05017em;">B</span><span class="mord mathnormal mtight" style="margin-right:0.07847em;">I</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 把该系向量表达在地图 B 中。平移不会加到速度上，姿态也不能乘上尺度；IMU 偏置若表达在传感器自身坐标系，则不会因世界图坐标改变而旋转。这些是坐标变换规律，并不意味着任意成熟惯性地图都允许自由缩放。</p>
+<p><strong>原创手算。</strong> 取 <span class="reading-math" data-tex="s=2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi><mo>=</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">s=2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span></span></span></span></span>、<span class="reading-math" data-tex="R"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>R</mi></mrow><annotation encoding="application/x-tex">R</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span></span></span></span> 为绕竖直轴转 <span class="reading-math" data-tex="90^\circ"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>9</mn><msup><mn>0</mn><mo>∘</mo></msup></mrow><annotation encoding="application/x-tex">90^\circ</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6741em;"></span><span class="mord">9</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6741em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∘</span></span></span></span></span></span></span></span></span></span></span></span>、<span class="reading-math" data-tex="t=(10,0,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>t</mi><mo>=</mo><mo stretchy="false">(</mo><mn>10</mn><mo separator="true">,</mo><mn>0</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">t=(10,0,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6151em;"></span><span class="mord mathnormal">t</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">10</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span>；地图 B 的点 <span class="reading-math" data-tex="(1,0,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>0</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1,0,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span> 变为 <span class="reading-math" data-tex="(10,2,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>10</mn><mo separator="true">,</mo><mn>2</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(10,2,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">10</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span>，速度 <span class="reading-math" data-tex="(1,0,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>0</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1,0,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span> 变为 <span class="reading-math" data-tex="(0,2,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0</mn><mo separator="true">,</mo><mn>2</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0,2,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span>。若只更新点而保留速度 <span class="reading-math" data-tex="(1,0,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>0</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1,0,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span>，下一次惯性位置预测便与已经转过的地图不相容。</p>
+<p><a href="https://arxiv.org/html/2007.11898">原文V-B与VI-C</a>区分未成熟地图的 Sim(3) 对齐与成熟惯性地图的 SE(3) 对齐。后者已有公制尺度，理想重力对齐后剩余世界旋转自由度主要是偏航；实际还要检查横滚、俯仰的一致性，并优化惯性连接。多次地图实验因此验证的不只是“认出旧图像”，还包括融合后状态和几何能否共同解释观测。</p>
+<p>此伪代码概括机制。实际线程、删除条件与优化窗口应以固定版本代码为准。输出状态必须与位姿一起看，不能把初始化中、暂时丢失和正常跟踪都当成同等可靠的数据。</p>
+<p>地图断开时保留新图，重新合并时必须再次建立跨图关联。下面检查坐标与尺度一致性，再读恢复实验的对齐口径。</p>
+<h2 id="三管理新图与合并检查尺度和参考系">三、管理新图与合并，检查尺度和参考系</h2>
 <pre><code class="language-text">输入：图像；可选 IMU；相机与外参标定
 在当前活动地图中提取并匹配视觉特征
 根据已有运动与 IMU 预测当前状态
@@ -88,8 +95,15 @@
 若候选在另一图：对齐、融合和联合细化地图
 输出当前估计、地图关联关系及跟踪状态
 </code></pre>
-<p>此伪代码概括机制。实际线程、删除条件与优化窗口应以固定版本代码为准。输出状态必须与位姿一起看，不能把初始化中、暂时丢失和正常跟踪都当成同等可靠的数据。</p>
-<h2 id="实验设计先看对齐方法再看小数点">实验设计：先看对齐方法，再看小数点</h2>
+<h2 id="四按传感器与对齐方式读恢复和精度实验">四、按传感器与对齐方式读恢复和精度实验</h2>
+<!-- figure-ref-v6:start:rc-98-figure-5-anchor -->
+<p><span id="rc-98-figure-5"></span></p>
+<!-- figure-ref-v6:end:rc-98-figure-5-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/098-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/098-evidence.png" width="1249" height="600" alt="Fig. 5：不同颜色来自多次运行，融合后在同一参考系中叠加" loading="lazy"></a><figcaption>原论文结果图／表摘引：Carlos Campos 等（2020），Fig. 5，PDF 第 14 页；<a href="https://arxiv.org/pdf/2007.11898#page=14" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>读图：不同颜色来自多次运行，融合后在同一参考系中叠加。历史地图增加了先验信息，因而这幅多会话结果不能与从零开始的单次运行当成相同输入比较。</p>
+<h3 id="实验设计先看对齐方法再看小数点">实验设计：先看对齐方法，再看小数点</h3>
+<p>多地图合并必须有共同观测建立相对变换；尺度对齐后的低 ATE 不能证明单目已经自行恢复了公制尺度。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -123,7 +137,7 @@
 </tr>
 <tr>
 <td>基线公平性</td>
-<td>表 II 混合引用结果和作者重跑结果，脚注区分真值及轨迹口径</td>
+<td><a href="https://arxiv.org/pdf/2007.11898#page=12">表 II</a> 混合引用结果和作者重跑结果，脚注区分真值及轨迹口径</td>
 </tr>
 <tr>
 <td>训练预算</td>
@@ -132,36 +146,43 @@
 </tbody></table></div>
 <p>三组关键证据各回答不同问题：</p>
 <ol>
-<li><strong>表 II 与图 4</strong>：EuRoC 的跨运行误差与失败。双目惯性平均 ATE 为 0.035 米；表中部分其他配置未完成所有序列，带星号的成功子集均值不能当作同一测试集合的排名。</li>
-<li><strong>表 IV</strong>：TUM-VI room 序列中，纯单目平均 0.039 米、双目 0.068 米、双目惯性 0.009 米。单目看似优于双目，部分来自其允许额外尺度对齐，不能据此得出少一个相机通常更准。</li>
-<li><strong>表 V 与图 5–6</strong>：历史地图复用。它支持多次观察带来的收益，但历史地图就是额外信息，不宜与从零开始的单次运行混作公平输入对比。</li>
+<li><strong><a href="https://arxiv.org/pdf/2007.11898#page=12">表 II</a> 与<a href="#rc-98-figure-4">图 4</a></strong>：EuRoC 的跨运行误差与失败。双目惯性平均 ATE 为 0.035 米；表中部分其他配置未完成所有序列，带星号的成功子集均值不能当作同一测试集合的排名。</li>
 </ol>
+<!-- figure-ref-v6:start:rc-98-figure-4 -->
+<figure class="reading-evidence-figure" id="rc-98-figure-4"><a href="/robot-classic/assets/figure-refs-v6/098-fig-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/098-fig-4.png" width="640" height="494" alt="原论文图4：EuRoC多序列十次运行的四组ATE误差热图" loading="lazy"></a><figcaption>Carlos Campos 等（2020），图 4，PDF 第 11 页；<a href="https://arxiv.org/pdf/2007.11898#page=11" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：每格是一轮运行结果，颜色对应共同误差色标；同时观察重复波动与序列差异。</p>
+<!-- figure-ref-v6:end:rc-98-figure-4 -->
+<ol start="2">
+<li><strong><a href="https://arxiv.org/pdf/2007.11898#page=13">表 IV</a></strong>：TUM-VI room 序列中，纯单目平均 0.039 米、双目 0.068 米、双目惯性 0.009 米。单目看似优于双目，部分来自其允许额外尺度对齐，不能据此得出少一个相机通常更准。</li>
+<li><strong><a href="https://arxiv.org/pdf/2007.11898#page=13">表 V</a> 与<a href="#rc-98-figure-5">图 5–6</a></strong>：历史地图复用。它支持多次观察带来的收益，但历史地图就是额外信息，不宜与从零开始的单次运行混作公平输入对比。</li>
+</ol>
+<!-- figure-ref-v6:start:rc-98-figure-6 -->
+<figure class="reading-evidence-figure" id="rc-98-figure-6"><a href="/robot-classic/assets/figure-refs-v6/098-fig-6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/098-fig-6.png" width="640" height="697" alt="原论文图6：室外多会话双目惯性轨迹在卫星背景上的单会话与多会话对比" loading="lazy"></a><figcaption>Carlos Campos 等（2020），图 6，PDF 第 14 页；<a href="https://arxiv.org/pdf/2007.11898#page=14" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+<p>读图：红、蓝轨迹对应不同会话处理方式；背景图用来定位，而定量精度仍须结合正文表格。</p>
+<!-- figure-ref-v6:end:rc-98-figure-6 -->
+
 <p>TUM-VI 很多长序列只有起终区域真值，room 序列才有完整覆盖。作者展示的室外轨迹改善和地图一致性有参考价值，但缺少中段真值的位置不能被写成已经逐米验证厘米精度。</p>
-<h2 id="贡献与局限恢复能力也有条件">贡献与局限：恢复能力也有条件</h2>
+<h3 id="自构实验与前置知识">自构实验与前置知识</h3>
+<p><strong>未运行实验</strong>：选同一段有重访的图像序列，在中途人工遮挡连续若干帧，比较禁用多地图、启用多地图和加入 IMU 三种情况。固定特征预算与标定，记录丢失时间、新建地图数、成功合并数、最终可追踪比例和 ATE。然后删除重访部分，检查系统是否仍保留独立地图，而不是凭空恢复联系。</p>
+<h2 id="五保留标定激励与可靠跨图关联要求">五、保留标定、激励与可靠跨图关联要求</h2>
 <p>作者把可靠估计所需的多个环节整合为完整系统：初始化、不同时间跨度的数据关联、丢失处理、合并和局部优化。它并不是换一个损失函数就获得全部收益。阅读消融或配置对比时，应问具体改变了传感器、输入历史、数据关联还是优化范围。</p>
 <p>下面是方法层面的分析。遮挡期间若 IMU 偏置未估好，短时预测也会变差；长时间黑暗没有可用几何，创建新图不能恢复那段缺失轨迹；重复走廊可能提出错误场所候选；地图无限累积还会影响存储和优化成本。</p>
 <p>因此，平均误差低和工程恢复能力强是不同维度。一个方法可能只在容易片段上误差很低，却经常丢失；另一个方法误差略大但覆盖更完整。部署前至少同时看成功覆盖率、重定位时间、误差和尾部延迟。</p>
-<h2 id="自构实验与前置知识">自构实验与前置知识</h2>
-<p><strong>未运行实验</strong>：选同一段有重访的图像序列，在中途人工遮挡连续若干帧，比较禁用多地图、启用多地图和加入 IMU 三种情况。固定特征预算与标定，记录丢失时间、新建地图数、成功合并数、最终可追踪比例和 ATE。然后删除重访部分，检查系统是否仍保留独立地图，而不是凭空恢复联系。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>惯性初值不准、丢失后难恢复、历史信息利用不足</td>
-<td>MAP初始化、改进关联、Atlas与地图合并</td>
-<td>利用互补观测并允许片段暂时独立，再用可靠重访建立联系</td>
-<td>表II/IV/V和图4–6，按传感器及历史输入解释</td>
-<td>可观测性、重复场景、标定与计算资源仍限制效果；不同对齐口径不可直接比较</td>
-</tr>
-</tbody></table></div>
-<h2 id="读懂了吗三问三答">读懂了吗：三问三答</h2>
+<h2 id="六追问两张地图各自残差很小为什么不能仅据此允许合并">六、追问：两张地图各自残差很小，为什么不能仅据此允许合并？</h2>
+<details>
+<summary>两张地图各自残差很小，为什么不能仅据此允许合并？</summary>
+
+<p><strong>参考答案</strong>：各图内部拟合不能证明跨图对应正确，也不保证尺度和坐标关系一致。合并需要独立的可靠关联及相应几何约束，再检查联合优化结果。多地图管理保存继续工作的机会，不会自动提供两图身份相同的证据。</p>
+</details>
+
+<h2 id="七比较多地图系统与雷达实时估计">七、比较多地图系统与雷达实时估计</h2>
+<ul>
+<li><strong>平行路线</strong>：<a href="092-vinsmono.html">VINS-Mono：让单目视觉与 IMU 组成可以长期运行的定位系统</a>。比较不同视觉惯性系统的初始化、恢复和长期管理。</li>
+<li><strong>教学联系</strong>：<a href="099-fastlio2.html">FAST-LIO2：直接用点云定位，为什么先要解决地图更新</a>。比较关键帧优化与雷达迭代滤波的实时取舍。</li>
+</ul>
+<h2 id="八自测与参考答案">八、自测与参考答案</h2>
 <h3 id="1为什么加入-imu-后单目尺度仍可能初始化不好">1．为什么加入 IMU 后，单目尺度仍可能初始化不好？</h3>
 <p><strong>答</strong>：IMU 提供的是受偏置和噪声影响的运动观测。若运动缺乏足够激励，尺度、速度、重力和偏置之间仍难区分。传感器的存在不等于数据已经包含所需信息。</p>
 <h3 id="2新建地图与重定位有什么区别">2．新建地图与重定位有什么区别？</h3>
@@ -177,21 +198,17 @@
 
 [总览](00-发展时间线总览.md) · [目录](README.md) · [上一篇](097-liosam.md) · [下一篇](099-fastlio2.md)
 
-**论文**：Carlos Campos 等，*ORB-SLAM3: An Accurate Open-Source Library for Visual, Visual-Inertial, and Multimap SLAM*，2020 年预印本，后发表于 IEEE T-RO。[原文](https://arxiv.org/html/2007.11898) · [官方代码](https://github.com/UZ-SLAMLab/ORB_SLAM3)。
+**论文**：Carlos Campos 等，*ORB-SLAM3: An Accurate Open-Source Library for Visual, Visual-Inertial and Multi-Map SLAM*，2020 年预印本，后发表于 IEEE T-RO。[原文](https://arxiv.org/html/2007.11898) · [官方代码](https://github.com/UZ-SLAMLab/ORB_SLAM3)。
 
-**阅读范围**：核对系统架构、视觉惯性初始化、地图合并及实验正文；公式以下以简化符号解释，不复刻全部优化实现。代码仓库用于确认运行与系统边界，未独立执行基准。
+### 先接住前作的问题
 
-## 一分钟理解：允许暂时不知道自己在哪里
+[ORB-SLAM2](089-orbslam2.md)已经能回环和复用地图，但长时间丢失仍会断开运行；ORB-SLAM3 直接扩展这一系统，加入视觉惯性初始化与 Atlas 地图管理。它与[VINS-Mono](092-vinsmono.md)是完整视觉惯性系统的平行选择。
+
+## 一、问题设定：跟踪断裂后怎样保留地图片段并在以后重接
 
 相机被手挡住，或者机器人突然转向，视觉 SLAM 就可能跟不上原来的特征。一个脆弱的系统会因此丢掉整段运行；另一个危险做法是继续输出貌似平滑但其实已经失真的轨迹。
 
-ORB-SLAM3 的重要思想是把失踪处理纳入系统：视觉与 IMU 联合估计，暂时无法连回旧地图时可以建立新地图，以后找到可靠联系再合并。它还改进了惯性初始化和场所识别，使历史观测更早、更有效地参与估计。
-
-一句话：在视觉或视觉惯性定位中，通过更完整的数据关联、惯性初始化和多地图管理，改善精度与跟踪丢失后的恢复能力，代价是更复杂的地图状态、优化调度和标定要求。
-
-这里的“多地图”是同一个系统维护和关联多个地图片段，不等于论文已经解决多机器人通信、异构传感器协商或无限期开放世界建图。
-
-## 背景：地图不只是最近两帧之间的位移
+### 背景：地图不只是最近两帧之间的位移
 
 只比较相邻图像，误差会随时间积累。保留三维地图点，可以让当前帧与更早的帧共同约束同一个位置；识别重访还能把相隔很久的片段连接起来。数据关联因而有不同时间跨度，而不只是“特征检测是否够快”。
 
@@ -199,11 +216,13 @@ ORB-SLAM3 的重要思想是把失踪处理纳入系统：视觉与 IMU 联合�
 
 本任务没有策略、奖励或试错训练。变量是相机/机体位姿、地图点，以及惯性配置中的速度、偏置和重力相关量。本文讨论的是稀疏定位建图；它不自动生成可抓取物体语义或高质量稠密网格。
 
-## 方法：用不同观测反复约束同一组未知量
+## 二、联合惯性初始化与Atlas数据关联
+
+ORB-SLAM3 的重要思想是把失踪处理纳入系统：视觉与 IMU 联合估计，暂时无法连回旧地图时可以建立新地图，以后找到可靠联系再合并。它还改进了惯性初始化和场所识别，使历史观测更早、更有效地参与估计。
 
 ### 视觉误差是什么
 
-设世界点为 $P_j$，相机位姿为 $T_i$，$T_{CB}$ 是机体到相机的已知外参。观察像素为 $u_{ij}$，则简化重投影残差为：
+设世界点为 $P_j$，$T_i$ 是机体到世界的变换，$T_{CB}$ 是机体到相机的已知外参。观察像素为 $u_{ij}$，则简化重投影残差为：
 
 $$
 r_{ij}=u_{ij}-\pi(T_{CB}T_i^{-1}P_j).
@@ -238,6 +257,22 @@ $X$ 包含运动状态，$P$ 是地图点，$\rho$ 降低错误视觉匹配的�
 
 合并地图至少涉及三个不同动作：提出候选地点、验证几何变换、消除重复点并传播校正。只因两张图像看起来像，就强行合并，会把整张地图拉坏。另一方面，没有重叠或可辨认的历史观测时，保留两个片段是诚实的状态，不是算法忘了按某个按钮。
 
+地图对齐还必须作用于同一坐标系中的所有状态。设 $S_{AB}:p_B\mapsto sRp_B+t$ 把地图 B 的坐标变到地图 A；$s&gt;0$ 是尺度、$R$ 为旋转、$t$ 为平移。对于尚未定尺度、位置与速度使用同一图单位且时间单位不变的状态，正确变换为
+
+$$p_A=sRp_B+t,\qquad v_A=sRv_B,\qquad R_{AI}=RR_{BI}.$$
+
+$I$ 表示机体/IMU 系，$R_{BI}$ 把该系向量表达在地图 B 中。平移不会加到速度上，姿态也不能乘上尺度；IMU 偏置若表达在传感器自身坐标系，则不会因世界图坐标改变而旋转。这些是坐标变换规律，并不意味着任意成熟惯性地图都允许自由缩放。
+
+**原创手算。** 取 $s=2$、$R$ 为绕竖直轴转 $90^\circ$、$t=(10,0,0)$；地图 B 的点 $(1,0,0)$ 变为 $(10,2,0)$，速度 $(1,0,0)$ 变为 $(0,2,0)$。若只更新点而保留速度 $(1,0,0)$，下一次惯性位置预测便与已经转过的地图不相容。
+
+[原文V-B与VI-C](https://arxiv.org/html/2007.11898)区分未成熟地图的 Sim(3) 对齐与成熟惯性地图的 SE(3) 对齐。后者已有公制尺度，理想重力对齐后剩余世界旋转自由度主要是偏航；实际还要检查横滚、俯仰的一致性，并优化惯性连接。多次地图实验因此验证的不只是“认出旧图像”，还包括融合后状态和几何能否共同解释观测。
+
+此伪代码概括机制。实际线程、删除条件与优化窗口应以固定版本代码为准。输出状态必须与位姿一起看，不能把初始化中、暂时丢失和正常跟踪都当成同等可靠的数据。
+
+地图断开时保留新图，重新合并时必须再次建立跨图关联。下面检查坐标与尺度一致性，再读恢复实验的对齐口径。
+
+## 三、管理新图与合并，检查尺度和参考系
+
 ```text
 输入：图像；可选 IMU；相机与外参标定
 在当前活动地图中提取并匹配视觉特征
@@ -252,9 +287,18 @@ $X$ 包含运动状态，$P$ 是地图点，$\rho$ 降低错误视觉匹配的�
 输出当前估计、地图关联关系及跟踪状态
 ```
 
-此伪代码概括机制。实际线程、删除条件与优化窗口应以固定版本代码为准。输出状态必须与位姿一起看，不能把初始化中、暂时丢失和正常跟踪都当成同等可靠的数据。
+## 四、按传感器与对齐方式读恢复和精度实验
 
-## 实验设计：先看对齐方法，再看小数点
+&lt;!-- figure-ref-v6:start:rc-98-figure-5-anchor --&gt;
+&lt;span id=&quot;rc-98-figure-5&quot;&gt;&lt;/span&gt;
+&lt;!-- figure-ref-v6:end:rc-98-figure-5-anchor --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-classic/assets/papers/098-evidence.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/papers/098-evidence.png&quot; width=&quot;1249&quot; height=&quot;600&quot; alt=&quot;Fig. 5：不同颜色来自多次运行，融合后在同一参考系中叠加&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文结果图／表摘引：Carlos Campos 等（2020），Fig. 5，PDF 第 14 页；&lt;a href=&quot;https://arxiv.org/pdf/2007.11898#page=14&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：不同颜色来自多次运行，融合后在同一参考系中叠加。历史地图增加了先验信息，因而这幅多会话结果不能与从零开始的单次运行当成相同输入比较。
+
+### 实验设计：先看对齐方法，再看小数点
+
+多地图合并必须有共同观测建立相对变换；尺度对齐后的低 ATE 不能证明单目已经自行恢复了公制尺度。
 
 | 检查项 | 原文说明与解读 |
 |---|---|
@@ -264,18 +308,36 @@ $X$ 包含运动状态，$P$ 是地图点，$\rho$ 降低错误视觉匹配的�
 | 对齐 | 纯单目用含尺度的 Sim(3)，其他配置用 SE(3) |
 | 重复 | EuRoC 单次场景报告 10 次中位数；TUM-VI 3 次；多次地图实验 5 次 |
 | 硬件 | 原实验为 i7-7700、32 GB 内存、CPU 计算 |
-| 基线公平性 | 表 II 混合引用结果和作者重跑结果，脚注区分真值及轨迹口径 |
+| 基线公平性 | [表 II](https://arxiv.org/pdf/2007.11898#page=12) 混合引用结果和作者重跑结果，脚注区分真值及轨迹口径 |
 | 训练预算 | 系统优化不是模型训练；完整调参搜索预算未核实 |
 
 三组关键证据各回答不同问题：
 
-1. **表 II 与图 4**：EuRoC 的跨运行误差与失败。双目惯性平均 ATE 为 0.035 米；表中部分其他配置未完成所有序列，带星号的成功子集均值不能当作同一测试集合的排名。
-2. **表 IV**：TUM-VI room 序列中，纯单目平均 0.039 米、双目 0.068 米、双目惯性 0.009 米。单目看似优于双目，部分来自其允许额外尺度对齐，不能据此得出少一个相机通常更准。
-3. **表 V 与图 5–6**：历史地图复用。它支持多次观察带来的收益，但历史地图就是额外信息，不宜与从零开始的单次运行混作公平输入对比。
+1. **[表 II](https://arxiv.org/pdf/2007.11898#page=12) 与[图 4](#rc-98-figure-4)**：EuRoC 的跨运行误差与失败。双目惯性平均 ATE 为 0.035 米；表中部分其他配置未完成所有序列，带星号的成功子集均值不能当作同一测试集合的排名。
+
+&lt;!-- figure-ref-v6:start:rc-98-figure-4 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-98-figure-4&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/098-fig-4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/098-fig-4.png&quot; width=&quot;640&quot; height=&quot;494&quot; alt=&quot;原论文图4：EuRoC多序列十次运行的四组ATE误差热图&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Carlos Campos 等（2020），图 4，PDF 第 11 页；&lt;a href=&quot;https://arxiv.org/pdf/2007.11898#page=11&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：每格是一轮运行结果，颜色对应共同误差色标；同时观察重复波动与序列差异。
+&lt;!-- figure-ref-v6:end:rc-98-figure-4 --&gt;
+2. **[表 IV](https://arxiv.org/pdf/2007.11898#page=13)**：TUM-VI room 序列中，纯单目平均 0.039 米、双目 0.068 米、双目惯性 0.009 米。单目看似优于双目，部分来自其允许额外尺度对齐，不能据此得出少一个相机通常更准。
+3. **[表 V](https://arxiv.org/pdf/2007.11898#page=13) 与[图 5–6](#rc-98-figure-5)**：历史地图复用。它支持多次观察带来的收益，但历史地图就是额外信息，不宜与从零开始的单次运行混作公平输入对比。
+
+&lt;!-- figure-ref-v6:start:rc-98-figure-6 --&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rc-98-figure-6&quot;&gt;&lt;a href=&quot;/robot-classic/assets/figure-refs-v6/098-fig-6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-classic/assets/figure-refs-v6/098-fig-6.png&quot; width=&quot;640&quot; height=&quot;697&quot; alt=&quot;原论文图6：室外多会话双目惯性轨迹在卫星背景上的单会话与多会话对比&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;Carlos Campos 等（2020），图 6，PDF 第 14 页；&lt;a href=&quot;https://arxiv.org/pdf/2007.11898#page=14&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;原文与图注&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+读图：红、蓝轨迹对应不同会话处理方式；背景图用来定位，而定量精度仍须结合正文表格。
+&lt;!-- figure-ref-v6:end:rc-98-figure-6 --&gt;
 
 TUM-VI 很多长序列只有起终区域真值，room 序列才有完整覆盖。作者展示的室外轨迹改善和地图一致性有参考价值，但缺少中段真值的位置不能被写成已经逐米验证厘米精度。
 
-## 贡献与局限：恢复能力也有条件
+### 自构实验与前置知识
+
+**未运行实验**：选同一段有重访的图像序列，在中途人工遮挡连续若干帧，比较禁用多地图、启用多地图和加入 IMU 三种情况。固定特征预算与标定，记录丢失时间、新建地图数、成功合并数、最终可追踪比例和 ATE。然后删除重访部分，检查系统是否仍保留独立地图，而不是凭空恢复联系。
+
+五个前置概念：**重投影误差**检查三维点是否投到观测位置；**BA**联合调整位姿和地图点；**预积分**压缩区间惯性约束；**Sim(3)**在刚体变换外允许尺度变化；**场所识别**提出历史地点候选，仍需要几何验证。
+
+## 五、保留标定、激励与可靠跨图关联要求
 
 作者把可靠估计所需的多个环节整合为完整系统：初始化、不同时间跨度的数据关联、丢失处理、合并和局部优化。它并不是换一个损失函数就获得全部收益。阅读消融或配置对比时，应问具体改变了传感器、输入历史、数据关联还是优化范围。
 
@@ -283,17 +345,21 @@ TUM-VI 很多长序列只有起终区域真值，room 序列才有完整覆盖�
 
 因此，平均误差低和工程恢复能力强是不同维度。一个方法可能只在容易片段上误差很低，却经常丢失；另一个方法误差略大但覆盖更完整。部署前至少同时看成功覆盖率、重定位时间、误差和尾部延迟。
 
-## 自构实验与前置知识
+## 六、追问：两张地图各自残差很小，为什么不能仅据此允许合并？
 
-**未运行实验**：选同一段有重访的图像序列，在中途人工遮挡连续若干帧，比较禁用多地图、启用多地图和加入 IMU 三种情况。固定特征预算与标定，记录丢失时间、新建地图数、成功合并数、最终可追踪比例和 ATE。然后删除重访部分，检查系统是否仍保留独立地图，而不是凭空恢复联系。
+&lt;details&gt;
+&lt;summary&gt;两张地图各自残差很小，为什么不能仅据此允许合并？&lt;/summary&gt;
 
-五个前置概念：**重投影误差**检查三维点是否投到观测位置；**BA**联合调整位姿和地图点；**预积分**压缩区间惯性约束；**Sim(3)**在刚体变换外允许尺度变化；**场所识别**提出历史地点候选，仍需要几何验证。
+**参考答案**：各图内部拟合不能证明跨图对应正确，也不保证尺度和坐标关系一致。合并需要独立的可靠关联及相应几何约束，再检查联合优化结果。多地图管理保存继续工作的机会，不会自动提供两图身份相同的证据。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 惯性初值不准、丢失后难恢复、历史信息利用不足 | MAP初始化、改进关联、Atlas与地图合并 | 利用互补观测并允许片段暂时独立，再用可靠重访建立联系 | 表II/IV/V和图4–6，按传感器及历史输入解释 | 可观测性、重复场景、标定与计算资源仍限制效果；不同对齐口径不可直接比较 |
+&lt;/details&gt;
 
-## 读懂了吗：三问三答
+## 七、比较多地图系统与雷达实时估计
+
+- **平行路线**：[VINS-Mono：让单目视觉与 IMU 组成可以长期运行的定位系统](092-vinsmono.md)。比较不同视觉惯性系统的初始化、恢复和长期管理。
+- **教学联系**：[FAST-LIO2：直接用点云定位，为什么先要解决地图更新](099-fastlio2.md)。比较关键帧优化与雷达迭代滤波的实时取舍。
+
+## 八、自测与参考答案
 
 ### 1．为什么加入 IMU 后，单目尺度仍可能初始化不好？
 

@@ -42,25 +42,31 @@
                 <span class="text-gray-500">Seq2Seq：用一个条件生成模型连接两种长度不同的序列</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="988491fd5256b06b34927f5523cdf59869061654ce4fab6e291dc474d0a33b0a"><h1>006｜Seq2Seq：用一个条件生成模型连接两种长度不同的序列</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="5751fc9877d21b399b60d041122f610c40899e2f2ab00eba47331b5a5a91c453"><h1>006｜Seq2Seq：用一个条件生成模型连接两种长度不同的序列</h1>
 <p><a href="index.html">目录</a> · <a href="005-negative-sampling.html">上一篇</a> · <a href="007-attention.html">下一篇</a></p>
 <p><strong>论文</strong>：Ilya Sutskever、Oriol Vinyals、Quoc V. Le，<em>Sequence to Sequence Learning with Neural Networks</em>，2014。<a href="https://arxiv.org/abs/1409.3215">原文</a> · <a href="https://arxiv.org/pdf/1409.3215">PDF</a>。以下以论文的 LSTM 编码器—解码器为对象，不把后来注意力加入到原始方法中。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>翻译输入有十个词，输出可能有十二个词，如何用一个统一模型处理？编码器先读完整输入，把它压缩到状态；解码器从这个状态出发，逐词生成目标序列，直到结束符。不同长度被转化为条件概率建模，而不再要求输入输出位置一一对应。</p>
-<p>作者还把源句顺序反转，使部分源词与对应输出之间的学习路径更短。论文展示了强翻译结果，但集成、搜索和重评分需要分别识别。它的历史贡献是简洁统一的条件序列接口；核心限制则是输入信息经有限状态压缩，以及训练与实际生成时前缀分布不同。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="001-lstm.html">LSTM</a>提供可学习的循环存储模块，<a href="003-rnnlm.html">RNNLM</a>给出逐词条件预测；两者仍未规定怎样把一个可变长输入交给另一条可变长输出。本篇把循环模块组合成编码器—解码器。它与<a href="007-attention.html">注意力编码解码</a>在2014年前后并行发展，目录顺序不代表后者由本篇直接改造。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>理解本篇的五个前置概念是条件概率分解、编码器状态、教师强制、结束符与 beam search。分别对应训练对象、输入接口、训练前缀来源、可变长度终止及近似解码。只要明确这些，许多后来的编码解码模型便容易比较。</p>
-<h2 id="背景从多个模块到条件序列概率">背景：从多个模块到条件序列概率</h2>
-<p>传统翻译系统包含显式词组、对齐和语言模型等组件。Seq2Seq 希望直接学习源句 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 到目标句 <span class="reading-math" data-tex="y"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">y</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span></span></span></span> 的条件分布：</p>
+<h2 id="一问题设定长度不同的源句与目标句怎样共享训练接口">一、问题设定：长度不同的源句与目标句怎样共享训练接口</h2>
+<p>翻译输入有十个词，输出可能有十二个词，也未必逐位置对应。传统系统把词组、对齐和语言模型分开处理；本篇希望直接学习源句 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 到目标句 <span class="reading-math" data-tex="y"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">y</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span></span></span></span> 的条件分布，用编码状态连接两条不同长度的序列，并用结束符决定何时停止。</p>
 <p><span class="reading-math" data-tex="P_\theta(y\mid x)=\prod_{t=1}^{T_y}
 P_\theta(y_t\mid y_{&lt;t},c(x))."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>P</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>y</mi><mo>∣</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><munderover><mo>∏</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><msub><mi>T</mi><mi>y</mi></msub></munderover><msub><mi>P</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>y</mi><mi>t</mi></msub><mo>∣</mo><msub><mi>y</mi><mrow><mo>&lt;</mo><mi>t</mi></mrow></msub><mo separator="true">,</mo><mi>c</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">P_\theta(y\mid x)=\prod_{t=1}^{T_y}
 P_\theta(y_t\mid y_{&lt;t},c(x)).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.2038em;vertical-align:-1.2671em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.9367em;"><span style="top:-1.8829em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∏</span></span></span><span style="top:-4.4083em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:-0.1389em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">y</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2819em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2671em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">c</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">))</span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="c(x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">c(x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">c</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span> 是编码器从源句得到的状态，<span class="reading-math" data-tex="y_{&lt;t}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>y</mi><mrow><mo>&lt;</mo><mi>t</mi></mrow></msub></mrow><annotation encoding="application/x-tex">y_{&lt;t}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span></span></span></span></span> 是此前目标词。链式分解允许输出长度变化，只需把结束符也当作候选 token。编码器与解码器承担不同角色：前者整理输入，后者根据输入摘要与已生成内容预测下一词。</p>
 <p>“端到端”描述参数通过统一目标学习，并不表示系统没有任何预处理、词表或搜索选择。分词、未知词、长度限制和 beam search 都属于实际方法。若只画两个网络方框，很容易忽略这些对最终结果很重要的条件。</p>
-<h2 id="方法状态如何传递">方法：状态如何传递</h2>
+<h2 id="二先分解条件概率再辨析反转与状态瓶颈">二、先分解条件概率，再辨析反转与状态瓶颈</h2>
 <p>编码器用多层 LSTM 顺序读源词。输入结束后，所得状态作为解码器的条件信息；解码器读开始符，再根据前一目标词逐步更新。训练时通常提供真实目标前缀，最大化参考翻译的对数似然；测试时前缀来自模型自己，错误可能累积。</p>
 <p>源句反转并不改变句子包含哪些词，而是改变递归路径长度。假设源句开头的信息最先在目标句中使用，不反转时，它距离解码开始较远；反转后，它更靠近编码结束，从而减少某些关键依赖的距离。这是对优化的帮助，不是对所有语言重排的通用最优规则。</p>
 <p>解码寻找高概率序列通常无法穷举。Beam search 保留若干当前得分较好的前缀，继续扩展。更大的 beam 增加搜索计算，也可能改变长度偏好与错误类型。搜索找到模型更偏好的答案，不保证找到人类认为最好的翻译，因为模型概率与翻译质量并不完全一致。</p>
+<h3 id="反转缩短的是哪一种距离">反转缩短的是哪一种距离</h3>
+<p>用理想单调对齐说明原文的解释：源句 <span class="reading-math" data-tex="x_1,x_2,x_3,x_4"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mn>1</mn></msub><mo separator="true">,</mo><msub><mi>x</mi><mn>2</mn></msub><mo separator="true">,</mo><msub><mi>x</mi><mn>3</mn></msub><mo separator="true">,</mo><msub><mi>x</mi><mn>4</mn></msub></mrow><annotation encoding="application/x-tex">x_1,x_2,x_3,x_4</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">3</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">4</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 后接目标 <span class="reading-math" data-tex="y_1,y_2,y_3,y_4"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>y</mi><mn>1</mn></msub><mo separator="true">,</mo><msub><mi>y</mi><mn>2</mn></msub><mo separator="true">,</mo><msub><mi>y</mi><mn>3</mn></msub><mo separator="true">,</mo><msub><mi>y</mi><mn>4</mn></msub></mrow><annotation encoding="application/x-tex">y_1,y_2,y_3,y_4</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">3</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">4</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。忽略分隔符，正向排列中每个 <span class="reading-math" data-tex="x_i\to y_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mi>i</mi></msub><mo>→</mo><msub><mi>y</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">x_i\to y_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 都相隔4步；源句反转后，距离依次变成1、3、5、7，平均仍为4。改善并不是“所有依赖都缩短”，而是先出现容易学的短依赖，有助于建立源与目标的联系。原文 §3.3 同样明确平均距离未变；这是一种受实验支持的优化解释，作者没有把它证明为一般定理。</p>
+<p>构造源句“红色的小球在桌上”。编码器不必把每个词保存在固定槽位，而是形成一个向量状态。解码器生成英语时，先预测“The”，再根据状态和“The”预测下一词。训练时即便第一词预测错，下一步仍可能喂入真实“The”；测试时却要面对自己的错误前缀。</p>
+<h3 id="按时间表追踪教师强制与部署分叉">按时间表追踪教师强制与部署分叉</h3>
+<p>设目标是“我 喜欢 猫”。训练预测“猫”时解码器读取真实前词“喜欢”；部署若第二词误生成为“看见”，第三词就条件于不同前缀。两个过程使用同一组权重，却走过不同状态。检查实现时可分别喂真实前缀与模型前缀，观察分叉从哪一步开始；源句反转并不消除这项差异。</p>
+<p>教法联系：<a href="https://colah.github.io/posts/2015-08-Understanding-LSTMs/">Christopher Olah的Understanding LSTM Networks</a>。算例为本文自构。</p>
+<h2 id="三把教师强制和搜索拆成训练生成两套流程">三、把教师强制和搜索拆成训练、生成两套流程</h2>
 <pre><code class="language-text">训练输入：源句 x、参考目标句 y
 将源句按论文协议反转
 encoder_state ← EncoderLSTM(x)
@@ -76,8 +82,10 @@ loss ← 0
 重复扩展并保留 beam 中候选，直到结束符或长度上限
 输出得分最高的完整候选
 </code></pre>
-<p>目标函数优化似然；机制将可变长映射改为状态条件生成；最终评价用 BLEU 等指标。不能说训练直接最大化 BLEU，也不能把 beam 搜索改进等同于参数能力提高。模型、搜索和集成必须分别列出。</p>
-<h2 id="实验设置">实验设置</h2>
+<p><strong>搜索的教学反例。</strong> 假设第一步 <span class="reading-math" data-tex="P(A)=0.6,P(B)=0.4"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi><mo stretchy="false">(</mo><mi>A</mi><mo stretchy="false">)</mo><mo>=</mo><mn>0.6</mn><mo separator="true">,</mo><mi>P</mi><mo stretchy="false">(</mo><mi>B</mi><mo stretchy="false">)</mo><mo>=</mo><mn>0.4</mn></mrow><annotation encoding="application/x-tex">P(A)=0.6,P(B)=0.4</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mopen">(</span><span class="mord mathnormal">A</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">0.6</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.4</span></span></span></span></span>，而最佳后续完整序列的条件概率分别为0.2与0.9。贪心先选A，得到联合概率0.12；宽度2保留B，能找到0.36的序列。若模型却把正确翻译对应的B概率压到接近零，扩大beam只会更准确地优化错误的模型目标。这个两层树把搜索错误与建模错误分开了。</p>
+<h2 id="四区分反转集成句长和smt重评分的收益">四、区分反转、集成、句长和SMT重评分的收益</h2>
+<p>不能说训练直接最大化 BLEU，也不能把 beam 搜索改进等同于参数能力提高。模型、搜索和集成必须分别列出。</p>
+<p>沿训练、搜索两个层次读表：先比较单模型反转，再增加集成与候选重评分。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -114,35 +122,30 @@ loss ← 0
 <td>集成模型数可见，不应把集成解释为多随机种子误差条</td>
 </tr>
 </tbody></table></div>
-<p>**证据一，方法与源序列反转讨论。**论文给出条件生成目标与反转输入的动机，说明优化路径可以通过数据排列改变。这并不意味着模型学习了显式对齐矩阵。</p>
-<p>**证据二，表 1。**相同 beam 12 下，单个正向 LSTM 为 26.17 BLEU，单个反转 LSTM 为 30.59；五个反转模型集成、beam 12 为 34.81。反转与集成是两项不同变化，不能把最后分数全部归给反转。</p>
-<p>**证据三，第 3.7 节与图 3。**按句长观察表现，检验固定状态是否立即在较长输入上失效。论文结果表明该设置下长句仍可处理，但不证明固定向量可无损表达任意长度。表 2 的 SMT 重评分也应作为额外系统条件阅读。</p>
+<p><strong>证据一，方法与源序列反转讨论。</strong>论文给出条件生成目标与反转输入的动机，说明优化路径可以通过数据排列改变。这并不意味着模型学习了显式对齐矩阵。</p>
+<p><strong>证据二，<a href="https://arxiv.org/html/1409.3215#S3.T1">表1</a>。</strong>相同 beam 12 下，单个正向 LSTM 为 26.17 BLEU，单个反转 LSTM 为 30.59；五个反转模型集成、beam 12 为 34.81。反转与集成是两项不同变化，不能把最后分数全部归给反转。</p>
+<p><strong>证据三，第 3.7 节与<a href="#llm-v6-006-figure-3">图3</a>。</strong>按句长观察表现，检验固定状态是否立即在较长输入上失效。论文结果表明该设置下长句仍可处理，但不证明固定向量可无损表达任意长度。<a href="https://arxiv.org/html/1409.3215#S3.T2">表2</a> 的 SMT 重评分也应作为额外系统条件阅读。 读图时分开两幅横轴：左侧按句长排序，右侧按平均词频排名排序；长句退化与罕见词退化不是同一个控制实验。</p>
+<!-- figure-ref-v6:start:006-f3-2-anchor -->
+<p><a id="llm-v6-006-figure-3"></a></p>
+<!-- figure-ref-v6:end:006-f3-2-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/006-seq2seq-f3.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/006-seq2seq-f3.png" width="1853" height="892" alt="翻译BLEU分别随测试句长度与平均词频排名变化的两幅曲线" loading="lazy"></a><figcaption>原实验图摘引：Ilya Sutskever、Oriol Vinyals、Quoc V. Le，2014，图3；<a href="https://arxiv.org/html/1409.3215#S3.F3" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <p>还有一个重要比较边界：生成式模型可能无法输出未知词，传统系统却有不同的词表处理方式。若只比较一个总 BLEU，不说明词表与数据筛选，就会遗漏能力上限。评分差异既可能来自建模，也可能来自可输出符号集合。</p>
-<h2 id="教学例子编码生成与搜索的区别">教学例子：编码、生成与搜索的区别</h2>
-<p>构造源句“红色的小球在桌上”。编码器不必把每个词保存在固定槽位，而是形成一个向量状态。解码器生成英语时，先预测“The”，再根据状态和“The”预测下一词。训练时即便第一词预测错，下一步仍可能喂入真实“The”；测试时却要面对自己的错误前缀。</p>
+<h2 id="五固定状态与近似搜索各自遗漏了什么">五、固定状态与近似搜索各自遗漏了什么</h2>
 <p>若模型把“红色”信息在编码过程中丢掉，增大 beam 通常无法凭空恢复。若颜色信息仍在，正确翻译只是早期被贪心选择淘汰，那么 beam 可能有帮助。这个区别解释为什么搜索预算只能修复某类错误，不能代替表示能力。</p>
 <p>再把源句末尾加入“不是红色，而是蓝色”。状态需要整合更晚的否定信息，单纯让最初词离解码更近不一定足够。反转是针对当时训练问题的有效技巧，其价值来自实验，不是普遍语义定理。</p>
-<h2 id="贡献代价与延伸">贡献、代价与延伸</h2>
 <p>Seq2Seq 提供了可复用的任务接口：翻译、摘要和其他序列转换都可以写成条件生成。它把不同长度与非逐位置对齐放进统一概率模型，减少手工模块边界。这里的通用性指形式统一，不等于一个在翻译上训练的模型无需新数据就能完成任意任务。</p>
 <p>代价是顺序计算、有限状态瓶颈、教师强制下的前缀分布差异，以及昂贵集成搜索。本文的分析是，下一篇注意力通过让解码器直接访问多个源状态，改变了最关键的信息通路；它不是简单增大原来的摘要向量。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>输入与输出长度不同，固定维度预测接口难以直接处理翻译</td>
-<td>LSTM编码器—解码器，并反转源序列改善优化</td>
-<td>编码状态连接两条变长序列；反转改变部分词对的时间距离</td>
-<td>表1正向/反向/集成比较，§3.7与图3句长分析</td>
-<td>固定状态仍有信息瓶颈；集成、beam与SMT重评分是额外系统条件</td>
-</tr>
-</tbody></table></div>
+<h2 id="六把本篇机制再推进一步">六、把本篇机制再推进一步</h2>
+<details>
+<summary>1. 反转后平均源目标距离不变，为什么仍可能更容易训练？</summary>
+
+<p><strong>参考答案</strong>：教学单调对齐中距离从全部4步变为1、3、5、7步，最早的短依赖可能先帮助模型建立输入输出联系。优化不只由平均距离决定，还与梯度首先能学到哪些关系有关。原文把它作为受结果支持的解释，并没有证明所有排列或语言都受益。</p>
+</details>
+
+<h2 id="七保留条件生成接口改写信息读取路径">七、保留条件生成接口，改写信息读取路径</h2>
+<p>固定句向量仍要承载所有源信息。<a href="007-attention.html">Attention</a>直接松开这一瓶颈，让每个目标位置重新读取源状态；比较时应问改善来自可访问信息，还是仅来自更宽隐藏层。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 为什么反转源句可能有帮助，却不是翻译时把意思倒着理解？</strong></p>
 <p>反转改变词在循环计算中的时间位置，从而缩短部分输入输出依赖路径。词的身份和监督翻译没有改变，模型仍学习正常目标句。它主要影响优化和信息路径，不是语义规则。</p>
@@ -161,15 +164,13 @@ loss ← 0
 
 **论文**：Ilya Sutskever、Oriol Vinyals、Quoc V. Le，*Sequence to Sequence Learning with Neural Networks*，2014。[原文](https://arxiv.org/abs/1409.3215) · [PDF](https://arxiv.org/pdf/1409.3215)。以下以论文的 LSTM 编码器—解码器为对象，不把后来注意力加入到原始方法中。
 
-## 一分钟理解
+### 先接住前作的问题
 
-翻译输入有十个词，输出可能有十二个词，如何用一个统一模型处理？编码器先读完整输入，把它压缩到状态；解码器从这个状态出发，逐词生成目标序列，直到结束符。不同长度被转化为条件概率建模，而不再要求输入输出位置一一对应。
+[LSTM](001-lstm.md)提供可学习的循环存储模块，[RNNLM](003-rnnlm.md)给出逐词条件预测；两者仍未规定怎样把一个可变长输入交给另一条可变长输出。本篇把循环模块组合成编码器—解码器。它与[注意力编码解码](007-attention.md)在2014年前后并行发展，目录顺序不代表后者由本篇直接改造。
 
-作者还把源句顺序反转，使部分源词与对应输出之间的学习路径更短。论文展示了强翻译结果，但集成、搜索和重评分需要分别识别。它的历史贡献是简洁统一的条件序列接口；核心限制则是输入信息经有限状态压缩，以及训练与实际生成时前缀分布不同。
+## 一、问题设定：长度不同的源句与目标句怎样共享训练接口
 
-## 背景：从多个模块到条件序列概率
-
-传统翻译系统包含显式词组、对齐和语言模型等组件。Seq2Seq 希望直接学习源句 $x$ 到目标句 $y$ 的条件分布：
+翻译输入有十个词，输出可能有十二个词，也未必逐位置对应。传统系统把词组、对齐和语言模型分开处理；本篇希望直接学习源句 $x$ 到目标句 $y$ 的条件分布，用编码状态连接两条不同长度的序列，并用结束符决定何时停止。
 
 $$
 P_\theta(y\mid x)=\prod_{t=1}^{T_y}
@@ -180,13 +181,27 @@ $c(x)$ 是编码器从源句得到的状态，$y_{&lt;t}$ 是此前目标词。�
 
 “端到端”描述参数通过统一目标学习，并不表示系统没有任何预处理、词表或搜索选择。分词、未知词、长度限制和 beam search 都属于实际方法。若只画两个网络方框，很容易忽略这些对最终结果很重要的条件。
 
-## 方法：状态如何传递
+## 二、先分解条件概率，再辨析反转与状态瓶颈
 
 编码器用多层 LSTM 顺序读源词。输入结束后，所得状态作为解码器的条件信息；解码器读开始符，再根据前一目标词逐步更新。训练时通常提供真实目标前缀，最大化参考翻译的对数似然；测试时前缀来自模型自己，错误可能累积。
 
 源句反转并不改变句子包含哪些词，而是改变递归路径长度。假设源句开头的信息最先在目标句中使用，不反转时，它距离解码开始较远；反转后，它更靠近编码结束，从而减少某些关键依赖的距离。这是对优化的帮助，不是对所有语言重排的通用最优规则。
 
 解码寻找高概率序列通常无法穷举。Beam search 保留若干当前得分较好的前缀，继续扩展。更大的 beam 增加搜索计算，也可能改变长度偏好与错误类型。搜索找到模型更偏好的答案，不保证找到人类认为最好的翻译，因为模型概率与翻译质量并不完全一致。
+
+### 反转缩短的是哪一种距离
+
+用理想单调对齐说明原文的解释：源句 $x_1,x_2,x_3,x_4$ 后接目标 $y_1,y_2,y_3,y_4$。忽略分隔符，正向排列中每个 $x_i\to y_i$ 都相隔4步；源句反转后，距离依次变成1、3、5、7，平均仍为4。改善并不是“所有依赖都缩短”，而是先出现容易学的短依赖，有助于建立源与目标的联系。原文 §3.3 同样明确平均距离未变；这是一种受实验支持的优化解释，作者没有把它证明为一般定理。
+
+构造源句“红色的小球在桌上”。编码器不必把每个词保存在固定槽位，而是形成一个向量状态。解码器生成英语时，先预测“The”，再根据状态和“The”预测下一词。训练时即便第一词预测错，下一步仍可能喂入真实“The”；测试时却要面对自己的错误前缀。
+
+### 按时间表追踪教师强制与部署分叉
+
+设目标是“我 喜欢 猫”。训练预测“猫”时解码器读取真实前词“喜欢”；部署若第二词误生成为“看见”，第三词就条件于不同前缀。两个过程使用同一组权重，却走过不同状态。检查实现时可分别喂真实前缀与模型前缀，观察分叉从哪一步开始；源句反转并不消除这项差异。
+
+教法联系：[Christopher Olah的Understanding LSTM Networks](https://colah.github.io/posts/2015-08-Understanding-LSTMs/)。算例为本文自构。
+
+## 三、把教师强制和搜索拆成训练、生成两套流程
 
 ```text
 训练输入：源句 x、参考目标句 y
@@ -205,9 +220,13 @@ loss ← 0
 输出得分最高的完整候选
 ```
 
-目标函数优化似然；机制将可变长映射改为状态条件生成；最终评价用 BLEU 等指标。不能说训练直接最大化 BLEU，也不能把 beam 搜索改进等同于参数能力提高。模型、搜索和集成必须分别列出。
+**搜索的教学反例。** 假设第一步 $P(A)=0.6,P(B)=0.4$，而最佳后续完整序列的条件概率分别为0.2与0.9。贪心先选A，得到联合概率0.12；宽度2保留B，能找到0.36的序列。若模型却把正确翻译对应的B概率压到接近零，扩大beam只会更准确地优化错误的模型目标。这个两层树把搜索错误与建模错误分开了。
 
-## 实验设置
+## 四、区分反转、集成、句长和SMT重评分的收益
+
+不能说训练直接最大化 BLEU，也不能把 beam 搜索改进等同于参数能力提高。模型、搜索和集成必须分别列出。
+
+沿训练、搜索两个层次读表：先比较单模型反转，再增加集成与候选重评分。
 
 | 项目 | 原文范围及条件 |
 |---|---|
@@ -221,21 +240,23 @@ loss ← 0
 
 **证据一，方法与源序列反转讨论。**论文给出条件生成目标与反转输入的动机，说明优化路径可以通过数据排列改变。这并不意味着模型学习了显式对齐矩阵。
 
-**证据二，表 1。**相同 beam 12 下，单个正向 LSTM 为 26.17 BLEU，单个反转 LSTM 为 30.59；五个反转模型集成、beam 12 为 34.81。反转与集成是两项不同变化，不能把最后分数全部归给反转。
+**证据二，[表1](https://arxiv.org/html/1409.3215#S3.T1)。**相同 beam 12 下，单个正向 LSTM 为 26.17 BLEU，单个反转 LSTM 为 30.59；五个反转模型集成、beam 12 为 34.81。反转与集成是两项不同变化，不能把最后分数全部归给反转。
 
-**证据三，第 3.7 节与图 3。**按句长观察表现，检验固定状态是否立即在较长输入上失效。论文结果表明该设置下长句仍可处理，但不证明固定向量可无损表达任意长度。表 2 的 SMT 重评分也应作为额外系统条件阅读。
+**证据三，第 3.7 节与[图3](#llm-v6-006-figure-3)。**按句长观察表现，检验固定状态是否立即在较长输入上失效。论文结果表明该设置下长句仍可处理，但不证明固定向量可无损表达任意长度。[表2](https://arxiv.org/html/1409.3215#S3.T2) 的 SMT 重评分也应作为额外系统条件阅读。 读图时分开两幅横轴：左侧按句长排序，右侧按平均词频排名排序；长句退化与罕见词退化不是同一个控制实验。
+
+&lt;!-- figure-ref-v6:start:006-f3-2-anchor --&gt;
+&lt;a id=&quot;llm-v6-006-figure-3&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:006-f3-2-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/006-seq2seq-f3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/006-seq2seq-f3.png&quot; width=&quot;1853&quot; height=&quot;892&quot; alt=&quot;翻译BLEU分别随测试句长度与平均词频排名变化的两幅曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原实验图摘引：Ilya Sutskever、Oriol Vinyals、Quoc V. Le，2014，图3；&lt;a href=&quot;https://arxiv.org/html/1409.3215#S3.F3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 还有一个重要比较边界：生成式模型可能无法输出未知词，传统系统却有不同的词表处理方式。若只比较一个总 BLEU，不说明词表与数据筛选，就会遗漏能力上限。评分差异既可能来自建模，也可能来自可输出符号集合。
 
-## 教学例子：编码、生成与搜索的区别
-
-构造源句“红色的小球在桌上”。编码器不必把每个词保存在固定槽位，而是形成一个向量状态。解码器生成英语时，先预测“The”，再根据状态和“The”预测下一词。训练时即便第一词预测错，下一步仍可能喂入真实“The”；测试时却要面对自己的错误前缀。
+## 五、固定状态与近似搜索各自遗漏了什么
 
 若模型把“红色”信息在编码过程中丢掉，增大 beam 通常无法凭空恢复。若颜色信息仍在，正确翻译只是早期被贪心选择淘汰，那么 beam 可能有帮助。这个区别解释为什么搜索预算只能修复某类错误，不能代替表示能力。
 
 再把源句末尾加入“不是红色，而是蓝色”。状态需要整合更晚的否定信息，单纯让最初词离解码更近不一定足够。反转是针对当时训练问题的有效技巧，其价值来自实验，不是普遍语义定理。
-
-## 贡献、代价与延伸
 
 Seq2Seq 提供了可复用的任务接口：翻译、摘要和其他序列转换都可以写成条件生成。它把不同长度与非逐位置对齐放进统一概率模型，减少手工模块边界。这里的通用性指形式统一，不等于一个在翻译上训练的模型无需新数据就能完成任意任务。
 
@@ -243,9 +264,18 @@ Seq2Seq 提供了可复用的任务接口：翻译、摘要和其他序列转换
 
 理解本篇的五个前置概念是条件概率分解、编码器状态、教师强制、结束符与 beam search。分别对应训练对象、输入接口、训练前缀来源、可变长度终止及近似解码。只要明确这些，许多后来的编码解码模型便容易比较。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 输入与输出长度不同，固定维度预测接口难以直接处理翻译 | LSTM编码器—解码器，并反转源序列改善优化 | 编码状态连接两条变长序列；反转改变部分词对的时间距离 | 表1正向/反向/集成比较，§3.7与图3句长分析 | 固定状态仍有信息瓶颈；集成、beam与SMT重评分是额外系统条件 |
+## 六、把本篇机制再推进一步
+
+&lt;details&gt;
+&lt;summary&gt;1. 反转后平均源目标距离不变，为什么仍可能更容易训练？&lt;/summary&gt;
+
+**参考答案**：教学单调对齐中距离从全部4步变为1、3、5、7步，最早的短依赖可能先帮助模型建立输入输出联系。优化不只由平均距离决定，还与梯度首先能学到哪些关系有关。原文把它作为受结果支持的解释，并没有证明所有排列或语言都受益。
+
+&lt;/details&gt;
+
+## 七、保留条件生成接口，改写信息读取路径
+
+固定句向量仍要承载所有源信息。[Attention](007-attention.md)直接松开这一瓶颈，让每个目标位置重新读取源状态；比较时应问改善来自可访问信息，还是仅来自更宽隐藏层。
 
 ## 自测与参考答案
 

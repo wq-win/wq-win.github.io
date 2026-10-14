@@ -354,7 +354,7 @@ test('the first 11 levels stay, and five later levels add other patterns', () =>
     const game = createGame();
     assert.equal(game.levels.length, 16);
     assert.deepEqual(clone(game.levels.map(level => level.id)), Array.from({ length: 16 }, (_, i) => i + 1));
-    assert.deepEqual(game.levels.slice(0, 11).map(level => [level.youText, level.oppText]), [
+    assert.deepEqual(clone(game.levels.slice(0, 11).map(level => [level.youText, level.oppText])), [
         ['Q J J 8 8 6 5 5', '小王 9 9 4 4'],
         ['Q J J 10 6 6 5 5', '大王 J J 6 5 5'],
         ['Q Q J 9 6 6 3 3', '小王 K 10 10 8 4 4'],
@@ -367,7 +367,7 @@ test('the first 11 levels stay, and five later levels add other patterns', () =>
         ['Q Q J 10 10 9 8 7 6 6', 'A K K 10 8 5 5'],
         ['Q 10 10 9 8 6 6 4 4', '小王 10 10 9 6 5 5']
     ]);
-    assert.deepEqual(game.levels.slice(11).map(level => level.youText), [
+    assert.deepEqual(clone(game.levels.slice(11).map(level => level.youText)), [
         'A K J 9 7 6 5 4 3',
         'A 10 10 9 9 8 8 7',
         '2 10 10 9 9 8 8 6',

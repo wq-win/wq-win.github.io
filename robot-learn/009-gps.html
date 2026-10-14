@@ -42,16 +42,15 @@
                 <span class="text-gray-500">GPS：让轨迹优化指导策略学习</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="9f996f1bdfd724584a2210441bfed568a37c7d2b6c1dc0258a2d17448ee23f4e"><h1>009｜GPS：让轨迹优化指导策略学习</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="25517759ef666efb72aedeaf7dce1fd07fa251d70d7435e36e8ee2c534c529d3"><h1>009｜GPS：让轨迹优化指导策略学习</h1>
 <p><a href="index.html">系列首页</a> · <a href="008-promp.html">上一篇</a> · <a href="010-visuomotor.html">下一篇</a></p>
 <p><strong>原论文</strong>：<em>Guided Policy Search</em>，Sergey Levine、Vladlen Koltun，ICML 2013。<a href="https://proceedings.mlr.press/v28/levine13.html">原文</a>。</p>
-<h2 id="一局部好轨迹与通用反馈策略之间隔着什么">一、局部好轨迹与通用反馈策略之间隔着什么</h2>
-<p>轨迹优化器可以找到一段漂亮的跑步动作，但它常依赖特定起点、时刻与地形。神经网络策略可以直接根据当前状态反馈控制，却很难从随机探索发现同样好的动作。GPS 把两者连接：用轨迹优化得到的高回报分布提供引导样本，再用这些样本与当前策略样本共同训练参数化策略。</p>
-<p>本篇讨论的是 2013 年原始 GPS：核心包括重要性采样、引导分布与正则化策略搜索。后来的 BADMM、镜像下降和视觉运动版本采用不同优化形式，不能全部写成同一个算法。<a href="https://proceedings.mlr.press/v28/levine13.pdf">原文 §3–5</a></p>
-<p>一句话：利用局部优化产生的好样本，降低复杂策略搜索的探索难度；代价是需要引导控制器及其模型条件，并处理引导分布与策略分布的不匹配。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="004-power.html">PoWER</a>借结构化运动参数降低探索难度，但有限动作基元未必能表达跨地形的状态反馈。GPS转而利用局部轨迹优化提供高回报样本，再训练共享反馈策略。这是探索与表示选择的教学对照，不是PoWER的直接继承。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念是 DDP、时变反馈、重要性采样、自归一化估计和分布支持。分别对应引导生成、局部执行、样本复用、方差取舍和估计是否有依据。</p>
-<h2 id="二两个控制器为什么各有作用">二、两个控制器为什么各有作用</h2>
+<h2 id="一问题设定局部好轨迹怎样教出跨状态的反馈">一、问题设定：局部好轨迹怎样教出跨状态的反馈</h2>
+<p>轨迹优化器可以找到一段漂亮的跑步动作，但它常依赖特定起点、时刻与地形。神经网络策略可以直接根据当前状态反馈控制，却很难从随机探索发现同样好的动作。GPS 把两者连接：用轨迹优化得到的高回报分布提供引导样本，再用这些样本与当前策略样本共同训练参数化策略。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -87,7 +86,9 @@
 </tr>
 </tbody></table></div>
 <p>GPS 中策略搜索部分可以不依赖环境求导，但 DDP 构造引导分布需要动力学。只引用“model-free policy search”就把整个系统归为不需要模型，会漏掉这一关键成本。</p>
-<h2 id="三重要性采样如何复用引导轨迹">三、重要性采样如何复用引导轨迹</h2>
+<h2 id="二连接引导分布重要性估计与策略正则">二、连接引导分布、重要性估计与策略正则</h2>
+<p>本篇讨论的是 2013 年原始 GPS：核心包括重要性采样、引导分布与正则化策略搜索。后来的 BADMM、镜像下降和视觉运动版本采用不同优化形式，不能全部写成同一个算法。<a href="https://proceedings.mlr.press/v28/levine13.pdf">原文 §3–5</a></p>
+<h3 id="重要性采样如何复用引导轨迹">重要性采样如何复用引导轨迹</h3>
 <p>设轨迹 <span class="reading-math" data-tex="\zeta_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ζ</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">\zeta_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07378em;">ζ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0738em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 来自 <span class="reading-math" data-tex="q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi></mrow><annotation encoding="application/x-tex">q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span></span></span></span>，目标策略轨迹概率为 <span class="reading-math" data-tex="\pi_\theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>π</mi><mi>θ</mi></msub></mrow><annotation encoding="application/x-tex">\pi_\theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，重要性比为：</p>
 <p><span class="reading-math" data-tex="w_i(\theta)=\frac{\pi_\theta(\zeta_i)}{q(\zeta_i)}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>w</mi><mi>i</mi></msub><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>=</mo><mfrac><mrow><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>ζ</mi><mi>i</mi></msub><mo stretchy="false">)</mo></mrow><mrow><mi>q</mi><mo stretchy="false">(</mo><msub><mi>ζ</mi><mi>i</mi></msub><mo stretchy="false">)</mo></mrow></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">w_i(\theta)=\frac{\pi_\theta(\zeta_i)}{q(\zeta_i)}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.363em;vertical-align:-0.936em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.427em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07378em;">ζ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0738em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07378em;">ζ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0738em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.936em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p>自归一化估计的示意形式是：</p>
@@ -98,11 +99,18 @@
 {\sum_iw_i(\theta)}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.09618em;">J</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0833em;"><span class="mord">^</span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4254em;vertical-align:-0.9857em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.4397em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2997em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.6897em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2997em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07378em;">ζ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0738em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.9857em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p>它让不同分布产生的数据参与目标策略回报估计。原文还利用逐步前缀比降低不必要方差；并加入正则化，不能只把上式当作完整 GPS 目标。</p>
 <p>为什么需要正则化？假设新策略给所有已观察轨迹的绝对概率都很低，只是给其中最好的一条相对高一点。归一化之后，这条样本几乎独占权重，估计回报看起来很好；但新策略实际运行可能根本不会产生类似轨迹。自归一化只看相对比例，不能独自约束覆盖。</p>
-<h2 id="四引导分布如何生成为什么还要适应">四、引导分布如何生成，为什么还要适应</h2>
+<p>用一个极端算例检验覆盖问题：两条已见轨迹回报为10和0，策略A赋予概率 <span class="reading-math" data-tex="0.4,0.4"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0.4</mn><mo separator="true">,</mo><mn>0.4</mn></mrow><annotation encoding="application/x-tex">0.4,0.4</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8389em;vertical-align:-0.1944em;"></span><span class="mord">0.4</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.4</span></span></span></span></span>，策略B赋予 <span class="reading-math" data-tex="10^{-6},10^{-9}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><msup><mn>0</mn><mrow><mo>−</mo><mn>6</mn></mrow></msup><mo separator="true">,</mo><mn>1</mn><msup><mn>0</mn><mrow><mo>−</mo><mn>9</mn></mrow></msup></mrow><annotation encoding="application/x-tex">10^{-6},10^{-9}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0085em;vertical-align:-0.1944em;"></span><span class="mord">1</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">6</span></span></span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">9</span></span></span></span></span></span></span></span></span></span></span></span></span>。若来源概率相同，自归一化估计分别约为5和9.99；后者看起来更好，却把几乎全部质量放到了未见轨迹上。这里是教学分布，不是论文测量值。</p>
+<p>因此正则化保护的不是“别离专家太远”这句泛泛忠告，而是回报估计的证据覆盖。原文<a href="#paper-009-gps-figure-2">图2</a>里去掉正则和去掉引导都是独立消融；每轮策略采样以外，引导变体还有额外引导轨迹。它们一起说明，优化目标、样本来源和交互预算必须同时列清。<a href="#paper-009-gps-figure-2">原文 §3、图2</a></p>
+<h3 id="引导分布如何生成为什么还要适应">引导分布如何生成，为什么还要适应</h3>
 <p>DDP 在名义轨迹附近进行局部动力学与成本近似，得到时变反馈控制器。把它随机化，就不只生成一条完全固定轨迹，还能给策略展示附近的纠正行为。</p>
 <p>原文讨论接近高奖励指数分布的引导设计，也给出结合当前策略概率的自适应引导。直觉是让轨迹优化同时考虑“好不好”和“当前策略能不能学会”。</p>
 <p>这在观察别名时尤其重要：如果同一状态在不同时间需要完全不同动作，局部时变控制器可以凭时钟区别，但不带时钟的平稳策略可能无法复现。自适应引导尝试寻找更兼容策略表示的行为，而不是强迫网络复制相互冲突的标签。</p>
-<h2 id="五教学伪代码">五、教学伪代码</h2>
+<h3 id="一个坡道例子">一个坡道例子</h3>
+<p>教学构造：机器人训练时在走出两米后遇到坡道。时变控制器在固定时刻抬高腿，即使当前地形发生变化也按时钟动作。把坡道提前一米，它可能还没准备好就撞上。</p>
+<p>状态反馈策略如果从引导样本中学到“根据身体姿态和接触变化调整抬腿”，就可能应对坡道位置变化。这不是网络天生懂地形，而是表示与数据支持这种反馈规律。</p>
+<p>如果训练只提供完全相同的一条无扰动轨迹，网络也可能把时间相关状态当捷径。随机反馈样本与测试环境变化，才帮助区分它学到的是轨迹记忆还是可复用控制。更陡坡道或不同接触材质仍可能超出这套规律。</p>
+<h2 id="三交替采样引导轨迹与更新反馈策略">三、交替采样引导轨迹与更新反馈策略</h2>
+<p>重要性权重连接的是两个轨迹分布，因而引导样本不能只在初始化时使用一次后置之不理。当共享策略与局部引导冲突，流程还需要适应引导分布。</p>
 <pre><code class="language-text">输入：任务奖励、动力学接口、参数化策略
 用 DDP 生成一个或多个局部反馈方案
 从引导控制器采样轨迹
@@ -117,11 +125,15 @@
 输出：状态反馈策略
 </code></pre>
 <p>这份教学流程保留了引导、策略采样和概率修正的关系，省略具体正则化更新及样本集选择。实现若只保留最好的轨迹而不记录来源分布，就无法直接沿用重要性采样解释。</p>
-<h2 id="六一个坡道例子">六、一个坡道例子</h2>
-<p>教学构造：机器人训练时在走出两米后遇到坡道。时变控制器在固定时刻抬高腿，即使当前地形发生变化也按时钟动作。把坡道提前一米，它可能还没准备好就撞上。</p>
-<p>状态反馈策略如果从引导样本中学到“根据身体姿态和接触变化调整抬腿”，就可能应对坡道位置变化。这不是网络天生懂地形，而是表示与数据支持这种反馈规律。</p>
-<p>如果训练只提供完全相同的一条无扰动轨迹，网络也可能把时间相关状态当捷径。随机反馈样本与测试环境变化，才帮助区分它学到的是轨迹记忆还是可复用控制。更陡坡道或不同接触材质仍可能超出这套规律。</p>
-<h2 id="七实验与证据强度">七、实验与证据强度</h2>
+<h2 id="四用坡道位置变化检验反馈而非轨迹记忆">四、用坡道位置变化检验反馈而非轨迹记忆</h2>
+<p>坡道位置变化能把按时钟重放与状态反馈区分开。图2的去引导、去正则对照则回答另一个问题：收益来自好样本本身，还是样本与策略之间的约束。</p>
+<p><strong>原图怎么读：</strong> <a href="#paper-009-gps-figure-2">图2，PDF第6页</a>。同时看完整GPS与去引导、去正则的版本，才能区分有效采样和分布约束各自的作用；单独看最高回报无法判断是哪一个组件带来收益。</p>
+<!-- figure-ref-v6:start:419f85301ebc-anchor -->
+<p><a id="paper-009-gps-figure-2"></a></p>
+<!-- figure-ref-v6:end:419f85301ebc-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/009-gps-fig2.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/009-gps-fig2.png" width="1948" height="300" alt="Guided Policy Search，图2：同时看完整GPS与去引导、去正则的版本，才能区分有效采样和分布约束各自的作用；单独看最高回报无法判断是哪一个组件带来收益。" loading="lazy"></a><figcaption>实验图原图摘引：Sergey Levine、Vladlen Koltun，ICML 2013，PDF第6页，图2。<a href="https://proceedings.mlr.press/v28/levine13.pdf#page=6" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -144,48 +156,47 @@
 <td>任意策略容量都足够</td>
 </tr>
 <tr>
-<td>图 3、§6.3</td>
+<td><a href="#paper-009-gps-figure-3">图3</a>、§6.3</td>
 <td>改变坡道开始位置</td>
 <td>状态反馈可比时变局部轨迹更适应位置变化</td>
 <td>任意地形泛化</td>
 </tr>
 <tr>
-<td>图 4</td>
+<td><a href="#paper-009-gps-figure-4">图4</a></td>
 <td>随机分段坡度地形</td>
 <td>比较 GPS、DDP 与邻近轨迹方案</td>
 <td>真实机器人部署已验证</td>
 </tr>
 <tr>
-<td>图 5、§6.4</td>
+<td><a href="#paper-009-gps-figure-5">图5</a>、§6.4</td>
 <td>三维人形跑步模拟</td>
 <td>高维状态下可学习相应反馈</td>
 <td>无示范、无模型的从零学习</td>
 </tr>
 </tbody></table></div>
-<p>人形任务使用 63 维状态，引导来自人类运动捕捉并经 DDP 转成相应力矩；训练与测试采用不同地形。图 4 的四个测试场景是具体泛化样例，不能解释为对整个地形分布的充分覆盖。</p>
+<!-- figure-ref-v6:start:734ec6546c92 -->
+<p><a id="paper-009-gps-figure-3"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/009-gps-v6-figure-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/009-gps-v6-figure-3.png" width="956" height="320" alt="Guided Policy Search，图3：左侧按坡道起点位置比较回报，右侧是固定位置的轨迹，均为同一组泛化实验的不同视角。" loading="lazy"></a><figcaption>原图摘引：Sergey Levine、Vladlen Koltun，ICML 2013，PDF第7页，图3。<a href="https://proceedings.mlr.press/v28/levine13.pdf#page=7" target="_blank" rel="noopener noreferrer">核对原文</a>。左侧按坡道起点位置比较回报，右侧是固定位置的轨迹，均为同一组泛化实验的不同视角。</figcaption></figure>
+<!-- figure-ref-v6:end:734ec6546c92 -->
+<!-- figure-ref-v6:start:3cbf3fbd3242 -->
+<a id="paper-009-gps-figure-4"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/009-gps-v6-figure-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/009-gps-v6-figure-4.png" width="964" height="788" alt="Guided Policy Search，图4：各行把同一测试地形上的GPS、TBDP与DDP轨迹并列，括号给出平均回报，不能只凭单条姿态判断稳定性。" loading="lazy"></a><figcaption>原图摘引：Sergey Levine、Vladlen Koltun，ICML 2013，PDF第7页，图4。<a href="https://proceedings.mlr.press/v28/levine13.pdf#page=7" target="_blank" rel="noopener noreferrer">核对原文</a>。各行把同一测试地形上的GPS、TBDP与DDP轨迹并列，括号给出平均回报，不能只凭单条姿态判断稳定性。</figcaption></figure>
+<!-- figure-ref-v6:end:3cbf3fbd3242 -->
+<!-- figure-ref-v6:start:cb03a2d18e2b -->
+<a id="paper-009-gps-figure-5"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/009-gps-v6-figure-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/009-gps-v6-figure-5.png" width="956" height="844" alt="Guided Policy Search，图5：左侧比较四种测试地形上的模拟跑步轨迹，右侧给出三维人形模型，证据仍限于模拟设置。" loading="lazy"></a><figcaption>原图摘引：Sergey Levine、Vladlen Koltun，ICML 2013，PDF第7页，图5。<a href="https://proceedings.mlr.press/v28/levine13.pdf#page=7" target="_blank" rel="noopener noreferrer">核对原文</a>。左侧比较四种测试地形上的模拟跑步轨迹，右侧给出三维人形模型，证据仍限于模拟设置。</figcaption></figure>
+<!-- figure-ref-v6:end:cb03a2d18e2b -->
+
+
+<p>人形任务使用 63 维状态，引导来自人类运动捕捉并经 DDP 转成相应力矩；训练与测试采用不同地形。<a href="#paper-009-gps-figure-4">图4</a> 的四个测试场景是具体泛化样例，不能解释为对整个地形分布的充分覆盖。</p>
 <p>图中负奖励的差值需要按原成本定义解读，不适合直接转换为“成功率提升百分比”。自适应引导变体还使用额外引导样本，比较样本效率时要同时计入这些来源。阅读已覆盖主文方法与上述模拟实验，未独立复现。</p>
-<h2 id="八贡献与边界">八、贡献与边界</h2>
-<p>GPS 的贡献是让不同优化方式分工合作：局部规划擅长发现好轨迹，函数逼近擅长表达共享反馈，重要性采样与正则化负责连接数据分布。它给后来视觉运动策略提供了关键训练思路，但原版并未直接解决从图像学精细真机操作的全部问题。</p>
+<h2 id="五局部教师无法覆盖任意失败状态">五、局部教师无法覆盖任意失败状态</h2>
 <p>局部控制器的有效范围也限制“专家查询”。一个已经摔倒的人形状态，可能远离原始 DDP 轨迹，直接询问这个局部控制器未必能得到正确恢复动作。因此不能把它当成覆盖所有状态的通用专家。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>好轨迹局部化、复杂策略难探索</td>
-<td>引导采样＋正则化策略搜索</td>
-<td>在高回报区域学习共享反馈</td>
-<td>§3–6、图 3–5</td>
-<td>模型、局部有效性、样本分布错配</td>
-</tr>
-</tbody></table></div>
-<h2 id="九自测题与参考答案">九、自测题与参考答案</h2>
+<h3 id="追问怎样区分坡道泛化来自状态反馈还是训练中见过相似时间表">追问：怎样区分坡道泛化来自状态反馈，还是训练中见过相似时间表？</h3>
+<p>参考答案：可保持坡道形状而改变出现位置和到达时间，并记录策略是否随实际姿态、接触变化调整动作。固定时钟仍成功不足以证明反馈，改变地形后恢复也不能自动推出任意地形泛化。还需核对引导样本是否覆盖这些扰动，并把额外引导成本计入比较。这个对照沿用本篇坡道例子的机制，不新增真机结论。</p>
+<h2 id="六沿机制关系继续读">六、沿机制关系继续读</h2>
+<p><a href="010-visuomotor.html">视觉运动策略</a>直接承接引导式策略搜索思想，但改用约束式交替训练并接入图像网络。2013年的重要性估计与2016年的BADMM并不相同；这里的继承是训练分工的演化，不能把后者公式倒写成原版GPS。</p>
+<h2 id="七自测题与参考答案">七、自测题与参考答案</h2>
 <p><strong>问题 1：既然 DDP 已经完成任务，为什么还需要训练神经策略？</strong></p>
 <p>参考答案：DDP 通常围绕一条时变轨迹有效，地形或起点变化可能破坏它。参数化策略有机会从多条及受扰轨迹中学到共享状态反馈，但这种泛化必须实验验证。</p>
 <p><strong>问题 2：自归一化重要性估计为什么可能“所有样本概率都很低，却认为回报很高”？</strong></p>
@@ -203,15 +214,13 @@
 
 **原论文**：*Guided Policy Search*，Sergey Levine、Vladlen Koltun，ICML 2013。[原文](https://proceedings.mlr.press/v28/levine13.html)。
 
-## 一、局部好轨迹与通用反馈策略之间隔着什么
+### 先接住前作的问题
+
+[PoWER](004-power.md)借结构化运动参数降低探索难度，但有限动作基元未必能表达跨地形的状态反馈。GPS转而利用局部轨迹优化提供高回报样本，再训练共享反馈策略。这是探索与表示选择的教学对照，不是PoWER的直接继承。
+
+## 一、问题设定：局部好轨迹怎样教出跨状态的反馈
 
 轨迹优化器可以找到一段漂亮的跑步动作，但它常依赖特定起点、时刻与地形。神经网络策略可以直接根据当前状态反馈控制，却很难从随机探索发现同样好的动作。GPS 把两者连接：用轨迹优化得到的高回报分布提供引导样本，再用这些样本与当前策略样本共同训练参数化策略。
-
-本篇讨论的是 2013 年原始 GPS：核心包括重要性采样、引导分布与正则化策略搜索。后来的 BADMM、镜像下降和视觉运动版本采用不同优化形式，不能全部写成同一个算法。[原文 §3–5](https://proceedings.mlr.press/v28/levine13.pdf)
-
-一句话：利用局部优化产生的好样本，降低复杂策略搜索的探索难度；代价是需要引导控制器及其模型条件，并处理引导分布与策略分布的不匹配。
-
-## 二、两个控制器为什么各有作用
 
 | 组件 | 作用 | 使用边界 |
 |---|---|---|
@@ -223,7 +232,11 @@
 
 GPS 中策略搜索部分可以不依赖环境求导，但 DDP 构造引导分布需要动力学。只引用“model-free policy search”就把整个系统归为不需要模型，会漏掉这一关键成本。
 
-## 三、重要性采样如何复用引导轨迹
+## 二、连接引导分布、重要性估计与策略正则
+
+本篇讨论的是 2013 年原始 GPS：核心包括重要性采样、引导分布与正则化策略搜索。后来的 BADMM、镜像下降和视觉运动版本采用不同优化形式，不能全部写成同一个算法。[原文 §3–5](https://proceedings.mlr.press/v28/levine13.pdf)
+
+### 重要性采样如何复用引导轨迹
 
 设轨迹 $\zeta_i$ 来自 $q$，目标策略轨迹概率为 $\pi_\theta$，重要性比为：
 
@@ -243,7 +256,11 @@ $$
 
 为什么需要正则化？假设新策略给所有已观察轨迹的绝对概率都很低，只是给其中最好的一条相对高一点。归一化之后，这条样本几乎独占权重，估计回报看起来很好；但新策略实际运行可能根本不会产生类似轨迹。自归一化只看相对比例，不能独自约束覆盖。
 
-## 四、引导分布如何生成，为什么还要适应
+用一个极端算例检验覆盖问题：两条已见轨迹回报为10和0，策略A赋予概率 $0.4,0.4$，策略B赋予 $10^{-6},10^{-9}$。若来源概率相同，自归一化估计分别约为5和9.99；后者看起来更好，却把几乎全部质量放到了未见轨迹上。这里是教学分布，不是论文测量值。
+
+因此正则化保护的不是“别离专家太远”这句泛泛忠告，而是回报估计的证据覆盖。原文[图2](#paper-009-gps-figure-2)里去掉正则和去掉引导都是独立消融；每轮策略采样以外，引导变体还有额外引导轨迹。它们一起说明，优化目标、样本来源和交互预算必须同时列清。[原文 §3、图2](#paper-009-gps-figure-2)
+
+### 引导分布如何生成，为什么还要适应
 
 DDP 在名义轨迹附近进行局部动力学与成本近似，得到时变反馈控制器。把它随机化，就不只生成一条完全固定轨迹，还能给策略展示附近的纠正行为。
 
@@ -251,7 +268,17 @@ DDP 在名义轨迹附近进行局部动力学与成本近似，得到时变反�
 
 这在观察别名时尤其重要：如果同一状态在不同时间需要完全不同动作，局部时变控制器可以凭时钟区别，但不带时钟的平稳策略可能无法复现。自适应引导尝试寻找更兼容策略表示的行为，而不是强迫网络复制相互冲突的标签。
 
-## 五、教学伪代码
+### 一个坡道例子
+
+教学构造：机器人训练时在走出两米后遇到坡道。时变控制器在固定时刻抬高腿，即使当前地形发生变化也按时钟动作。把坡道提前一米，它可能还没准备好就撞上。
+
+状态反馈策略如果从引导样本中学到“根据身体姿态和接触变化调整抬腿”，就可能应对坡道位置变化。这不是网络天生懂地形，而是表示与数据支持这种反馈规律。
+
+如果训练只提供完全相同的一条无扰动轨迹，网络也可能把时间相关状态当捷径。随机反馈样本与测试环境变化，才帮助区分它学到的是轨迹记忆还是可复用控制。更陡坡道或不同接触材质仍可能超出这套规律。
+
+## 三、交替采样引导轨迹与更新反馈策略
+
+重要性权重连接的是两个轨迹分布，因而引导样本不能只在初始化时使用一次后置之不理。当共享策略与局部引导冲突，流程还需要适应引导分布。
 
 ~~~text
 输入：任务奖励、动力学接口、参数化策略
@@ -270,41 +297,62 @@ DDP 在名义轨迹附近进行局部动力学与成本近似，得到时变反�
 
 这份教学流程保留了引导、策略采样和概率修正的关系，省略具体正则化更新及样本集选择。实现若只保留最好的轨迹而不记录来源分布，就无法直接沿用重要性采样解释。
 
-## 六、一个坡道例子
+## 四、用坡道位置变化检验反馈而非轨迹记忆
 
-教学构造：机器人训练时在走出两米后遇到坡道。时变控制器在固定时刻抬高腿，即使当前地形发生变化也按时钟动作。把坡道提前一米，它可能还没准备好就撞上。
+坡道位置变化能把按时钟重放与状态反馈区分开。图2的去引导、去正则对照则回答另一个问题：收益来自好样本本身，还是样本与策略之间的约束。
 
-状态反馈策略如果从引导样本中学到“根据身体姿态和接触变化调整抬腿”，就可能应对坡道位置变化。这不是网络天生懂地形，而是表示与数据支持这种反馈规律。
+**原图怎么读：** [图2，PDF第6页](#paper-009-gps-figure-2)。同时看完整GPS与去引导、去正则的版本，才能区分有效采样和分布约束各自的作用；单独看最高回报无法判断是哪一个组件带来收益。
 
-如果训练只提供完全相同的一条无扰动轨迹，网络也可能把时间相关状态当捷径。随机反馈样本与测试环境变化，才帮助区分它学到的是轨迹记忆还是可复用控制。更陡坡道或不同接触材质仍可能超出这套规律。
 
-## 七、实验与证据强度
+&lt;!-- figure-ref-v6:start:419f85301ebc-anchor --&gt;
+&lt;a id=&quot;paper-009-gps-figure-2&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:419f85301ebc-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/009-gps-fig2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/009-gps-fig2.png&quot; width=&quot;1948&quot; height=&quot;300&quot; alt=&quot;Guided Policy Search，图2：同时看完整GPS与去引导、去正则的版本，才能区分有效采样和分布约束各自的作用；单独看最高回报无法判断是哪一个组件带来收益。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验图原图摘引：Sergey Levine、Vladlen Koltun，ICML 2013，PDF第6页，图2。&lt;a href=&quot;https://proceedings.mlr.press/v28/levine13.pdf#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 | 原文位置 | 比较与设定 | 支持什么 | 不能推出什么 |
 |---|---|---|---|
 | §3 | 重要性采样与正则化目标 | 为什么仅看归一化回报会退化 | 正则化消除所有样本偏差 |
 | §4.2、§6.2 | 引导适应当前策略 | 冲突行为可通过重新引导改善 | 任意策略容量都足够 |
-| 图 3、§6.3 | 改变坡道开始位置 | 状态反馈可比时变局部轨迹更适应位置变化 | 任意地形泛化 |
-| 图 4 | 随机分段坡度地形 | 比较 GPS、DDP 与邻近轨迹方案 | 真实机器人部署已验证 |
-| 图 5、§6.4 | 三维人形跑步模拟 | 高维状态下可学习相应反馈 | 无示范、无模型的从零学习 |
+| [图3](#paper-009-gps-figure-3)、§6.3 | 改变坡道开始位置 | 状态反馈可比时变局部轨迹更适应位置变化 | 任意地形泛化 |
+| [图4](#paper-009-gps-figure-4) | 随机分段坡度地形 | 比较 GPS、DDP 与邻近轨迹方案 | 真实机器人部署已验证 |
+| [图5](#paper-009-gps-figure-5)、§6.4 | 三维人形跑步模拟 | 高维状态下可学习相应反馈 | 无示范、无模型的从零学习 |
 
-人形任务使用 63 维状态，引导来自人类运动捕捉并经 DDP 转成相应力矩；训练与测试采用不同地形。图 4 的四个测试场景是具体泛化样例，不能解释为对整个地形分布的充分覆盖。
+&lt;!-- figure-ref-v6:start:734ec6546c92 --&gt;
+&lt;a id=&quot;paper-009-gps-figure-3&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/009-gps-v6-figure-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/009-gps-v6-figure-3.png&quot; width=&quot;956&quot; height=&quot;320&quot; alt=&quot;Guided Policy Search，图3：左侧按坡道起点位置比较回报，右侧是固定位置的轨迹，均为同一组泛化实验的不同视角。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Sergey Levine、Vladlen Koltun，ICML 2013，PDF第7页，图3。&lt;a href=&quot;https://proceedings.mlr.press/v28/levine13.pdf#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。左侧按坡道起点位置比较回报，右侧是固定位置的轨迹，均为同一组泛化实验的不同视角。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:734ec6546c92 --&gt;
+&lt;!-- figure-ref-v6:start:3cbf3fbd3242 --&gt;
+&lt;a id=&quot;paper-009-gps-figure-4&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/009-gps-v6-figure-4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/009-gps-v6-figure-4.png&quot; width=&quot;964&quot; height=&quot;788&quot; alt=&quot;Guided Policy Search，图4：各行把同一测试地形上的GPS、TBDP与DDP轨迹并列，括号给出平均回报，不能只凭单条姿态判断稳定性。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Sergey Levine、Vladlen Koltun，ICML 2013，PDF第7页，图4。&lt;a href=&quot;https://proceedings.mlr.press/v28/levine13.pdf#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。各行把同一测试地形上的GPS、TBDP与DDP轨迹并列，括号给出平均回报，不能只凭单条姿态判断稳定性。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:3cbf3fbd3242 --&gt;
+&lt;!-- figure-ref-v6:start:cb03a2d18e2b --&gt;
+&lt;a id=&quot;paper-009-gps-figure-5&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/009-gps-v6-figure-5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/009-gps-v6-figure-5.png&quot; width=&quot;956&quot; height=&quot;844&quot; alt=&quot;Guided Policy Search，图5：左侧比较四种测试地形上的模拟跑步轨迹，右侧给出三维人形模型，证据仍限于模拟设置。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Sergey Levine、Vladlen Koltun，ICML 2013，PDF第7页，图5。&lt;a href=&quot;https://proceedings.mlr.press/v28/levine13.pdf#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。左侧比较四种测试地形上的模拟跑步轨迹，右侧给出三维人形模型，证据仍限于模拟设置。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:cb03a2d18e2b --&gt;
+
+
+人形任务使用 63 维状态，引导来自人类运动捕捉并经 DDP 转成相应力矩；训练与测试采用不同地形。[图4](#paper-009-gps-figure-4) 的四个测试场景是具体泛化样例，不能解释为对整个地形分布的充分覆盖。
 
 图中负奖励的差值需要按原成本定义解读，不适合直接转换为“成功率提升百分比”。自适应引导变体还使用额外引导样本，比较样本效率时要同时计入这些来源。阅读已覆盖主文方法与上述模拟实验，未独立复现。
 
-## 八、贡献与边界
-
-GPS 的贡献是让不同优化方式分工合作：局部规划擅长发现好轨迹，函数逼近擅长表达共享反馈，重要性采样与正则化负责连接数据分布。它给后来视觉运动策略提供了关键训练思路，但原版并未直接解决从图像学精细真机操作的全部问题。
+## 五、局部教师无法覆盖任意失败状态
 
 局部控制器的有效范围也限制“专家查询”。一个已经摔倒的人形状态，可能远离原始 DDP 轨迹，直接询问这个局部控制器未必能得到正确恢复动作。因此不能把它当成覆盖所有状态的通用专家。
 
+### 五个前置概念
+
 五个前置概念是 DDP、时变反馈、重要性采样、自归一化估计和分布支持。分别对应引导生成、局部执行、样本复用、方差取舍和估计是否有依据。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 证据 | 代价与局限 |
-|---|---|---|---|---|
-| 好轨迹局部化、复杂策略难探索 | 引导采样＋正则化策略搜索 | 在高回报区域学习共享反馈 | §3–6、图 3–5 | 模型、局部有效性、样本分布错配 |
+### 追问：怎样区分坡道泛化来自状态反馈，还是训练中见过相似时间表？
 
-## 九、自测题与参考答案
+参考答案：可保持坡道形状而改变出现位置和到达时间，并记录策略是否随实际姿态、接触变化调整动作。固定时钟仍成功不足以证明反馈，改变地形后恢复也不能自动推出任意地形泛化。还需核对引导样本是否覆盖这些扰动，并把额外引导成本计入比较。这个对照沿用本篇坡道例子的机制，不新增真机结论。
+
+## 六、沿机制关系继续读
+
+[视觉运动策略](010-visuomotor.md)直接承接引导式策略搜索思想，但改用约束式交替训练并接入图像网络。2013年的重要性估计与2016年的BADMM并不相同；这里的继承是训练分工的演化，不能把后者公式倒写成原版GPS。
+
+## 七、自测题与参考答案
 
 **问题 1：既然 DDP 已经完成任务，为什么还需要训练神经策略？**
 
@@ -317,7 +365,6 @@ GPS 的贡献是让不同优化方式分工合作：局部规划擅长发现好�
 **问题 3：引导样本动作相互冲突时，增大神经网络一定能解决吗？**
 
 参考答案：如果同一输入确实要求两个不同行为，而策略没有时间或隐状态，再大网络也不能确定性地区分。需要改变输入、策略形式或引导行为。GPS 的自适应引导处理的是这种兼容性问题的一部分。
-
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>
