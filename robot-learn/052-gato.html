@@ -42,21 +42,21 @@
                 <span class="text-gray-500">Gato：把多模态决策统一为序列预测</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="4c70572c1df1779783d944ddf1303e9638bce73c568a6709e51ff2cc8841e875"><h1>052｜Gato：把多模态决策统一为序列预测</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="723c56e1cef2266c4cc15591713ffb5fddd078305bdd90fc476468bb0cb11131"><h1>052｜Gato：把多模态决策统一为序列预测</h1>
 <p><a href="index.html">系列首页</a> · <a href="051-saycan.html">上一篇</a> · <a href="053-diffuser.html">下一篇</a></p>
 <p><strong>原论文</strong>：<em>A Generalist Agent</em>，Scott Reed 等，2022。<a href="https://arxiv.org/abs/2205.06175">论文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p>一套权重能否既生成文字，又玩游戏，还控制真实机械臂？Gato把这些任务都改写成序列预测：把观测变成输入token，把文字或动作变成要预测的token，用一个Transformer学习。</p>
-<p>它证明的重点是多种模态与身体接口可以共存于单一网络，而不是一个模型已经掌握任意新任务。机器人实验中，它在未用于堆叠训练的五组物体形状上取得50.2%成功率，与专门BC基线49%相近。单模型承担更多任务的同时维持有竞争力的操作能力，是比“全面战胜专家”更准确的结论。</p>
-<p>一句话总结：在多任务、多模态离线监督学习场景下，通过统一序列接口与共享Transformer，整合了游戏、语言和机器人控制能力，代价是需要大量专家数据，而且跨任务迁移并不总是正向。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="019-one-shot.html">一次示范模仿</a>提供一个阅读起点。One-shot模仿在相关任务间共享读取示范的能力，但身体接口和模态仍受任务族限制。Gato把更多观测与输出变成序列，追问一套权重是否容纳这些不同接口；共享存在不等于跨域数据已经帮助每项任务。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>序列化</strong>规定多模态数据的排列；<strong>量化</strong>将连续值变为有限档；<strong>因果注意力</strong>只读取已出现内容；<strong>损失掩码</strong>指定哪些位置需要预测；<strong>负迁移</strong>指其他任务经验降低当前任务学习表现。</p>
-<h2 id="二背景与问题定义">二、背景与问题定义</h2>
+<h2 id="一问题设定多种模态与身体接口怎样共用一套权重">一、问题设定：多种模态与身体接口怎样共用一套权重</h2>
+<p>一套权重能否既生成文字，又玩游戏，还控制真实机械臂？Gato把这些任务都改写成序列预测：把观测变成输入token，把文字或动作变成要预测的token，用一个Transformer学习。</p>
 <p>Gato的训练是离线监督学习。控制数据主要来自已有专家，许多专家通过RL训练，但Gato自身没有在主训练中用TD价值或策略梯度改善回报。它更像把多个专家行为蒸馏进一个通用序列模型。</p>
 <p>一个重要区别是“同一组权重能做许多已学任务”与“遇到任意新任务就会做”。前者需要避免任务间干扰；后者还需要迁移、适应或新学习。论文分别展示预训练模型、少样本微调和专门模型，不应把三者最好的分数拼成一个万能模型的成绩单。</p>
 <p>在机器人RGB Stacking中，Sawyer需要把红块叠到蓝块上，忽略绿块。观测包括两台128×128相机、机器人关节及末端状态，不包含物体真值位姿。回合400步、名义20 Hz，总20秒。动作是该平台定义的连续控制分量和夹爪离散命令；每个控制域仍需外部接口规定动作长度及解码方式。</p>
 <p>奖励主要用于筛选较好控制轨迹与评测。主体损失预测记录中的动作，不显式比较“未执行动作是否更好”。这意味着数据质量上限与覆盖仍很关键。</p>
-<h2 id="三方法统一token不等于所有模态完全一样">三、方法：统一token，不等于所有模态完全一样</h2>
+<h2 id="二统一序列表示并只对规定输出计算损失">二、统一序列表示并只对规定输出计算损失</h2>
+<p>它证明的重点是多种模态与身体接口可以共存于单一网络，而不是一个模型已经掌握任意新任务。机器人实验中，它在未用于堆叠训练的五组物体形状上取得50.2%成功率，与专门BC基线49%相近。单模型承担更多任务的同时维持有竞争力的操作能力，是比“全面战胜专家”更准确的结论。</p>
 <h3 id="1-数据如何进入模型">1. 数据如何进入模型</h3>
 <p>文字使用子词词表；图像分为16×16图块，再通过小型视觉嵌入模块；连续数值先按适当变换缩放，再离散成1024档；离散动作编码为整数。一个交互步按“观测、分隔符、动作”排序，多个交互步再按时间连接。</p>
 <p>连续动作量化的直觉很简单：把实数选择变为类别预测。若一个动作范围为 <span class="reading-math" data-tex="[-1,1]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">[</mo><mo>−</mo><mn>1</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[-1,1]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord">−</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">]</span></span></span></span></span>，等宽1024档的宽度约为 <span class="reading-math" data-tex="2/1024"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mi mathvariant="normal">/</mi><mn>1024</mn></mrow><annotation encoding="application/x-tex">2/1024</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2/1024</span></span></span></span></span>。模型需要学习各档概率，再由接口映射回实数。实际不同数值还涉及缩放及mu-law处理，不能只拿这个教学间隔代替全部实现。</p>
@@ -71,6 +71,14 @@
 <p>受1024token上下文限制，一段含图像的控制历史往往很短。论文对真正未见任务主要使用参数微调，而不是证明仅靠长示范提示就能学会。</p>
 <h3 id="4-真机有专门的时延处理">4. 真机有专门的时延处理</h3>
 <p>附录G说明，真实堆叠部署缩短历史上下文，并采用一次推理并行预测动作token的方案，训练输入中对应动作token置零。它牺牲了常规自回归动作维间条件，以减少延迟。文中的“context length to 1”应结合交互序列实现理解，不能解释为整张图像只剩一个token。</p>
+<p>方法改变的是多任务表示与监督组织；优化目标是记录token的似然；指标是各任务的回报或成功率。主模型没有额外训练一个通用价值函数来纠正示范。</p>
+<p>统一token损失也会隐含任务权重。若任务A每次动作7个token、任务B每次动作20个token，按所有目标token直接求和时，同样一条控制转移并不贡献同样损失权重。再叠加文本长度、图像占用上下文及数据混合比例，“共享模型”并未自动实现任务等权。这里是从掩码交叉熵推导出的检查项。</p>
+<p>教学例：两个任务各抽100步，B提供2000个动作目标、A仅700个；如果要按物理决策等权，需明确归一化或采样设计。原文不预测图像与非文本观测，因此大量视觉输入token又会消耗计算而不直接增加输出监督。评估应逐领域看回报，不能用一个总token损失代替多任务能力。<a href="https://arxiv.org/html/2205.06175">原文§2.1—2.3</a></p>
+<h3 id="手算例子与前置概念">手算例子与前置概念</h3>
+<p><strong>自构例子，未运行。</strong> 一个二维动作“向右0.3、向上0.1”被编码为两个离散档位。常规自回归模型先选水平档，再根据它选垂直档，因此可以表达“右移多时少向上”的相关性。并行预测时两维同时决定，速度更快，但需要模型用共同观测隐含协调它们。这个变化会影响控制分布，不能只当成无损加速。</p>
+<p>三个后续实验可以分别固定总计算改变数据混合比例、固定模型比较并行与串行动作误差、在未见身体上测试同token接口是否仍有效。它们对应共享效率、实时性和跨身体语义。</p>
+<h2 id="三按模态编码序列并遮蔽非预测位置的损失">三、按模态编码序列并遮蔽非预测位置的损失</h2>
+<p>共同Transformer接收不同token，但并非要求生成所有输入。训练要保留各模态编码和输出掩码，机器人连续动作的量化也仍是一项接口选择。</p>
 <pre><code class="language-text">训练：
     按指定混合权重选择一个数据域
     将文字、图像块、数值观测和动作序列化
@@ -90,8 +98,17 @@
     使用论文专门的短历史与动作并行预测配置
     记录模型时延，不能假设仿真会等待策略计算
 </code></pre>
-<p>方法改变的是多任务表示与监督组织；优化目标是记录token的似然；指标是各任务的回报或成功率。主模型没有额外训练一个通用价值函数来纠正示范。</p>
-<h2 id="四实验设置与资源">四、实验设置与资源</h2>
+<h2 id="四区分共同容纳任务与跨任务正迁移">四、区分共同容纳任务与跨任务正迁移</h2>
+<p><strong>原图怎么读：</strong> <a href="#paper-052-gato-figure-5">图5，原论文图注与图像</a>。横轴是达到专家分数的比例阈值，纵轴是超过阈值的任务数。它是任务覆盖分布，既不是一条随训练时间增长的曲线，也不是统一成功率。</p>
+<!-- figure-ref-v6:start:052-gato-license -->
+<p>原文标注 <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>。本页摘图仅保留图形区域并作栅格化；有面板重排的图另行注明，作者与原文入口见各图注。</p>
+<!-- figure-ref-v6:end:052-gato-license -->
+<!-- figure-ref-v6:start:11691362b369-anchor -->
+<a id="paper-052-gato-figure-5"></a>
+<!-- figure-ref-v6:end:11691362b369-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/052-gato-s4-f5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/052-gato-s4-f5.png" width="1520" height="645" alt="A Generalist Agent，图5：横轴是达到专家分数的比例阈值，纵轴是超过阈值的任务数。它是任务覆盖分布，既不是一条随训练时间增长的曲线，也不是统一成功率。" loading="lazy"></a><figcaption>实验图原图摘引：Scott Reed 等，2022，HTML S4.F5，图5。<a href="https://arxiv.org/html/2205.06175v3#S4.F5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -113,7 +130,7 @@
 </tr>
 <tr>
 <td>控制数据规模</td>
-<td>表1总约6300万回合、约1.5万亿可序列化token；不是模型实际完整遍历次数</td>
+<td><a href="https://arxiv.org/html/2205.06175v3#S3.T1">表1</a>总约6300万回合、约1.5万亿可序列化token；不是模型实际完整遍历次数</td>
 </tr>
 <tr>
 <td>机器人预训练</td>
@@ -140,65 +157,53 @@
 <td>全专家数据采集的综合成本及主预训练独立随机重训次数</td>
 </tr>
 </tbody></table></div>
-<p>604是论文整体任务口径，表1控制任务合计596并另列语言视觉数据集。它不意味着604项都是独立真实机器人技能，也不意味着每项都达到专家水平。</p>
+<p>604是论文整体任务口径，<a href="https://arxiv.org/html/2205.06175v3#S3.T1">表1</a>控制任务合计596并另列语言视觉数据集。它不意味着604项都是独立真实机器人技能，也不意味着每项都达到专家水平。</p>
 <p>监督训练使用已有专家数据，专家本身的RL交互成本很高。因此“4天训练一个会这么多任务的模型”只描述共享模型训练阶段，不包含创造专家和数据的全部过程。</p>
 <p>名义20Hz给每步50毫秒；多约10毫秒意味着推理约60毫秒，约16.7次/秒，这是据文字做的粗略换算，不是完整闭环控制实测频率。机器人不会像同步仿真一样暂停等待模型。</p>
-<h2 id="五五处结果与证据">五、五处结果与证据</h2>
-<p><strong>图5：覆盖广度。</strong> 论文报告超过450项任务达到专家归一化分数的50%以上。这里50%不是任务成功概率，而是相对于随机和专家的回报位置。它支持广覆盖，不能证明专家级掌握，更不能把所有任务权重相同视为真实应用价值相同。</p>
-<p><strong>表2：真实形状泛化。</strong> Gato五组成功率24.5%、33%、50.5%、76.5%、66.5%，平均50.2%；BC-IMP平均49%。平均差1.2个百分点，且Gato在第二、第四组更低。结论应是接近专门基线，而不是每组优越。</p>
-<p><strong>图9：未见任务有负迁移。</strong> 对保留的Boxing，作者没有观察到预训练优势，随机初始化反而更好；只用非控制数据预训练，在某些无视觉控制任务无益甚至有害。不同任务共用网络，不代表不同数据天然相互促进。</p>
-<p><strong>图10、图11：微调能改变任务能力，但要计入新数据。</strong> 改为“蓝叠绿”时，使用500条真实示范，约2小时45分钟，并加入模拟示范，最终真机成功60%；从头BC为0.5%。它支持预训练有助适应，却不是一句新语言指令立即完成颜色目标切换。</p>
-<p><strong>附录I、图19：同域专家仍有优势。</strong> 部分机器人微调对照中，只在相同领域预训练的模型表现最好。这给“大杂烩数据一定优于专业数据”提供了直接反例。更大数据多样性可能与有限容量、采样频率和任务干扰形成权衡。</p>
-<p>图8的规模趋势是在相同处理token数量下比较不同参数量。参数更大意味着更多计算，不能把这张图解释为严格固定FLOPs的最优设计证明。注意力可视化也只是选定头的现象展示，不是因果解释。</p>
-<h2 id="六贡献局限与值得保留的疑点">六、贡献、局限与值得保留的疑点</h2>
-<p>Gato的重要性，是展示动作可以成为通用序列模型的一类正常输出，而不仅是语言模型外接的技能名称。这为后续动作token、视觉语言动作模型提供了清晰技术方向。</p>
+<h3 id="五处结果与证据">五处结果与证据</h3>
+<p><strong><a href="#paper-052-gato-figure-5">图5</a>：覆盖广度。</strong> 论文报告超过450项任务达到专家归一化分数的50%以上。这里50%不是任务成功概率，而是相对于随机和专家的回报位置。它支持广覆盖，不能证明专家级掌握，更不能把所有任务权重相同视为真实应用价值相同。</p>
+<p><strong><a href="https://arxiv.org/html/2205.06175v3#S4.T2">表2</a>：真实形状泛化。</strong> Gato五组成功率24.5%、33%、50.5%、76.5%、66.5%，平均50.2%；BC-IMP平均49%。平均差1.2个百分点，且Gato在第二、第四组更低。结论应是接近专门基线，而不是每组优越。</p>
+<p><strong><a href="#paper-052-gato-figure-9">图9</a>：未见任务有负迁移。</strong> 对保留的Boxing，作者没有观察到预训练优势，随机初始化反而更好；只用非控制数据预训练，在某些无视觉控制任务无益甚至有害。不同任务共用网络，不代表不同数据天然相互促进。</p>
+<!-- figure-ref-v6:start:ec513aaff69b -->
+<p><a id="paper-052-gato-figure-9"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/052-gato-v6-figure-9.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/052-gato-v6-figure-9.png" width="2132" height="551" alt="A Generalist Agent，图9：未见任务有负迁移。 对保留的Boxing，作者没有观察到预训练优势，随机初始化反而更好；只用非控制数据预训练，在某些无视觉控制任务无益甚至有害。不同任务共用网络，不代表不同数据天然相互促进。" loading="lazy"></a><figcaption>原图摘引：Scott Reed 等，2022，HTML S5.F9，图9。<a href="https://arxiv.org/html/2205.06175v3#S5.F9" target="_blank" rel="noopener noreferrer">核对原文</a>。未见任务有负迁移。 对保留的Boxing，作者没有观察到预训练优势，随机初始化反而更好；只用非控制数据预训练，在某些无视觉控制任务无益甚至有害。不同任务共用网络，不代表不同数据天然相互促进。</figcaption></figure>
+<!-- figure-ref-v6:end:ec513aaff69b -->
+
+
+<p><strong><a href="#paper-052-gato-figure-10">图10</a>、<a href="#paper-052-gato-figure-11">图11</a>：微调能改变任务能力，但要计入新数据。</strong> 改为“蓝叠绿”时，使用500条真实示范，约2小时45分钟，并加入模拟示范，最终真机成功60%；从头BC为0.5%。它支持预训练有助适应，却不是一句新语言指令立即完成颜色目标切换。</p>
+<!-- figure-ref-v6:start:c558ad970220 -->
+<p><a id="paper-052-gato-figure-10"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/052-gato-v6-figure-10.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/052-gato-v6-figure-10.png" width="2132" height="884" alt="A Generalist Agent，图10：微调能改变任务能力，但要计入新数据。 改为“蓝叠绿”时，使用500条真实示范，约2小时45分钟，并加入模拟示范，最终真机成功60%；从头BC为0.5%。它支持预训练有助适应，却不是一句新语言指令立即完成颜色目标切换。" loading="lazy"></a><figcaption>原图摘引：Scott Reed 等，2022，HTML S5.F10，图10。原面板按源顺序重新排版，数据未改。<a href="https://arxiv.org/html/2205.06175v3#S5.F10" target="_blank" rel="noopener noreferrer">核对原文</a>。微调能改变任务能力，但要计入新数据。 改为“蓝叠绿”时，使用500条真实示范，约2小时45分钟，并加入模拟示范，最终真机成功60%；从头BC为0.5%。它支持预训练有助适应，却不是一句新语言指令立即完成颜色目标切换。</figcaption></figure>
+<!-- figure-ref-v6:end:c558ad970220 -->
+<!-- figure-ref-v6:start:e5c713424465 -->
+<a id="paper-052-gato-figure-11"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/052-gato-v6-figure-11.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/052-gato-v6-figure-11.png" width="1056" height="564" alt="A Generalist Agent，图11：微调能改变任务能力，但要计入新数据。 改为“蓝叠绿”时，使用500条真实示范，约2小时45分钟，并加入模拟示范，最终真机成功60%；从头BC为0.5%。它支持预训练有助适应，却不是一句新语言指令立即完成颜色目标切换。" loading="lazy"></a><figcaption>原图摘引：Scott Reed 等，2022，HTML S5.F11，图11。<a href="https://arxiv.org/html/2205.06175v3#S5.F11" target="_blank" rel="noopener noreferrer">核对原文</a>。微调能改变任务能力，但要计入新数据。 改为“蓝叠绿”时，使用500条真实示范，约2小时45分钟，并加入模拟示范，最终真机成功60%；从头BC为0.5%。它支持预训练有助适应，却不是一句新语言指令立即完成颜色目标切换。</figcaption></figure>
+<!-- figure-ref-v6:end:e5c713424465 -->
+
+
+<p><strong>附录I、<a href="#paper-052-gato-figure-19">图19</a>：同域专家仍有优势。</strong> 部分机器人微调对照中，只在相同领域预训练的模型表现最好。这给“大杂烩数据一定优于专业数据”提供了直接反例。更大数据多样性可能与有限容量、采样频率和任务干扰形成权衡。</p>
+<!-- figure-ref-v6:start:a556e1ff62af -->
+<p><a id="paper-052-gato-figure-19"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/052-gato-v6-figure-19.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/052-gato-v6-figure-19.png" width="2132" height="984" alt="A Generalist Agent，图19：同域专家仍有优势。 部分机器人微调对照中，只在相同领域预训练的模型表现最好。这给“大杂烩数据一定优于专业数据”提供了直接反例。更大数据多样性可能与有限容量、采样频率和任务干扰形成权衡。" loading="lazy"></a><figcaption>原图摘引：Scott Reed 等，2022，HTML A9.F19，图19。<a href="https://arxiv.org/html/2205.06175v3#A9.F19" target="_blank" rel="noopener noreferrer">核对原文</a>。同域专家仍有优势。 部分机器人微调对照中，只在相同领域预训练的模型表现最好。这给“大杂烩数据一定优于专业数据”提供了直接反例。更大数据多样性可能与有限容量、采样频率和任务干扰形成权衡。</figcaption></figure>
+<!-- figure-ref-v6:end:a556e1ff62af -->
+
+
+<p><a href="#paper-052-gato-figure-8">图8</a>的规模趋势是在相同处理token数量下比较不同参数量。参数更大意味着更多计算，不能把这张图解释为严格固定FLOPs的最优设计证明。注意力可视化也只是选定头的现象展示，不是因果解释。</p>
+<!-- figure-ref-v6:start:997112c843e1 -->
+<p><a id="paper-052-gato-figure-8"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/052-gato-v6-figure-8.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/052-gato-v6-figure-8.png" width="1564" height="1084" alt="A Generalist Agent，图8：图8的规模趋势是在相同处理token数量下比较不同参数量。参数更大意味着更多计算，不能把这张图解释为严格固定FLOPs的最优设计证明。注意力可视化也只是选定头的现象展示，不是因果解释。" loading="lazy"></a><figcaption>原图摘引：Scott Reed 等，2022，HTML S5.F8，图8。<a href="https://arxiv.org/html/2205.06175v3#S5.F8" target="_blank" rel="noopener noreferrer">核对原文</a>。图8的规模趋势是在相同处理token数量下比较不同参数量。参数更大意味着更多计算，不能把这张图解释为严格固定FLOPs的最优设计证明。注意力可视化也只是选定头的现象展示，不是因果解释。</figcaption></figure>
+<!-- figure-ref-v6:end:997112c843e1 -->
+
+
+<h2 id="五数据混合和量化影响单任务表现">五、数据混合和量化影响单任务表现</h2>
 <p>但它仍依赖环境专用的输入序列化和动作反量化接口。相同token编号在不同身体上的物理意义不同，网络需要依赖上下文学习区分；统一格式不会自动创造跨身体的可执行动作语义。</p>
 <p>训练于好轨迹的行为克隆也难以主动发现超越数据的新策略。作者把未来结合RL作为方向，不能倒过来把可能的未来能力写成本篇成果。</p>
 <p>阅读时还有一处具体口径值得留意：§3.1文字称窗口大小是数据量10%或“至少1000”，括号却写 <span class="reading-math" data-tex="\min(1000,0.1N)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>min</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>1000</mn><mo separator="true">,</mo><mn>0.1</mn><mi>N</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\min(1000,0.1N)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">min</span><span class="mopen">(</span><span class="mord">1000</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.1</span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="mclose">)</span></span></span></span></span>，两者不一致。本文不据此重算专家归一化分数，复现需要确认数据过滤实现。这个局部定义疑点不否定多任务共享结果，但影响精确复现。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>每种任务单独设计网络</td>
-<td>统一序列与共享主干</td>
-<td>参数和表征可共享</td>
-<td>图5、表2</td>
-<td>多域训练仍可能互相干扰</td>
-</tr>
-<tr>
-<td>连续动作难接入语言式输出</td>
-<td>数值量化为token</td>
-<td>用分类似然统一训练</td>
-<td>§2方法与机器人实验</td>
-<td>量化误差、串行时延</td>
-</tr>
-<tr>
-<td>新任务数据有限</td>
-<td>大模型预训练后微调</td>
-<td>利用已有控制知识</td>
-<td>图9–11</td>
-<td>部分负迁移，需新示范</td>
-</tr>
-<tr>
-<td>大模型难实时控制</td>
-<td>短历史与并行动作预测</td>
-<td>降低每步推理次数</td>
-<td>附录G</td>
-<td>仍略超预算，历史信息减少</td>
-</tr>
-</tbody></table></div>
-<h2 id="七手算例子与前置概念">七、手算例子与前置概念</h2>
-<p><strong>自构例子，未运行。</strong> 一个二维动作“向右0.3、向上0.1”被编码为两个离散档位。常规自回归模型先选水平档，再根据它选垂直档，因此可以表达“右移多时少向上”的相关性。并行预测时两维同时决定，速度更快，但需要模型用共同观测隐含协调它们。这个变化会影响控制分布，不能只当成无损加速。</p>
-<p>三个后续实验可以分别固定总计算改变数据混合比例、固定模型比较并行与串行动作误差、在未见身体上测试同token接口是否仍有效。它们对应共享效率、实时性和跨身体语义。</p>
-<p>阅读范围：依据<a href="https://arxiv.org/html/2205.06175">原论文v3正文与机器人相关附录</a>核对方法、主表、微调及真实部署；没有独立复现，专家数据过滤窗口定义存在上述文字与公式差异。</p>
-<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<h3 id="追问若机器人数据在混合中只占很小比例怎样判断下降来自负迁移还是采样不足">追问：若机器人数据在混合中只占很小比例，怎样判断下降来自负迁移还是采样不足？</h3>
+<p>参考答案：先记录机器人样本的实际更新次数，再在相同机器人更新预算下比较有无其他领域数据；也应控制总模型与算力。若只固定总步数，加入大量其他任务会稀释机器人训练，下降不能直接证明表示冲突。共享网络的容量竞争与样本配额是两种不同解释。</p>
+<h2 id="六沿机制关系继续读">六、沿机制关系继续读</h2>
+<p>与<a href="057-rt1.html">RT-1</a>是平行序列策略路线：Gato优先统一多领域接口，RT-1针对真机控制延迟与机器人数据设计；<a href="065-rt2.html">RT-2</a>再将预训练视觉语言模型用于动作输出，三者不能简化为只靠参数增大的线性版本链。</p>
+<h2 id="七自测三题与参考答案">七、自测三题与参考答案</h2>
 <p><strong>问题1：使用下一token预测，为什么不必把图像也生成出来？</strong></p>
 <p>输入可以为预测提供条件而不成为目标。损失掩码使图像参与理解上下文，但只对文字和动作位置计算监督。它学的是条件策略，不必同时学习像素生成模型。</p>
 <p><strong>问题2：同一模型会游戏和堆叠，能否推断玩游戏的数据提高了堆叠成功率？</strong></p>
@@ -216,15 +221,13 @@
 
 **原论文**：*A Generalist Agent*，Scott Reed 等，2022。[论文](https://arxiv.org/abs/2205.06175)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
+
+[一次示范模仿](019-one-shot.md)提供一个阅读起点。One-shot模仿在相关任务间共享读取示范的能力，但身体接口和模态仍受任务族限制。Gato把更多观测与输出变成序列，追问一套权重是否容纳这些不同接口；共享存在不等于跨域数据已经帮助每项任务。
+
+## 一、问题设定：多种模态与身体接口怎样共用一套权重
 
 一套权重能否既生成文字，又玩游戏，还控制真实机械臂？Gato把这些任务都改写成序列预测：把观测变成输入token，把文字或动作变成要预测的token，用一个Transformer学习。
-
-它证明的重点是多种模态与身体接口可以共存于单一网络，而不是一个模型已经掌握任意新任务。机器人实验中，它在未用于堆叠训练的五组物体形状上取得50.2%成功率，与专门BC基线49%相近。单模型承担更多任务的同时维持有竞争力的操作能力，是比“全面战胜专家”更准确的结论。
-
-一句话总结：在多任务、多模态离线监督学习场景下，通过统一序列接口与共享Transformer，整合了游戏、语言和机器人控制能力，代价是需要大量专家数据，而且跨任务迁移并不总是正向。
-
-## 二、背景与问题定义
 
 Gato的训练是离线监督学习。控制数据主要来自已有专家，许多专家通过RL训练，但Gato自身没有在主训练中用TD价值或策略梯度改善回报。它更像把多个专家行为蒸馏进一个通用序列模型。
 
@@ -234,7 +237,9 @@ Gato的训练是离线监督学习。控制数据主要来自已有专家，许�
 
 奖励主要用于筛选较好控制轨迹与评测。主体损失预测记录中的动作，不显式比较“未执行动作是否更好”。这意味着数据质量上限与覆盖仍很关键。
 
-## 三、方法：统一token，不等于所有模态完全一样
+## 二、统一序列表示并只对规定输出计算损失
+
+它证明的重点是多种模态与身体接口可以共存于单一网络，而不是一个模型已经掌握任意新任务。机器人实验中，它在未用于堆叠训练的五组物体形状上取得50.2%成功率，与专门BC基线49%相近。单模型承担更多任务的同时维持有竞争力的操作能力，是比“全面战胜专家”更准确的结论。
 
 ### 1. 数据如何进入模型
 
@@ -266,6 +271,22 @@ $$
 
 附录G说明，真实堆叠部署缩短历史上下文，并采用一次推理并行预测动作token的方案，训练输入中对应动作token置零。它牺牲了常规自回归动作维间条件，以减少延迟。文中的“context length to 1”应结合交互序列实现理解，不能解释为整张图像只剩一个token。
 
+方法改变的是多任务表示与监督组织；优化目标是记录token的似然；指标是各任务的回报或成功率。主模型没有额外训练一个通用价值函数来纠正示范。
+
+统一token损失也会隐含任务权重。若任务A每次动作7个token、任务B每次动作20个token，按所有目标token直接求和时，同样一条控制转移并不贡献同样损失权重。再叠加文本长度、图像占用上下文及数据混合比例，“共享模型”并未自动实现任务等权。这里是从掩码交叉熵推导出的检查项。
+
+教学例：两个任务各抽100步，B提供2000个动作目标、A仅700个；如果要按物理决策等权，需明确归一化或采样设计。原文不预测图像与非文本观测，因此大量视觉输入token又会消耗计算而不直接增加输出监督。评估应逐领域看回报，不能用一个总token损失代替多任务能力。[原文§2.1—2.3](https://arxiv.org/html/2205.06175)
+
+### 手算例子与前置概念
+
+**自构例子，未运行。** 一个二维动作“向右0.3、向上0.1”被编码为两个离散档位。常规自回归模型先选水平档，再根据它选垂直档，因此可以表达“右移多时少向上”的相关性。并行预测时两维同时决定，速度更快，但需要模型用共同观测隐含协调它们。这个变化会影响控制分布，不能只当成无损加速。
+
+三个后续实验可以分别固定总计算改变数据混合比例、固定模型比较并行与串行动作误差、在未见身体上测试同token接口是否仍有效。它们对应共享效率、实时性和跨身体语义。
+
+## 三、按模态编码序列并遮蔽非预测位置的损失
+
+共同Transformer接收不同token，但并非要求生成所有输入。训练要保留各模态编码和输出掩码，机器人连续动作的量化也仍是一项接口选择。
+
 ~~~text
 训练：
     按指定混合权重选择一个数据域
@@ -287,16 +308,26 @@ $$
     记录模型时延，不能假设仿真会等待策略计算
 ~~~
 
-方法改变的是多任务表示与监督组织；优化目标是记录token的似然；指标是各任务的回报或成功率。主模型没有额外训练一个通用价值函数来纠正示范。
+## 四、区分共同容纳任务与跨任务正迁移
 
-## 四、实验设置与资源
+**原图怎么读：** [图5，原论文图注与图像](#paper-052-gato-figure-5)。横轴是达到专家分数的比例阈值，纵轴是超过阈值的任务数。它是任务覆盖分布，既不是一条随训练时间增长的曲线，也不是统一成功率。
+
+
+&lt;!-- figure-ref-v6:start:052-gato-license --&gt;
+&lt;p&gt;原文标注 &lt;a href=&quot;https://creativecommons.org/licenses/by/4.0/&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;CC BY 4.0&lt;/a&gt;。本页摘图仅保留图形区域并作栅格化；有面板重排的图另行注明，作者与原文入口见各图注。&lt;/p&gt;
+&lt;!-- figure-ref-v6:end:052-gato-license --&gt;
+&lt;!-- figure-ref-v6:start:11691362b369-anchor --&gt;
+&lt;a id=&quot;paper-052-gato-figure-5&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:11691362b369-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/052-gato-s4-f5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/052-gato-s4-f5.png&quot; width=&quot;1520&quot; height=&quot;645&quot; alt=&quot;A Generalist Agent，图5：横轴是达到专家分数的比例阈值，纵轴是超过阈值的任务数。它是任务覆盖分布，既不是一条随训练时间增长的曲线，也不是统一成功率。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验图原图摘引：Scott Reed 等，2022，HTML S4.F5，图5。&lt;a href=&quot;https://arxiv.org/html/2205.06175v3#S4.F5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 | 项目 | 原文设置 |
 |---|---|
 | 主模型 | 约1.18B参数，常称1.2B；24层decoder-only Transformer |
 | 主训练 | 16×16 TPUv3切片，100万更新，batch512，序列1024token，约4天 |
 | 数据构成 | 多种模拟控制、真实堆叠、文字及视觉语言数据，按手工混合权重采样 |
-| 控制数据规模 | 表1总约6300万回合、约1.5万亿可序列化token；不是模型实际完整遍历次数 |
+| 控制数据规模 | [表1](https://arxiv.org/html/2205.06175v3#S3.T1)总约6300万回合、约1.5万亿可序列化token；不是模型实际完整遍历次数 |
 | 机器人预训练 | 约38.7万模拟成功轨迹及约1.57万真实轨迹，测试物体形状不在该训练集合 |
 | 主真机评测 | 五个测试物体三元组，每组200回合 |
 | 模拟评测 | 每个任务50次；归一化参照随机策略与生成数据的专家 |
@@ -304,29 +335,55 @@ $$
 | 实时性 | RTX3090运行大模型，附录称仍比20Hz预算多约10毫秒 |
 | 未完全核实 | 全专家数据采集的综合成本及主预训练独立随机重训次数 |
 
-604是论文整体任务口径，表1控制任务合计596并另列语言视觉数据集。它不意味着604项都是独立真实机器人技能，也不意味着每项都达到专家水平。
+604是论文整体任务口径，[表1](https://arxiv.org/html/2205.06175v3#S3.T1)控制任务合计596并另列语言视觉数据集。它不意味着604项都是独立真实机器人技能，也不意味着每项都达到专家水平。
 
 监督训练使用已有专家数据，专家本身的RL交互成本很高。因此“4天训练一个会这么多任务的模型”只描述共享模型训练阶段，不包含创造专家和数据的全部过程。
 
 名义20Hz给每步50毫秒；多约10毫秒意味着推理约60毫秒，约16.7次/秒，这是据文字做的粗略换算，不是完整闭环控制实测频率。机器人不会像同步仿真一样暂停等待模型。
 
-## 五、五处结果与证据
+### 五处结果与证据
 
-**图5：覆盖广度。** 论文报告超过450项任务达到专家归一化分数的50%以上。这里50%不是任务成功概率，而是相对于随机和专家的回报位置。它支持广覆盖，不能证明专家级掌握，更不能把所有任务权重相同视为真实应用价值相同。
+**[图5](#paper-052-gato-figure-5)：覆盖广度。** 论文报告超过450项任务达到专家归一化分数的50%以上。这里50%不是任务成功概率，而是相对于随机和专家的回报位置。它支持广覆盖，不能证明专家级掌握，更不能把所有任务权重相同视为真实应用价值相同。
 
-**表2：真实形状泛化。** Gato五组成功率24.5%、33%、50.5%、76.5%、66.5%，平均50.2%；BC-IMP平均49%。平均差1.2个百分点，且Gato在第二、第四组更低。结论应是接近专门基线，而不是每组优越。
+**[表2](https://arxiv.org/html/2205.06175v3#S4.T2)：真实形状泛化。** Gato五组成功率24.5%、33%、50.5%、76.5%、66.5%，平均50.2%；BC-IMP平均49%。平均差1.2个百分点，且Gato在第二、第四组更低。结论应是接近专门基线，而不是每组优越。
 
-**图9：未见任务有负迁移。** 对保留的Boxing，作者没有观察到预训练优势，随机初始化反而更好；只用非控制数据预训练，在某些无视觉控制任务无益甚至有害。不同任务共用网络，不代表不同数据天然相互促进。
+**[图9](#paper-052-gato-figure-9)：未见任务有负迁移。** 对保留的Boxing，作者没有观察到预训练优势，随机初始化反而更好；只用非控制数据预训练，在某些无视觉控制任务无益甚至有害。不同任务共用网络，不代表不同数据天然相互促进。
 
-**图10、图11：微调能改变任务能力，但要计入新数据。** 改为“蓝叠绿”时，使用500条真实示范，约2小时45分钟，并加入模拟示范，最终真机成功60%；从头BC为0.5%。它支持预训练有助适应，却不是一句新语言指令立即完成颜色目标切换。
+&lt;!-- figure-ref-v6:start:ec513aaff69b --&gt;
+&lt;a id=&quot;paper-052-gato-figure-9&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/052-gato-v6-figure-9.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/052-gato-v6-figure-9.png&quot; width=&quot;2132&quot; height=&quot;551&quot; alt=&quot;A Generalist Agent，图9：未见任务有负迁移。 对保留的Boxing，作者没有观察到预训练优势，随机初始化反而更好；只用非控制数据预训练，在某些无视觉控制任务无益甚至有害。不同任务共用网络，不代表不同数据天然相互促进。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Scott Reed 等，2022，HTML S5.F9，图9。&lt;a href=&quot;https://arxiv.org/html/2205.06175v3#S5.F9&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。未见任务有负迁移。 对保留的Boxing，作者没有观察到预训练优势，随机初始化反而更好；只用非控制数据预训练，在某些无视觉控制任务无益甚至有害。不同任务共用网络，不代表不同数据天然相互促进。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:ec513aaff69b --&gt;
 
-**附录I、图19：同域专家仍有优势。** 部分机器人微调对照中，只在相同领域预训练的模型表现最好。这给“大杂烩数据一定优于专业数据”提供了直接反例。更大数据多样性可能与有限容量、采样频率和任务干扰形成权衡。
 
-图8的规模趋势是在相同处理token数量下比较不同参数量。参数更大意味着更多计算，不能把这张图解释为严格固定FLOPs的最优设计证明。注意力可视化也只是选定头的现象展示，不是因果解释。
+**[图10](#paper-052-gato-figure-10)、[图11](#paper-052-gato-figure-11)：微调能改变任务能力，但要计入新数据。** 改为“蓝叠绿”时，使用500条真实示范，约2小时45分钟，并加入模拟示范，最终真机成功60%；从头BC为0.5%。它支持预训练有助适应，却不是一句新语言指令立即完成颜色目标切换。
 
-## 六、贡献、局限与值得保留的疑点
+&lt;!-- figure-ref-v6:start:c558ad970220 --&gt;
+&lt;a id=&quot;paper-052-gato-figure-10&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/052-gato-v6-figure-10.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/052-gato-v6-figure-10.png&quot; width=&quot;2132&quot; height=&quot;884&quot; alt=&quot;A Generalist Agent，图10：微调能改变任务能力，但要计入新数据。 改为“蓝叠绿”时，使用500条真实示范，约2小时45分钟，并加入模拟示范，最终真机成功60%；从头BC为0.5%。它支持预训练有助适应，却不是一句新语言指令立即完成颜色目标切换。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Scott Reed 等，2022，HTML S5.F10，图10。原面板按源顺序重新排版，数据未改。&lt;a href=&quot;https://arxiv.org/html/2205.06175v3#S5.F10&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。微调能改变任务能力，但要计入新数据。 改为“蓝叠绿”时，使用500条真实示范，约2小时45分钟，并加入模拟示范，最终真机成功60%；从头BC为0.5%。它支持预训练有助适应，却不是一句新语言指令立即完成颜色目标切换。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:c558ad970220 --&gt;
+&lt;!-- figure-ref-v6:start:e5c713424465 --&gt;
+&lt;a id=&quot;paper-052-gato-figure-11&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/052-gato-v6-figure-11.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/052-gato-v6-figure-11.png&quot; width=&quot;1056&quot; height=&quot;564&quot; alt=&quot;A Generalist Agent，图11：微调能改变任务能力，但要计入新数据。 改为“蓝叠绿”时，使用500条真实示范，约2小时45分钟，并加入模拟示范，最终真机成功60%；从头BC为0.5%。它支持预训练有助适应，却不是一句新语言指令立即完成颜色目标切换。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Scott Reed 等，2022，HTML S5.F11，图11。&lt;a href=&quot;https://arxiv.org/html/2205.06175v3#S5.F11&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。微调能改变任务能力，但要计入新数据。 改为“蓝叠绿”时，使用500条真实示范，约2小时45分钟，并加入模拟示范，最终真机成功60%；从头BC为0.5%。它支持预训练有助适应，却不是一句新语言指令立即完成颜色目标切换。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:e5c713424465 --&gt;
 
-Gato的重要性，是展示动作可以成为通用序列模型的一类正常输出，而不仅是语言模型外接的技能名称。这为后续动作token、视觉语言动作模型提供了清晰技术方向。
+
+**附录I、[图19](#paper-052-gato-figure-19)：同域专家仍有优势。** 部分机器人微调对照中，只在相同领域预训练的模型表现最好。这给“大杂烩数据一定优于专业数据”提供了直接反例。更大数据多样性可能与有限容量、采样频率和任务干扰形成权衡。
+
+&lt;!-- figure-ref-v6:start:a556e1ff62af --&gt;
+&lt;a id=&quot;paper-052-gato-figure-19&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/052-gato-v6-figure-19.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/052-gato-v6-figure-19.png&quot; width=&quot;2132&quot; height=&quot;984&quot; alt=&quot;A Generalist Agent，图19：同域专家仍有优势。 部分机器人微调对照中，只在相同领域预训练的模型表现最好。这给“大杂烩数据一定优于专业数据”提供了直接反例。更大数据多样性可能与有限容量、采样频率和任务干扰形成权衡。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Scott Reed 等，2022，HTML A9.F19，图19。&lt;a href=&quot;https://arxiv.org/html/2205.06175v3#A9.F19&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。同域专家仍有优势。 部分机器人微调对照中，只在相同领域预训练的模型表现最好。这给“大杂烩数据一定优于专业数据”提供了直接反例。更大数据多样性可能与有限容量、采样频率和任务干扰形成权衡。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:a556e1ff62af --&gt;
+
+
+[图8](#paper-052-gato-figure-8)的规模趋势是在相同处理token数量下比较不同参数量。参数更大意味着更多计算，不能把这张图解释为严格固定FLOPs的最优设计证明。注意力可视化也只是选定头的现象展示，不是因果解释。
+
+&lt;!-- figure-ref-v6:start:997112c843e1 --&gt;
+&lt;a id=&quot;paper-052-gato-figure-8&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/052-gato-v6-figure-8.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/052-gato-v6-figure-8.png&quot; width=&quot;1564&quot; height=&quot;1084&quot; alt=&quot;A Generalist Agent，图8：图8的规模趋势是在相同处理token数量下比较不同参数量。参数更大意味着更多计算，不能把这张图解释为严格固定FLOPs的最优设计证明。注意力可视化也只是选定头的现象展示，不是因果解释。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Scott Reed 等，2022，HTML S5.F8，图8。&lt;a href=&quot;https://arxiv.org/html/2205.06175v3#S5.F8&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。图8的规模趋势是在相同处理token数量下比较不同参数量。参数更大意味着更多计算，不能把这张图解释为严格固定FLOPs的最优设计证明。注意力可视化也只是选定头的现象展示，不是因果解释。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:997112c843e1 --&gt;
+
+
+## 五、数据混合和量化影响单任务表现
 
 但它仍依赖环境专用的输入序列化和动作反量化接口。相同token编号在不同身体上的物理意义不同，网络需要依赖上下文学习区分；统一格式不会自动创造跨身体的可执行动作语义。
 
@@ -334,24 +391,19 @@ Gato的重要性，是展示动作可以成为通用序列模型的一类正常�
 
 阅读时还有一处具体口径值得留意：§3.1文字称窗口大小是数据量10%或“至少1000”，括号却写 $\min(1000,0.1N)$，两者不一致。本文不据此重算专家归一化分数，复现需要确认数据过滤实现。这个局部定义疑点不否定多任务共享结果，但影响精确复现。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 每种任务单独设计网络 | 统一序列与共享主干 | 参数和表征可共享 | 图5、表2 | 多域训练仍可能互相干扰 |
-| 连续动作难接入语言式输出 | 数值量化为token | 用分类似然统一训练 | §2方法与机器人实验 | 量化误差、串行时延 |
-| 新任务数据有限 | 大模型预训练后微调 | 利用已有控制知识 | 图9–11 | 部分负迁移，需新示范 |
-| 大模型难实时控制 | 短历史与并行动作预测 | 降低每步推理次数 | 附录G | 仍略超预算，历史信息减少 |
-
-## 七、手算例子与前置概念
-
-**自构例子，未运行。** 一个二维动作“向右0.3、向上0.1”被编码为两个离散档位。常规自回归模型先选水平档，再根据它选垂直档，因此可以表达“右移多时少向上”的相关性。并行预测时两维同时决定，速度更快，但需要模型用共同观测隐含协调它们。这个变化会影响控制分布，不能只当成无损加速。
+### 五个前置概念
 
 五个前置概念：**序列化**规定多模态数据的排列；**量化**将连续值变为有限档；**因果注意力**只读取已出现内容；**损失掩码**指定哪些位置需要预测；**负迁移**指其他任务经验降低当前任务学习表现。
 
-三个后续实验可以分别固定总计算改变数据混合比例、固定模型比较并行与串行动作误差、在未见身体上测试同token接口是否仍有效。它们对应共享效率、实时性和跨身体语义。
+### 追问：若机器人数据在混合中只占很小比例，怎样判断下降来自负迁移还是采样不足？
 
-阅读范围：依据[原论文v3正文与机器人相关附录](https://arxiv.org/html/2205.06175)核对方法、主表、微调及真实部署；没有独立复现，专家数据过滤窗口定义存在上述文字与公式差异。
+参考答案：先记录机器人样本的实际更新次数，再在相同机器人更新预算下比较有无其他领域数据；也应控制总模型与算力。若只固定总步数，加入大量其他任务会稀释机器人训练，下降不能直接证明表示冲突。共享网络的容量竞争与样本配额是两种不同解释。
 
-## 八、三个问题及答案
+## 六、沿机制关系继续读
+
+与[RT-1](057-rt1.md)是平行序列策略路线：Gato优先统一多领域接口，RT-1针对真机控制延迟与机器人数据设计；[RT-2](065-rt2.md)再将预训练视觉语言模型用于动作输出，三者不能简化为只靠参数增大的线性版本链。
+
+## 七、自测三题与参考答案
 
 **问题1：使用下一token预测，为什么不必把图像也生成出来？**
 
@@ -364,7 +416,6 @@ Gato的重要性，是展示动作可以成为通用序列模型的一类正常�
 **问题3：60%的蓝叠绿结果是否证明模型能凭语言直接换目标？**
 
 不是。该实验进行了500条真实示范及额外模拟示范的微调。它证明预训练有助学习新的目标排列，不能替代无需参数更新的语言条件泛化实验。
-
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

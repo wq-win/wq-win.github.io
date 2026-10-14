@@ -42,22 +42,34 @@
                 <span class="text-gray-500">PerAct：三维体素中的语言条件动作</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="503f4f0c8a07b805151123d2fdcb8788ab05002f2c56376cc9645137934989d5"><h1>055｜PerAct：三维体素中的语言条件动作</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="c2fc6bcec0f1f5f661fe49efff05dd63eaf62f839880f291336565bc266aaad9"><h1>055｜PerAct：三维体素中的语言条件动作</h1>
 <p><a href="index.html">系列首页</a> · <a href="054-daydreamer.html">上一篇</a> · <a href="056-vima.html">下一篇</a></p>
 <p><strong>原论文</strong>：<em>Perceiver-Actor: A Multi-Task Transformer for Robotic Manipulation</em>，Mohit Shridhar、Lucas Manuelli、Dieter Fox，2022。<a href="https://arxiv.org/abs/2209.05451">论文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p>给机器人看图，让它回归一个三维抓取位置，网络需要自己学相机投影与空间关系。PerAct先把RGB-D转换成三维体素，再问：“下一次关键动作应该落在哪个体素？”</p>
-<p>语言和三维空间特征通过Perceiver融合，输出位置、旋转、夹爪及碰撞规划模式。底层运动规划器负责从当前位置走到预测位姿。这是一种语言条件行为克隆，虽然输出被记作Q，训练并没有TD学习。</p>
-<p>它在18项RLBench任务上明显优于所测图像回归基线，并用53条真实示范训练七项真机任务。但多任务模型在几项精密操作上仍为零；三维结构带来样本效率，不代表解决了任意精细接触控制。</p>
-<p>一句话总结：在桌面六自由度操作中，通过把观测和关键动作放入同一三维体素空间，改善了少示范多任务学习，代价是需要深度、标定和运动规划，且离散精度与计算开销限制应用范围。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="040-transporter.html">Transporter</a>把抓放关系放入平面空间结构，但三维位姿动作还需要处理高度、旋转与不同视角。PerAct把RGB-D与关键动作共同写进体素空间，再让语言参与选择；它改换表示与动作接口，不继承平面等变性的全部结论。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>体素</strong>把三维空间分成格子；<strong>关键帧动作</strong>表示技能中的瓶颈位姿；<strong>cross-attention</strong>使一组查询汇总另一组输入；<strong>几何增强</strong>同时变换场景和动作标签；<strong>运动规划器</strong>根据起终位姿与碰撞信息生成可执行路径。</p>
-<h2 id="二背景与任务定义">二、背景与任务定义</h2>
+<details>
+<summary>进阶追问与参考答案（3题）</summary>
+
+<p><strong>进阶问题1：等视角输入下，PerAct的改进还剩多少？</strong></p>
+<p>参考答案：不能从输入不一致的已有比较计算出净增益。应固定相机数、RGB-D分辨率、历史长度与标定，再比较三维体素模型和对应基线；分别记录遮挡条件与非遮挡条件的成功率。如果优势主要来自多视角信息，输入对齐后会缩小；剩余差距才更直接支持表示与架构的贡献。</p>
+<p><strong>进阶问题2：连续残差动作能否缓解体素量化？</strong></p>
+<p>参考答案：在体素已选对、目标处于局部可达邻域时，预测体素中心到连续目标的残差可以降低网格偏差。但它不能修复选错抽屉或错误深度。可比较细网格、粗网格与粗网格加残差，匹配预算，分别统计离散选格错误、格内定位误差和真实插装成功；仅降低位置MSE不足以证明接触控制改善。</p>
+<p><strong>进阶问题3：失败恢复示范是否比继续增加成功示范更有效？</strong></p>
+<p>参考答案：若主要失败来自策略偏离后的状态缺失，恢复示范更有针对性；若基础技能尚未学好，更多成功示范仍可能更有价值。用相同人工采集时间分配给普通成功轨迹或故障后恢复轨迹，再在标准初态和受扰初态两组独立评估。记录自然发生的失败而非只挑容易恢复的例子，才能避免选择偏差。</p>
+<p>这些回答给出机制分析与待检验设计，不是已经运行的新实验结果。</p>
+</details>
+
+<h2 id="一问题设定怎样在三维观察中定位下一次关键动作">一、问题设定：怎样在三维观察中定位下一次关键动作</h2>
+<p>给机器人看图，让它回归一个三维抓取位置，网络需要自己学相机投影与空间关系。PerAct先把RGB-D转换成三维体素，再问：“下一次关键动作应该落在哪个体素？”</p>
 <p>研究设定是离线模仿、单臂、多任务、语言条件控制。观测包含RGB-D重建的点云及少量本体信息；输出不是每个时刻的关节力矩，而是关键末端位姿和辅助离散决策。</p>
 <p>模拟用四台无噪声RGB-D相机；真机因多Kinect互相干扰，只用一台经过标定的Kinect-2。3D表示可以自然融合多个视角，但不意味着系统无需几何标定。深度误差和外参偏差会直接进入动作坐标。</p>
 <p>模拟任务有18类、249种变化，包含物体姿态、颜色、数量、形状类别及语言条件变化。论文明确不测试未见物体：训练和测试的物体集合相同。应说泛化到新的场景配置，而非开放词汇新对象操作。</p>
 <p>终止也不是网络独立完成的全部能力。模拟中由任务oracle判定成功，最多25次关键动作；真机由人停止，并观察下一动作预测是否安全。神经网络输出“碰撞规避开关”，不等于学会可靠安全约束。</p>
-<h2 id="三方法在空间中检测动作">三、方法：在空间中检测动作</h2>
+<h2 id="二用体素和perceiver预测位姿分类">二、用体素和Perceiver预测位姿分类</h2>
+<p>语言和三维空间特征通过Perceiver融合，输出位置、旋转、夹爪及碰撞规划模式。底层运动规划器负责从当前位置走到预测位姿。这是一种语言条件行为克隆，虽然输出被记作Q，训练并没有TD学习。</p>
+<p>它在18项RLBench任务上明显优于所测图像回归基线，并用53条真实示范训练七项真机任务。但多任务模型在几项精密操作上仍为零；三维结构带来样本效率，不代表解决了任意精细接触控制。</p>
 <h3 id="1-关键帧减少控制学习难度">1. 关键帧减少控制学习难度</h3>
 <p>示范通过停顿、关节速度和夹爪状态等启发规则抽取关键动作。训练数据中的多个观测帧都可对应下一个关键位姿，网络学“接下来去哪里”，不拟合运动规划器沿路每个微小控制量。</p>
 <p>这既减少标签噪声，也把一部分运动生成职责交给已有规划器。关键帧选择是实质性先验；若抓取接触点被错过，剩余网络再强也会学习错误分段。</p>
@@ -77,6 +89,24 @@ j\in\{\mathrm{位置},\mathrm{旋转三轴},\mathrm{夹爪},\mathrm{碰撞模式
 \quad
 j\in\{\mathrm{位置},\mathrm{旋转三轴},\mathrm{夹爪},\mathrm{碰撞模式}\}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">BC</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4638em;vertical-align:-1.4138em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4138em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.01968em;">l</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">{</span><span class="mord"><span class="mord mathrm cjk_fallback">位置</span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathrm cjk_fallback">旋转三轴</span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathrm cjk_fallback">夹爪</span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathrm cjk_fallback">碰撞模式</span></span><span class="mclose">}</span><span class="mord">.</span></span></span></span></span></span></p>
 <p>原文Q是分类logit，经softmax得到概率。它不是折扣回报，也没有Bellman方程。CLIP文本编码提供预训练语言知识；“从头训练”主要指操作模型，不应理解为没有使用任何预训练组件。</p>
+<p>几何增强必须同时变换观测与动作，否则监督不一致。论文实际主要用三轴平移与yaw旋转，而不是无约束随机roll/pitch：机器人可达空间会限制合法增强。</p>
+<p>体素分辨率可换算为几何量化误差。边长1米、每轴100格时，格宽1厘米；若取最近格中心，每轴误差至多0.5厘米，三维欧氏误差至多约0.866厘米。这里只计算无噪声点的量化，不含深度、标定、规划跟踪误差。5度旋转分箱又有单轴最多2.5度的量化间隔误差，且Euler多轴合成不应直接相加为全姿态误差。</p>
+<p>因此1毫米插孔任务不能只靠“位置分类正确”论证精度够用；需要更细网格、局部修正或柔顺接触等额外机制。原文碰撞模式头还会改变运动规划器允许的路径，成功结果是分类模型与执行器共同作用。<a href="https://arxiv.org/html/2209.05451">原文§3.2—3.4</a></p>
+<h3 id="一个例子与前置概念">一个例子与前置概念</h3>
+<p><strong>自构例子，未运行。</strong> 三个抽屉把手局部外观完全相同。只截取一个把手的小块点云，网络不知道它是上还是下；保留全柜三维结构后，可根据整体排序决定“打开中间抽屉”对应的位置。若相机外参整体偏2厘米，分类即使语义正确，执行仍可能错过把手。</p>
+<h2 id="三从关键帧标签训练位姿头并调用规划器">三、从关键帧标签训练位姿头并调用规划器</h2>
+<p>只看选格正确还不能保证末端精度。教学上，边长为<span class="reading-math" data-tex="h"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi></mrow><annotation encoding="application/x-tex">h</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">h</span></span></span></span></span>的立方体素若解码为中心，即使类别完全正确，格内目标到中心的最大距离仍为<span class="reading-math" data-tex="\sqrt3h/2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msqrt><mn>3</mn></msqrt><mi>h</mi><mi mathvariant="normal">/</mi><mn>2</mn></mrow><annotation encoding="application/x-tex">\sqrt3h/2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1572em;vertical-align:-0.25em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9072em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;">3</span></span><span style="top:-2.8672em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1328em;"><span></span></span></span></span></span><span class="mord mathnormal">h</span><span class="mord">/2</span></span></span></span></span>；这是假定三轴均匀网格的量化几何，不是原论文误差测量。若插入容差比这个尺度更小，就还需要更细表示、连续修正或低层反馈，不能只靠提高体素分类准确率。</p>
 <pre><code class="language-text">准备示范：
     抽取关键末端位姿与夹爪、碰撞模式
     将轨迹中观测配对到下一关键动作
@@ -95,8 +125,17 @@ j\in\{\mathrm{位置},\mathrm{旋转三轴},\mathrm{夹爪},\mathrm{碰撞模式
     用运动规划器执行到目标，再读取新观测
     按实验规定由成功oracle或人工停止
 </code></pre>
-<p>几何增强必须同时变换观测与动作，否则监督不一致。论文实际主要用三轴平移与yaw旋转，而不是无约束随机roll/pitch：机器人可达空间会限制合法增强。</p>
-<h2 id="四实验如何验证">四、实验如何验证</h2>
+<h2 id="四将体素收益与规划器分担的能力分开">四、将体素收益与规划器分担的能力分开</h2>
+<p><strong>原图怎么读：</strong> <a href="#paper-055-peract-figure-4">图4，原论文图注与图像</a>。这里比较全局与局部感受野的策略成功率，关注局部细网格是否因丢掉远处任务关系而吃亏。它不能把三维精度与场景语义当成同一个因素。</p>
+<!-- figure-ref-v6:start:055-peract-license -->
+<p>原文标注 <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>。本页摘图仅保留图形区域并作栅格化；有面板重排的图另行注明，作者与原文入口见各图注。</p>
+<!-- figure-ref-v6:end:055-peract-license -->
+<!-- figure-ref-v6:start:a85bc97961f8-anchor -->
+<a id="paper-055-peract-figure-4"></a>
+<!-- figure-ref-v6:end:a85bc97961f8-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/055-peract-s4-f4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/055-peract-s4-f4.png" width="1824" height="852" alt="Perceiver-Actor: A Multi-Task Transformer for Robotic Manipulation，图4：这里比较全局与局部感受野的策略成功率，关注局部细网格是否因丢掉远处任务关系而吃亏。它不能把三维精度与场景语义当成同一个因素。" loading="lazy"></a><figcaption>实验图原图摘引：Mohit Shridhar、Lucas Manuelli、Dieter Fox，2022，HTML S4.F4，图4。<a href="https://arxiv.org/html/2209.05451v2#S4.F4" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -148,61 +187,25 @@ j\in\{\mathrm{位置},\mathrm{旋转三轴},\mathrm{夹爪},\mathrm{碰撞模式
 <p>Image-BC使用单视角，而PerAct模拟使用多视角。论文也承认这项劣势，因此34倍等倍率是完整框架比较，不能说只把CNN换成Transformer就获得同等提升。</p>
 <p>C2FARM-BC更适合作为结构对照：同样体素化，但由粗到细裁剪，细层局部感受野受限。它的细分辨率约0.47厘米，甚至高于PerAct的1厘米，说明分辨率不是决定效果的唯一因素。</p>
 <p>每批先均匀选任务，避免长示范任务贡献过多样本；代价是长任务中每个动作阶段覆盖较慢。数据量增加也可能引入更多任务变化，并非只给同一种情形重复更多样本。</p>
-<h2 id="五五处证据与具体反例">五、五处证据与具体反例</h2>
-<p><strong>表1：整体比较。</strong> 作者报告PerAct在36个“任务×数据量”比较中的25个胜过C2FARM-BC；相对平均倍率在10示范时1.33、100示范时2.83。它不是25个独立新任务，也不是所有任务成功率提高183个百分点。倍率低分母敏感，应同时阅读逐任务成功率。</p>
-<p><strong>图4：相似把手需要全局上下文。</strong> 打开上、中、下抽屉时，局部把手很相似。PerAct超过70%，所测C2FARM变体约33%。这支持全局场景关系的作用；实验仍同时包含网络结构差异，不能证明所有局部方法都无法加入位置上下文。</p>
-<p><strong>图3：关键帧是核心条件。</strong> 随机或固定间隔选择关键动作，在该抽屉消融中导致零表现。它说明动作分段不可忽略，而非单靠Transformer就能消化任意原始控制记录。</p>
-<p><strong>表2：真机范围有限。</strong> 洗手液90%、放记号笔70%、放食物60%、放抽屉40%、击球60%、堆块40%、扫豆20%。前六项各10次，扫豆5次。不同任务样本数不同，不能不说明加权方式就报一个精确总成功率。真实策略使用真实示范，未采用模拟策略直接迁移。</p>
+<h3 id="五处证据与具体反例">五处证据与具体反例</h3>
+<p><strong><a href="https://arxiv.org/html/2209.05451v2#S4.T1">表1</a>：整体比较。</strong> 作者报告PerAct在36个“任务×数据量”比较中的25个胜过C2FARM-BC；相对平均倍率在10示范时1.33、100示范时2.83。它不是25个独立新任务，也不是所有任务成功率提高183个百分点。倍率低分母敏感，应同时阅读逐任务成功率。</p>
+<p><strong><a href="#paper-055-peract-figure-4">图4</a>：相似把手需要全局上下文。</strong> 打开上、中、下抽屉时，局部把手很相似。PerAct超过70%，所测C2FARM变体约33%。这支持全局场景关系的作用；实验仍同时包含网络结构差异，不能证明所有局部方法都无法加入位置上下文。</p>
+<p><strong><a href="#paper-055-peract-figure-3">图3</a>：关键帧是核心条件。</strong> 随机或固定间隔选择关键动作，在该抽屉消融中导致零表现。它说明动作分段不可忽略，而非单靠Transformer就能消化任意原始控制记录。</p>
+<!-- figure-ref-v6:start:365ab60d6f0b -->
+<p><a id="paper-055-peract-figure-3"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/055-peract-v6-figure-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/055-peract-v6-figure-3.png" width="2132" height="1305" alt="Perceiver-Actor: A Multi-Task Transformer for Robotic Manipulation，图3：关键帧是核心条件。 随机或固定间隔选择关键动作，在该抽屉消融中导致零表现。它说明动作分段不可忽略，而非单靠Transformer就能消化任意原始控制记录。" loading="lazy"></a><figcaption>原图摘引：Mohit Shridhar、Lucas Manuelli、Dieter Fox，2022，HTML S4.F3，图3。<a href="https://arxiv.org/html/2209.05451v2#S4.F3" target="_blank" rel="noopener noreferrer">核对原文</a>。关键帧是核心条件。 随机或固定间隔选择关键动作，在该抽屉消融中导致零表现。它说明动作分段不可忽略，而非单靠Transformer就能消化任意原始控制记录。</figcaption></figure>
+<!-- figure-ref-v6:end:365ab60d6f0b -->
+
+
+<p><strong><a href="https://arxiv.org/html/2209.05451v2#S4.T2">表2</a>：真机范围有限。</strong> 洗手液90%、放记号笔70%、放食物60%、放抽屉40%、击球60%、堆块40%、扫豆20%。前六项各10次，扫豆5次。不同任务样本数不同，不能不说明加权方式就报一个精确总成功率。真实策略使用真实示范，未采用模拟策略直接迁移。</p>
 <p><strong>附录G–H：增强和多任务都有反例。</strong> 去yaw增强时某些受限朝向任务反而更好；更少latent有时不差。三项精密任务的默认多任务模型为0，单任务训练后放杯24%、套杯32%、插孔16%。量化精度是限制之一，多任务优化也同样重要。</p>
 <p>此外，附录A的部分成功判据比自然语言任务名称更窄：例如“关罐子”主要检查盖子位置及夹爪释放。读者不应自动将其理解为已验证真实螺纹密封或可靠旋紧扭矩。</p>
-<h2 id="六贡献成本与局限">六、贡献、成本与局限</h2>
-<p>PerAct说明机器人学习的数据效率依赖正确结构。让动作与观测在三维空间中对齐，可以把几何先验直接交给网络，而非要求它从少数示范自行发现相机坐标变换。</p>
+<h2 id="五离散精度与关键帧控制限制接触能力">五、离散精度与关键帧控制限制接触能力</h2>
 <p>这种结构也带来边界。固定网格限制工作空间；分辨率提高会增加内存；Euler角分类有量化与表示问题；采样运动规划器可能找不到路径或无法完成接触动作。多指手、高速抛接、力反馈插装不容易直接复用这套关键位姿接口。</p>
 <p>作者承认对运动规划器的依赖及向灵巧连续控制推广的困难。本文进一步强调，碰撞开关若选择“不避障”，只是为了允许目标接触，并不能自动区分必要接触与危险碰撞。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>少数据学三维动作困难</td>
-<td>同坐标体素观测与动作</td>
-<td>直接利用几何对应</td>
-<td>表1</td>
-<td>深度与标定要求</td>
-</tr>
-<tr>
-<td>局部裁剪丢失相对关系</td>
-<td>Perceiver全局融合</td>
-<td>看见多个相似目标关系</td>
-<td>图4</td>
-<td>多天多GPU训练</td>
-</tr>
-<tr>
-<td>原始控制标签噪声大</td>
-<td>预测关键位姿</td>
-<td>把运动插值交给规划器</td>
-<td>图3</td>
-<td>依赖关键帧与规划接口</td>
-</tr>
-<tr>
-<td>多任务意图不明</td>
-<td>CLIP语言条件</td>
-<td>指定颜色、位置及数量</td>
-<td>去语言对照</td>
-<td>未验证开放物体泛化</td>
-</tr>
-</tbody></table></div>
-<h2 id="七一个例子与前置概念">七、一个例子与前置概念</h2>
-<p><strong>自构例子，未运行。</strong> 三个抽屉把手局部外观完全相同。只截取一个把手的小块点云，网络不知道它是上还是下；保留全柜三维结构后，可根据整体排序决定“打开中间抽屉”对应的位置。若相机外参整体偏2厘米，分类即使语义正确，执行仍可能错过把手。</p>
-<p>后续应追问：在等视角输入下改进还剩多少；连续残差动作能否缓解体素量化；加入失败恢复示范是否比继续增加成功示范更有效。它们分别检验感知公平性、精度与分布偏移。</p>
-<p>阅读范围：核对<a href="https://arxiv.org/html/2209.05451">原论文v2正文及附录A–H</a>，包含训练预算、真实监督及成功判据；没有独立复现，不把网络Q记号误解为强化学习价值。</p>
-<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<h2 id="六沿机制关系继续读">六、沿机制关系继续读</h2>
+<p>与<a href="040-transporter.html">Transporter</a>是平行空间动作表示：本篇把分类网格升到三维并用Perceiver融合；与<a href="034-rlbench.html">RLBench</a>是基准使用关系，航点规划提供的能力仍须计入整套系统。</p>
+<h2 id="七自测三题与参考答案">七、自测三题与参考答案</h2>
 <p><strong>问题1：Q图最大的位置是不是未来回报最高的位置？</strong></p>
 <p>不是本篇的训练含义。Q图是分类logit，监督来自示范关键位置，最大值代表模型最倾向预测的动作类别。没有TD目标，就不能直接赋予其长期回报解释。</p>
 <p><strong>问题2：更细的体素为什么未必打败全局模型？</strong></p>
@@ -220,17 +223,13 @@ j\in\{\mathrm{位置},\mathrm{旋转三轴},\mathrm{夹爪},\mathrm{碰撞模式
 
 **原论文**：*Perceiver-Actor: A Multi-Task Transformer for Robotic Manipulation*，Mohit Shridhar、Lucas Manuelli、Dieter Fox，2022。[论文](https://arxiv.org/abs/2209.05451)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
+
+[Transporter](040-transporter.md)把抓放关系放入平面空间结构，但三维位姿动作还需要处理高度、旋转与不同视角。PerAct把RGB-D与关键动作共同写进体素空间，再让语言参与选择；它改换表示与动作接口，不继承平面等变性的全部结论。
+
+## 一、问题设定：怎样在三维观察中定位下一次关键动作
 
 给机器人看图，让它回归一个三维抓取位置，网络需要自己学相机投影与空间关系。PerAct先把RGB-D转换成三维体素，再问：“下一次关键动作应该落在哪个体素？”
-
-语言和三维空间特征通过Perceiver融合，输出位置、旋转、夹爪及碰撞规划模式。底层运动规划器负责从当前位置走到预测位姿。这是一种语言条件行为克隆，虽然输出被记作Q，训练并没有TD学习。
-
-它在18项RLBench任务上明显优于所测图像回归基线，并用53条真实示范训练七项真机任务。但多任务模型在几项精密操作上仍为零；三维结构带来样本效率，不代表解决了任意精细接触控制。
-
-一句话总结：在桌面六自由度操作中，通过把观测和关键动作放入同一三维体素空间，改善了少示范多任务学习，代价是需要深度、标定和运动规划，且离散精度与计算开销限制应用范围。
-
-## 二、背景与任务定义
 
 研究设定是离线模仿、单臂、多任务、语言条件控制。观测包含RGB-D重建的点云及少量本体信息；输出不是每个时刻的关节力矩，而是关键末端位姿和辅助离散决策。
 
@@ -240,7 +239,11 @@ j\in\{\mathrm{位置},\mathrm{旋转三轴},\mathrm{夹爪},\mathrm{碰撞模式
 
 终止也不是网络独立完成的全部能力。模拟中由任务oracle判定成功，最多25次关键动作；真机由人停止，并观察下一动作预测是否安全。神经网络输出“碰撞规避开关”，不等于学会可靠安全约束。
 
-## 三、方法：在空间中检测动作
+## 二、用体素和Perceiver预测位姿分类
+
+语言和三维空间特征通过Perceiver融合，输出位置、旋转、夹爪及碰撞规划模式。底层运动规划器负责从当前位置走到预测位姿。这是一种语言条件行为克隆，虽然输出被记作Q，训练并没有TD学习。
+
+它在18项RLBench任务上明显优于所测图像回归基线，并用53条真实示范训练七项真机任务。但多任务模型在几项精密操作上仍为零；三维结构带来样本效率，不代表解决了任意精细接触控制。
 
 ### 1. 关键帧减少控制学习难度
 
@@ -276,6 +279,20 @@ $$
 
 原文Q是分类logit，经softmax得到概率。它不是折扣回报，也没有Bellman方程。CLIP文本编码提供预训练语言知识；“从头训练”主要指操作模型，不应理解为没有使用任何预训练组件。
 
+几何增强必须同时变换观测与动作，否则监督不一致。论文实际主要用三轴平移与yaw旋转，而不是无约束随机roll/pitch：机器人可达空间会限制合法增强。
+
+体素分辨率可换算为几何量化误差。边长1米、每轴100格时，格宽1厘米；若取最近格中心，每轴误差至多0.5厘米，三维欧氏误差至多约0.866厘米。这里只计算无噪声点的量化，不含深度、标定、规划跟踪误差。5度旋转分箱又有单轴最多2.5度的量化间隔误差，且Euler多轴合成不应直接相加为全姿态误差。
+
+因此1毫米插孔任务不能只靠“位置分类正确”论证精度够用；需要更细网格、局部修正或柔顺接触等额外机制。原文碰撞模式头还会改变运动规划器允许的路径，成功结果是分类模型与执行器共同作用。[原文§3.2—3.4](https://arxiv.org/html/2209.05451)
+
+### 一个例子与前置概念
+
+**自构例子，未运行。** 三个抽屉把手局部外观完全相同。只截取一个把手的小块点云，网络不知道它是上还是下；保留全柜三维结构后，可根据整体排序决定“打开中间抽屉”对应的位置。若相机外参整体偏2厘米，分类即使语义正确，执行仍可能错过把手。
+
+## 三、从关键帧标签训练位姿头并调用规划器
+
+只看选格正确还不能保证末端精度。教学上，边长为$h$的立方体素若解码为中心，即使类别完全正确，格内目标到中心的最大距离仍为$\sqrt3h/2$；这是假定三轴均匀网格的量化几何，不是原论文误差测量。若插入容差比这个尺度更小，就还需要更细表示、连续修正或低层反馈，不能只靠提高体素分类准确率。
+
 ~~~text
 准备示范：
     抽取关键末端位姿与夹爪、碰撞模式
@@ -296,9 +313,19 @@ $$
     按实验规定由成功oracle或人工停止
 ~~~
 
-几何增强必须同时变换观测与动作，否则监督不一致。论文实际主要用三轴平移与yaw旋转，而不是无约束随机roll/pitch：机器人可达空间会限制合法增强。
+## 四、将体素收益与规划器分担的能力分开
 
-## 四、实验如何验证
+**原图怎么读：** [图4，原论文图注与图像](#paper-055-peract-figure-4)。这里比较全局与局部感受野的策略成功率，关注局部细网格是否因丢掉远处任务关系而吃亏。它不能把三维精度与场景语义当成同一个因素。
+
+
+&lt;!-- figure-ref-v6:start:055-peract-license --&gt;
+&lt;p&gt;原文标注 &lt;a href=&quot;https://creativecommons.org/licenses/by/4.0/&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;CC BY 4.0&lt;/a&gt;。本页摘图仅保留图形区域并作栅格化；有面板重排的图另行注明，作者与原文入口见各图注。&lt;/p&gt;
+&lt;!-- figure-ref-v6:end:055-peract-license --&gt;
+&lt;!-- figure-ref-v6:start:a85bc97961f8-anchor --&gt;
+&lt;a id=&quot;paper-055-peract-figure-4&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:a85bc97961f8-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/055-peract-s4-f4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/055-peract-s4-f4.png&quot; width=&quot;1824&quot; height=&quot;852&quot; alt=&quot;Perceiver-Actor: A Multi-Task Transformer for Robotic Manipulation，图4：这里比较全局与局部感受野的策略成功率，关注局部细网格是否因丢掉远处任务关系而吃亏。它不能把三维精度与场景语义当成同一个因素。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验图原图摘引：Mohit Shridhar、Lucas Manuelli、Dieter Fox，2022，HTML S4.F4，图4。&lt;a href=&quot;https://arxiv.org/html/2209.05451v2#S4.F4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 | 项目 | 设置与含义 |
 |---|---|
@@ -319,46 +346,60 @@ C2FARM-BC更适合作为结构对照：同样体素化，但由粗到细裁剪�
 
 每批先均匀选任务，避免长示范任务贡献过多样本；代价是长任务中每个动作阶段覆盖较慢。数据量增加也可能引入更多任务变化，并非只给同一种情形重复更多样本。
 
-## 五、五处证据与具体反例
+### 五处证据与具体反例
 
-**表1：整体比较。** 作者报告PerAct在36个“任务×数据量”比较中的25个胜过C2FARM-BC；相对平均倍率在10示范时1.33、100示范时2.83。它不是25个独立新任务，也不是所有任务成功率提高183个百分点。倍率低分母敏感，应同时阅读逐任务成功率。
+**[表1](https://arxiv.org/html/2209.05451v2#S4.T1)：整体比较。** 作者报告PerAct在36个“任务×数据量”比较中的25个胜过C2FARM-BC；相对平均倍率在10示范时1.33、100示范时2.83。它不是25个独立新任务，也不是所有任务成功率提高183个百分点。倍率低分母敏感，应同时阅读逐任务成功率。
 
-**图4：相似把手需要全局上下文。** 打开上、中、下抽屉时，局部把手很相似。PerAct超过70%，所测C2FARM变体约33%。这支持全局场景关系的作用；实验仍同时包含网络结构差异，不能证明所有局部方法都无法加入位置上下文。
+**[图4](#paper-055-peract-figure-4)：相似把手需要全局上下文。** 打开上、中、下抽屉时，局部把手很相似。PerAct超过70%，所测C2FARM变体约33%。这支持全局场景关系的作用；实验仍同时包含网络结构差异，不能证明所有局部方法都无法加入位置上下文。
 
-**图3：关键帧是核心条件。** 随机或固定间隔选择关键动作，在该抽屉消融中导致零表现。它说明动作分段不可忽略，而非单靠Transformer就能消化任意原始控制记录。
+**[图3](#paper-055-peract-figure-3)：关键帧是核心条件。** 随机或固定间隔选择关键动作，在该抽屉消融中导致零表现。它说明动作分段不可忽略，而非单靠Transformer就能消化任意原始控制记录。
 
-**表2：真机范围有限。** 洗手液90%、放记号笔70%、放食物60%、放抽屉40%、击球60%、堆块40%、扫豆20%。前六项各10次，扫豆5次。不同任务样本数不同，不能不说明加权方式就报一个精确总成功率。真实策略使用真实示范，未采用模拟策略直接迁移。
+&lt;!-- figure-ref-v6:start:365ab60d6f0b --&gt;
+&lt;a id=&quot;paper-055-peract-figure-3&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/055-peract-v6-figure-3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/055-peract-v6-figure-3.png&quot; width=&quot;2132&quot; height=&quot;1305&quot; alt=&quot;Perceiver-Actor: A Multi-Task Transformer for Robotic Manipulation，图3：关键帧是核心条件。 随机或固定间隔选择关键动作，在该抽屉消融中导致零表现。它说明动作分段不可忽略，而非单靠Transformer就能消化任意原始控制记录。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Mohit Shridhar、Lucas Manuelli、Dieter Fox，2022，HTML S4.F3，图3。&lt;a href=&quot;https://arxiv.org/html/2209.05451v2#S4.F3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。关键帧是核心条件。 随机或固定间隔选择关键动作，在该抽屉消融中导致零表现。它说明动作分段不可忽略，而非单靠Transformer就能消化任意原始控制记录。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:365ab60d6f0b --&gt;
+
+
+**[表2](https://arxiv.org/html/2209.05451v2#S4.T2)：真机范围有限。** 洗手液90%、放记号笔70%、放食物60%、放抽屉40%、击球60%、堆块40%、扫豆20%。前六项各10次，扫豆5次。不同任务样本数不同，不能不说明加权方式就报一个精确总成功率。真实策略使用真实示范，未采用模拟策略直接迁移。
 
 **附录G–H：增强和多任务都有反例。** 去yaw增强时某些受限朝向任务反而更好；更少latent有时不差。三项精密任务的默认多任务模型为0，单任务训练后放杯24%、套杯32%、插孔16%。量化精度是限制之一，多任务优化也同样重要。
 
 此外，附录A的部分成功判据比自然语言任务名称更窄：例如“关罐子”主要检查盖子位置及夹爪释放。读者不应自动将其理解为已验证真实螺纹密封或可靠旋紧扭矩。
 
-## 六、贡献、成本与局限
-
-PerAct说明机器人学习的数据效率依赖正确结构。让动作与观测在三维空间中对齐，可以把几何先验直接交给网络，而非要求它从少数示范自行发现相机坐标变换。
+## 五、离散精度与关键帧控制限制接触能力
 
 这种结构也带来边界。固定网格限制工作空间；分辨率提高会增加内存；Euler角分类有量化与表示问题；采样运动规划器可能找不到路径或无法完成接触动作。多指手、高速抛接、力反馈插装不容易直接复用这套关键位姿接口。
 
 作者承认对运动规划器的依赖及向灵巧连续控制推广的困难。本文进一步强调，碰撞开关若选择“不避障”，只是为了允许目标接触，并不能自动区分必要接触与危险碰撞。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 少数据学三维动作困难 | 同坐标体素观测与动作 | 直接利用几何对应 | 表1 | 深度与标定要求 |
-| 局部裁剪丢失相对关系 | Perceiver全局融合 | 看见多个相似目标关系 | 图4 | 多天多GPU训练 |
-| 原始控制标签噪声大 | 预测关键位姿 | 把运动插值交给规划器 | 图3 | 依赖关键帧与规划接口 |
-| 多任务意图不明 | CLIP语言条件 | 指定颜色、位置及数量 | 去语言对照 | 未验证开放物体泛化 |
-
-## 七、一个例子与前置概念
-
-**自构例子，未运行。** 三个抽屉把手局部外观完全相同。只截取一个把手的小块点云，网络不知道它是上还是下；保留全柜三维结构后，可根据整体排序决定“打开中间抽屉”对应的位置。若相机外参整体偏2厘米，分类即使语义正确，执行仍可能错过把手。
+### 五个前置概念
 
 五个前置概念：**体素**把三维空间分成格子；**关键帧动作**表示技能中的瓶颈位姿；**cross-attention**使一组查询汇总另一组输入；**几何增强**同时变换场景和动作标签；**运动规划器**根据起终位姿与碰撞信息生成可执行路径。
 
-后续应追问：在等视角输入下改进还剩多少；连续残差动作能否缓解体素量化；加入失败恢复示范是否比继续增加成功示范更有效。它们分别检验感知公平性、精度与分布偏移。
+&lt;details&gt;
+&lt;summary&gt;进阶追问与参考答案（3题）&lt;/summary&gt;
 
-阅读范围：核对[原论文v2正文及附录A–H](https://arxiv.org/html/2209.05451)，包含训练预算、真实监督及成功判据；没有独立复现，不把网络Q记号误解为强化学习价值。
+**进阶问题1：等视角输入下，PerAct的改进还剩多少？**
 
-## 八、三个问题及答案
+参考答案：不能从输入不一致的已有比较计算出净增益。应固定相机数、RGB-D分辨率、历史长度与标定，再比较三维体素模型和对应基线；分别记录遮挡条件与非遮挡条件的成功率。如果优势主要来自多视角信息，输入对齐后会缩小；剩余差距才更直接支持表示与架构的贡献。
+
+**进阶问题2：连续残差动作能否缓解体素量化？**
+
+参考答案：在体素已选对、目标处于局部可达邻域时，预测体素中心到连续目标的残差可以降低网格偏差。但它不能修复选错抽屉或错误深度。可比较细网格、粗网格与粗网格加残差，匹配预算，分别统计离散选格错误、格内定位误差和真实插装成功；仅降低位置MSE不足以证明接触控制改善。
+
+**进阶问题3：失败恢复示范是否比继续增加成功示范更有效？**
+
+参考答案：若主要失败来自策略偏离后的状态缺失，恢复示范更有针对性；若基础技能尚未学好，更多成功示范仍可能更有价值。用相同人工采集时间分配给普通成功轨迹或故障后恢复轨迹，再在标准初态和受扰初态两组独立评估。记录自然发生的失败而非只挑容易恢复的例子，才能避免选择偏差。
+
+这些回答给出机制分析与待检验设计，不是已经运行的新实验结果。
+
+&lt;/details&gt;
+
+## 六、沿机制关系继续读
+
+与[Transporter](040-transporter.md)是平行空间动作表示：本篇把分类网格升到三维并用Perceiver融合；与[RLBench](034-rlbench.md)是基准使用关系，航点规划提供的能力仍须计入整套系统。
+
+## 七、自测三题与参考答案
 
 **问题1：Q图最大的位置是不是未来回报最高的位置？**
 
@@ -371,7 +412,6 @@ PerAct说明机器人学习的数据效率依赖正确结构。让动作与观�
 **问题3：预测六自由度位姿是否等于学会六自由度连续控制？**
 
 不等于。网络预测的是关键终点，规划器与底层控制器负责整段运动；接触、力和高速反馈没有由该输出完整表达。迁移到精密插装或灵巧手时，需要重新考虑动作接口。
-
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

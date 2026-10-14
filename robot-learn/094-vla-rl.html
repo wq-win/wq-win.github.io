@@ -42,14 +42,11 @@
                 <span class="text-gray-500">VLA-RL：用强化学习改进动作基础模型</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="f59bcffef238ceec80775366335b8d6a59452a976d77ed46b3bd835482cf6d5b"><h1>094｜VLA-RL：用强化学习改进动作基础模型</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="c95008b32f79edc01c46f9d1a41764df2073904aec3d852ec9c9ccc68838a2cf"><h1>094｜VLA-RL：用强化学习改进动作基础模型</h1>
 <p><a href="index.html">系列首页</a> · <a href="093-pi05.html">上一篇</a> · <a href="095-smolvla.html">下一篇</a></p>
 <p><strong>原论文</strong>：<em>VLA-RL: Towards Masterful and General Robotic Manipulation with Scalable Reinforcement Learning</em>，Guanxing Lu 等，2025。<a href="https://arxiv.org/abs/2505.18719">论文</a>。</p>
-<h2 id="一一分钟理解让-vla-从自己的执行中继续学习">一、一分钟理解：让 VLA 从自己的执行中继续学习</h2>
-<p>行为克隆教机器人模仿专家，但部署时机器人会遇见自己造成的偏差：夹爪早闭合、末端停在错误位置、物体被碰偏。VLA-RL 的思路是保留预训练 OpenVLA 的视觉与动作先验，再让它在线收集轨迹，用 PPO 调整动作概率。</p>
-<p>真正的难点不是把 PPO 公式放到大模型上，而是让奖励、价值估计、动作概率和并行环境一致工作。论文加入过程奖励模型、价值网络预热、任务采样与批量解码。它属于<strong>在线、无环境模型、Actor–Critic式强化学习微调</strong>；过程奖励模型不是预测环境未来的世界模型。</p>
-<p>表1中 OpenVLA 从76.5%升到81.0%，增加4.5个百分点。本文把它理解为在已适配 LIBERO 的模型上继续优化的收益，不能说从零获得全部能力，也不能说已证明真机开放世界泛化。（§4.1）</p>
-<p>一句话：在可大量交互的仿真操作任务中，通过在线 PPO 与学习的稠密奖励改善已训练 VLA 的执行成功率，代价是额外交互、奖励偏差与大模型训练稳定性问题。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="082-openvla.html">OpenVLA</a>通过示范监督获得动作先验，但自己的执行偏差会产生新状态。VLA-RL在这一基础上在线收集回合，以PPO及过程奖励改进；核心问题是动作token概率、价值和真实环境步怎样一致对齐。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：</p>
 <ul>
@@ -59,12 +56,15 @@
 <li><strong>Critic预热</strong>：先校准价值估计，再让它指导策略。</li>
 <li><strong>在线数据分布</strong>：当前策略执行产生的状态，随学习不断改变。</li>
 </ul>
-<h2 id="二研究背景动作-token-与环境动作有两个时间尺度">二、研究背景：动作 token 与环境动作有两个时间尺度</h2>
+<h2 id="一问题设定vla怎样用自身执行结果继续学习">一、问题设定：VLA怎样用自身执行结果继续学习</h2>
+<p>行为克隆教机器人模仿专家，但部署时机器人会遇见自己造成的偏差：夹爪早闭合、末端停在错误位置、物体被碰偏。VLA-RL 的思路是保留预训练 OpenVLA 的视觉与动作先验，再让它在线收集轨迹，用 PPO 调整动作概率。</p>
 <p>OpenVLA 每次看到外部相机图像与指令，生成表示七维动作的离散 token，再转换成末端控制量和夹爪命令。这里有两种顺序：同一动作内部的 token 自回归顺序，以及执行该动作后环境推进到下一时刻的顺序。</p>
 <p>论文把轨迹类比成多轮对话，是为了复用语言模型的概率训练与系统工具。但机器人动作会改变物理环境，不能把一整回合简单当作没有环境反馈的一次文字生成。训练要保存执行后的新观测、终止标记、环境奖励，以及当时采样策略的概率。</p>
 <p>初始模型已经在每个 LIBERO 任务套件进行监督微调。随后强化学习仍在这些下游任务环境中进行。因此这里主要研究对现有任务的在线改善，而不是把新的训练回合伪装成完全不接触测试分布的零样本评估。训练种子、初始化分布与最终评估回合之间的关系，在复现时应明确记录。</p>
 <p>任务成功提供稀疏奖励；学习的过程奖励提供额外指导。只有前者可以直接反映基准成功，后者是代理信号。将两者相加改变了优化目标，不能自动获得保持最优策略不变的奖励塑形保证。</p>
-<h2 id="三方法四个组件如何配合">三、方法：四个组件如何配合</h2>
+<h2 id="二对齐动作token概率价值预热和过程奖励">二、对齐动作token概率、价值预热和过程奖励</h2>
+<p>真正的难点不是把 PPO 公式放到大模型上，而是让奖励、价值估计、动作概率和并行环境一致工作。论文加入过程奖励模型、价值网络预热、任务采样与批量解码。它属于<strong>在线、无环境模型、Actor–Critic式强化学习微调</strong>；过程奖励模型不是预测环境未来的世界模型。</p>
+<p><a href="https://arxiv.org/html/2505.18719v1#S4.T1">表1</a>中 OpenVLA 从76.5%升到81.0%，增加4.5个百分点。本文把它理解为在已适配 LIBERO 的模型上继续优化的收益，不能说从零获得全部能力，也不能说已证明真机开放世界泛化。（§4.1）</p>
 <h3 id="1-从-token-概率计算动作概率">1. 从 token 概率计算动作概率</h3>
 <p>若一个环境动作由 token 序列 <span class="reading-math" data-tex="z_1,\ldots,z_d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>z</mi><mn>1</mn></msub><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><msub><mi>z</mi><mi>d</mi></msub></mrow><annotation encoding="application/x-tex">z_1,\ldots,z_d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">d</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 表示，正确的自回归分解为</p>
 <p><span class="reading-math" data-tex="\log\pi_\theta(a_t\mid o_t,l)
@@ -88,6 +88,14 @@
 <p>原文式4为</p>
 <p><span class="reading-math" data-tex="P(j)\propto\exp((0.5-s_j)/\tau),"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>P</mi><mo stretchy="false">(</mo><mi>j</mi><mo stretchy="false">)</mo><mo>∝</mo><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><mo stretchy="false">(</mo><mn>0.5</mn><mo>−</mo><msub><mi>s</mi><mi>j</mi></msub><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mi>τ</mi><mo stretchy="false">)</mo><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">P(j)\propto\exp((0.5-s_j)/\tau),</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∝</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">exp</span><span class="mopen">((</span><span class="mord">0.5</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mclose">)</span><span class="mpunct">,</span></span></span></span></span></span></p>
 <p>其中 <span class="reading-math" data-tex="s_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">s_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>是任务成功率。对正温度 <span class="reading-math" data-tex="\tau"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>τ</mi></mrow><annotation encoding="application/x-tex">\tau</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span></span></span></span></span>，这个概率随成功率<strong>单调下降</strong>；归一化后常数0.5会抵消。因此公式优先低成功率任务，并不会在50%处达到峰值。正文关于“学习前沿”的解释与写出的公式不一致，应保留为实现待核对项。</p>
+<p>并行环境、批量解码与训练分片改变墙钟效率，不改变理论任务目标。效率收益必须用相同交互量和硬件条件比较，不能从更快曲线推断更高样本效率。</p>
+<p>可以用三个任务直接测试课程公式。教学取成功率 <span class="reading-math" data-tex="s=(0,0.5,1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi><mo>=</mo><mo stretchy="false">(</mo><mn>0</mn><mo separator="true">,</mo><mn>0.5</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">s=(0,0.5,1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.5</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span>、温度 <span class="reading-math" data-tex="\tau=0.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>τ</mi><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">\tau=0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span>，式4的权重为 <span class="reading-math" data-tex="(e,1,e^{-1})"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>e</mi><mo separator="true">,</mo><mn>1</mn><mo separator="true">,</mo><msup><mi>e</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(e,1,e^{-1})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">e</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，归一化约为 <span class="reading-math" data-tex="(0.665,0.245,0.090)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0.665</mn><mo separator="true">,</mo><mn>0.245</mn><mo separator="true">,</mo><mn>0.090</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0.665,0.245,0.090)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.665</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.245</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.090</span><span class="mclose">)</span></span></span></span></span>。最难任务获得最多采样，50%任务并非峰值；若意图优先中等难度，还需别的公式或实现逻辑，不能从现式推出。</p>
+<p>消融措辞也应对照表：去过程奖励后仍为85.8%，去课程为88.0%，而学习率增大十倍降到0.2%。它们都差于完整配置90.2%，却不都属于“迅速崩溃”。这组结果更支持启动、奖励和优化尺度共同影响稳定性，不能仅用一个组件解释全部增益。<a href="https://arxiv.org/html/2505.18719v1">原文§3.5与表2</a></p>
+<h3 id="一个小例子奖励有帮助也可能指错方向">一个小例子：奖励有帮助，也可能指错方向</h3>
+<p>下面是未运行的教学例子。机器人向杯子移动，夹爪闭合后停住。奖励模型若把“闭合且静止”当进度，会给这一步高分；但夹爪可能根本没有抓住杯子。真正成功奖励直到杯子放进容器才出现。</p>
+<p>如果稠密奖励足够大，策略可能偏好反复闭合停住。若稀疏成功率也随训练提高，说明这种失败没有完全主导当前实验，却不能保证别的场景不会出现。最直接的检查是构造同样闭合和静止、但对象未被抓住的反例。</p>
+<h2 id="三在环境步上对齐token概率价值与奖励">三、在环境步上对齐token概率、价值与奖励</h2>
+<p>一个物理动作包含多个条件token，log概率需按相应联合分布计算。价值预热、过程奖励与课程采样共同影响PPO，符号正确还需与环境执行单位一致。</p>
 <pre><code class="language-text">载入已经监督微调的 VLA、价值模型与冻结过程奖励模型
 固定策略，先用初始轨迹预热价值网络
 
@@ -103,8 +111,15 @@
     用 PPO 更新策略，用回归目标更新价值模型
     在独立评估回合记录真实成功率
 </code></pre>
-<p>并行环境、批量解码与训练分片改变墙钟效率，不改变理论任务目标。效率收益必须用相同交互量和硬件条件比较，不能从更快曲线推断更高样本效率。</p>
-<h2 id="四实验设置与关键缺口">四、实验设置与关键缺口</h2>
+<h2 id="四核对课程公式训练预算与真实评价单位">四、核对课程公式、训练预算与真实评价单位</h2>
+<p><strong>原图怎么读：</strong> <a href="#paper-094-vla-rl-figure-4">图4，原论文图注与图像</a>。虽然图标题写Test-time Scaling，图注实际每隔2500个训练步评估一次微调模型；横向变化含参数更新，因此不能称为固定模型的推理预算扩展。</p>
+<!-- figure-ref-v6:start:e9963db93bb6-anchor -->
+<p><a id="paper-094-vla-rl-figure-4"></a></p>
+<!-- figure-ref-v6:end:e9963db93bb6-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/094-vla-rl-s4-f4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/094-vla-rl-s4-f4.png" width="1824" height="463" alt="VLA-RL: Towards Masterful and General Robotic Manipulation with Scalable Reinforcement Learning，图4：虽然图标题写Test-time Scaling，图注实际每隔2500个训练步评估一次微调模型；横向变化含参数更新，因此不能称为固定模型的推理预算扩展。" loading="lazy"></a><figcaption>实验图原图摘引：Guanxing Lu 等，2025，HTML S4.F4，图4。<a href="https://arxiv.org/html/2505.18719v1#S4.F4" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p>课程采样公式、奖励标量化和完整训练预算仍需与实现对应；式4的数学性质应按实际写出的公式检验，不能用文字意图补写新算法。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -156,39 +171,36 @@
 </tbody></table></div>
 <p>这里有额外专家轨迹用于初始SFT或奖励建模，因此“摆脱离线数据”只能理解成在线阶段不必重复依赖全部预训练数据，不能理解成系统没有专家知识。</p>
 <p>奖励曲线上升和任务成功同时上升是有价值的证据，但还不是奖励投机已经排除。更强测试应固定成功率观察奖励是否还能被提高，或加入静止、反复开合、错误物体等对抗轨迹检查奖励模型。</p>
-<h2 id="五五处结果与严格解读">五、五处结果与严格解读</h2>
-<p><strong>表1：平均提升存在，最强参考仍更高。</strong> 76.5%到81.0%是增加4.5个百分点，相对为 <span class="reading-math" data-tex="4.5/76.5\approx5.9\%"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>4.5</mn><mi mathvariant="normal">/</mi><mn>76.5</mn><mo>≈</mo><mn>5.9</mn><mi mathvariant="normal">%</mi></mrow><annotation encoding="application/x-tex">4.5/76.5\approx5.9\%</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">4.5/76.5</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8056em;vertical-align:-0.0556em;"></span><span class="mord">5.9%</span></span></span></span></span>。GRAPE为79.2%，差1.8个百分点。表中 π0-FAST 为85.5%，因此正文“匹配”说法不能用于平均成绩；Long套件的接近也不能代表全部套件相同。</p>
-<p><strong>图4：更多在线训练带来改善。</strong> 横轴对应继续优化，模型参数发生更新，也消耗环境交互。它支持在线训练可扩展性的一段经验趋势，不能直接证明固定权重、仅增加推理搜索即可改善，更不足以建立普遍的幂律或无限增长结论。</p>
-<p><strong>表2：有些组件帮助，有些配置导致崩溃。</strong> 移除奖励模型为85.8%，移除课程为88.0%，取消 critic 预热为80.0%；完整方法90.2%。这些是程度不同的下降。把学习率从 <span class="reading-math" data-tex="2\times10^{-5}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mo>×</mo><mn>1</mn><msup><mn>0</mn><mrow><mo>−</mo><mn>5</mn></mrow></msup></mrow><annotation encoding="application/x-tex">2\times10^{-5}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">1</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">5</span></span></span></span></span></span></span></span></span></span></span></span></span> 提到 <span class="reading-math" data-tex="2\times10^{-4}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mo>×</mo><mn>1</mn><msup><mn>0</mn><mrow><mo>−</mo><mn>4</mn></mrow></msup></mrow><annotation encoding="application/x-tex">2\times10^{-4}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">1</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">4</span></span></span></span></span></span></span></span></span></span></span></span></span> 后为0.2%，才是明显崩溃。表注称移除任一组件都会迅速崩溃，超出了表中数值所能支持的范围。</p>
-<p><strong>图5：训练动态具有诊断价值。</strong> 回合变短可能说明更快成功，也可能来自更早终止，必须与成功率一起看。熵下降可能代表技能收敛，也可能代表探索坍缩；只读一个曲线无法区分。系统耗时分解能定位瓶颈，却不能替代硬件一致的基线实验。</p>
-<p><strong>图6—7：行为覆盖与案例。</strong> 二维动作投影更分散，说明采样动作分布改变，不直接证明高维状态空间覆盖更完整或分布外鲁棒性更强。成功抓取案例解释了潜在收益，但不能把一个任务的改进提升为接触操作的普遍规律。</p>
-<h2 id="六贡献代价和边界">六、贡献、代价和边界</h2>
-<p>论文的价值在于把离散自回归 VLA 连接到可运行的在线 PPO 系统，并展示预训练动作先验可继续被环境反馈改进。它没有提出新的 PPO 定理，关键贡献更接近奖励与系统工程的整合。</p>
+<h3 id="五处结果与严格解读">五处结果与严格解读</h3>
+<p><strong><a href="https://arxiv.org/html/2505.18719v1#S4.T1">表1</a>：平均提升存在，最强参考仍更高。</strong> 76.5%到81.0%是增加4.5个百分点，相对为 <span class="reading-math" data-tex="4.5/76.5\approx5.9\%"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>4.5</mn><mi mathvariant="normal">/</mi><mn>76.5</mn><mo>≈</mo><mn>5.9</mn><mi mathvariant="normal">%</mi></mrow><annotation encoding="application/x-tex">4.5/76.5\approx5.9\%</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">4.5/76.5</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8056em;vertical-align:-0.0556em;"></span><span class="mord">5.9%</span></span></span></span></span>。GRAPE为79.2%，差1.8个百分点。表中 π0-FAST 为85.5%，因此正文“匹配”说法不能用于平均成绩；Long套件的接近也不能代表全部套件相同。</p>
+<p><strong><a href="#paper-094-vla-rl-figure-4">图4</a>：更多在线训练带来改善。</strong> 横轴对应继续优化，模型参数发生更新，也消耗环境交互。它支持在线训练可扩展性的一段经验趋势，不能直接证明固定权重、仅增加推理搜索即可改善，更不足以建立普遍的幂律或无限增长结论。</p>
+<p><strong><a href="https://arxiv.org/html/2505.18719v1#S4.T2">表2</a>：有些组件帮助，有些配置导致崩溃。</strong> 移除奖励模型为85.8%，移除课程为88.0%，取消 critic 预热为80.0%；完整方法90.2%。这些是程度不同的下降。把学习率从 <span class="reading-math" data-tex="2\times10^{-5}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mo>×</mo><mn>1</mn><msup><mn>0</mn><mrow><mo>−</mo><mn>5</mn></mrow></msup></mrow><annotation encoding="application/x-tex">2\times10^{-5}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">1</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">5</span></span></span></span></span></span></span></span></span></span></span></span></span> 提到 <span class="reading-math" data-tex="2\times10^{-4}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mo>×</mo><mn>1</mn><msup><mn>0</mn><mrow><mo>−</mo><mn>4</mn></mrow></msup></mrow><annotation encoding="application/x-tex">2\times10^{-4}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">1</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">4</span></span></span></span></span></span></span></span></span></span></span></span></span> 后为0.2%，才是明显崩溃。表注称移除任一组件都会迅速崩溃，超出了表中数值所能支持的范围。</p>
+<p><strong><a href="#paper-094-vla-rl-figure-5">图5</a>：训练动态具有诊断价值。</strong> 回合变短可能说明更快成功，也可能来自更早终止，必须与成功率一起看。熵下降可能代表技能收敛，也可能代表探索坍缩；只读一个曲线无法区分。系统耗时分解能定位瓶颈，却不能替代硬件一致的基线实验。</p>
+<!-- figure-ref-v6:start:832141e504e5 -->
+<p><a id="paper-094-vla-rl-figure-5"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/094-vla-rl-v6-figure-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/094-vla-rl-v6-figure-5.png" width="2132" height="448" alt="VLA-RL: Towards Masterful and General Robotic Manipulation with Scalable Reinforcement Learning，图5：训练动态具有诊断价值。 回合变短可能说明更快成功，也可能来自更早终止，必须与成功率一起看。熵下降可能代表技能收敛，也可能代表探索坍缩；只读一个曲线无法区分。系统耗时分解能定位瓶颈，却不能替代硬件一致的基线实验。" loading="lazy"></a><figcaption>原图摘引：Guanxing Lu 等，2025，HTML S4.F5，图5。<a href="https://arxiv.org/html/2505.18719v1#S4.F5" target="_blank" rel="noopener noreferrer">核对原文</a>。训练动态具有诊断价值。 回合变短可能说明更快成功，也可能来自更早终止，必须与成功率一起看。熵下降可能代表技能收敛，也可能代表探索坍缩；只读一个曲线无法区分。系统耗时分解能定位瓶颈，却不能替代硬件一致的基线实验。</figcaption></figure>
+<!-- figure-ref-v6:end:832141e504e5 -->
+
+
+<p><strong><a href="#paper-094-vla-rl-figure-6">图6</a>、<a href="#paper-094-vla-rl-figure-7">图7</a>：行为覆盖与案例。</strong> 二维动作投影更分散，说明采样动作分布改变，不直接证明高维状态空间覆盖更完整或分布外鲁棒性更强。成功抓取案例解释了潜在收益，但不能把一个任务的改进提升为接触操作的普遍规律。</p>
+<!-- figure-ref-v6:start:0f539f0b0f8a -->
+<p><a id="paper-094-vla-rl-figure-6"></a></p>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/094-vla-rl-v6-figure-6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/094-vla-rl-v6-figure-6.png" width="2132" height="1015" alt="VLA-RL: Towards Masterful and General Robotic Manipulation with Scalable Reinforcement Learning，图6：行为覆盖与案例。 二维动作投影更分散，说明采样动作分布改变，不直接证明高维状态空间覆盖更完整或分布外鲁棒性更强。成功抓取案例解释了潜在收益，但不能把一个任务的改进提升为接触操作的普遍规律。" loading="lazy"></a><figcaption>原图摘引：Guanxing Lu 等，2025，HTML S4.F6，图6。<a href="https://arxiv.org/html/2505.18719v1#S4.F6" target="_blank" rel="noopener noreferrer">核对原文</a>。行为覆盖与案例。 二维动作投影更分散，说明采样动作分布改变，不直接证明高维状态空间覆盖更完整或分布外鲁棒性更强。成功抓取案例解释了潜在收益，但不能把一个任务的改进提升为接触操作的普遍规律。</figcaption></figure>
+<!-- figure-ref-v6:end:0f539f0b0f8a -->
+<!-- figure-ref-v6:start:e8f60f982d64 -->
+<a id="paper-094-vla-rl-figure-7"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/094-vla-rl-v6-figure-7.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/094-vla-rl-v6-figure-7.png" width="1218" height="830" alt="VLA-RL: Towards Masterful and General Robotic Manipulation with Scalable Reinforcement Learning，图7：行为覆盖与案例。 二维动作投影更分散，说明采样动作分布改变，不直接证明高维状态空间覆盖更完整或分布外鲁棒性更强。成功抓取案例解释了潜在收益，但不能把一个任务的改进提升为接触操作的普遍规律。" loading="lazy"></a><figcaption>原图摘引：Guanxing Lu 等，2025，HTML S4.F7，图7。<a href="https://arxiv.org/html/2505.18719v1#S4.F7" target="_blank" rel="noopener noreferrer">核对原文</a>。行为覆盖与案例。 二维动作投影更分散，说明采样动作分布改变，不直接证明高维状态空间覆盖更完整或分布外鲁棒性更强。成功抓取案例解释了潜在收益，但不能把一个任务的改进提升为接触操作的普遍规律。</figcaption></figure>
+<!-- figure-ref-v6:end:e8f60f982d64 -->
+
+
+<h2 id="五启发式奖励可能引导错误过程">五、启发式奖励可能引导错误过程</h2>
 <p>作者承认伪标签启发式可能无法描述更细腻的操作，并把真实世界在线经验与扩散策略留作后续。我的分析是，奖励尺度、动作 token 的联合概率、错误 critic 与探索温度形成相互作用；单独移除一个组件只能说明当前配置的依赖，不能证明该组件对所有VLA都是必要条件。</p>
 <p>另一个边界是仿真可廉价重置，而真机存在复位、失败回收和硬件磨损成本。48 GPU小时既不是48小时机器人占用，也不是完整系统研发成本。将这项研究迁移到真机，需要同时优化环境交互效率和失败处理，而不仅是提升模型训练吞吐。</p>
-<p><strong>阅读范围</strong>：核对 arXiv v1 全文方法、算法1、结果表1—2及图4—7说明；未独立复现。课程公式、奖励标量化和完整训练预算仍需结合实现进一步确认。<a href="https://arxiv.org/html/2505.18719v1">原文全文</a></p>
-<h2 id="七一个小例子奖励有帮助也可能指错方向">七、一个小例子：奖励有帮助，也可能指错方向</h2>
-<p>下面是未运行的教学例子。机器人向杯子移动，夹爪闭合后停住。奖励模型若把“闭合且静止”当进度，会给这一步高分；但夹爪可能根本没有抓住杯子。真正成功奖励直到杯子放进容器才出现。</p>
-<p>如果稠密奖励足够大，策略可能偏好反复闭合停住。若稀疏成功率也随训练提高，说明这种失败没有完全主导当前实验，却不能保证别的场景不会出现。最直接的检查是构造同样闭合和静止、但对象未被抓住的反例。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>模仿策略偏离示范后易失败</td>
-<td>在线PPO、过程奖励、价值预热和并行采样</td>
-<td>收集自身执行数据并改善信用分配</td>
-<td>表1—2、图4</td>
-<td>额外交互；奖励启发式；仅仿真；部分表述与公式需核对</td>
-</tr>
-</tbody></table></div>
-<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<h3 id="追问过程奖励模型若偏爱接近目标怎样检查策略是否拖延真正完成">追问：过程奖励模型若偏爱接近目标，怎样检查策略是否拖延真正完成？</h3>
+<p>参考答案：应把中间得分与终局完成分别统计，观察是否反复停留在高分却未完成的状态。可固定奖励模型，检查这些轨迹的判定，并用独立成功条件评价。过程反馈有助于稀疏学习，但若和任务目标不一致，PPO会有效优化错误信号。</p>
+<h2 id="六沿机制关系继续读">六、沿机制关系继续读</h2>
+<p>VLA-RL直接微调<a href="082-openvla.html">OpenVLA</a>式动作模型，组合PPO与过程奖励；与<a href="083-diffusion-rl.html">DPPO</a>是平行后训练，前者计算离散动作序列似然，后者计算内部去噪路径似然。</p>
+<h2 id="七自测三题与参考答案">七、自测三题与参考答案</h2>
 <p><strong>问题1：为什么动作的 log 概率要把七个 token 的条件概率相加？</strong></p>
 <p><strong>答案：</strong> 七个 token 共同构成一次环境动作。联合概率由自回归条件概率相乘，取对数后成为求和。若把各 token 当成独立环境动作更新，就改变了信用分配和 PPO 比率的含义，还可能忽略各动作维度之间的依赖。</p>
 <p><strong>问题2：成功率曲线随训练上升，为何还不能称为推理 scaling law？</strong></p>
@@ -206,17 +218,13 @@
 
 **原论文**：*VLA-RL: Towards Masterful and General Robotic Manipulation with Scalable Reinforcement Learning*，Guanxing Lu 等，2025。[论文](https://arxiv.org/abs/2505.18719)。
 
-## 一、一分钟理解：让 VLA 从自己的执行中继续学习
+### 先接住前作的问题
+
+[OpenVLA](082-openvla.md)通过示范监督获得动作先验，但自己的执行偏差会产生新状态。VLA-RL在这一基础上在线收集回合，以PPO及过程奖励改进；核心问题是动作token概率、价值和真实环境步怎样一致对齐。
+
+## 一、问题设定：VLA怎样用自身执行结果继续学习
 
 行为克隆教机器人模仿专家，但部署时机器人会遇见自己造成的偏差：夹爪早闭合、末端停在错误位置、物体被碰偏。VLA-RL 的思路是保留预训练 OpenVLA 的视觉与动作先验，再让它在线收集轨迹，用 PPO 调整动作概率。
-
-真正的难点不是把 PPO 公式放到大模型上，而是让奖励、价值估计、动作概率和并行环境一致工作。论文加入过程奖励模型、价值网络预热、任务采样与批量解码。它属于**在线、无环境模型、Actor–Critic式强化学习微调**；过程奖励模型不是预测环境未来的世界模型。
-
-表1中 OpenVLA 从76.5%升到81.0%，增加4.5个百分点。本文把它理解为在已适配 LIBERO 的模型上继续优化的收益，不能说从零获得全部能力，也不能说已证明真机开放世界泛化。（§4.1）
-
-一句话：在可大量交互的仿真操作任务中，通过在线 PPO 与学习的稠密奖励改善已训练 VLA 的执行成功率，代价是额外交互、奖励偏差与大模型训练稳定性问题。
-
-## 二、研究背景：动作 token 与环境动作有两个时间尺度
 
 OpenVLA 每次看到外部相机图像与指令，生成表示七维动作的离散 token，再转换成末端控制量和夹爪命令。这里有两种顺序：同一动作内部的 token 自回归顺序，以及执行该动作后环境推进到下一时刻的顺序。
 
@@ -226,7 +234,11 @@ OpenVLA 每次看到外部相机图像与指令，生成表示七维动作的离
 
 任务成功提供稀疏奖励；学习的过程奖励提供额外指导。只有前者可以直接反映基准成功，后者是代理信号。将两者相加改变了优化目标，不能自动获得保持最优策略不变的奖励塑形保证。
 
-## 三、方法：四个组件如何配合
+## 二、对齐动作token概率、价值预热和过程奖励
+
+真正的难点不是把 PPO 公式放到大模型上，而是让奖励、价值估计、动作概率和并行环境一致工作。论文加入过程奖励模型、价值网络预热、任务采样与批量解码。它属于**在线、无环境模型、Actor–Critic式强化学习微调**；过程奖励模型不是预测环境未来的世界模型。
+
+[表1](https://arxiv.org/html/2505.18719v1#S4.T1)中 OpenVLA 从76.5%升到81.0%，增加4.5个百分点。本文把它理解为在已适配 LIBERO 的模型上继续优化的收益，不能说从零获得全部能力，也不能说已证明真机开放世界泛化。（§4.1）
 
 ### 1. 从 token 概率计算动作概率
 
@@ -271,6 +283,22 @@ $$
 
 其中 $s_j$是任务成功率。对正温度 $\tau$，这个概率随成功率**单调下降**；归一化后常数0.5会抵消。因此公式优先低成功率任务，并不会在50%处达到峰值。正文关于“学习前沿”的解释与写出的公式不一致，应保留为实现待核对项。
 
+并行环境、批量解码与训练分片改变墙钟效率，不改变理论任务目标。效率收益必须用相同交互量和硬件条件比较，不能从更快曲线推断更高样本效率。
+
+可以用三个任务直接测试课程公式。教学取成功率 $s=(0,0.5,1)$、温度 $\tau=0.5$，式4的权重为 $(e,1,e^{-1})$，归一化约为 $(0.665,0.245,0.090)$。最难任务获得最多采样，50%任务并非峰值；若意图优先中等难度，还需别的公式或实现逻辑，不能从现式推出。
+
+消融措辞也应对照表：去过程奖励后仍为85.8%，去课程为88.0%，而学习率增大十倍降到0.2%。它们都差于完整配置90.2%，却不都属于“迅速崩溃”。这组结果更支持启动、奖励和优化尺度共同影响稳定性，不能仅用一个组件解释全部增益。[原文§3.5与表2](https://arxiv.org/html/2505.18719v1)
+
+### 一个小例子：奖励有帮助，也可能指错方向
+
+下面是未运行的教学例子。机器人向杯子移动，夹爪闭合后停住。奖励模型若把“闭合且静止”当进度，会给这一步高分；但夹爪可能根本没有抓住杯子。真正成功奖励直到杯子放进容器才出现。
+
+如果稠密奖励足够大，策略可能偏好反复闭合停住。若稀疏成功率也随训练提高，说明这种失败没有完全主导当前实验，却不能保证别的场景不会出现。最直接的检查是构造同样闭合和静止、但对象未被抓住的反例。
+
+## 三、在环境步上对齐token概率、价值与奖励
+
+一个物理动作包含多个条件token，log概率需按相应联合分布计算。价值预热、过程奖励与课程采样共同影响PPO，符号正确还需与环境执行单位一致。
+
 ~~~text
 载入已经监督微调的 VLA、价值模型与冻结过程奖励模型
 固定策略，先用初始轨迹预热价值网络
@@ -288,9 +316,18 @@ $$
     在独立评估回合记录真实成功率
 ~~~
 
-并行环境、批量解码与训练分片改变墙钟效率，不改变理论任务目标。效率收益必须用相同交互量和硬件条件比较，不能从更快曲线推断更高样本效率。
+## 四、核对课程公式、训练预算与真实评价单位
 
-## 四、实验设置与关键缺口
+**原图怎么读：** [图4，原论文图注与图像](#paper-094-vla-rl-figure-4)。虽然图标题写Test-time Scaling，图注实际每隔2500个训练步评估一次微调模型；横向变化含参数更新，因此不能称为固定模型的推理预算扩展。
+
+
+&lt;!-- figure-ref-v6:start:e9963db93bb6-anchor --&gt;
+&lt;a id=&quot;paper-094-vla-rl-figure-4&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:e9963db93bb6-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/094-vla-rl-s4-f4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/094-vla-rl-s4-f4.png&quot; width=&quot;1824&quot; height=&quot;463&quot; alt=&quot;VLA-RL: Towards Masterful and General Robotic Manipulation with Scalable Reinforcement Learning，图4：虽然图标题写Test-time Scaling，图注实际每隔2500个训练步评估一次微调模型；横向变化含参数更新，因此不能称为固定模型的推理预算扩展。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验图原图摘引：Guanxing Lu 等，2025，HTML S4.F4，图4。&lt;a href=&quot;https://arxiv.org/html/2505.18719v1#S4.F4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+课程采样公式、奖励标量化和完整训练预算仍需与实现对应；式4的数学性质应按实际写出的公式检验，不能用文字意图补写新算法。
 
 | 项目 | 原文设置 | 解释 |
 |---|---|---|
@@ -307,33 +344,41 @@ $$
 
 奖励曲线上升和任务成功同时上升是有价值的证据，但还不是奖励投机已经排除。更强测试应固定成功率观察奖励是否还能被提高，或加入静止、反复开合、错误物体等对抗轨迹检查奖励模型。
 
-## 五、五处结果与严格解读
+### 五处结果与严格解读
 
-**表1：平均提升存在，最强参考仍更高。** 76.5%到81.0%是增加4.5个百分点，相对为 $4.5/76.5\approx5.9\%$。GRAPE为79.2%，差1.8个百分点。表中 π0-FAST 为85.5%，因此正文“匹配”说法不能用于平均成绩；Long套件的接近也不能代表全部套件相同。
+**[表1](https://arxiv.org/html/2505.18719v1#S4.T1)：平均提升存在，最强参考仍更高。** 76.5%到81.0%是增加4.5个百分点，相对为 $4.5/76.5\approx5.9\%$。GRAPE为79.2%，差1.8个百分点。表中 π0-FAST 为85.5%，因此正文“匹配”说法不能用于平均成绩；Long套件的接近也不能代表全部套件相同。
 
-**图4：更多在线训练带来改善。** 横轴对应继续优化，模型参数发生更新，也消耗环境交互。它支持在线训练可扩展性的一段经验趋势，不能直接证明固定权重、仅增加推理搜索即可改善，更不足以建立普遍的幂律或无限增长结论。
+**[图4](#paper-094-vla-rl-figure-4)：更多在线训练带来改善。** 横轴对应继续优化，模型参数发生更新，也消耗环境交互。它支持在线训练可扩展性的一段经验趋势，不能直接证明固定权重、仅增加推理搜索即可改善，更不足以建立普遍的幂律或无限增长结论。
 
-**表2：有些组件帮助，有些配置导致崩溃。** 移除奖励模型为85.8%，移除课程为88.0%，取消 critic 预热为80.0%；完整方法90.2%。这些是程度不同的下降。把学习率从 $2\times10^{-5}$ 提到 $2\times10^{-4}$ 后为0.2%，才是明显崩溃。表注称移除任一组件都会迅速崩溃，超出了表中数值所能支持的范围。
+**[表2](https://arxiv.org/html/2505.18719v1#S4.T2)：有些组件帮助，有些配置导致崩溃。** 移除奖励模型为85.8%，移除课程为88.0%，取消 critic 预热为80.0%；完整方法90.2%。这些是程度不同的下降。把学习率从 $2\times10^{-5}$ 提到 $2\times10^{-4}$ 后为0.2%，才是明显崩溃。表注称移除任一组件都会迅速崩溃，超出了表中数值所能支持的范围。
 
-**图5：训练动态具有诊断价值。** 回合变短可能说明更快成功，也可能来自更早终止，必须与成功率一起看。熵下降可能代表技能收敛，也可能代表探索坍缩；只读一个曲线无法区分。系统耗时分解能定位瓶颈，却不能替代硬件一致的基线实验。
+**[图5](#paper-094-vla-rl-figure-5)：训练动态具有诊断价值。** 回合变短可能说明更快成功，也可能来自更早终止，必须与成功率一起看。熵下降可能代表技能收敛，也可能代表探索坍缩；只读一个曲线无法区分。系统耗时分解能定位瓶颈，却不能替代硬件一致的基线实验。
 
-**图6—7：行为覆盖与案例。** 二维动作投影更分散，说明采样动作分布改变，不直接证明高维状态空间覆盖更完整或分布外鲁棒性更强。成功抓取案例解释了潜在收益，但不能把一个任务的改进提升为接触操作的普遍规律。
+&lt;!-- figure-ref-v6:start:832141e504e5 --&gt;
+&lt;a id=&quot;paper-094-vla-rl-figure-5&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/094-vla-rl-v6-figure-5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/094-vla-rl-v6-figure-5.png&quot; width=&quot;2132&quot; height=&quot;448&quot; alt=&quot;VLA-RL: Towards Masterful and General Robotic Manipulation with Scalable Reinforcement Learning，图5：训练动态具有诊断价值。 回合变短可能说明更快成功，也可能来自更早终止，必须与成功率一起看。熵下降可能代表技能收敛，也可能代表探索坍缩；只读一个曲线无法区分。系统耗时分解能定位瓶颈，却不能替代硬件一致的基线实验。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Guanxing Lu 等，2025，HTML S4.F5，图5。&lt;a href=&quot;https://arxiv.org/html/2505.18719v1#S4.F5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。训练动态具有诊断价值。 回合变短可能说明更快成功，也可能来自更早终止，必须与成功率一起看。熵下降可能代表技能收敛，也可能代表探索坍缩；只读一个曲线无法区分。系统耗时分解能定位瓶颈，却不能替代硬件一致的基线实验。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:832141e504e5 --&gt;
 
-## 六、贡献、代价和边界
 
-论文的价值在于把离散自回归 VLA 连接到可运行的在线 PPO 系统，并展示预训练动作先验可继续被环境反馈改进。它没有提出新的 PPO 定理，关键贡献更接近奖励与系统工程的整合。
+**[图6](#paper-094-vla-rl-figure-6)、[图7](#paper-094-vla-rl-figure-7)：行为覆盖与案例。** 二维动作投影更分散，说明采样动作分布改变，不直接证明高维状态空间覆盖更完整或分布外鲁棒性更强。成功抓取案例解释了潜在收益，但不能把一个任务的改进提升为接触操作的普遍规律。
+
+&lt;!-- figure-ref-v6:start:0f539f0b0f8a --&gt;
+&lt;a id=&quot;paper-094-vla-rl-figure-6&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/094-vla-rl-v6-figure-6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/094-vla-rl-v6-figure-6.png&quot; width=&quot;2132&quot; height=&quot;1015&quot; alt=&quot;VLA-RL: Towards Masterful and General Robotic Manipulation with Scalable Reinforcement Learning，图6：行为覆盖与案例。 二维动作投影更分散，说明采样动作分布改变，不直接证明高维状态空间覆盖更完整或分布外鲁棒性更强。成功抓取案例解释了潜在收益，但不能把一个任务的改进提升为接触操作的普遍规律。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Guanxing Lu 等，2025，HTML S4.F6，图6。&lt;a href=&quot;https://arxiv.org/html/2505.18719v1#S4.F6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。行为覆盖与案例。 二维动作投影更分散，说明采样动作分布改变，不直接证明高维状态空间覆盖更完整或分布外鲁棒性更强。成功抓取案例解释了潜在收益，但不能把一个任务的改进提升为接触操作的普遍规律。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:0f539f0b0f8a --&gt;
+&lt;!-- figure-ref-v6:start:e8f60f982d64 --&gt;
+&lt;a id=&quot;paper-094-vla-rl-figure-7&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/094-vla-rl-v6-figure-7.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/094-vla-rl-v6-figure-7.png&quot; width=&quot;1218&quot; height=&quot;830&quot; alt=&quot;VLA-RL: Towards Masterful and General Robotic Manipulation with Scalable Reinforcement Learning，图7：行为覆盖与案例。 二维动作投影更分散，说明采样动作分布改变，不直接证明高维状态空间覆盖更完整或分布外鲁棒性更强。成功抓取案例解释了潜在收益，但不能把一个任务的改进提升为接触操作的普遍规律。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原图摘引：Guanxing Lu 等，2025，HTML S4.F7，图7。&lt;a href=&quot;https://arxiv.org/html/2505.18719v1#S4.F7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。行为覆盖与案例。 二维动作投影更分散，说明采样动作分布改变，不直接证明高维状态空间覆盖更完整或分布外鲁棒性更强。成功抓取案例解释了潜在收益，但不能把一个任务的改进提升为接触操作的普遍规律。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:e8f60f982d64 --&gt;
+
+
+## 五、启发式奖励可能引导错误过程
 
 作者承认伪标签启发式可能无法描述更细腻的操作，并把真实世界在线经验与扩散策略留作后续。我的分析是，奖励尺度、动作 token 的联合概率、错误 critic 与探索温度形成相互作用；单独移除一个组件只能说明当前配置的依赖，不能证明该组件对所有VLA都是必要条件。
 
 另一个边界是仿真可廉价重置，而真机存在复位、失败回收和硬件磨损成本。48 GPU小时既不是48小时机器人占用，也不是完整系统研发成本。将这项研究迁移到真机，需要同时优化环境交互效率和失败处理，而不仅是提升模型训练吞吐。
 
-**阅读范围**：核对 arXiv v1 全文方法、算法1、结果表1—2及图4—7说明；未独立复现。课程公式、奖励标量化和完整训练预算仍需结合实现进一步确认。[原文全文](https://arxiv.org/html/2505.18719v1)
-
-## 七、一个小例子：奖励有帮助，也可能指错方向
-
-下面是未运行的教学例子。机器人向杯子移动，夹爪闭合后停住。奖励模型若把“闭合且静止”当进度，会给这一步高分；但夹爪可能根本没有抓住杯子。真正成功奖励直到杯子放进容器才出现。
-
-如果稠密奖励足够大，策略可能偏好反复闭合停住。若稀疏成功率也随训练提高，说明这种失败没有完全主导当前实验，却不能保证别的场景不会出现。最直接的检查是构造同样闭合和静止、但对象未被抓住的反例。
+### 五个前置概念
 
 五个前置概念：
 
@@ -343,11 +388,15 @@ $$
 - **Critic预热**：先校准价值估计，再让它指导策略。
 - **在线数据分布**：当前策略执行产生的状态，随学习不断改变。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 模仿策略偏离示范后易失败 | 在线PPO、过程奖励、价值预热和并行采样 | 收集自身执行数据并改善信用分配 | 表1—2、图4 | 额外交互；奖励启发式；仅仿真；部分表述与公式需核对 |
+### 追问：过程奖励模型若偏爱接近目标，怎样检查策略是否拖延真正完成？
 
-## 八、三个问题及答案
+参考答案：应把中间得分与终局完成分别统计，观察是否反复停留在高分却未完成的状态。可固定奖励模型，检查这些轨迹的判定，并用独立成功条件评价。过程反馈有助于稀疏学习，但若和任务目标不一致，PPO会有效优化错误信号。
+
+## 六、沿机制关系继续读
+
+VLA-RL直接微调[OpenVLA](082-openvla.md)式动作模型，组合PPO与过程奖励；与[DPPO](083-diffusion-rl.md)是平行后训练，前者计算离散动作序列似然，后者计算内部去噪路径似然。
+
+## 七、自测三题与参考答案
 
 **问题1：为什么动作的 log 概率要把七个 token 的条件概率相加？**
 
@@ -360,7 +409,6 @@ $$
 **问题3：式4真的优先50%成功率的任务吗？**
 
 **答案：** 不。正温度下它对成功率单调递减，且0.5在归一化时抵消。若想围绕50%取峰，需另一个随距离变化的函数，但不能擅自把那种设计当成作者实现。正确做法是指出数学与文字不一致，再核对代码和实验设置。
-
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

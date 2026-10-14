@@ -42,22 +42,21 @@
                 <span class="text-gray-500">DexMimicGen：从少量示范生成双臂灵巧数据</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="be118959a87feb2ff1c894aaa88bb64597938e525026d54f754b069e3ce9ba21"><h1>088｜DexMimicGen：从少量示范生成双臂灵巧数据</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="61e269636873afcee2784b65ecc6932ea817d7039d068a8c0a7a3c5c9215665a"><h1>088｜DexMimicGen：从少量示范生成双臂灵巧数据</h1>
 <p><a href="index.html">系列首页</a> · <a href="087-pi0.html">上一篇</a> · <a href="089-fast.html">下一篇</a></p>
 <p><strong>原论文</strong>：<em>DexMimicGen: Automated Data Generation for Bimanual Dexterous Manipulation via Imitation Learning</em>，Zhenyu Jiang、Yuqi Xie、Kevin Lin 等，2024首次公开，ICRA 2025。<a href="https://arxiv.org/abs/2410.24185">论文</a>。</p>
-<h2 id="一先用一分钟讲明白">一、先用一分钟讲明白</h2>
-<p>双手装配不能简单地把两条单手轨迹同时播放。左手可以先拿到零件、等待右手；两手抬托盘必须同时用力；倒完水之前，另一只手不能把碗搬走。DexMimicGen 的核心，就是把这些时间关系加入示范扩增。</p>
-<p>它沿用 MimicGen 的物体中心轨迹变换，但为每只手单独切分动作，并增加同步和先后约束。少量人类示范由此能在新的物体位置上重执行，成功轨迹留下用于模仿学习。</p>
-<p>作者在九个主要仿真任务、三类双臂形态上验证生成资料的用途，并展示真实 GR-1 分拣。真机实验经过仿真检查后执行轨迹、收集真实数据，不应称为仅用模拟图像训练后零样本部署。</p>
-<p>一句话：在可以分解为物体中心子任务的双手操作中，通过几何变换和动作时序约束，扩展少量示范的覆盖，代价是任务结构、物体位姿与仿真系统的先验配置。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="071-mimicgen.html">MimicGen</a>按物体关系变换单段动作，但双手各自正确移动仍可能因先后或同步错误而失败。DexMimicGen加入每手分段与双手时序约束，让生成器先处理协调，再把成功轨迹交给学习器。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
-<p>五个前置概念：**SE(3)**描述刚体位姿；<strong>物体中心表示</strong>用末端对物体的关系组织动作；<strong>异步队列</strong>允许两手独立推进片段；<strong>先决约束</strong>表示动作事件必须满足的前后关系；<strong>数字孪生</strong>提供与真实场景对应的模拟系统。</p>
-<h2 id="二研究背景与问题定义">二、研究背景与问题定义</h2>
+<p>五个前置概念：<strong>SE(3)</strong>描述刚体位姿；<strong>物体中心表示</strong>用末端对物体的关系组织动作；<strong>异步队列</strong>允许两手独立推进片段；<strong>先决约束</strong>表示动作事件必须满足的前后关系；<strong>数字孪生</strong>提供与真实场景对应的模拟系统。</p>
+<h2 id="一问题设定双手示范怎样同时保留几何与时序关系">一、问题设定：双手示范怎样同时保留几何与时序关系</h2>
+<p>双手装配不能简单地把两条单手轨迹同时播放。左手可以先拿到零件、等待右手；两手抬托盘必须同时用力；倒完水之前，另一只手不能把碗搬走。DexMimicGen 的核心，就是把这些时间关系加入示范扩增。</p>
 <p>最终策略属于离线模仿学习：输入视觉观测，输出机器人动作，训练时拟合成功演示。数据生成过程会在环境中执行轨迹，但它没有用奖励梯度优化一个探索策略。因此“在线生成数据”和“在线强化学习”并不是一回事。</p>
 <p>生成器拥有比学习策略更多的信息。它需要源片段所关联的物体、片段边界、当前物体位姿以及成功检查器。最终 visuomotor policy 从观测预测动作，不必部署整套轨迹变换逻辑。评价时若只看策略输入而忽略生成器先验，就会低估取得数据的成本。</p>
 <p>论文的主要假设包括：每只机械臂可接受末端位姿控制，手部接受开合或关节命令；任务能分成物体中心片段；接触前能够观察或估计目标物体位姿。Panda 用操作空间控制，人形平台使用 IK 处理联接到同一躯干的运动链，手指则用关节位置控制。</p>
 <p>这些假设适合抓取、交接、装配等可局部重用的动作，但不是一般双手运动的完整描述。例如织物在拉扯后形状改变，靠一个刚体位姿就未必足以重新定位所有接触点。<a href="https://arxiv.org/html/2410.24185v1">原文§III–V</a></p>
-<h2 id="三方法到底改了什么">三、方法：到底改了什么</h2>
+<h2 id="二按独立同步与顺序子任务生成双臂轨迹">二、按独立、同步与顺序子任务生成双臂轨迹</h2>
+<p>它沿用 MimicGen 的物体中心轨迹变换，但为每只手单独切分动作，并增加同步和先后约束。少量人类示范由此能在新的物体位置上重执行，成功轨迹留下用于模仿学习。</p>
 <h3 id="1-保留与物体的关系而非世界坐标">1. 保留与物体的关系，而非世界坐标</h3>
 <p>设 <span class="reading-math" data-tex="T_O"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mi>O</mi></msub></mrow><annotation encoding="application/x-tex">T_O</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">O</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是源示范中物体的世界位姿，<span class="reading-math" data-tex="T'_O"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>T</mi><mi>O</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msubsup></mrow><annotation encoding="application/x-tex">T&#x27;_O</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0272em;vertical-align:-0.2753em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7519em;"><span style="top:-2.4247em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">O</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2753em;"><span></span></span></span></span></span></span></span></span></span></span> 是新场景位姿，<span class="reading-math" data-tex="T_E(t)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mi>E</mi></msub><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">T_E(t)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05764em;">E</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">t</span><span class="mclose">)</span></span></span></span></span> 是末端轨迹。变换后的轨迹为：</p>
 <p><span class="reading-math" data-tex="T'_E(t)=T'_O T_O^{-1}T_E(t)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msubsup><mi>T</mi><mi>E</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msubsup><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo><mo>=</mo><msubsup><mi>T</mi><mi>O</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msubsup><msubsup><mi>T</mi><mi>O</mi><mrow><mo>−</mo><mn>1</mn></mrow></msubsup><msub><mi>T</mi><mi>E</mi></msub><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">T&#x27;_E(t)=T&#x27;_O T_O^{-1}T_E(t).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0519em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-2.453em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05764em;">E</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">t</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1478em;vertical-align:-0.2837em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8019em;"><span style="top:-2.453em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">O</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-2.4163em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">O</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2837em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05764em;">E</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">t</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
@@ -71,6 +70,16 @@
 <p><strong>顺序子任务</strong>：给出先决关系。如果“倒入球”还没完成，另一只手的“移走碗”就等待。它表达的是事件依赖，不能用简单的固定延迟替代，因为前一段完成时间随初始位置变化。</p>
 <p>同步与顺序有不同含义：同步要求一起做，顺序要求一个做完另一个才能做。若混淆，系统可能让两手永远互相等待，或过早开始操作。</p>
 <h3 id="3-生成和学习是分开的算法">3. 生成和学习是分开的算法</h3>
+<p>核心损失仍可概括为最大似然：</p>
+<p><span class="reading-math" data-tex="L_{\rm BC}=-\mathbb E_{(o,a)\sim D_{\rm gen}}\log\pi_\theta(a|o)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mrow><mi mathvariant="normal">B</mi><mi mathvariant="normal">C</mi></mrow></msub><mo>=</mo><mo>−</mo><msub><mi mathvariant="double-struck">E</mi><mrow><mo stretchy="false">(</mo><mi>o</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>∼</mo><msub><mi>D</mi><mrow><mi mathvariant="normal">g</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">n</mi></mrow></msub></mrow></msub><mi>log</mi><mo>⁡</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">∣</mi><mi>o</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_{\rm BC}=-\mathbb E_{(o,a)\sim D_{\rm gen}}\log\pi_\theta(a|o).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">BC</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1275em;vertical-align:-0.3775em;"></span><span class="mord">−</span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.5198em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight">o</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">a</span><span class="mclose mtight">)</span><span class="mrel mtight">∼</span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:-0.0278em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">gen</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2819em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3775em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">∣</span><span class="mord mathnormal">o</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>换成 Diffusion Policy 时采用相应生成训练，而不是把以上抽象似然式冒充其具体实现。方法优化的主要对象是资料覆盖和可用性；最终指标则是策略成功率，二者之间还隔着学习器拟合能力。</p>
+<p>共同空间变换为何保留双手配合，可以直接验证。设源左右末端世界位姿为 <span class="reading-math" data-tex="L,R"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi><mo separator="true">,</mo><mi>R</mi></mrow><annotation encoding="application/x-tex">L,R</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">L</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span></span></span></span>，两手共同左乘刚体变换 <span class="reading-math" data-tex="G"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span></span></span></span></span>，则新的相对位姿为 <span class="reading-math" data-tex="(GL)^{-1}(GR)=L^{-1}R"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>G</mi><mi>L</mi><msup><mo stretchy="false">)</mo><mrow><mo>−</mo><mn>1</mn></mrow></msup><mo stretchy="false">(</mo><mi>G</mi><mi>R</mi><mo stretchy="false">)</mo><mo>=</mo><msup><mi>L</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mi>R</mi></mrow><annotation encoding="application/x-tex">(GL)^{-1}(GR)=L^{-1}R</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">G</span><span class="mord mathnormal">L</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.00773em;">GR</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span></span></span></span>。若两手分别使用 <span class="reading-math" data-tex="G_L,G_R"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>G</mi><mi>L</mi></msub><mo separator="true">,</mo><msub><mi>G</mi><mi>R</mi></msub></mrow><annotation encoding="application/x-tex">G_L,G_R</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">L</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，结果变为 <span class="reading-math" data-tex="L^{-1}G_L^{-1}G_RR"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>L</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><msubsup><mi>G</mi><mi>L</mi><mrow><mo>−</mo><mn>1</mn></mrow></msubsup><msub><mi>G</mi><mi>R</mi></msub><mi>R</mi></mrow><annotation encoding="application/x-tex">L^{-1}G_L^{-1}G_RR</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1478em;vertical-align:-0.2935em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8542em;"><span style="top:-2.4065em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">L</span></span></span><span style="top:-3.1031em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2935em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.00773em;">R</span></span></span></span></span>，通常不再等于源关系。</p>
+<p>教学上，抬托盘时左右手各自“跟随最近对象”可能把手间距拉开；共同变换能保留几何，却仍需同步时间才能在同一时刻共同承重。原文协调片段同时要求共享变换与末端时序对齐，这两条约束解决不同错误，不能任选其一。<a href="https://arxiv.org/html/2410.24185v1">原文§IV-B</a></p>
+<h3 id="用一个例子建立理解">用一个例子建立理解</h3>
+<p>以下是未运行的教学例子。右手把球倒入左边的碗，左手随后把碗搬到垫上。换了碗的位置，右手倒球轨迹可以按碗位姿变换；左手抓碗轨迹也能变换。但若左手一抓到就离开，右手会把球倒在桌上。因此两个几何正确的局部动作，并不自动组成正确的联合任务。</p>
+<p>先决约束是“倒球完成→移碗开始”。在两手抬托盘时则不同：要求同步抬起，且两手用共同变换，保留间距。一个是时间顺序，一个是共同运动，不能用同一条等待规则粗暴处理。</p>
+<h2 id="三按双手时序约束重执行并筛选数据">三、按双手时序约束重执行并筛选数据</h2>
+<p>独立子任务、同步子任务和先后依赖各采用对应处理。物体中心变换只解决空间关系，等待与切换规则决定两手能否共同完成接触。</p>
 <pre><code class="language-text">为每条源示范：
     分别切分左右手的物体中心子任务
     标注协调片段、先决关系及参考物体
@@ -89,10 +98,22 @@
 使用成功资料训练BC-RNN、BC-RNN-GMM或Diffusion Policy
 在重新采样的初始条件中测试学习策略
 </code></pre>
-<p>核心损失仍可概括为最大似然：</p>
-<p><span class="reading-math" data-tex="L_{\rm BC}=-\mathbb E_{(o,a)\sim D_{\rm gen}}\log\pi_\theta(a|o)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mrow><mi mathvariant="normal">B</mi><mi mathvariant="normal">C</mi></mrow></msub><mo>=</mo><mo>−</mo><msub><mi mathvariant="double-struck">E</mi><mrow><mo stretchy="false">(</mo><mi>o</mi><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo>∼</mo><msub><mi>D</mi><mrow><mi mathvariant="normal">g</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">n</mi></mrow></msub></mrow></msub><mi>log</mi><mo>⁡</mo><msub><mi>π</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">∣</mi><mi>o</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_{\rm BC}=-\mathbb E_{(o,a)\sim D_{\rm gen}}\log\pi_\theta(a|o).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">BC</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1275em;vertical-align:-0.3775em;"></span><span class="mord">−</span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.5198em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight">o</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight">a</span><span class="mclose mtight">)</span><span class="mrel mtight">∼</span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:-0.0278em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">gen</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2819em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3775em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">∣</span><span class="mord mathnormal">o</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
-<p>换成 Diffusion Policy 时采用相应生成训练，而不是把以上抽象似然式冒充其具体实现。方法优化的主要对象是资料覆盖和可用性；最终指标则是策略成功率，二者之间还隔着学习器拟合能力。</p>
-<h2 id="四实验如何验证方法">四、实验如何验证方法</h2>
+<h2 id="四区分扩展初态中的训练与零样本测试">四、区分扩展初态中的训练与零样本测试</h2>
+<p>作者在九个主要仿真任务、三类双臂形态上验证生成资料的用途，并展示真实 GR-1 分拣。真机实验经过仿真检查后执行轨迹、收集真实数据，不应称为仅用模拟图像训练后零样本部署。</p>
+<p><strong>原图怎么读：</strong> <a href="#paper-088-dexmimicgen-figure-6">图6，原论文图注与图像</a>。按真机执行序列检查双手同步与目标对象变化；这些是用真实收集资料训练后的策略展示，不应直接称为只用仿真数据的零样本迁移。</p>
+<!-- figure-ref-v6:start:df64439a31fe-anchor -->
+<p><a id="paper-088-dexmimicgen-figure-6"></a></p>
+<!-- figure-ref-v6:end:df64439a31fe-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/088-dexmimicgen-s6-f6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/088-dexmimicgen-s6-f6.png" width="1624" height="924" alt="DexMimicGen: Automated Data Generation for Bimanual Dexterous Manipulation via Imitation Learning，图6：按真机执行序列检查双手同步与目标对象变化；这些是用真实收集资料训练后的策略展示，不应直接称为只用仿真数据的零样本迁移。" loading="lazy"></a><figcaption>实验图原图摘引：Zhenyu Jiang、Yuqi Xie、Kevin Lin 等，2024首次公开，ICRA 2025，HTML S6.F6，图6。<a href="https://arxiv.org/html/2410.24185v1#S6.F6" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>结果图怎么读：</strong> 图5固定各任务与学习流程，改变生成数据集规模。先看100到500或1000条的增益，再看继续扩到5000条是否仍改善；柱高的停滞说明生成数量不是唯一限制，不能把一次扩增的收益线性外推到任意更大数据集。</p>
+<!-- figure-ref-v6:start:63d9dae3d568-anchor -->
+<p><a id="paper-088-dexmimicgen-figure-5"></a></p>
+<!-- figure-ref-v6:end:63d9dae3d568-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/088-dexmimicgen-s6-f5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/088-dexmimicgen-s6-f5.png" width="1824" height="939" alt="DexMimicGen: Automated Data Generation for Bimanual Dexterous Manipulation via Imitation Learning，图5：图5固定各任务与学习流程，改变生成数据集规模。先看100到500或1000条的增益，再看继续扩到5000条是否仍改善；柱高的停滞说明生成数量不是唯一限制，不能把一次扩增的收益线性外推到任意更大数据集。" loading="lazy"></a><figcaption>实验图原图摘引：Zhenyu Jiang、Yuqi Xie、Kevin Lin 等，2024首次公开，ICRA 2025，HTML S6.F5，图5。<a href="https://arxiv.org/html/2410.24185v1#S6.F5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -139,62 +160,22 @@
 </tbody></table></div>
 <p>完整生成算力、训练更新预算和每个检查点测试次数在所读主文中未逐项核实。21K是跨设置生成量，不是九个主任务各有21K；主表明确使用各1000条。</p>
 <p>只有成功轨迹留下，使数据更像可模仿专家，但也造成选择偏差：更难的初始状态若生成失败较多，最终资料可能低估它们。比较生成规模时还应记录尝试次数、成功留存率和初始状态覆盖。</p>
-<h2 id="五结果证据到底有多强">五、结果：证据到底有多强</h2>
-<p><strong>表I：资料扩增确实有用。</strong> Drawer Cleanup 的 DP 从源资料0.7%升到生成资料76.0%，绝对提升75.3个百分点；Can Sorting 从0.7%到97.3%。这是在特定任务、资料与选模规程下的结果，不代表任何五条示范都能实现同样跃升。</p>
-<p>表I也显示生成器和策略是不同维度：Box Cleanup 中 BC-RNN 为96.7%，DP为92.0%；Pouring中也是BC-RNN更高。数据方法有效，不意味着扩散架构每个任务都最好。GMM头在灵巧手任务的相对表现，也未延续所有早期单臂观察。</p>
-<p><strong>表II：扩大的是训练资料覆盖。</strong> Piece Assembly 从D0条件74.0%到更难D2条件44.0%，Box Cleanup从96.7%到78.7%。生成器在广分布里确有用途，但复杂度增加仍导致下降。这里是分别用相应广分布生成资料再训练，不能写成“只在D0训练策略直接泛化D2”。</p>
-<p><strong>表III：几何重用优于简单加噪。</strong> Tray Lift 中同样1000条资料，DemoNoise为16.7%，DexMimicGen为75.3%，相差58.6个百分点。Pouring相差52.6个百分点，因此不能把正文笼统的“58%”改写成所有任务至少58个百分点；相对和绝对增幅必须分开。</p>
-<p><strong>图5与§VI-C：扩增并非无限收益。</strong> 100到500/1000条的提升明显，1000到5000条未必继续提高。数据多样性、模式重复和学习器容量都可能影响边际效用，论文没有将所有原因完全分离。顺序约束在Pouring的比较为88.7%对76.7%，但在Drawer同源片段方案仍可更好，说明资料组合方式与约束要共同考虑。</p>
-<p><strong>图6、§VI-D：真机的90%对应什么。</strong> 四条人类示范先进入数字孪生；新轨迹在仿真成功后发送真机，再采集成功真实示范供DP训练。40条对四条资料得到90%对0%，红蓝两种物体各10次，即90%对应20次中18次成功。真实采集仍需复位，仿真只是一层可行性检查，不是物理安全证明。<a href="https://arxiv.org/html/2410.24185v1#S6">原文实验§VI</a></p>
-<h2 id="六贡献代价与局限">六、贡献、代价与局限</h2>
-<p>新意是给原先单序列的物体中心扩增加入双手事件结构：异步、同步与先决关系。它把相当难的遥操作规模问题转为“少量演示加明确结构能生成多少有效变化”。</p>
+<h3 id="结果证据到底有多强">结果：证据到底有多强</h3>
+<p><strong><a href="https://arxiv.org/html/2410.24185v1#S5.T1">表I</a>：资料扩增确实有用。</strong> Drawer Cleanup 的 DP 从源资料0.7%升到生成资料76.0%，绝对提升75.3个百分点；Can Sorting 从0.7%到97.3%。这是在特定任务、资料与选模规程下的结果，不代表任何五条示范都能实现同样跃升。</p>
+<p><a href="https://arxiv.org/html/2410.24185v1#S5.T1">表I</a>也显示生成器和策略是不同维度：Box Cleanup 中 BC-RNN 为96.7%，DP为92.0%；Pouring中也是BC-RNN更高。数据方法有效，不意味着扩散架构每个任务都最好。GMM头在灵巧手任务的相对表现，也未延续所有早期单臂观察。</p>
+<p><strong><a href="https://arxiv.org/html/2410.24185v1#S6.T2">表II</a>：扩大的是训练资料覆盖。</strong> Piece Assembly 从D0条件74.0%到更难D2条件44.0%，Box Cleanup从96.7%到78.7%。生成器在广分布里确有用途，但复杂度增加仍导致下降。这里是分别用相应广分布生成资料再训练，不能写成“只在D0训练策略直接泛化D2”。</p>
+<p><strong><a href="https://arxiv.org/html/2410.24185v1#S6.T3">表III</a>：几何重用优于简单加噪。</strong> Tray Lift 中同样1000条资料，DemoNoise为16.7%，DexMimicGen为75.3%，相差58.6个百分点。Pouring相差52.6个百分点，因此不能把正文笼统的“58%”改写成所有任务至少58个百分点；相对和绝对增幅必须分开。</p>
+<p><strong><a href="#paper-088-dexmimicgen-figure-5">图5</a>与§VI-C：扩增并非无限收益。</strong> 100到500/1000条的提升明显，1000到5000条未必继续提高。数据多样性、模式重复和学习器容量都可能影响边际效用，论文没有将所有原因完全分离。顺序约束在Pouring的比较为88.7%对76.7%，但在Drawer同源片段方案仍可更好，说明资料组合方式与约束要共同考虑。</p>
+<p><strong><a href="#paper-088-dexmimicgen-figure-6">图6</a>、§VI-D：真机的90%对应什么。</strong> 四条人类示范先进入数字孪生；新轨迹在仿真成功后发送真机，再采集成功真实示范供DP训练。40条对四条资料得到90%对0%，红蓝两种物体各10次，即90%对应20次中18次成功。真实采集仍需复位，仿真只是一层可行性检查，不是物理安全证明。<a href="https://arxiv.org/html/2410.24185v1#S6">原文实验§VI</a></p>
+<h2 id="五重执行成功不保证所有接触节奏可复用">五、重执行成功不保证所有接触节奏可复用</h2>
 <p>工程代价包括仿真资产、物体位姿、子任务标注、控制器和成功筛选器。机器人动作所受的力学约束不会因为刚体变换保留几何关系而消失。数字孪生越不准确，仿真通过与真机完成之间的差距越大。</p>
 <p>我的分析是，方法最适合“技能结构固定、初始几何变化丰富”的问题。若任务要求因突发事件切换全新策略，生成器仍受已有源片段限制。丢弃失败也意味着恢复策略覆盖可能不足，后续可考虑保留可恢复失败并补充纠正。</p>
 <p>三种子取最高检查点体现可达到的性能，但比固定训练预算后的最终模型更乐观；这不否定相对比较，只要求复现时采用同一规程。真机只有一个分拣任务，无法由此推到所有仿真任务都能顺利迁移。</p>
-<h2 id="七用一个例子建立理解">七、用一个例子建立理解</h2>
-<p>以下是未运行的教学例子。右手把球倒入左边的碗，左手随后把碗搬到垫上。换了碗的位置，右手倒球轨迹可以按碗位姿变换；左手抓碗轨迹也能变换。但若左手一抓到就离开，右手会把球倒在桌上。因此两个几何正确的局部动作，并不自动组成正确的联合任务。</p>
-<p>先决约束是“倒球完成→移碗开始”。在两手抬托盘时则不同：要求同步抬起，且两手用共同变换，保留间距。一个是时间顺序，一个是共同运动，不能用同一条等待规则粗暴处理。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者的改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>双手示范难规模化</td>
-<td>自动几何扩增</td>
-<td>重用少量技能结构</td>
-<td>表I</td>
-<td>依赖源技能覆盖</td>
-</tr>
-<tr>
-<td>两手进度不一致</td>
-<td>独立队列</td>
-<td>不强制无关动作同步</td>
-<td>多类任务</td>
-<td>要有正确分段</td>
-</tr>
-<tr>
-<td>协调动作被分开变换</td>
-<td>共同变换与同步</td>
-<td>保持双手相对几何</td>
-<td>策略与方案比较</td>
-<td>不保证力学可行</td>
-</tr>
-<tr>
-<td>新轨迹直接真机风险大</td>
-<td>仿真检查后真实采集</td>
-<td>筛去明显失败方案</td>
-<td>分拣20次测试</td>
-<td>仍需真机时间和复位</td>
-</tr>
-</tbody></table></div>
-<p>阅读范围：核对 arXiv v1 方法、主实验及<a href="https://dexmimicgen.github.io/">官方项目页</a>。该版本附录主要为贡献说明；未独立复现，未把未核实的训练预算填写为零。</p>
-<h2 id="八三个问题及答案">八、三个问题及答案</h2>
+<h3 id="追问人为延长一只手的等待段会怎样影响生成率与学习质量">追问：人为延长一只手的等待段，会怎样影响生成率与学习质量？</h3>
+<p>参考答案：等待可能帮助另一只手完成前置条件，从而提高生成成功；也可能制造大量静止帧，使策略倾向停住或难以识别切换。应同时记录生成率、等待时长分布和最终策略的阶段转换表现。数据生产更稳与监督更容易学习并非同一目标。</p>
+<h2 id="六沿机制关系继续读">六、沿机制关系继续读</h2>
+<p>本篇直接承接<a href="071-mimicgen.html">MimicGen</a>的对象中心生成，新增双手队列、同步与事件先后；<a href="077-dexcap.html">DexCap</a>则是平行采集路线，人体示范重定向并不自动提供这里的仿真成功筛选。</p>
+<h2 id="七自测三题与参考答案">七、自测三题与参考答案</h2>
 <p><strong>问题1：为什么两只手都正确地跟随各自物体，仍可能做不成任务？</strong></p>
 <p>答案：局部几何正确不保证联合时间关系正确。两手可能抢先移动共享物体，或者交接时还没同时到位。必须额外表达同步或先决关系；这是从单臂扩增到双臂扩增的核心差异。</p>
 <p><strong>问题2：D1/D2实验是否证明策略能零样本外推到更宽位置分布？</strong></p>
@@ -212,17 +193,13 @@
 
 **原论文**：*DexMimicGen: Automated Data Generation for Bimanual Dexterous Manipulation via Imitation Learning*，Zhenyu Jiang、Yuqi Xie、Kevin Lin 等，2024首次公开，ICRA 2025。[论文](https://arxiv.org/abs/2410.24185)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
+
+[MimicGen](071-mimicgen.md)按物体关系变换单段动作，但双手各自正确移动仍可能因先后或同步错误而失败。DexMimicGen加入每手分段与双手时序约束，让生成器先处理协调，再把成功轨迹交给学习器。
+
+## 一、问题设定：双手示范怎样同时保留几何与时序关系
 
 双手装配不能简单地把两条单手轨迹同时播放。左手可以先拿到零件、等待右手；两手抬托盘必须同时用力；倒完水之前，另一只手不能把碗搬走。DexMimicGen 的核心，就是把这些时间关系加入示范扩增。
-
-它沿用 MimicGen 的物体中心轨迹变换，但为每只手单独切分动作，并增加同步和先后约束。少量人类示范由此能在新的物体位置上重执行，成功轨迹留下用于模仿学习。
-
-作者在九个主要仿真任务、三类双臂形态上验证生成资料的用途，并展示真实 GR-1 分拣。真机实验经过仿真检查后执行轨迹、收集真实数据，不应称为仅用模拟图像训练后零样本部署。
-
-一句话：在可以分解为物体中心子任务的双手操作中，通过几何变换和动作时序约束，扩展少量示范的覆盖，代价是任务结构、物体位姿与仿真系统的先验配置。
-
-## 二、研究背景与问题定义
 
 最终策略属于离线模仿学习：输入视觉观测，输出机器人动作，训练时拟合成功演示。数据生成过程会在环境中执行轨迹，但它没有用奖励梯度优化一个探索策略。因此“在线生成数据”和“在线强化学习”并不是一回事。
 
@@ -232,7 +209,9 @@
 
 这些假设适合抓取、交接、装配等可局部重用的动作，但不是一般双手运动的完整描述。例如织物在拉扯后形状改变，靠一个刚体位姿就未必足以重新定位所有接触点。[原文§III–V](https://arxiv.org/html/2410.24185v1)
 
-## 三、方法：到底改了什么
+## 二、按独立、同步与顺序子任务生成双臂轨迹
+
+它沿用 MimicGen 的物体中心轨迹变换，但为每只手单独切分动作，并增加同步和先后约束。少量人类示范由此能在新的物体位置上重执行，成功轨迹留下用于模仿学习。
 
 ### 1. 保留与物体的关系，而非世界坐标
 
@@ -264,6 +243,28 @@ $$
 
 ### 3. 生成和学习是分开的算法
 
+核心损失仍可概括为最大似然：
+
+$$
+L_{\rm BC}=-\mathbb E_{(o,a)\sim D_{\rm gen}}\log\pi_\theta(a|o).
+$$
+
+换成 Diffusion Policy 时采用相应生成训练，而不是把以上抽象似然式冒充其具体实现。方法优化的主要对象是资料覆盖和可用性；最终指标则是策略成功率，二者之间还隔着学习器拟合能力。
+
+共同空间变换为何保留双手配合，可以直接验证。设源左右末端世界位姿为 $L,R$，两手共同左乘刚体变换 $G$，则新的相对位姿为 $(GL)^{-1}(GR)=L^{-1}R$。若两手分别使用 $G_L,G_R$，结果变为 $L^{-1}G_L^{-1}G_RR$，通常不再等于源关系。
+
+教学上，抬托盘时左右手各自“跟随最近对象”可能把手间距拉开；共同变换能保留几何，却仍需同步时间才能在同一时刻共同承重。原文协调片段同时要求共享变换与末端时序对齐，这两条约束解决不同错误，不能任选其一。[原文§IV-B](https://arxiv.org/html/2410.24185v1)
+
+### 用一个例子建立理解
+
+以下是未运行的教学例子。右手把球倒入左边的碗，左手随后把碗搬到垫上。换了碗的位置，右手倒球轨迹可以按碗位姿变换；左手抓碗轨迹也能变换。但若左手一抓到就离开，右手会把球倒在桌上。因此两个几何正确的局部动作，并不自动组成正确的联合任务。
+
+先决约束是“倒球完成→移碗开始”。在两手抬托盘时则不同：要求同步抬起，且两手用共同变换，保留间距。一个是时间顺序，一个是共同运动，不能用同一条等待规则粗暴处理。
+
+## 三、按双手时序约束重执行并筛选数据
+
+独立子任务、同步子任务和先后依赖各采用对应处理。物体中心变换只解决空间关系，等待与切换规则决定两手能否共同完成接触。
+
 ~~~text
 为每条源示范：
     分别切分左右手的物体中心子任务
@@ -284,15 +285,27 @@ $$
 在重新采样的初始条件中测试学习策略
 ~~~
 
-核心损失仍可概括为最大似然：
+## 四、区分扩展初态中的训练与零样本测试
 
-$$
-L_{\rm BC}=-\mathbb E_{(o,a)\sim D_{\rm gen}}\log\pi_\theta(a|o).
-$$
+作者在九个主要仿真任务、三类双臂形态上验证生成资料的用途，并展示真实 GR-1 分拣。真机实验经过仿真检查后执行轨迹、收集真实数据，不应称为仅用模拟图像训练后零样本部署。
 
-换成 Diffusion Policy 时采用相应生成训练，而不是把以上抽象似然式冒充其具体实现。方法优化的主要对象是资料覆盖和可用性；最终指标则是策略成功率，二者之间还隔着学习器拟合能力。
+**原图怎么读：** [图6，原论文图注与图像](#paper-088-dexmimicgen-figure-6)。按真机执行序列检查双手同步与目标对象变化；这些是用真实收集资料训练后的策略展示，不应直接称为只用仿真数据的零样本迁移。
 
-## 四、实验如何验证方法
+
+&lt;!-- figure-ref-v6:start:df64439a31fe-anchor --&gt;
+&lt;a id=&quot;paper-088-dexmimicgen-figure-6&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:df64439a31fe-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/088-dexmimicgen-s6-f6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/088-dexmimicgen-s6-f6.png&quot; width=&quot;1624&quot; height=&quot;924&quot; alt=&quot;DexMimicGen: Automated Data Generation for Bimanual Dexterous Manipulation via Imitation Learning，图6：按真机执行序列检查双手同步与目标对象变化；这些是用真实收集资料训练后的策略展示，不应直接称为只用仿真数据的零样本迁移。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验图原图摘引：Zhenyu Jiang、Yuqi Xie、Kevin Lin 等，2024首次公开，ICRA 2025，HTML S6.F6，图6。&lt;a href=&quot;https://arxiv.org/html/2410.24185v1#S6.F6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+**结果图怎么读：** 图5固定各任务与学习流程，改变生成数据集规模。先看100到500或1000条的增益，再看继续扩到5000条是否仍改善；柱高的停滞说明生成数量不是唯一限制，不能把一次扩增的收益线性外推到任意更大数据集。
+
+
+&lt;!-- figure-ref-v6:start:63d9dae3d568-anchor --&gt;
+&lt;a id=&quot;paper-088-dexmimicgen-figure-5&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:63d9dae3d568-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/robot-learn/assets/papers/088-dexmimicgen-s6-f5.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/robot-learn/assets/papers/088-dexmimicgen-s6-f5.png&quot; width=&quot;1824&quot; height=&quot;939&quot; alt=&quot;DexMimicGen: Automated Data Generation for Bimanual Dexterous Manipulation via Imitation Learning，图5：图5固定各任务与学习流程，改变生成数据集规模。先看100到500或1000条的增益，再看继续扩到5000条是否仍改善；柱高的停滞说明生成数量不是唯一限制，不能把一次扩增的收益线性外推到任意更大数据集。&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验图原图摘引：Zhenyu Jiang、Yuqi Xie、Kevin Lin 等，2024首次公开，ICRA 2025，HTML S6.F5，图5。&lt;a href=&quot;https://arxiv.org/html/2410.24185v1#S6.F5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 | 设计 | 原文设置 | 要回答的问题 |
 |---|---|---|
@@ -308,23 +321,21 @@ $$
 
 只有成功轨迹留下，使数据更像可模仿专家，但也造成选择偏差：更难的初始状态若生成失败较多，最终资料可能低估它们。比较生成规模时还应记录尝试次数、成功留存率和初始状态覆盖。
 
-## 五、结果：证据到底有多强
+### 结果：证据到底有多强
 
-**表I：资料扩增确实有用。** Drawer Cleanup 的 DP 从源资料0.7%升到生成资料76.0%，绝对提升75.3个百分点；Can Sorting 从0.7%到97.3%。这是在特定任务、资料与选模规程下的结果，不代表任何五条示范都能实现同样跃升。
+**[表I](https://arxiv.org/html/2410.24185v1#S5.T1)：资料扩增确实有用。** Drawer Cleanup 的 DP 从源资料0.7%升到生成资料76.0%，绝对提升75.3个百分点；Can Sorting 从0.7%到97.3%。这是在特定任务、资料与选模规程下的结果，不代表任何五条示范都能实现同样跃升。
 
-表I也显示生成器和策略是不同维度：Box Cleanup 中 BC-RNN 为96.7%，DP为92.0%；Pouring中也是BC-RNN更高。数据方法有效，不意味着扩散架构每个任务都最好。GMM头在灵巧手任务的相对表现，也未延续所有早期单臂观察。
+[表I](https://arxiv.org/html/2410.24185v1#S5.T1)也显示生成器和策略是不同维度：Box Cleanup 中 BC-RNN 为96.7%，DP为92.0%；Pouring中也是BC-RNN更高。数据方法有效，不意味着扩散架构每个任务都最好。GMM头在灵巧手任务的相对表现，也未延续所有早期单臂观察。
 
-**表II：扩大的是训练资料覆盖。** Piece Assembly 从D0条件74.0%到更难D2条件44.0%，Box Cleanup从96.7%到78.7%。生成器在广分布里确有用途，但复杂度增加仍导致下降。这里是分别用相应广分布生成资料再训练，不能写成“只在D0训练策略直接泛化D2”。
+**[表II](https://arxiv.org/html/2410.24185v1#S6.T2)：扩大的是训练资料覆盖。** Piece Assembly 从D0条件74.0%到更难D2条件44.0%，Box Cleanup从96.7%到78.7%。生成器在广分布里确有用途，但复杂度增加仍导致下降。这里是分别用相应广分布生成资料再训练，不能写成“只在D0训练策略直接泛化D2”。
 
-**表III：几何重用优于简单加噪。** Tray Lift 中同样1000条资料，DemoNoise为16.7%，DexMimicGen为75.3%，相差58.6个百分点。Pouring相差52.6个百分点，因此不能把正文笼统的“58%”改写成所有任务至少58个百分点；相对和绝对增幅必须分开。
+**[表III](https://arxiv.org/html/2410.24185v1#S6.T3)：几何重用优于简单加噪。** Tray Lift 中同样1000条资料，DemoNoise为16.7%，DexMimicGen为75.3%，相差58.6个百分点。Pouring相差52.6个百分点，因此不能把正文笼统的“58%”改写成所有任务至少58个百分点；相对和绝对增幅必须分开。
 
-**图5与§VI-C：扩增并非无限收益。** 100到500/1000条的提升明显，1000到5000条未必继续提高。数据多样性、模式重复和学习器容量都可能影响边际效用，论文没有将所有原因完全分离。顺序约束在Pouring的比较为88.7%对76.7%，但在Drawer同源片段方案仍可更好，说明资料组合方式与约束要共同考虑。
+**[图5](#paper-088-dexmimicgen-figure-5)与§VI-C：扩增并非无限收益。** 100到500/1000条的提升明显，1000到5000条未必继续提高。数据多样性、模式重复和学习器容量都可能影响边际效用，论文没有将所有原因完全分离。顺序约束在Pouring的比较为88.7%对76.7%，但在Drawer同源片段方案仍可更好，说明资料组合方式与约束要共同考虑。
 
-**图6、§VI-D：真机的90%对应什么。** 四条人类示范先进入数字孪生；新轨迹在仿真成功后发送真机，再采集成功真实示范供DP训练。40条对四条资料得到90%对0%，红蓝两种物体各10次，即90%对应20次中18次成功。真实采集仍需复位，仿真只是一层可行性检查，不是物理安全证明。[原文实验§VI](https://arxiv.org/html/2410.24185v1#S6)
+**[图6](#paper-088-dexmimicgen-figure-6)、§VI-D：真机的90%对应什么。** 四条人类示范先进入数字孪生；新轨迹在仿真成功后发送真机，再采集成功真实示范供DP训练。40条对四条资料得到90%对0%，红蓝两种物体各10次，即90%对应20次中18次成功。真实采集仍需复位，仿真只是一层可行性检查，不是物理安全证明。[原文实验§VI](https://arxiv.org/html/2410.24185v1#S6)
 
-## 六、贡献、代价与局限
-
-新意是给原先单序列的物体中心扩增加入双手事件结构：异步、同步与先决关系。它把相当难的遥操作规模问题转为“少量演示加明确结构能生成多少有效变化”。
+## 五、重执行成功不保证所有接触节奏可复用
 
 工程代价包括仿真资产、物体位姿、子任务标注、控制器和成功筛选器。机器人动作所受的力学约束不会因为刚体变换保留几何关系而消失。数字孪生越不准确，仿真通过与真机完成之间的差距越大。
 
@@ -332,24 +343,19 @@ $$
 
 三种子取最高检查点体现可达到的性能，但比固定训练预算后的最终模型更乐观；这不否定相对比较，只要求复现时采用同一规程。真机只有一个分拣任务，无法由此推到所有仿真任务都能顺利迁移。
 
-## 七、用一个例子建立理解
-
-以下是未运行的教学例子。右手把球倒入左边的碗，左手随后把碗搬到垫上。换了碗的位置，右手倒球轨迹可以按碗位姿变换；左手抓碗轨迹也能变换。但若左手一抓到就离开，右手会把球倒在桌上。因此两个几何正确的局部动作，并不自动组成正确的联合任务。
-
-先决约束是“倒球完成→移碗开始”。在两手抬托盘时则不同：要求同步抬起，且两手用共同变换，保留间距。一个是时间顺序，一个是共同运动，不能用同一条等待规则粗暴处理。
+### 五个前置概念
 
 五个前置概念：**SE(3)**描述刚体位姿；**物体中心表示**用末端对物体的关系组织动作；**异步队列**允许两手独立推进片段；**先决约束**表示动作事件必须满足的前后关系；**数字孪生**提供与真实场景对应的模拟系统。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 双手示范难规模化 | 自动几何扩增 | 重用少量技能结构 | 表I | 依赖源技能覆盖 |
-| 两手进度不一致 | 独立队列 | 不强制无关动作同步 | 多类任务 | 要有正确分段 |
-| 协调动作被分开变换 | 共同变换与同步 | 保持双手相对几何 | 策略与方案比较 | 不保证力学可行 |
-| 新轨迹直接真机风险大 | 仿真检查后真实采集 | 筛去明显失败方案 | 分拣20次测试 | 仍需真机时间和复位 |
+### 追问：人为延长一只手的等待段，会怎样影响生成率与学习质量？
 
-阅读范围：核对 arXiv v1 方法、主实验及[官方项目页](https://dexmimicgen.github.io/)。该版本附录主要为贡献说明；未独立复现，未把未核实的训练预算填写为零。
+参考答案：等待可能帮助另一只手完成前置条件，从而提高生成成功；也可能制造大量静止帧，使策略倾向停住或难以识别切换。应同时记录生成率、等待时长分布和最终策略的阶段转换表现。数据生产更稳与监督更容易学习并非同一目标。
 
-## 八、三个问题及答案
+## 六、沿机制关系继续读
+
+本篇直接承接[MimicGen](071-mimicgen.md)的对象中心生成，新增双手队列、同步与事件先后；[DexCap](077-dexcap.md)则是平行采集路线，人体示范重定向并不自动提供这里的仿真成功筛选。
+
+## 七、自测三题与参考答案
 
 **问题1：为什么两只手都正确地跟随各自物体，仍可能做不成任务？**
 
@@ -362,7 +368,6 @@ $$
 **问题3：真实90%能否称为纯仿真到真实迁移？**
 
 答案：不能。仿真生成的轨迹还在真机上执行并收集真实观测，最终策略使用40条成功真实资料。减少的是人持续遥操作的劳动，真实机器人执行与环境复位仍然存在。
-
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>
