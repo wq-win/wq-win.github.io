@@ -300,6 +300,32 @@
             notesToggle.hidden = true;
         }
 
+        // Use the header's *visible* geometry, not a reserved desktop height.
+        // The site header can scroll away with its host or change height on mobile.
+        function updateStickyGeometry() {
+            if (destroyed) return;
+            let bottom = 0;
+            document.querySelectorAll('#site-header header, header.site-header').forEach((header) => {
+                const style = global.getComputedStyle(header);
+                const rect = header.getBoundingClientRect();
+                if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && rect.bottom > 0 && rect.top < global.innerHeight) {
+                    bottom = Math.max(bottom, Math.min(global.innerHeight, rect.bottom));
+                }
+            });
+            const top = Math.max(0, Math.ceil(bottom));
+            layout.style.setProperty('--rg-sticky-top', top + 'px');
+            const railHeight = wide.matches ? 0 : left.getBoundingClientRect().height;
+            layout.style.setProperty('--rg-anchor-offset', Math.ceil(top + railHeight + 16) + 'px');
+            // Measure the actual disclosure trigger: wrapped labels, zoom and a
+            // resized mobile header must not put the popup below the viewport.
+            [tocDisclosure, symbolsDisclosure].forEach((disclosure) => {
+                const panel = disclosure.querySelector('.rg-toc, .rg-symbol-panel');
+                if (wide.matches) { panel.style.maxHeight = ''; return; }
+                const triggerBottom = disclosure.querySelector('summary').getBoundingClientRect().bottom;
+                panel.style.maxHeight = Math.max(0, Math.min(550, global.innerHeight - triggerBottom - 19)) + 'px';
+            });
+        }
+
         function layoutNotes() {
             if (!wide.matches) {
                 notes.style.height = '';
@@ -320,10 +346,10 @@
         }
         function scheduleLayout() {
             if (layoutFrame || destroyed) return;
-            layoutFrame = global.requestAnimationFrame(() => { layoutFrame = 0; layoutNotes(); });
+            layoutFrame = global.requestAnimationFrame(() => { layoutFrame = 0; updateStickyGeometry(); layoutNotes(); });
         }
         function updateActive() {
-            const line = Math.min(230, global.innerHeight * 0.3);
+            const line = Math.max(Number.parseFloat(layout.style.getPropertyValue('--rg-anchor-offset')) || 0, Math.min(230, global.innerHeight * 0.3));
             let index = 0;
             for (let i = 1; i < sections.length; i += 1) {
                 if (sections[i].heading.getBoundingClientRect().top <= line) index = i;
@@ -396,8 +422,8 @@
             const disclosure = event.target.closest('details');
             if (disclosure && disclosure.open) { disclosure.open = false; disclosure.querySelector('summary').focus(); }
         });
-        listen(tocDisclosure, 'toggle', () => { if (!wide.matches && tocDisclosure.open) symbolsDisclosure.open = false; });
-        listen(symbolsDisclosure, 'toggle', () => { if (!wide.matches && symbolsDisclosure.open) tocDisclosure.open = false; });
+        listen(tocDisclosure, 'toggle', () => { if (!wide.matches && tocDisclosure.open) symbolsDisclosure.open = false; scheduleLayout(); });
+        listen(symbolsDisclosure, 'toggle', () => { if (!wide.matches && symbolsDisclosure.open) tocDisclosure.open = false; scheduleLayout(); });
         listen(notesToggle, 'click', () => {
             const hidden = layout.classList.toggle('rg-notes-hidden');
             notes.inert = hidden;
@@ -406,28 +432,43 @@
         });
         listen(global, 'scroll', () => {
             if (scrollFrame) return;
-            scrollFrame = global.requestAnimationFrame(() => { scrollFrame = 0; updateActive(); });
+            scrollFrame = global.requestAnimationFrame(() => { scrollFrame = 0; updateStickyGeometry(); updateActive(); });
         }, { passive: true });
         listen(global, 'resize', () => { scheduleLayout(); updateActive(); });
         if (typeof wide.addEventListener === 'function') listen(wide, 'change', setDisclosure);
         else if (wide.addListener) { wide.addListener(setDisclosure); cleanups.push(() => wide.removeListener(setDisclosure)); }
+        const headerHost = document.getElementById('site-header') || document.querySelector('header.site-header');
+        if (headerHost && typeof global.MutationObserver === 'function') {
+            const headerObserver = new global.MutationObserver(scheduleLayout);
+            headerObserver.observe(headerHost, { childList: true, subtree: true, attributes: true });
+            cleanups.push(() => headerObserver.disconnect());
+            listen(headerHost, 'transitionend', scheduleLayout);
+        }
+        if (global.visualViewport) {
+            listen(global.visualViewport, 'resize', scheduleLayout);
+            listen(global.visualViewport, 'scroll', scheduleLayout);
+        }
         if (typeof global.ResizeObserver === 'function') {
             const resizeObserver = new global.ResizeObserver(scheduleLayout);
             resizeObserver.observe(container);
             resizeObserver.observe(article);
+            resizeObserver.observe(left);
+            if (headerHost) resizeObserver.observe(headerHost);
+            document.querySelectorAll('#site-header header, header.site-header').forEach((header) => resizeObserver.observe(header));
             [...notes.children].forEach((note) => resizeObserver.observe(note));
             cleanups.push(() => resizeObserver.disconnect());
         }
         listen(container, 'load', scheduleLayout, true);
         if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleLayout);
         setDisclosure();
+        updateStickyGeometry();
         updateActive();
         scheduleLayout();
         const state = {
             conceptCount: firsts.size,
             occurrences: Object.fromEntries(counts),
             sections: sections.map((section) => ({ title: section.title, id: section.heading && section.heading.id, symbols: section.symbols.map((symbol) => symbol.id) })),
-            refresh() { activeIndex = -1; updateActive(); scheduleLayout(); },
+            refresh() { activeIndex = -1; updateStickyGeometry(); updateActive(); scheduleLayout(); },
             getAlignment() { return [...notes.children].filter((note) => note.dataset.term).map((note) => ({ id: note.dataset.term, top: note.getBoundingClientRect().top, height: note.offsetHeight, anchor: firsts.get(note.dataset.term).getBoundingClientRect().top })); },
             destroy() {
                 destroyed = true;
