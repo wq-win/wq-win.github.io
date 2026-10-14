@@ -4,17 +4,13 @@
 
 **原论文**：*Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization*，Xiaoyuan Cheng、Wenxuan Yuan 等，2026。[论文](https://arxiv.org/abs/2605.26282)。
 
-## 一、一分钟理解：搜索越努力，可能越会钻价值函数的空子
+### 先接住前作的问题
+
+[TD-MPC2](070-tdmpc2.md)用潜模型和末端价值在线搜索，搜索策略却可能利用价值学习未充分覆盖的动作。MBDPO在模型中构造带行为支持约束的扩散目标，再摊销到策略，研究价值估计与实际选动作分布的关系。
+
+## 一、问题设定：模型内搜索怎样避免追逐支持外高估
 
 世界模型能预测未来，不代表搜索一定找到真实好动作。假设价值函数主要熟悉回放数据中的行为，规划器却专门寻找其预测最高的动作，那么搜索可能不断找到估计错误的高峰。MBDPO 研究这种**搜索策略与价值学习之间的不一致**。
-
-它不在每次部署时运行昂贵的候选轨迹搜索，而是在训练中用世界模型评价候选动作序列，根据回报与行为约束估计扩散分数场，再把这个场学习成网络。部署时通过该网络逐步去噪生成动作，从而将搜索结果摊销进策略。
-
-论文在在线、离线预训练和离线到在线适配三种设置中报告收益，但验证全部在仿真。理论针对模型内、受正则的目标分布；不能直接理解成真实机器人回报必然单调改善。（§3—4、§6）
-
-一句话：在世界模型连续控制中，通过行为约束的模型内轨迹加权与扩散策略学习减少搜索漂移，代价是额外采样训练、近似行为密度，以及仍然存在的模型和价值误差。
-
-## 二、背景与定义：不是所有分布差异都是同一件事
 
 模型包含状态编码器 $z=E(s)$、潜在转移 $z'=F(z,a)$、奖励预测 $R(z,a)$、价值函数 $Q(z,a)$，并在多任务条件下使用任务嵌入。策略优化动作序列，以滚动时域方式执行。
 
@@ -24,7 +20,11 @@
 
 原文式4用KL距离上界描述不同策略对应Bellman算子的差异。这是**上界**，不是误差一定增大的下界。较大KL使保证变弱，却不能单凭该式证明搜索必然有害，更不能证明任何MPPI方法都不属于有效控制优化。
 
-## 三、方法：用模型回报塑造扩散目标
+## 二、以模型回报和行为约束塑造扩散分数
+
+它不在每次部署时运行昂贵的候选轨迹搜索，而是在训练中用世界模型评价候选动作序列，根据回报与行为约束估计扩散分数场，再把这个场学习成网络。部署时通过该网络逐步去噪生成动作，从而将搜索结果摊销进策略。
+
+论文在在线、离线预训练和离线到在线适配三种设置中报告收益，但验证全部在仿真。理论针对模型内、受正则的目标分布；不能直接理解成真实机器人回报必然单调改善。（§3—4、§6）
 
 ### 1. 带行为先验的理想目标
 
@@ -78,6 +78,20 @@ $\bar\alpha_\tau$描述该噪声级别的信号保留量。直觉是把动作分
 
 因此本文不会把“严格留在信任域内”“完全消除不一致”当作实际神经网络系统已获得的保证。合理结论是用结构和正则减轻问题，并用实验评估效果。
 
+有限候选为何重要，可以看极端情况。教学设只采一个候选，归一化权重必为1，无论它的模型回报多高多低，式15中的加权候选项都不再受回报影响。多候选才提供相对优劣信息，但若一个权重接近1，其余近0，有效比较仍可能退化成单样本。
+
+有限样本的“分子除以分母”一般有偏，增加样本是在改善估计，不会同时消除世界模型和价值函数的系统误差。原文将候选滚动放在分数网络训练中，因此部署便宜应与训练计算分开记账；这不是用零搜索成本获得了原本所有规划信息。[原文式15—16与实践算法](https://arxiv.org/html/2605.26282v1)
+
+### 教学例子与前置概念
+
+以下是未运行的例子。数据多为缓慢推块，世界模型却误以为高速穿过物体能获得高奖励。无约束搜索可能选这条“捷径”；能量惩罚会降低这类少见动作的权重，使策略优先尝试有数据支持的推动。
+
+如果任务确实需要高速击打，过强能量又会阻止正确动作。最好的策略不是永远保守，而是在模型和新数据支持增加后适度放宽约束。这说明正则系数本质上影响探索与利用的边界。
+
+## 三、在模型中估计受约束分数场并摊销进策略
+
+候选动作先由模型回报与行为支持共同评价，再用这些权重学习去噪方向。部署生成降低逐次搜索成本，却不能纠正训练评分器中的全部错误。
+
 ~~~text
 初始化回放数据或随机探索数据
 重复：
@@ -94,48 +108,96 @@ $\bar\alpha_\tau$描述该噪声级别的信号保留量。直觉是把动作分
     执行动作序列前段，再观测
 ~~~
 
-## 四、实验设置：规模、数据和时间不是同一个变量
+## 四、同时比较候选样本、训练时间与回报
+
+**原图怎么读：** [图9，原论文图注与图像](#paper-097-mbdpo-figure-9)。左侧改变蒙特卡洛样本数后的训练时间，右侧比较奖励随训练推进的变化。更多候选是否值得，需要把回报改善与计算开销一起读。
+
+
+<!-- figure-ref-v6:start:097-mbdpo-license -->
+<p>原文标注 <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>。本页摘图仅保留图形区域并作栅格化；有面板重排的图另行注明，作者与原文入口见各图注。</p>
+<!-- figure-ref-v6:end:097-mbdpo-license -->
+<!-- figure-ref-v6:start:da609a1abf29-anchor -->
+<a id="paper-097-mbdpo-figure-9"></a>
+<!-- figure-ref-v6:end:da609a1abf29-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/097-mbdpo-s4-f9.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/097-mbdpo-s4-f9.png" width="1824" height="764" alt="Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization，图9：左侧改变蒙特卡洛样本数后的训练时间，右侧比较奖励随训练推进的变化。更多候选是否值得，需要把回报改善与计算开销一起读。" loading="lazy"></a><figcaption>实验图原图摘引：Xiaoyuan Cheng、Wenxuan Yuan 等，2026，HTML S4.F9，图9。<a href="https://arxiv.org/html/2605.26282v1#S4.F9" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
 
 | 方向 | 设置 | 指标/预算 | 验证目标 |
 |---|---|---|---|
 | 在线从头学习 | DMControl、MetaWorld、ManiSkill2、MyoSuite | 环境回报或成功率曲线 | 在线样本效率 |
-| 视觉控制 | 10个图像控制任务 | 图5为每任务5种子 | 是否不限于低维状态 |
+| 视觉控制 | 10个图像控制任务 | [图5](#paper-097-mbdpo-figure-5)为每任务5种子 | 是否不限于低维状态 |
 | 离线规模 | 30/80任务数据，1.7M至340M模型 | 归一化分数 | 模型容量收益 |
 | 离线到在线 | 70任务预训练、10个未见任务适配 | 每任务40k交互 | 迁移与快速适应 |
 | 正则消融 | 80任务、21M模型 | 改变能量系数 | 约束强度的作用 |
-| 采样消融 | 候选数与去噪步数 | 图9—10为3种子 | 精度与计算折中 |
+| 采样消融 | 候选数与去噪步数 | [图9](#paper-097-mbdpo-figure-9)、[图10](#paper-097-mbdpo-figure-10)为3种子 | 精度与计算折中 |
+
+<!-- figure-ref-v6:start:287d55c8fb8d -->
+<a id="paper-097-mbdpo-figure-5"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/097-mbdpo-v6-figure-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/097-mbdpo-v6-figure-5.png" width="2132" height="770" alt="Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization，图5：读图对应本段的“10个图像控制任务”；图5为每任务5种子。" loading="lazy"></a><figcaption>原图摘引：Xiaoyuan Cheng、Wenxuan Yuan 等，2026，HTML S4.F5，图5。<a href="https://arxiv.org/html/2605.26282v1#S4.F5" target="_blank" rel="noopener noreferrer">核对原文</a>。读图对应本段的“10个图像控制任务”；图5为每任务5种子。</figcaption></figure>
+<!-- figure-ref-v6:end:287d55c8fb8d -->
+<!-- figure-ref-v6:start:ce30423735d2 -->
+<a id="paper-097-mbdpo-figure-10"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/097-mbdpo-v6-figure-10.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/097-mbdpo-v6-figure-10.png" width="2132" height="909" alt="Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization，图10：读图对应本段的“候选数与去噪步数”；图9、图10为3种子。" loading="lazy"></a><figcaption>原图摘引：Xiaoyuan Cheng、Wenxuan Yuan 等，2026，HTML S4.F10，图10。<a href="https://arxiv.org/html/2605.26282v1#S4.F10" target="_blank" rel="noopener noreferrer">核对原文</a>。读图对应本段的“候选数与去噪步数”；图9、图10为3种子。</figcaption></figure>
+<!-- figure-ref-v6:end:ce30423735d2 -->
+
 
 附录D默认时域3、候选512、去噪5—20步、五个Q网络，并保留TD-MPC风格的表示与训练组件。这是短时域潜在控制研究，不能从名称推断其世界模型已具备长视频生成或语言推理能力。
 
-表1在线计时在A800，离线计时在H200，硬件不同，不能直接横比绝对小时。离线表采用相同1000万训练步比较任务数，更多任务未必代表每个任务被同样充分训练。本文未逐项核对离线数据规模、所有任务训练终点和全部种子来源，不能把摘要的121任务与任一计时子表视为完全相同集合。
+[表1](https://arxiv.org/html/2605.26282v1#S4.T1)在线计时在A800，离线计时在H200，硬件不同，不能直接横比绝对小时。离线表采用相同1000万训练步比较任务数，更多任务未必代表每个任务被同样充分训练。本文未逐项核对离线数据规模、所有任务训练终点和全部种子来源，不能把摘要的121任务与任一计时子表视为完全相同集合。
 
-## 五、五组证据：哪些说法需要降一档
+### 五组证据：哪些说法需要降一档
 
-**图3——漂移与交叉TD误差。** 作者报告相对基线更低、更稳定的误差和动作漂移，支持正则化机制。但这些代理指标不是对真实 $Q^\beta$误差的直接测量，更不是证明估计偏差为零。
+**[图3](#paper-097-mbdpo-figure-3)——漂移与交叉TD误差。** 作者报告相对基线更低、更稳定的误差和动作漂移，支持正则化机制。但这些代理指标不是对真实 $Q^\beta$误差的直接测量，更不是证明估计偏差为零。
 
-**图4—5——控制成绩。** 多任务汇总与视觉控制显示较强表现，支持算法具有广泛仿真适用性。单任务曲线仍需看失败项，整体平均不能证明每个环境获胜，也不能替代真实机器人实验。
+<!-- figure-ref-v6:start:fd29275f8e6f -->
+<a id="paper-097-mbdpo-figure-3"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/097-mbdpo-v6-figure-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/097-mbdpo-v6-figure-3.png" width="2132" height="398" alt="Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization，图3：图3——漂移与交叉TD误差。 作者报告相对基线更低、更稳定的误差和动作漂移，支持正则化机制。但这些代理指标不是对真实 $Q^\beta$误差的直接测量，更不是证明估计偏差为零。" loading="lazy"></a><figcaption>原图摘引：Xiaoyuan Cheng、Wenxuan Yuan 等，2026，HTML S3.F3，图3。<a href="https://arxiv.org/html/2605.26282v1#S3.F3" target="_blank" rel="noopener noreferrer">核对原文</a>。图3——漂移与交叉TD误差。 作者报告相对基线更低、更稳定的误差和动作漂移，支持正则化机制。但这些代理指标不是对真实 $Q^\beta$误差的直接测量，更不是证明估计偏差为零。</figcaption></figure>
+<!-- figure-ref-v6:end:fd29275f8e6f -->
 
-**图6——规模趋势存在例外。** 作者强调模型变大总体改善，但正文明确指出30任务数据上340M模型成绩下降。因此更准确是“在所测区间总体呈规模收益，最大模型存在数据集依赖退化”，不是严格单调定律。把下降归因于数据容量耗尽是作者假设，未被独立隔离验证。
 
-**图7—8——迁移和能量强度。** 预训练帮助少交互适配，但Hopper Hop表现不佳；潜在嵌入偏移是解释线索，不能仅靠图像判定唯一原因。能量系数为0时仍有75.29对基线57.1的优势，说明收益不全来自行为约束；过大系数则压制改善，体现保守性与优化的取舍。
+**[图4](#paper-097-mbdpo-figure-4)、[图5](#paper-097-mbdpo-figure-5)——控制成绩。** 多任务汇总与视觉控制显示较强表现，支持算法具有广泛仿真适用性。单任务曲线仍需看失败项，整体平均不能证明每个环境获胜，也不能替代真实机器人实验。
 
-**表1与图11——效率与表示。** 视觉任务每步时间3.55降至3.04毫秒，是该硬件和流程下的计时结果。二维潜在轨迹更平滑或呈闭环，可能与周期任务结构一致，但降维图不能证明学到了因果动力学，也不能据此宣称基线轨迹物理上无意义。
+<!-- figure-ref-v6:start:8a21fa3cf03b -->
+<a id="paper-097-mbdpo-figure-4"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/097-mbdpo-v6-figure-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/097-mbdpo-v6-figure-4.png" width="2132" height="447" alt="Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization，图4：图4、图5——控制成绩。 多任务汇总与视觉控制显示较强表现，支持算法具有广泛仿真适用性。单任务曲线仍需看失败项，整体平均不能证明每个环境获胜，也不能替代真实机器人实验。" loading="lazy"></a><figcaption>原图摘引：Xiaoyuan Cheng、Wenxuan Yuan 等，2026，HTML S4.F4，图4。<a href="https://arxiv.org/html/2605.26282v1#S4.F4" target="_blank" rel="noopener noreferrer">核对原文</a>。图4、图5——控制成绩。 多任务汇总与视觉控制显示较强表现，支持算法具有广泛仿真适用性。单任务曲线仍需看失败项，整体平均不能证明每个环境获胜，也不能替代真实机器人实验。</figcaption></figure>
+<!-- figure-ref-v6:end:8a21fa3cf03b -->
 
-## 六、贡献与限制：保守性不是模型正确性的替代
 
-MBDPO把离线RL的行为支持、模型预测控制的候选评价和扩散采样结合起来，并将优化摊销进策略。它的启发在于：更准确的模型之外，还应检查价值学习和动作选择的分布关系。
+**[图6](#paper-097-mbdpo-figure-6)——规模趋势存在例外。** 图6右侧30任务设置中，54M到340M时MBDPO由82.4升至83.7，TD-MPC2由59.4升至71.4；但原文§4文字却称两者在340M时下降。这里存在原文图表与文字的冲突，不能据该图断言最大模型退化，也不替作者解释差异原因。
+
+<!-- figure-ref-v6:start:4176a571fceb -->
+<a id="paper-097-mbdpo-figure-6"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/097-mbdpo-v6-figure-6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/097-mbdpo-v6-figure-6.png" width="2132" height="921" alt="Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization，图6：右侧30任务图中，54M至340M的MBDPO分数为82.4至83.7，TD-MPC2为59.4至71.4；它与原文§4的下降描述存在冲突，不能把这张图解读成规模退化。" loading="lazy"></a><figcaption>原图摘引：Xiaoyuan Cheng、Wenxuan Yuan 等，2026，HTML S4.F6，图6。<a href="https://arxiv.org/html/2605.26282v1#S4.F6" target="_blank" rel="noopener noreferrer">核对原文</a>。右侧30任务图中，54M至340M的MBDPO分数为82.4至83.7，TD-MPC2为59.4至71.4；它与原文§4的下降描述存在冲突，不能把这张图解读成规模退化。</figcaption></figure>
+<!-- figure-ref-v6:end:4176a571fceb -->
+
+
+**[图7](#paper-097-mbdpo-figure-7)、[图8](#paper-097-mbdpo-figure-8)——迁移和能量强度。** 预训练帮助少交互适配，但Hopper Hop表现不佳；潜在嵌入偏移是解释线索，不能仅靠图像判定唯一原因。能量系数为0时仍有75.29对基线57.1的优势，说明收益不全来自行为约束；过大系数则压制改善，体现保守性与优化的取舍。
+
+<!-- figure-ref-v6:start:a5b2b193370d -->
+<a id="paper-097-mbdpo-figure-7"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/097-mbdpo-v6-figure-7.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/097-mbdpo-v6-figure-7.png" width="2132" height="549" alt="Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization，图7：图7、图8——迁移和能量强度。 预训练帮助少交互适配，但Hopper Hop表现不佳；潜在嵌入偏移是解释线索，不能仅靠图像判定唯一原因。能量系数为0时仍有75.29对基线57.1的优势，说明收益不全来自行为约束；过大系数则压制改善，体现保守性与优化的取舍。" loading="lazy"></a><figcaption>原图摘引：Xiaoyuan Cheng、Wenxuan Yuan 等，2026，HTML S4.F7，图7。<a href="https://arxiv.org/html/2605.26282v1#S4.F7" target="_blank" rel="noopener noreferrer">核对原文</a>。图7、图8——迁移和能量强度。 预训练帮助少交互适配，但Hopper Hop表现不佳；潜在嵌入偏移是解释线索，不能仅靠图像判定唯一原因。能量系数为0时仍有75.29对基线57.1的优势，说明收益不全来自行为约束；过大系数则压制改善，体现保守性与优化的取舍。</figcaption></figure>
+<!-- figure-ref-v6:end:a5b2b193370d -->
+<!-- figure-ref-v6:start:a2c1d20e149e -->
+<a id="paper-097-mbdpo-figure-8"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/097-mbdpo-v6-figure-8.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/097-mbdpo-v6-figure-8.png" width="2132" height="1114" alt="Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization，图8：图7、图8——迁移和能量强度。 预训练帮助少交互适配，但Hopper Hop表现不佳；潜在嵌入偏移是解释线索，不能仅靠图像判定唯一原因。能量系数为0时仍有75.29对基线57.1的优势，说明收益不全来自行为约束；过大系数则压制改善，体现保守性与优化的取舍。" loading="lazy"></a><figcaption>原图摘引：Xiaoyuan Cheng、Wenxuan Yuan 等，2026，HTML S4.F8，图8。<a href="https://arxiv.org/html/2605.26282v1#S4.F8" target="_blank" rel="noopener noreferrer">核对原文</a>。图7、图8——迁移和能量强度。 预训练帮助少交互适配，但Hopper Hop表现不佳；潜在嵌入偏移是解释线索，不能仅靠图像判定唯一原因。能量系数为0时仍有75.29对基线57.1的优势，说明收益不全来自行为约束；过大系数则压制改善，体现保守性与优化的取舍。</figcaption></figure>
+<!-- figure-ref-v6:end:a2c1d20e149e -->
+
+
+**[表1](https://arxiv.org/html/2605.26282v1#S4.T1)与[图11](#paper-097-mbdpo-figure-11)——效率与表示。** 视觉任务每步时间3.55降至3.04毫秒，是该硬件和流程下的计时结果。二维潜在轨迹更平滑或呈闭环，可能与周期任务结构一致，但降维图不能证明学到了因果动力学，也不能据此宣称基线轨迹物理上无意义。
+
+<!-- figure-ref-v6:start:9a8f02409721 -->
+<a id="paper-097-mbdpo-figure-11"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/097-mbdpo-v6-figure-11.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/097-mbdpo-v6-figure-11.png" width="2132" height="636" alt="Scaling World-Model Reinforcement Learning Through Diffusion Policy Optimization，图11：表1与图11——效率与表示。 视觉任务每步时间3.55降至3.04毫秒，是该硬件和流程下的计时结果。二维潜在轨迹更平滑或呈闭环，可能与周期任务结构一致，但降维图不能证明学到了因果动力学，也不能据此宣称基线轨迹物理上无意义。" loading="lazy"></a><figcaption>原图摘引：Xiaoyuan Cheng、Wenxuan Yuan 等，2026，HTML S5.F11，图11。<a href="https://arxiv.org/html/2605.26282v1#S5.F11" target="_blank" rel="noopener noreferrer">核对原文</a>。表1与图11——效率与表示。 视觉任务每步时间3.55降至3.04毫秒，是该硬件和流程下的计时结果。二维潜在轨迹更平滑或呈闭环，可能与周期任务结构一致，但降维图不能证明学到了因果动力学，也不能据此宣称基线轨迹物理上无意义。</figcaption></figure>
+<!-- figure-ref-v6:end:9a8f02409721 -->
+
+
+## 五、行为保守性不能修复所有模型误差
 
 不过，靠近数据并不保证数据充分覆盖目标；偏离数据也不总是坏事，在线学习可能正需要探索。能量约束若学错，会排斥新技能或把常见但无效的动作保留下来。模型对数据内接触仍可能预测不准，行为正则不能修复全部动力学误差。
 
 作者明确将真机部署和更大规模留作后续。对机器人学习而言，这篇更适合当作“如何审查世界模型策略优化”的方法论文，而非现成工业操作方案。理论、代理指标、仿真回报和真机可靠性之间仍有多个证据台阶。
 
-**阅读范围**：核对 arXiv v1 正文、附录C.3—C.4推导与D实现、主要结果及计时；没有独立复现或逐项重证全部界。能量密度近似与温度对应关系应在复现中单独核实。[原文全文](https://arxiv.org/html/2605.26282v1)
-
-## 七、教学例子与前置概念
-
-以下是未运行的例子。数据多为缓慢推块，世界模型却误以为高速穿过物体能获得高奖励。无约束搜索可能选这条“捷径”；能量惩罚会降低这类少见动作的权重，使策略优先尝试有数据支持的推动。
-
-如果任务确实需要高速击打，过强能量又会阻止正确动作。最好的策略不是永远保守，而是在模型和新数据支持增加后适度放宽约束。这说明正则系数本质上影响探索与利用的边界。
+### 五个前置概念
 
 五个前置概念：
 
@@ -145,11 +207,15 @@ MBDPO把离线RL的行为支持、模型预测控制的候选评价和扩散采�
 - **分数函数**：概率密度对输入的对数梯度。
 - **摊销优化**：把昂贵优化结果训练进网络，降低部署计算。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 搜索利用价值外推错误 | 能量约束、模型回报加权分数、扩散网络摊销 | 减少无支持动作并学习高回报分布 | 图3—8 | 近似密度；有限采样；仍有模型误差；仅仿真 |
+### 追问：增加候选数量后模型内回报上升但真实回报下降，说明什么？
 
-## 八、三个问题及答案
+参考答案：这与搜索更容易发现估计漏洞相容，但也可能混入采样方差或执行差异，不能直接锁定单一原因。应在固定模型上记录候选支持距离、价值预测与真实执行差，并比较约束强度。更多搜索只提高在当前评分器中找高分的能力，不自动提高评分真实性。
+
+## 六、沿机制关系继续读
+
+MBDPO承接[TD-MPC2](070-tdmpc2.md)相关潜模型与价值学习，改用摊销扩散策略；与[DPPO](083-diffusion-rl.md)是平行优化，模型内候选回报加权并不等同于真实环境去噪路径PPO。
+
+## 七、自测三题与参考答案
 
 **问题1：世界模型预测更准确，为什么策略仍可能很差？**
 
@@ -162,4 +228,3 @@ MBDPO把离线RL的行为支持、模型预测控制的候选评价和扩散采�
 **问题3：模型内最优的扩散分布能保证真实机器人单调改善吗？**
 
 **答案：** 不能。真实模型误差、价值误差、能量近似和有限步采样都可能破坏理想条件；正则只降低某些风险。必须在真实环境或可信独立仿真中评估回报，并把理论条件与实现误差分开。
-

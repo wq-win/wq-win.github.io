@@ -4,17 +4,13 @@
 
 **原论文**：*Temporal Difference Learning for Model Predictive Control*，Nicklas Hansen、Xiaolong Wang、Hao Su，2022。[论文](https://arxiv.org/abs/2203.04955)。
 
-## 一、先用一分钟讲明白
+### 先接住前作的问题
+
+[Dreamer](037-dreamer.md)在潜在想象中训练策略，部署通常直接执行策略。TD-MPC保留在线动作搜索，让短模型预测与末端价值分工；未解问题是哪些任务信息足以支撑规划，而不必重建完整像素。
+
+## 一、问题设定：怎样让短时模型规划连接长期价值
 
 学一个能预测未来的模型，未必需要让它画出未来每个像素。对控制来说，更重要的问题是：执行这个动作会不会接近目标，接下来还有多少收益？
-
-TD-MPC 把短期模型规划与长期价值估计接在一起。模型在潜在空间中预测未来几步，规划器搜索动作序列；搜索范围之外的结果交给 TD 学习得到的价值函数。学习信号同时来自奖励、价值误差和潜在状态的一致性，不要求重建完整图像。
-
-论文在连续控制模拟任务上支持这种组合的有效性，尤其是复杂动力学与高维动作任务。它没有证明学到的模型比真实物理更准确，也没有展示真实机器人部署。准确理解“学会哪些信息才够用”，比把它当成另一种更复杂的 SAC 更有收获。
-
-一句话总结：在连续控制场景下，通过面向任务的潜在模型、短时规划和末端价值估计，改善了部分任务的交互效率与回报，代价是每一步需要在线搜索，而且模型对新奖励的适用范围有限。
-
-## 二、背景：长远眼光为什么昂贵
 
 传统 MPC 每次向前搜索有限步。规划太短，可能只看到眼前利益；规划太长，需要评估更多动作组合，模型误差也会累积。另一方面，直接用策略网络输出动作很快，却可能不如在线搜索精细。
 
@@ -24,7 +20,11 @@ TD-MPC 的对象是在线、无示范、单智能体连续动作 RL。它既有�
 
 两个假设尤其关键。第一，存在足够紧凑的任务相关表示，可以保留预测收益所需的信息。第二，有限数据得到的价值函数足以为短期规划补充远期影响。奖励错误、隐藏状态严重或稀疏反馈极少时，这些假设都可能失效。
 
-## 三、方法：五个网络怎样形成一个控制器
+## 二、联合训练任务潜模型、奖励和末端Q
+
+TD-MPC 把短期模型规划与长期价值估计接在一起。模型在潜在空间中预测未来几步，规划器搜索动作序列；搜索范围之外的结果交给 TD 学习得到的价值函数。学习信号同时来自奖励、价值误差和潜在状态的一致性，不要求重建完整图像。
+
+论文在连续控制模拟任务上支持这种组合的有效性，尤其是复杂动力学与高维动作任务。它没有证明学到的模型比真实物理更准确，也没有展示真实机器人部署。准确理解“学会哪些信息才够用”，比把它当成另一种更复杂的 SAC 更有收获。
 
 ### 1. 五个组件
 
@@ -65,7 +65,21 @@ $\lambda$ 给远处训练误差较低权重，$\bar\theta$ 是慢更新目标参
 
 一致性项提供额外约束，奖励与价值项阻止表示仅仅追求“所有状态都一样”。这种组合并没有一个自动保证不坍塌、全局最优或任意任务充分性的定理。它的有效性主要由实验支撑。
 
-### 4. 教学伪代码
+数学优化的是预测误差、TD误差与策略价值；机制创新是让这些信号共同塑造用于规划的表示；实验改善的是控制表现。三者之间没有“损失下降必然回报上升”的等价关系。
+
+短规划末端价值的误差会被 $\gamma^H$ 缩放。若末端Q误差有界于 $\epsilon_Q$、前H步奖励模型每步误差有界于 $\epsilon_r$，取折扣 $0\le\gamma<1$、暂不计状态分布误差时，评分误差不超过 $\epsilon_r(1-\gamma^H)/(1-\gamma)+\gamma^H\epsilon_Q$。这里 $H$ 是规划长度，这个教学界只隔离两项误差，不是论文完整保证。
+
+它解释为何加长规划既可能减少末端价值依赖，又可能增加模型误差。奖励稀疏时，表示只拟合即时奖励还可能把关键但尚未获奖状态混在一起，潜在一致性与TD监督提供额外区分。原文消融检验的是这些信号的组合效果，而非“不重建图像必然更好”。[原文式8—10及一致性消融](https://arxiv.org/html/2203.04955)
+
+### 一个例子和五个概念
+
+**自构例子，未运行。** 机械臂需要先绕过障碍再碰目标。短视规划发现向障碍直接伸手能立即缩短距离，于是反复选择坏动作。若末端价值能识别“绕到旁边后更容易成功”，短期动作即使暂时远离目标也可能获得更高总评分。反过来，若价值头错把障碍后方判得极高，规划也会更执着地犯错。
+
+进一步可检验三件事：固定推理时间比较候选数量和规划长度；保持模型误差相近而改变奖励监督；在同一环境改换依赖不同视觉细节的任务，测量表示究竟遗漏了什么。
+
+## 三、短时搜索潜在轨迹并用终端Q补足未来
+
+潜模型、奖励与价值共同决定候选序列评分，策略先验帮助搜索但不取代它。每次只执行当前动作并重规划，部署成本因此仍含在线搜索。
 
 ~~~text
 初始化编码器、潜在动力学、奖励头、双价值头、策略与目标网络
@@ -87,16 +101,28 @@ $\lambda$ 给远处训练误差较低权重，$\bar\theta$ 是慢更新目标参
 输出：可在线规划的模型与快速候选策略
 ~~~
 
-数学优化的是预测误差、TD误差与策略价值；机制创新是让这些信号共同塑造用于规划的表示；实验改善的是控制表现。三者之间没有“损失下降必然回报上升”的等价关系。
+## 四、核对规划预算与真实模型对照的含义
 
-## 四、实验设计与比较条件
+**原图怎么读：** [图6，原论文图注与图像](#paper-049-tdmpc-figure-6)。左右分别改变规划时域与优化迭代数，另一个参数保持默认。它展示固定已训练模型的推理预算折中，区别于重新训练更大模型。
+
+
+<!-- figure-ref-v6:start:049-tdmpc-license -->
+<p>原文标注 <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>。本页摘图仅保留图形区域并作栅格化；有面板重排的图另行注明，作者与原文入口见各图注。</p>
+<!-- figure-ref-v6:end:049-tdmpc-license -->
+<!-- figure-ref-v6:start:91c7e93388ed-anchor -->
+<a id="paper-049-tdmpc-figure-6"></a>
+<!-- figure-ref-v6:end:91c7e93388ed-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/049-tdmpc-s5-f6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/049-tdmpc-s5-f6.png" width="1824" height="706" alt="Temporal Difference Learning for Model Predictive Control，图6：左右分别改变规划时域与优化迭代数，另一个参数保持默认。它展示固定已训练模型的推理预算折中，区别于重新训练更大模型。" loading="lazy"></a><figcaption>实验图原图摘引：Nicklas Hansen、Xiaolong Wang、Hao Su，2022，HTML S5.F6，图6。<a href="https://arxiv.org/html/2203.04955v2#S5.F6" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+式9与附录目标计算分支如何对应到实现，仍需在选定代码版本中核验；本篇不据符号相近认定所有目标分支共享相同梯度路径。
 
 | 项目 | 设置及解读 |
 |---|---|
 | 任务范围 | 92个任务设置，来自DMControl及Meta-World v2，含状态、视觉、多模态与多任务实验 |
 | 数据 | 在线环境交互，无机器人示范预训练；视觉使用随机平移增强 |
 | 默认规划 | $H=5$；512条候选，另加约5%策略候选；精英64条 |
-| 规划轮数 | 一般6轮，Dog及像素配置8轮、Humanoid12轮，详见附录表4 |
+| 规划轮数 | 一般6轮，Dog及像素配置8轮、Humanoid12轮，详见附录[表4](https://arxiv.org/html/2203.04955v2#A6.T4.fig1) |
 | 训练 | 优先回放；默认每决策步一次梯度更新；初始随机收集5000步；不同任务批量和学习率有差异 |
 | 状态基线 | SAC、LOOP、真实模拟器MPC及模型结构消融 |
 | 视觉基线 | DrQ系列、Dreamer系列、PlaNet、CURL及离散动作搜索方法 |
@@ -108,48 +134,71 @@ $\lambda$ 给远处训练误差较低权重，$\bar\theta$ 是慢更新目标参
 
 真实模拟器 MPC 使用长度10、200条候选和4轮搜索，而且没有学习得到的末端价值；TD-MPC使用不同候选数量、轮数和价值补偿。因此前者败北不能说明真实动力学不如学习模型，可能说明有限搜索和缺乏长远价值更限制控制。
 
-视觉表1部分数值引自其他论文。EfficientZero把动作离散化，并在评测前额外做2万次梯度更新。这些注释对理解排名很重要：同为10万环境步，并不意味着所有资源相同。
+视觉[表1](https://arxiv.org/html/2203.04955v2#S5.T1)部分数值引自其他论文。EfficientZero把动作离散化，并在评测前额外做2万次梯度更新。这些注释对理解排名很重要：同为10万环境步，并不意味着所有资源相同。
 
-## 五、五处关键证据
+### 五处关键证据
 
-**图1、图3：复杂状态控制。** 作者在Humanoid、Dog及其他连续任务中比较学习曲线，观察到部分复杂任务优势明显。它支持该模型与规划组合能处理高维连续动作；不能据此断言所有38维控制问题都简单，任务仍有特定奖励与动力学。
+**[图1](#paper-049-tdmpc-figure-1)、[图3](#paper-049-tdmpc-figure-3)：复杂状态控制。** 作者在Humanoid、Dog及其他连续任务中比较学习曲线，观察到部分复杂任务优势明显。它支持该模型与规划组合能处理高维连续动作；不能据此断言所有38维控制问题都简单，任务仍有特定奖励与动力学。
 
-**表1：低数据视觉实验有明确反例。** 10万环境步下，Finger Spin回报TD-MPC为943±59，DrQ为901±104；但Cheetah Run为222±88，低于DrQ的344±67。差值是122回报单位，不能叫122个百分点成功率。Walker Walk的577±208也低于DrQ的612±164。作者使用“有竞争力”比“全面领先”更准确。
+<!-- figure-ref-v6:start:dedc9727ee5e -->
+<a id="paper-049-tdmpc-figure-1"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/049-tdmpc-v6-figure-1.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/049-tdmpc-v6-figure-1.png" width="2132" height="981" alt="Temporal Difference Learning for Model Predictive Control，图1：复杂状态控制。 作者在Humanoid、Dog及其他连续任务中比较学习曲线，观察到部分复杂任务优势明显。它支持该模型与规划组合能处理高维连续动作；不能据此断言所有38维控制问题都简单，任务仍有特定奖励与动力学。" loading="lazy"></a><figcaption>原图摘引：Nicklas Hansen、Xiaolong Wang、Hao Su，2022，HTML S1.F1，图1。原面板按源顺序重新排版，数据未改。<a href="https://arxiv.org/html/2203.04955v2#S1.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。复杂状态控制。 作者在Humanoid、Dog及其他连续任务中比较学习曲线，观察到部分复杂任务优势明显。它支持该模型与规划组合能处理高维连续动作；不能据此断言所有38维控制问题都简单，任务仍有特定奖励与动力学。</figcaption></figure>
+<!-- figure-ref-v6:end:dedc9727ee5e -->
+<!-- figure-ref-v6:start:98691a3c376a -->
+<a id="paper-049-tdmpc-figure-3"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/049-tdmpc-v6-figure-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/049-tdmpc-v6-figure-3.png" width="2132" height="1783" alt="Temporal Difference Learning for Model Predictive Control，图3：复杂状态控制。 作者在Humanoid、Dog及其他连续任务中比较学习曲线，观察到部分复杂任务优势明显。它支持该模型与规划组合能处理高维连续动作；不能据此断言所有38维控制问题都简单，任务仍有特定奖励与动力学。" loading="lazy"></a><figcaption>原图摘引：Nicklas Hansen、Xiaolong Wang、Hao Su，2022，HTML S4.F3，图3。<a href="https://arxiv.org/html/2203.04955v2#S4.F3" target="_blank" rel="noopener noreferrer">核对原文</a>。复杂状态控制。 作者在Humanoid、Dog及其他连续任务中比较学习曲线，观察到部分复杂任务优势明显。它支持该模型与规划组合能处理高维连续动作；不能据此断言所有38维控制问题都简单，任务仍有特定奖励与动力学。</figcaption></figure>
+<!-- figure-ref-v6:end:98691a3c376a -->
 
-**图6、附录C和H：推理计算能换表现，但不是无限增益。** 完整训练后改变规划长度或迭代轮数，复杂任务更能受益；简单任务变化较小。默认约20毫秒，而快速策略明显更快。该消融检验固定模型的推理预算，不等于训练更久必然更好。
 
-**图10、附录D：一致性约束的价值。** 无正则、状态重建、对比式约束与潜在一致性有不同结果；后者整体更稳定。消融支持所测试实现中该训练项有帮助，不证明像素重建在所有数据规模或世界模型任务上都多余。
+**[表1](https://arxiv.org/html/2203.04955v2#S5.T1)：低数据视觉实验有明确反例。** 10万环境步下，Finger Spin回报TD-MPC为943±59，DrQ为901±104；但Cheetah Run为222±88，低于DrQ的344±67。差值是122回报单位，不能叫122个百分点成功率。Walker Walk的577±208也低于DrQ的612±164。作者使用“有竞争力”比“全面领先”更准确。
 
-**图7、附录A：转移不是零样本。** Walk训练后的模型在Run任务中继续在线微调。冻结编码器仍可较快适应，进一步冻结动力学则收敛变慢。这支持表示与动力学可迁移程度不同；不能把结果写成无需新交互就学会跑步。
+**[图6](#paper-049-tdmpc-figure-6)、附录C和H：推理计算能换表现，但不是无限增益。** 完整训练后改变规划长度或迭代轮数，复杂任务更能受益；简单任务变化较小。默认约20毫秒，而快速策略明显更快。该消融检验固定模型的推理预算，不等于训练更久必然更好。
+
+**[图10](#paper-049-tdmpc-figure-10)、附录D：一致性约束的价值。** 无正则、状态重建、对比式约束与潜在一致性有不同结果；后者整体更稳定。消融支持所测试实现中该训练项有帮助，不证明像素重建在所有数据规模或世界模型任务上都多余。
+
+<!-- figure-ref-v6:start:c2ba451ed6ca -->
+<a id="paper-049-tdmpc-figure-10"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/049-tdmpc-v6-figure-10.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/049-tdmpc-v6-figure-10.png" width="2132" height="1783" alt="Temporal Difference Learning for Model Predictive Control，图10：一致性约束的价值。 无正则、状态重建、对比式约束与潜在一致性有不同结果；后者整体更稳定。消融支持所测试实现中该训练项有帮助，不证明像素重建在所有数据规模或世界模型任务上都多余。" loading="lazy"></a><figcaption>原图摘引：Nicklas Hansen、Xiaolong Wang、Hao Su，2022，HTML A0.F10，图10。<a href="https://arxiv.org/html/2203.04955v2#A0.F10" target="_blank" rel="noopener noreferrer">核对原文</a>。一致性约束的价值。 无正则、状态重建、对比式约束与潜在一致性有不同结果；后者整体更稳定。消融支持所测试实现中该训练项有帮助，不证明像素重建在所有数据规模或世界模型任务上都多余。</figcaption></figure>
+<!-- figure-ref-v6:end:c2ba451ed6ca -->
+
+
+**[图7](#paper-049-tdmpc-figure-7)、附录A：转移不是零样本。** Walk训练后的模型在Run任务中继续在线微调。冻结编码器仍可较快适应，进一步冻结动力学则收敛变慢。这支持表示与动力学可迁移程度不同；不能把结果写成无需新交互就学会跑步。
+
+<!-- figure-ref-v6:start:dc3e3917f4fa -->
+<a id="paper-049-tdmpc-figure-7"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/049-tdmpc-v6-figure-7.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/049-tdmpc-v6-figure-7.png" width="2132" height="1217" alt="Temporal Difference Learning for Model Predictive Control，图7：转移不是零样本。 Walk训练后的模型在Run任务中继续在线微调。冻结编码器仍可较快适应，进一步冻结动力学则收敛变慢。这支持表示与动力学可迁移程度不同；不能把结果写成无需新交互就学会跑步。" loading="lazy"></a><figcaption>原图摘引：Nicklas Hansen、Xiaolong Wang、Hao Su，2022，HTML A0.F7，图7。<a href="https://arxiv.org/html/2203.04955v2#A0.F7" target="_blank" rel="noopener noreferrer">核对原文</a>。转移不是零样本。 Walk训练后的模型在Run任务中继续在线微调。冻结编码器仍可较快适应，进一步冻结动力学则收敛变慢。这支持表示与动力学可迁移程度不同；不能把结果写成无需新交互就学会跑步。</figcaption></figure>
+<!-- figure-ref-v6:end:dc3e3917f4fa -->
+
 
 另一个失败边界来自§5：Finger Turn Hard中的样本效率低于SAC和LOOP。规划随机性与方差下限并没有解决所有探索问题。
 
-## 六、贡献与局限
+原机制图表补充定位：[图2](#paper-049-tdmpc-figure-2)。
 
-论文把“模型该学什么”与“模型怎么用于决策”紧密联系起来：不是先独立追求最准确世界再调用它，而是共同学习能指导当前任务的状态、奖励和长期价值。
+<!-- figure-ref-v6:start:b285321acfba -->
+<a id="paper-049-tdmpc-figure-2"></a>
+<figure class="reading-evidence-figure"><a href="/robot-learn/assets/papers/049-tdmpc-v6-figure-2.png" target="_blank" rel="noopener noreferrer"><img src="/robot-learn/assets/papers/049-tdmpc-v6-figure-2.png" width="878" height="914" alt="Temporal Difference Learning for Model Predictive Control，图2：首帧经在线编码器得到潜状态，再由动力学模型逐步预测后续潜状态及价值、奖励、动作；灰色目标编码器提供训练目标。要区分训练时的目标表征与执行时模型展开的输入。" loading="lazy"></a><figcaption>原图摘引：Nicklas Hansen、Xiaolong Wang、Hao Su，2022，HTML S4.F2，首帧经在线编码器得到潜状态，再由动力学模型逐步预测后续潜状态及价值、奖励、动作；灰色目标编码器提供训练目标。要区分训练时的目标表征与执行时模型展开的输入。<a href="https://arxiv.org/html/2203.04955v2#S4.F2" target="_blank" rel="noopener noreferrer">核对原文</a>。首帧经在线编码器得到潜状态，再由动力学模型逐步预测后续潜状态及价值、奖励、动作；灰色目标编码器提供训练目标。要区分训练时的目标表征与执行时模型展开的输入。</figcaption></figure>
+<!-- figure-ref-v6:end:b285321acfba -->
+
+
+## 五、任务导向表示未必支持新奖励
 
 代价是任务相关压缩会丢弃一些当前奖励不需要、未来新任务却需要的信息。比如搬杯子时杯身文字可能无关，但按标签分类时它突然重要。文中相关行走任务的微调结果不能覆盖这种奖励语义大幅变化。
 
 确定性模型与有限观测也限制了对多模态未来、隐藏接触状态的表达。高价值错误还可能被规划器主动利用：搜索越积极，越容易找到模型过度乐观的区域。因此更多推理算力的收益以模型可靠性为前提。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 短规划看不见远期收益 | 加末端价值 | 用TD估计规划之外结果 | 图1、图3 | 价值误差进入搜索评分 |
-| 完整预测成本高 | 潜在奖励与价值监督 | 聚焦任务相关因素 | 图10消融 | 可能丢失新任务所需信息 |
-| 搜索高维动作困难 | 加策略候选与热启动 | 提供较好初始区域 | 算法1、计算预算实验 | 仍需大量模型前向 |
-| 单步模型误差累积 | 多步展开共同训练 | 在使用方式下监督预测 | 图2、式7–10 | 无任意长度误差保证 |
-
-## 七、一个例子和五个概念
-
-**自构例子，未运行。** 机械臂需要先绕过障碍再碰目标。短视规划发现向障碍直接伸手能立即缩短距离，于是反复选择坏动作。若末端价值能识别“绕到旁边后更容易成功”，短期动作即使暂时远离目标也可能获得更高总评分。反过来，若价值头错把障碍后方判得极高，规划也会更执着地犯错。
+### 五个前置概念
 
 五个前置概念：**MPC**每次规划只执行第一步；**TD学习**用一步奖励和下一状态价值构造目标；**潜在动力学**在压缩表示中预测状态变化；**目标网络**缓慢更新以稳定监督；**动作重复**使一次策略决策对应多个环境推进步。
 
-进一步可检验三件事：固定推理时间比较候选数量和规划长度；保持模型误差相近而改变奖励监督；在同一环境改换依赖不同视觉细节的任务，测量表示究竟遗漏了什么。
+### 追问：奖励定义改变后，为什么不能只替换规划器中的一个函数？
 
-阅读范围：核对[原论文v2正文及附录A–K](https://arxiv.org/html/2203.04955)，包括算法、超参数和比较口径。本文未独立复现；式9与附录目标计算分支的实现对应需在选定代码版本中继续确认。
+参考答案：潜在表示原先受奖励与价值目标塑造，可能丢掉旧任务无关但新奖励需要的信息。仅替换外部评分不保证潜状态还能预测这些因素。应先冻结模型检查新奖励所需信息可否由表示恢复，再比较重新训练或适配后的控制表现；不重建像素的效率来自任务选择，也因此带来迁移边界。
 
-## 八、三个问题及答案
+## 六、沿机制关系继续读
+
+与[Dreamer](037-dreamer.md)是平行潜在模型路线：本篇保持在线规划、用奖励价值塑造表示；[TD-MPC2](070-tdmpc2.md)直接承接并针对多任务、尺度和训练稳定性改进。
+
+## 七、自测三题与参考答案
 
 **问题1：既然有策略网络，为什么执行时还规划？**
 
@@ -162,4 +211,3 @@ $\lambda$ 给远处训练误差较低权重，$\bar\theta$ 是慢更新目标参
 **问题3：学习模型击败真实模拟器MPC，是否证明模型比物理更准确？**
 
 不能。被比较的是完整决策系统。真实模拟器基线没有末端价值，且候选数量和迭代预算不同。准确的局部预测配上短视搜索可能输给不完美模型加长期价值；要比较动力学精度，应另设相同输入动作的预测误差实验。
-
