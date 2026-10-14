@@ -2,17 +2,17 @@
 
 [返回目录](README.md) · [上一篇：自一致性](056-self-consistency.md) · [下一篇：Flamingo](058-flamingo.md)
 
-论文：Jordan Hoffmann等，*Training Compute-Optimal Large Language Models*，2022。[原始论文](https://arxiv.org/abs/2203.15556) · [全文](https://arxiv.org/pdf/2203.15556)。阅读范围为三种拟合方法、Chinchilla训练与主要评估、附录数据和调度分析；未复现数百次训练及拟合。
+论文：Jordan Hoffmann等，*Training Compute-Optimal Large Language Models*，2022。[原始论文](https://arxiv.org/abs/2203.15556) · [全文](https://arxiv.org/pdf/2203.15556)。
 
-## 一分钟理解
+### 先接住前作的问题
 
-固定一笔训练预算，可以训练一个很大的模型、让它少读一些文本，也可以训练一个小一些的模型、让它多读。参数与数据都影响损失，把钱全花在参数上可能得到一个没有充分训练的大模型。
+[Kaplan规模规律](029-scaling-laws.md)给出参数、数据和计算之间的经验关系，但训练长度与学习率调度会影响如何寻找最优点。本篇重新扫描这一配比；[LLaMA](068-llama.md)后续重视推理成本，目标函数又与纯训练预算不同。
 
-作者通过400多次不同规模和训练长度的实验估计最佳分配，发现随着算力增加，参数量与训练token数应大致同比例增长。在与Gopher相近训练FLOPs下，70B Chinchilla读1.4T token，胜过280B Gopher的多项成绩。
+## 一、问题设定：固定训练算力应怎样分给参数与数据
 
-一句话：在固定预训练计算预算下，通过联合选择模型规模和训练长度改善语言建模与下游表现，代价是更多数据处理，以及依赖数据分布、优化设置和目标函数的经验外推。
+给定一笔训练FLOPs预算，更大的模型必须相应少读数据。问题不是参数能否提高容量，而是在预算约束下哪种参数量和训练token数组合使最终损失最低；后面的400多次扫描将检验这个资源分配问题。
 
-## 问题定义：优化的是训练预算下的损失
+## 二、由经验损失的边际平衡推导最优配比
 
 令$N$为模型参数量，$D$为训练中处理的token数，$C$为训练计算量。研究问题是
 
@@ -25,8 +25,6 @@ $$
 此前扩展规律研究强调较大模型的样本效率，行业模型规模快速上升，训练token却常停留在相近数量级。Chinchilla指出，在固定计算预算下，样本效率与计算效率不是一回事：更大的模型每读一个token也更贵。
 
 $D$是处理过的token数，不自动等于唯一文本数量。附录A显示部分MassiveText子集重复超过一轮。不能把“多训练token”简单等价为“按相同比例增加独立知识”。数据质量、去重、分布与重复次数都会改变有效信息量。
-
-## 方法：三种途径寻找计算最优边界
 
 第一种方法在不同模型、不同训练长度的学习曲线中，寻找每个预算下最低损失的位置。关键是针对目标训练长度设置学习率调度，不能从一个很长训练计划的中途检查点直接推断短预算最佳表现。
 
@@ -49,6 +47,18 @@ $$
 
 因为固定乘积$ND$时，增加参数必然减少可训练数据。最优点让两种误差的边际改善相互平衡。近似的常数6来自密集Transformer训练成本模型，不应直接套到任意MoE、长上下文或硬件墙钟时间。
 
+### 最优比例来自两项边际收益相等
+
+设 $N,D$ 为参数量与训练 token 数，$E$ 为不可约损失项，$A,B,\alpha,\beta$ 是正的拟合常数，$C$ 是训练 FLOPs 预算。在经验损失 $E+AN^{-\alpha}+BD^{-\beta}$ 下，固定 $ND=C/6=K$，代入 $D=K/N$ 得 $L(N)=E+AN^{-\alpha}+BK^{-\beta}N^\beta$。令导数为零：$\alpha AN^{-\alpha}=\beta BD^{-\beta}$。因此最优点平衡的是带指数的边际项，并非无条件要求N=D；在系数与指数对称的简化模型中，可以直接由对称性推出 $N=D$；一般情形则应解上式，并检查最优配比怎样随预算改变。
+
+假设预算近似允许$ND=100$个抽象单位，方案A是$N=10,D=10$，方案B是$N=20,D=5$。B容量更大，但只读一半数据。如果损失近似为$1/N+1/D$，A为0.2，B为0.25，因此A更优。这只是对称教学函数，不是论文拟合的实际系数。
+
+### 从平方根配比反推新增算力怎么花
+
+在参数与训练量指数都近似0.5的那组经验关系下，预算增加16倍对应两者各约4倍，二者乘积才是16。若只把参数扩16倍而训练token不变，虽也增加乘积，却离开拟合的最优配比。这个倍率核对依赖该经验区间，不能变成部署最优或数据无限可得的保证。
+
+## 三、为每个训练长度匹配调度并扫描预算
+
 ```text
 输入：数据分布、候选模型规模、多个训练FLOPs预算
 对每个预算 C：
@@ -63,7 +73,9 @@ $$
 
 理论推导解释拟合函数内部的最优分配，实验检验该函数是否足够描述实际训练。不能用“解出了最优公式”跳过函数假设与外推验证。
 
-## 实验设置与大模型验证
+## 四、用三种拟合与大模型对照检验配比外推
+
+先读取每条等计算曲线的最低点，再判断拟合外推；70B验证与Gopher还同时改变了优化器和数据配方。
 
 | 项目 | 原文设置与目的 |
 |---|---|
@@ -71,50 +83,70 @@ $$
 | 三种分析 | 学习曲线最优包络、固定FLOPs谷底、参数损失面；检查结论是否依赖单一拟合方式 |
 | 主要数据 | MassiveText；附录另做C4和GitHub子集分析 |
 | 大模型 | Chinchilla70B，1.4T token；Gopher280B，相近训练FLOPs |
-| 配置 | 表4：Chinchilla80层、64头、隐藏维8192，最大学习率1e-4，批量1.5M逐步到3M token |
+| 配置 | [表4](https://arxiv.org/html/2203.15556#S4.T4)：Chinchilla80层、64头、隐藏维8192，最大学习率1e-4，批量1.5M逐步到3M token |
 | 非规模变化 | Adam改为AdamW，数据混合比例调整，tokenizer略改；不能将大模型对比视为仅参数与数据两个变量 |
 | 评价 | 语言建模、阅读理解、闭卷问答、常识、57个MMLU任务、62个BIG-bench任务 |
-| 不确定性 | 表2用80%训练点重采样100次估计幂律系数区间；这不是70B模型重复训练100次 |
+| 不确定性 | [表2](https://arxiv.org/html/2203.15556#S3.T2)用80%训练点重采样100次估计幂律系数区间；这不是70B模型重复训练100次 |
 
 最优研究关心训练FLOPs，因此并未完整优化全生命周期成本。若模型将服务极大量请求，更小模型训练更久可能进一步节省推理成本；若数据稀缺或延迟要求不同，优化问题需要改变。Chinchilla本身更小，推理和适配成本随之减少，但不能由参数比直接保证所有部署负载四倍提速。
 
-## 五组关键证据
+**证据一：[图3](#llm-v6-057-figure-3)与[表2](https://arxiv.org/html/2203.15556#S3.T2)的分配规律。** 曲线包络得到$N,D$指数约0.50/0.50，IsoFLOP方法0.49/0.51，参数化方法0.46/0.54，区别于表中列出的旧研究0.73/0.27。三种方法共同支持参数与数据大致同步增长，不能把0.5当作跨数据、架构和优化器不变的自然常数。 IsoFLOP 图左侧每条曲线固定最终训练 FLOPs，低谷给出该预算内较合适的模型规模；中、右图再利用这些低谷做外推。
 
-**证据一：图3与表2的分配规律。** 曲线包络得到$N,D$指数约0.50/0.50，IsoFLOP方法0.49/0.51，参数化方法0.46/0.54，区别于表中列出的旧研究0.73/0.27。三种方法共同支持参数与数据大致同步增长，不能把0.5当作跨数据、架构和优化器不变的自然常数。
+<!-- figure-ref-v6:start:057-f3-3-anchor -->
+<a id="llm-v6-057-figure-3"></a>
+<!-- figure-ref-v6:end:057-f3-3-anchor -->
 
-**证据二：附录图A1的学习率调度。** 衰减周期设得明显长于实际训练，最终损失会变差；超过目标训练长度25%的估计偏差开始出现清晰影响。它说明训练长度实验必须配套优化调度，否则可能把尚未衰减的模型误判为该预算下的最优模型。这里的25%是该消融现象，不是通用工程容差。
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/057-chinchilla-f3.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/057-chinchilla-f3.png" width="1600" height="461" alt="Chinchilla等计算预算损失曲线及计算最优模型和数据规模拟合" loading="lazy"></a><figcaption>原实验图摘引：Jordan Hoffmann等，2022，图3；<a href="https://arxiv.org/html/2203.15556#S3.F3" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
 
-**证据三：表6与图6的MMLU。** 五样本平均分Gopher60.0%，Chinchilla67.6%，提升7.6个百分点，相对提升约12.7%。四个任务退化，包括大学数学、计量经济学、道德情景和形式逻辑，还有两个任务持平。平均提升不能解释成每种能力都提高。
+**证据二：附录[图A1](#llm-v6-057-figure-A1)的学习率调度。** 衰减周期设得明显长于实际训练，最终损失会变差；超过目标训练长度25%的估计偏差开始出现清晰影响。它说明训练长度实验必须配套优化调度，否则可能把尚未衰减的模型误判为该预算下的最优模型。这里的25%是该消融现象，不是通用工程容差。
 
-**证据四：图5与§4.2.1的语言建模。** Chinchilla在所测Pile子集上优于Gopher，WikiText103困惑度从7.75降到7.16。作者同时提醒，训练数据更多可能增加训练测试重叠，因而不只依赖语言建模评估支持结论。困惑度下降也不是对应百分比的事实准确率提升。
+<!-- figure-ref-v6:start:057-fA1-9 -->
+<a id="llm-v6-057-figure-A1"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/057-chinchilla-fA1-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/057-chinchilla-fA1-v6.png" width="1800" height="1083" alt="Chinchilla六种余弦衰减周期在两种训练长度下的学习率、训练损失及C4损失" loading="lazy"></a><figcaption>原文图形摘引：Jordan Hoffmann等，2022，图A1，PDF第23页；<a href="https://arxiv.org/html/2203.15556v1#A2.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:057-fA1-9 -->
 
-**证据五：表8与图7的广泛但非全面收益。** HellaSwag为80.8%对79.2%，Winogrande74.9%对70.1%，BoolQ83.7%对79.3%，PIQA二者同为81.8%。BIG-bench多数任务改善、四项例外。证据说明收益跨任务存在，同时保留了持平和退化的边界。
+**证据三：[表6](https://arxiv.org/html/2203.15556#S4.T6)与[图6](#llm-v6-057-figure-6)的MMLU。** 五样本平均分Gopher60.0%，Chinchilla67.6%，提升7.6个百分点，相对提升约12.7%。四个任务退化，包括大学数学、计量经济学、道德情景和形式逻辑，还有两个任务持平。平均提升不能解释成每种能力都提高。
 
-## “每参数20个token”应怎样理解
+<!-- figure-ref-v6:start:057-f6-5 -->
+<a id="llm-v6-057-figure-6"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/057-chinchilla-f6-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/057-chinchilla-f6-v6.png" width="1800" height="933" alt="Chinchilla相对Gopher在MMLU各学科的改善与退步" loading="lazy"></a><figcaption>原文图形摘引：Jordan Hoffmann等，2022，图6，PDF第12页；<a href="https://arxiv.org/html/2203.15556v1#S4.F6" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:057-f6-5 -->
 
-70B乘20得到1.4T，恰好是著名训练配置。表3中1B对应约20.2B token、10B对应205.1B，也接近这个比例。但它来源于某组经验拟合与训练目标，不是说每个参数需要读固定20个不同词才能学会。
+**证据四：[图5](#llm-v6-057-figure-5)与§4.2.1的语言建模。** Chinchilla在所测Pile子集上优于Gopher，WikiText103困惑度从7.75降到7.16。作者同时提醒，训练数据更多可能增加训练测试重叠，因而不只依赖语言建模评估支持结论。困惑度下降也不是对应百分比的事实准确率提升。
 
-尤其不能把它用作所有后续模型训练长度上限。更长训练可能改善某个固定大小模型，只是在仅最小化一次预训练成本的目标下未必最优；当推理次数进入总成本时，继续训练较小模型可能合理。这里是对优化问题的分析，而非论文已经验证所有部署策略。
+<!-- figure-ref-v6:start:057-f5-6 -->
+<a id="llm-v6-057-figure-5"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/057-chinchilla-f5-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/057-chinchilla-f5-v6.png" width="1800" height="944" alt="Chinchilla相对Gopher在各Pile子集的每字节损失下降" loading="lazy"></a><figcaption>原文图形摘引：Jordan Hoffmann等，2022，图5，PDF第10页；<a href="https://arxiv.org/html/2203.15556v1#S4.F5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:057-f5-6 -->
 
-三种拟合方法对Gopher预算的预测范围约40B—70B，也说明最佳规模本身有不确定性。作者选70B还考虑数据与计算效率。表3的极大规模投影距离实测范围很远，不应把几十万亿token需求作为已经实验确认的事实。
+**证据五：[表8](https://arxiv.org/html/2203.15556#S4.T8)与[图7](#llm-v6-057-figure-7)的广泛但非全面收益。** HellaSwag为80.8%对79.2%，Winogrande74.9%对70.1%，BoolQ83.7%对79.3%，PIQA二者同为81.8%。BIG-bench多数任务改善、四项例外。证据说明收益跨任务存在，同时保留了持平和退化的边界。
 
-## 贡献、代价与复现边界
+<!-- figure-ref-v6:start:057-f7-8 -->
+<a id="llm-v6-057-figure-7"></a>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/057-chinchilla-f7-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/057-chinchilla-f7-v6.png" width="1800" height="954" alt="Chinchilla相对Gopher在BIG-bench各任务的变化及误差条" loading="lazy"></a><figcaption>原文图形摘引：Jordan Hoffmann等，2022，图7，PDF第13页；<a href="https://arxiv.org/html/2203.15556v1#S4.F7" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:057-f7-8 -->
 
-贡献是用广泛训练扫描、三种分析和一个大模型验证，重新校正固定算力下参数与训练量的平衡。它改变了“扩大模型即提高效率”的默认看法，也强调数据建设与优化调度的价值。
-
-局限包括拟合函数和计算近似、数据分布依赖、有限大模型验证，以及Chinchilla与Gopher同时改变优化器、tokenizer和混合比例。所有提升都只归因于参数/token分配会过度解释。原始MassiveText也不等同于完整开放可复建的数据，复现需要处理数据可得性。
-
-## 一个自构资源分配例子
-
-假设预算近似允许$ND=100$个抽象单位，方案A是$N=10,D=10$，方案B是$N=20,D=5$。B容量更大，但只读一半数据。如果损失近似为$1/N+1/D$，A为0.2，B为0.25，因此A更优。这只是对称教学函数，不是论文拟合的实际系数。
+## 五、训练最优比例不直接决定长期服务成本
 
 若任务需要更大容量，参数误差项权重增加，最优点也会移动。例子说明应比较边际收益，不能凭“参数多”或“数据多”单独下结论。
 
 五个前置概念：**FLOPs**是浮点运算次数估计；**交叉熵**衡量预测真实token的损失；**幂律拟合**用尺度指数描述经验关系；**等计算量曲线**固定预算比较模型选择；**学习率调度**改变训练各阶段的更新幅度。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 固定算力下模型过大、训练不足 | 联合扫描规模与token，匹配调度并拟合计算最优边界 | 平衡容量误差和有限训练误差 | 图3/表2近同步缩放；图A1调度；表6 MMLU60.0→67.6；表8跨任务结果 | 更多数据与实验扫描；最优依赖目标；大模型对照含其他改动；远距离外推不确定 |
+70B乘20得到1.4T，恰好是著名训练配置。[表3](https://arxiv.org/html/2203.15556#S3.T3)中1B对应约20.2B token、10B对应205.1B，也接近这个比例。但它来源于某组经验拟合与训练目标，不是说每个参数需要读固定20个不同词才能学会。
+
+尤其不能把它用作所有后续模型训练长度上限。更长训练可能改善某个固定大小模型，只是在仅最小化一次预训练成本的目标下未必最优；当推理次数进入总成本时，继续训练较小模型可能合理。这里是对优化问题的分析，而非论文已经验证所有部署策略。
+
+三种拟合方法对Gopher预算的预测范围约40B—70B，也说明最佳规模本身有不确定性。作者选70B还考虑数据与计算效率。[表3](https://arxiv.org/html/2203.15556#S3.T3)的极大规模投影距离实测范围很远，不应把几十万亿token需求作为已经实验确认的事实。
+
+**新的教学算例。** 若损失为 $4/N+1/D$、预算ND=100，导数条件为 $4/N=1/D$，故N=20、D=5，损失0.4；均分10、10的损失为0.5。容量误差更重时最优模型应更大。再加入大量部署请求的推理成本，约束不再仅为ND，原训练最优结论也应重算。
+
+它改变了“扩大模型即提高效率”的默认看法，也强调数据建设与优化调度的价值。
+
+局限包括拟合函数和计算近似、数据分布依赖、有限大模型验证，以及Chinchilla与Gopher同时改变优化器、tokenizer和混合比例。所有提升都只归因于参数/token分配会过度解释。原始MassiveText也不等同于完整开放可复建的数据，复现需要处理数据可得性。
+
+## 六、把训练预算继续接到部署预算
+
+训练最优仍不等于长期使用最优。[LLaMA](068-llama.md)更重视小模型反复部署，[推理时计算](091-test-time-scaling.md)把回答阶段的搜索也放进生命周期账本；先选成本目标，再讨论配比。
 
 ## 自测与参考答案
 
