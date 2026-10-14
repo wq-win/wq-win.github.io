@@ -39,29 +39,34 @@
                 <span class="text-gray-400">/</span>
                 <a href="index.html" class="text-primary hover:underline">大语言模型</a>
                 <span class="text-gray-400">/</span>
-                <span class="text-gray-500">032 · DPR：把海量文档检索变成可学习的向量搜索</span>
+                <span class="text-gray-500">DPR：把海量文档检索变成可学习的向量搜索</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="3b68dc5c498fe15a74ec1fb5e7efe13e2e31754671f402a15755d8581f32c3dc"><h1>032 · DPR：把海量文档检索变成可学习的向量搜索</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="03fd0421022b3eea8d7282c31a2162e30d75d974db82358ce67d335934b8ed62"><h1>032 · DPR：把海量文档检索变成可学习的向量搜索</h1>
 <p><a href="index.html">返回目录</a> · <a href="031-electra.html">上一篇：ELECTRA</a> · <a href="033-longformer.html">下一篇：Longformer</a></p>
-<p>论文：Vladimir Karpukhin 等，<em>Dense Passage Retrieval for Open-Domain Question Answering</em>，EMNLP 2020。<a href="https://arxiv.org/pdf/2004.04906">原始论文</a>。阅读依据为§3–6、表1–4及附录中的诊断实验；没有独立重建全量索引。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>用户问“英格兰和爱尔兰之间是什么水域”，材料可能只写“爱尔兰海”，没有复用整句关键词。DPR 用两个文本编码器，分别把问题和段落映射成向量，再用内积寻找相关段落。文档向量可以提前计算，所以不必让大型阅读器逐一阅读整个百科全书。</p>
-<p>创新重点不是发明向量距离，而是证明一个相对简单的双编码器，配合问题—段落监督、批内负例和困难负例，就能成为很强的开放域检索器。它与 REALM 的区别在于直接学习有监督检索，并分阶段训练检索器和阅读器，不依赖同样的检索增强预训练流程。</p>
-<p>一句话：在开放域问答中，通过可预计算的双编码器和对比训练，改善候选证据召回与最终答案准确率，代价是训练监督、向量索引建设，以及对罕见精确词项的潜在弱点。</p>
+<p>论文：Vladimir Karpukhin 等，<em>Dense Passage Retrieval for Open-Domain Question Answering</em>，EMNLP 2020。<a href="https://arxiv.org/pdf/2004.04906">原始论文</a>。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="030-realm.html">REALM</a>用最终预测收益学习检索，但检索器也可以直接利用问答配对监督。本篇沿这条平行路线，用可预计算双编码器缩小候选库，再训练阅读器；后来的<a href="034-rag.html">RAG</a>和<a href="036-fid.html">FiD</a>把它当作模块组合。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念分别是：倒排索引用词查文档，双编码器独立表示两端，内积衡量可学习匹配，批内负例复用已有编码，EM检查答案完全一致。理解这些之后，读RAG时就能分清检索表示来自哪里，以及生成器究竟在联合优化哪部分。</p>
-<h2 id="问题定义与系统边界">问题定义与系统边界</h2>
-<p>输入只有问题，答案证据藏在大规模段落库中。检索器输出少量候选，阅读器再选段落和答案跨度。它属于监督检索与问答，不是强化学习；“正例奖励更高”只是比喻，实际使用可微分类损失。</p>
+<h2 id="一问题设定问题与证据措辞不同怎样仍在大库中找回答案段落">一、问题设定：问题与证据措辞不同，怎样仍在大库中找回答案段落</h2>
+<p>问题可能问“英格兰和爱尔兰之间是什么水域”，证据却只写“爱尔兰海”。检索器要从大段落库召回少量候选，再由阅读器提取答案跨度；不能让昂贵阅读器逐一交叉编码整部百科。本篇利用监督问答与独立编码兼顾语义匹配和索引效率。</p>
 <p>稀疏检索 BM25 擅长精确词匹配，难以直接处理同义改写。交叉编码器把问题与段落一起送入 Transformer，能做细粒度交互，但对数千万段落逐一计算过于昂贵。DPR 以独立编码换取可索引性，再把昂贵交互留给少数候选。</p>
 <p>因此存在两个假设：单个固定长度向量能保存足够的检索信息；训练中的相关性监督能迁移到实际查询。对于冷门型号、罕见实体或领域迁移，这些假设可能失效。DPR 不是一个保证语义理解完整的搜索引擎。</p>
-<h2 id="双编码器怎样学习">双编码器怎样学习</h2>
+<h2 id="二由双编码打分推导负例集合的学习压力">二、由双编码打分推导负例集合的学习压力</h2>
 <p>令问题编码器为 <span class="reading-math" data-tex="E_Q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>E</mi><mi>Q</mi></msub></mrow><annotation encoding="application/x-tex">E_Q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">Q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，段落编码器为 <span class="reading-math" data-tex="E_P"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>E</mi><mi>P</mi></msub></mrow><annotation encoding="application/x-tex">E_P</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，打分为：</p>
 <p><span class="reading-math" data-tex="s(q,p)=E_Q(q)^\top E_P(p)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>s</mi><mo stretchy="false">(</mo><mi>q</mi><mo separator="true">,</mo><mi>p</mi><mo stretchy="false">)</mo><mo>=</mo><msub><mi>E</mi><mi>Q</mi></msub><mo stretchy="false">(</mo><mi>q</mi><msup><mo stretchy="false">)</mo><mi mathvariant="normal">⊤</mi></msup><msub><mi>E</mi><mi>P</mi></msub><mo stretchy="false">(</mo><mi>p</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">s(q,p)=E_Q(q)^\top E_P(p).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1852em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">Q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05764em;">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
 <p>给定问题 <span class="reading-math" data-tex="q_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>q</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">q_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>、正段落 <span class="reading-math" data-tex="p_i^+"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>p</mi><mi>i</mi><mo>+</mo></msubsup></mrow><annotation encoding="application/x-tex">p_i^+</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0883em;vertical-align:-0.2769em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8115em;"><span style="top:-2.4231em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.1031em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2769em;"><span></span></span></span></span></span></span></span></span></span></span> 和负例集合 <span class="reading-math" data-tex="N_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>N</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">N_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，优化：</p>
 <p><span class="reading-math" data-tex="L_i=-\log\frac{\exp s(q_i,p_i^+)}{\exp s(q_i,p_i^+)+\sum_{p\in N_i}\exp s(q_i,p)}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>L</mi><mi>i</mi></msub><mo>=</mo><mo>−</mo><mi>log</mi><mo>⁡</mo><mfrac><mrow><mi>exp</mi><mo>⁡</mo><mi>s</mi><mo stretchy="false">(</mo><msub><mi>q</mi><mi>i</mi></msub><mo separator="true">,</mo><msubsup><mi>p</mi><mi>i</mi><mo>+</mo></msubsup><mo stretchy="false">)</mo></mrow><mrow><mi>exp</mi><mo>⁡</mo><mi>s</mi><mo stretchy="false">(</mo><msub><mi>q</mi><mi>i</mi></msub><mo separator="true">,</mo><msubsup><mi>p</mi><mi>i</mi><mo>+</mo></msubsup><mo stretchy="false">)</mo><mo>+</mo><munder><mo>∑</mo><mrow><mi>p</mi><mo>∈</mo><msub><mi>N</mi><mi>i</mi></msub></mrow></munder><mi>exp</mi><mo>⁡</mo><mi>s</mi><mo stretchy="false">(</mo><msub><mi>q</mi><mi>i</mi></msub><mo separator="true">,</mo><mi>p</mi><mo stretchy="false">)</mo></mrow></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L_i=-\log\frac{\exp s(q_i,p_i^+)}{\exp s(q_i,p_i^+)+\sum_{p\in N_i}\exp s(q_i,p)}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.6257em;vertical-align:-1.1373em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.4885em;"><span style="top:-2.2985em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop">exp</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">s</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8115em;"><span style="top:-2.4231em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.1031em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2769em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1786em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="mrel mtight">∈</span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.10903em;">N</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:-0.109em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">exp</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">s</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop">exp</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">s</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8115em;"><span style="top:-2.4231em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.1031em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2769em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.1373em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p>这个 softmax 在当前候选集合中把概率推向正段落，并不直接计算全库的归一化概率。因此负例如何取样非常关键：随机文章容易排除，含相同词却答错问题的段落更能约束决策边界。</p>
 <p>批内负例复用同一批其他问题的正段落。若批量为 <span class="reading-math" data-tex="B"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>B</mi></mrow><annotation encoding="application/x-tex">B</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span></span></span></span></span>，一次编码能构造近似 <span class="reading-math" data-tex="B\times B"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>B</mi><mo>×</mo><mi>B</mi></mrow><annotation encoding="application/x-tex">B\times B</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span></span></span></span></span> 的配对分数矩阵，不需为每个问题单独编码大量新段落。论文还加入 BM25 高排名但不含答案字符串的段落作为困难负例。这种定义仍可能产生假负例，例如文本以另一种说法给出了正确答案。</p>
+<h3 id="检索梯度为何取决于负例集合">检索梯度为何取决于负例集合</h3>
+<p>对某问题的正例分数 <span class="reading-math" data-tex="s_+"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mo>+</mo></msub></mrow><annotation encoding="application/x-tex">s_+</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2583em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span> 与负例分数 <span class="reading-math" data-tex="s_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">s_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 做softmax，归一化概率记为 <span class="reading-math" data-tex="p_+,p_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mo>+</mo></msub><mo separator="true">,</mo><msub><mi>p</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">p_+,p_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2583em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>，损失 <span class="reading-math" data-tex="\ell"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">ℓ</mi></mrow><annotation encoding="application/x-tex">\ell</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">ℓ</span></span></span></span></span> 是 <span class="reading-math" data-tex="-\log p_+"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><mi>log</mi><mo>⁡</mo><msub><mi>p</mi><mo>+</mo></msub></mrow><annotation encoding="application/x-tex">-\log p_+</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9028em;vertical-align:-0.2083em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2583em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span>，因此 <span class="reading-math" data-tex="\partial\ell/\partial s_+=p_+-1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∂</mi><mi mathvariant="normal">ℓ</mi><mi mathvariant="normal">/</mi><mi mathvariant="normal">∂</mi><msub><mi>s</mi><mo>+</mo></msub><mo>=</mo><msub><mi>p</mi><mo>+</mo></msub><mo>−</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\partial\ell/\partial s_+=p_+-1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord">ℓ</span><span class="mord">/</span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2583em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7917em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2583em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">+</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>，负例梯度为 <span class="reading-math" data-tex="p_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">p_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>。已被模型排很低的随机负例几乎不提供信号，词面相似却不含答案的BM25负例更可能暴露错误边界。双编码器让文档可预计算，却也限制查询和文档只能在打分阶段通过低成本函数交互。</p>
+<p><strong>教学算例。</strong> 正例与一个负例分数为2和0时，正例概率0.881，梯度−0.119；加入分数3的困难负例后，正例概率约0.245，梯度−0.755。学习压力大幅变化；若该“负例”实际也能回答问题，强梯度便会把正确证据推远。因此更多in-batch负例不自动等于更可靠监督。</p>
+<h3 id="把一个batch写成检索分类题">把一个batch写成检索分类题</h3>
+<p>一个batch有3个问题和各自正段落，查询与段落两端独立编码后得到3×3分数矩阵。对第1行归一化，正项是第1列，其余两列作为负例；换batch就会改变这行分母。若另一个问题的正段落也能回答当前问题，它便可能成为假负例，批内负例不是自动正确的人工标签。</p>
+<p>教法联系：<a href="https://jalammar.github.io/illustrated-word2vec/">Jay Alammar的The Illustrated Word2vec</a>。算例为本文自构。</p>
+<h2 id="三预计算段落索引再分别训练检索器与阅读器">三、预计算段落索引，再分别训练检索器与阅读器</h2>
 <pre><code class="language-text">输入：问题与正段落对、BM25负例、预训练双编码器
 每个训练批次：
     编码所有问题 Q 和正段落 P
@@ -76,7 +81,8 @@
 输出：候选证据和答案
 </code></pre>
 <p>检索器损失改善的是候选区分；算法机制改善的是语义匹配及计算可分解性；实验指标则分别是 top-k 检索准确率与最终 EM。三者相关，但不能互相替代。阅读器可能看到了正确证据却抽错答案，也可能证据库本来就缺少相关内容。</p>
-<h2 id="实验如何组织">实验如何组织</h2>
+<h2 id="四同时保留nq收益squad退步与负例消融">四、同时保留NQ收益、SQuAD退步与负例消融</h2>
+<p>召回提升需要传到EM才有系统价值，失败数据集与困难负例数量的非单调性都应保留。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -94,7 +100,7 @@
 </tr>
 <tr>
 <td>训练样本</td>
-<td>表1区分原始数量与过滤后数量，例如 NQ 原始79,168、实际58,880；不能忽略过滤影响</td>
+<td><a href="https://arxiv.org/html/2004.04906#S4.T1">表1</a>区分原始数量与过滤后数量，例如 NQ 原始79,168、实际58,880；不能忽略过滤影响</td>
 </tr>
 <tr>
 <td>训练预算</td>
@@ -114,35 +120,23 @@
 </tr>
 </tbody></table></div>
 <p>“含答案字符串”是可扩展的检索评估代理，既不保证段落真正支持答案，也可能漏掉同义表达。多数据集设置给小任务增加了监督资源，因此不能与单数据集结果当作同预算比较。</p>
-<h2 id="证据及适用范围">证据及适用范围</h2>
-<p><strong>证据一：表2，稠密检索的收益与例外。</strong> NQ单数据集训练时，BM25的top-20准确率59.1，DPR为78.4，绝对增加19.3个百分点。SQuAD却由68.8下降到63.2。证据支持多数所测任务的提升，同时直接否定“语义检索必然全面替代词项检索”。论文讨论SQuAD的问题构造和数据分布特殊性，这属于解释线索，不是对所有失败的完整归因。</p>
-<p><strong>证据二：表3，负例与批内复用。</strong> NQ开发集使用7个其他问题正段落作为负例时，非批内训练top-20为63.1，批内版本69.1；批内配置再加入困难负例能进一步改善。这个结果支持训练配对构造的重要性。表中也显示加两个困难负例并不一定好过一个，所以“负例越多越好”没有得到普遍支持。</p>
-<p><strong>证据三：表4，检索改善能否传到答案。</strong> 作者系统在NQ上，BM25对应最终EM32.6，DPR为41.5，增加8.9个百分点。但SQuAD同样出现退步。这说明召回与问答能力需要一起评估；表4来自其他论文的结果区块包含不同预训练和阅读器资源，不能把所有差值归因于检索器一项。</p>
-<p>§5.4还揭示被在线延迟掩盖的成本：全库向量计算约需8张GPU运行8.8小时，索引构建另需约8.5小时，而Lucene倒排索引构建约30分钟。这些是当时特定配置的报告，不能作为今天服务延迟保证；它们说明索引刷新频繁时，总拥有成本可能改变选择。</p>
-<h2 id="构造例子与诊断办法">构造例子与诊断办法</h2>
-<p>自构例子：问题是“设备ZX-17的额定电压”。BM25能够紧抓型号，而稠密模型可能召回同类设备的通用说明。若题目换成“这台设备需要多大供电”，语义匹配又可能更有帮助。混合检索的价值来自错误类型不同，而不是把两个分数随便相加就必定改进。</p>
 <p>可以构造一个未执行的诊断集：一半问题做同义改写，一半只改变型号或年份，保持答案证据不变。比较BM25、DPR和混合方式的召回、阅读准确率及索引成本。若DPR只在改写题更强，就应给结论加上任务条件；若混合召回提高却EM下降，要检查候选噪声和阅读器排序，而不是马上扩大检索数量。</p>
+<p><strong>证据一：<a href="#llm-v6-032-table-2">表2</a>，稠密检索的收益与例外。</strong> NQ单数据集训练时，BM25的top-20准确率59.1，DPR为78.4，绝对增加19.3个百分点。SQuAD却由68.8下降到63.2。证据支持多数所测任务的提升，同时直接否定“语义检索必然全面替代词项检索”。论文讨论SQuAD的问题构造和数据分布特殊性，这属于解释线索，不是对所有失败的完整归因。</p>
+<!-- figure-ref-v6:start:032-t2-2-anchor -->
+<p><a id="llm-v6-032-table-2"></a></p>
+<!-- figure-ref-v6:end:032-t2-2-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/032-dpr-t2.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/032-dpr-t2.png" width="1701" height="390" alt="BM25、DPR及组合检索在多个问答数据集的Top-20和Top-100召回" loading="lazy"></a><figcaption>实验结果表摘引：Vladimir Karpukhin 等，2020，表2，PDF第5页；<a href="https://arxiv.org/pdf/2004.04906#page=5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据二：<a href="https://arxiv.org/html/2004.04906#S5.T3">表3</a>，负例与批内复用。</strong> NQ开发集使用7个其他问题正段落作为负例时，非批内训练top-20为63.1，批内版本69.1；批内配置再加入困难负例能进一步改善。这个结果支持训练配对构造的重要性。表中也显示加两个困难负例并不一定好过一个，所以“负例越多越好”没有得到普遍支持。</p>
+<p><strong>证据三：<a href="https://arxiv.org/html/2004.04906#S5.T4">表4</a>，检索改善能否传到答案。</strong> 作者系统在NQ上，BM25对应最终EM32.6，DPR为41.5，增加8.9个百分点。但SQuAD同样出现退步。这说明召回与问答能力需要一起评估；<a href="https://arxiv.org/html/2004.04906#S5.T4">表4</a>来自其他论文的结果区块包含不同预训练和阅读器资源，不能把所有差值归因于检索器一项。</p>
+<p>§5.4还揭示被在线延迟掩盖的成本：全库向量计算约需8张GPU运行8.8小时，索引构建另需约8.5小时，而Lucene倒排索引构建约30分钟。这些是当时特定配置的报告，不能作为今天服务延迟保证；它们说明索引刷新频繁时，总拥有成本可能改变选择。</p>
+<h2 id="五假负例和精确型号会暴露向量压缩限制">五、假负例和精确型号会暴露向量压缩限制</h2>
+<p>自构例子：问题是“设备ZX-17的额定电压”。BM25能够紧抓型号，而稠密模型可能召回同类设备的通用说明。若题目换成“这台设备需要多大供电”，语义匹配又可能更有帮助。混合检索的价值来自错误类型不同，而不是把两个分数随便相加就必定改进。</p>
 <p>还应检查过滤出的训练问题是什么类型。若BM25无法找到含答案正例的问题被丢弃，训练集合已经受到词项检索的选择偏差；这不推翻实验，但影响对真正低词汇重叠问题的外推。索引更新后也要保证新旧段落使用相同编码器版本，否则内积不再处于统一表示空间。</p>
-<h2 id="贡献与限制">贡献与限制</h2>
-<p>DPR 把监督式双编码器检索确立为实用的问答组件，证明良好的训练样本组织能比更复杂的联合流程更有竞争力。它付出的代价包括标签构建、假负例、向量存储、索引维护，以及单向量表示压缩细粒度关系的损失。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>词匹配漏掉语义相关证据</td>
-<td>双编码器、批内与困难负例</td>
-<td>可索引表示学习相关性边界</td>
-<td>表2召回、表3负例、表4最终EM</td>
-<td>假负例、索引成本、罕见实体弱点</td>
-</tr>
-</tbody></table></div>
+<p>它付出的代价包括标签构建、假负例、向量存储、索引维护，以及单向量表示压缩细粒度关系的损失。</p>
+<h2 id="六把可索引检索模块接入生成系统">六、把可索引检索模块接入生成系统</h2>
+<p>检索到正段落后，生成器还需使用它。<a href="034-rag.html">RAG</a>与<a href="036-fid.html">FiD</a>分别讨论潜在文档混合和多段解码融合；检索召回是必要诊断，却不能代替最终答案评价。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 为什么不直接用交叉编码器检索全部段落？</strong></p>
 <p>每个新问题都需要与每个段落重新进行注意力交互，无法预计算问题无关的匹配向量。双编码器把全库工作移到离线阶段，交叉编码器适合少量候选重排。</p>
@@ -159,25 +153,21 @@
 
 [返回目录](README.md) · [上一篇：ELECTRA](031-electra.md) · [下一篇：Longformer](033-longformer.md)
 
-论文：Vladimir Karpukhin 等，*Dense Passage Retrieval for Open-Domain Question Answering*，EMNLP 2020。[原始论文](https://arxiv.org/pdf/2004.04906)。阅读依据为§3–6、表1–4及附录中的诊断实验；没有独立重建全量索引。
+论文：Vladimir Karpukhin 等，*Dense Passage Retrieval for Open-Domain Question Answering*，EMNLP 2020。[原始论文](https://arxiv.org/pdf/2004.04906)。
 
-## 一分钟理解
+### 先接住前作的问题
 
-用户问“英格兰和爱尔兰之间是什么水域”，材料可能只写“爱尔兰海”，没有复用整句关键词。DPR 用两个文本编码器，分别把问题和段落映射成向量，再用内积寻找相关段落。文档向量可以提前计算，所以不必让大型阅读器逐一阅读整个百科全书。
+[REALM](030-realm.md)用最终预测收益学习检索，但检索器也可以直接利用问答配对监督。本篇沿这条平行路线，用可预计算双编码器缩小候选库，再训练阅读器；后来的[RAG](034-rag.md)和[FiD](036-fid.md)把它当作模块组合。
 
-创新重点不是发明向量距离，而是证明一个相对简单的双编码器，配合问题—段落监督、批内负例和困难负例，就能成为很强的开放域检索器。它与 REALM 的区别在于直接学习有监督检索，并分阶段训练检索器和阅读器，不依赖同样的检索增强预训练流程。
+## 一、问题设定：问题与证据措辞不同，怎样仍在大库中找回答案段落
 
-一句话：在开放域问答中，通过可预计算的双编码器和对比训练，改善候选证据召回与最终答案准确率，代价是训练监督、向量索引建设，以及对罕见精确词项的潜在弱点。
-
-## 问题定义与系统边界
-
-输入只有问题，答案证据藏在大规模段落库中。检索器输出少量候选，阅读器再选段落和答案跨度。它属于监督检索与问答，不是强化学习；“正例奖励更高”只是比喻，实际使用可微分类损失。
+问题可能问“英格兰和爱尔兰之间是什么水域”，证据却只写“爱尔兰海”。检索器要从大段落库召回少量候选，再由阅读器提取答案跨度；不能让昂贵阅读器逐一交叉编码整部百科。本篇利用监督问答与独立编码兼顾语义匹配和索引效率。
 
 稀疏检索 BM25 擅长精确词匹配，难以直接处理同义改写。交叉编码器把问题与段落一起送入 Transformer，能做细粒度交互，但对数千万段落逐一计算过于昂贵。DPR 以独立编码换取可索引性，再把昂贵交互留给少数候选。
 
 因此存在两个假设：单个固定长度向量能保存足够的检索信息；训练中的相关性监督能迁移到实际查询。对于冷门型号、罕见实体或领域迁移，这些假设可能失效。DPR 不是一个保证语义理解完整的搜索引擎。
 
-## 双编码器怎样学习
+## 二、由双编码打分推导负例集合的学习压力
 
 令问题编码器为 $E_Q$，段落编码器为 $E_P$，打分为：
 
@@ -194,6 +184,20 @@ $$
 这个 softmax 在当前候选集合中把概率推向正段落，并不直接计算全库的归一化概率。因此负例如何取样非常关键：随机文章容易排除，含相同词却答错问题的段落更能约束决策边界。
 
 批内负例复用同一批其他问题的正段落。若批量为 $B$，一次编码能构造近似 $B\times B$ 的配对分数矩阵，不需为每个问题单独编码大量新段落。论文还加入 BM25 高排名但不含答案字符串的段落作为困难负例。这种定义仍可能产生假负例，例如文本以另一种说法给出了正确答案。
+
+### 检索梯度为何取决于负例集合
+
+对某问题的正例分数 $s_+$ 与负例分数 $s_j$ 做softmax，归一化概率记为 $p_+,p_j$，损失 $\ell$ 是 $-\log p_+$，因此 $\partial\ell/\partial s_+=p_+-1$，负例梯度为 $p_j$。已被模型排很低的随机负例几乎不提供信号，词面相似却不含答案的BM25负例更可能暴露错误边界。双编码器让文档可预计算，却也限制查询和文档只能在打分阶段通过低成本函数交互。
+
+**教学算例。** 正例与一个负例分数为2和0时，正例概率0.881，梯度−0.119；加入分数3的困难负例后，正例概率约0.245，梯度−0.755。学习压力大幅变化；若该“负例”实际也能回答问题，强梯度便会把正确证据推远。因此更多in-batch负例不自动等于更可靠监督。
+
+### 把一个batch写成检索分类题
+
+一个batch有3个问题和各自正段落，查询与段落两端独立编码后得到3×3分数矩阵。对第1行归一化，正项是第1列，其余两列作为负例；换batch就会改变这行分母。若另一个问题的正段落也能回答当前问题，它便可能成为假负例，批内负例不是自动正确的人工标签。
+
+教法联系：[Jay Alammar的The Illustrated Word2vec](https://jalammar.github.io/illustrated-word2vec/)。算例为本文自构。
+
+## 三、预计算段落索引，再分别训练检索器与阅读器
 
 ```text
 输入：问题与正段落对、BM25负例、预训练双编码器
@@ -212,13 +216,15 @@ $$
 
 检索器损失改善的是候选区分；算法机制改善的是语义匹配及计算可分解性；实验指标则分别是 top-k 检索准确率与最终 EM。三者相关，但不能互相替代。阅读器可能看到了正确证据却抽错答案，也可能证据库本来就缺少相关内容。
 
-## 实验如何组织
+## 四、同时保留NQ收益、SQuAD退步与负例消融
+
+召回提升需要传到EM才有系统价值，失败数据集与困难负例数量的非单调性都应保留。
 
 |项目|设置与解释|
 |---|---|
 |文档库|§4.1将维基百科处理成21,015,324个不重叠100词段落，并加入文章标题；不是100个子词|
 |问答集|Natural Questions、TriviaQA、WebQuestions、CuratedTREC、SQuAD|
-|训练样本|表1区分原始数量与过滤后数量，例如 NQ 原始79,168、实际58,880；不能忽略过滤影响|
+|训练样本|[表1](https://arxiv.org/html/2004.04906#S4.T1)区分原始数量与过滤后数量，例如 NQ 原始79,168、实际58,880；不能忽略过滤影响|
 |训练预算|检索批量128，每问额外1个BM25负例；大数据最多40轮、小数据100轮，学习率$10^{-5}$|
 |对照|BM25、DPR、两者线性组合；单数据集与多数据集训练分开|
 |指标|top-k中是否至少有包含答案的段落；最终问答使用规范化后精确匹配|
@@ -226,33 +232,35 @@ $$
 
 “含答案字符串”是可扩展的检索评估代理，既不保证段落真正支持答案，也可能漏掉同义表达。多数据集设置给小任务增加了监督资源，因此不能与单数据集结果当作同预算比较。
 
-## 证据及适用范围
+可以构造一个未执行的诊断集：一半问题做同义改写，一半只改变型号或年份，保持答案证据不变。比较BM25、DPR和混合方式的召回、阅读准确率及索引成本。若DPR只在改写题更强，就应给结论加上任务条件；若混合召回提高却EM下降，要检查候选噪声和阅读器排序，而不是马上扩大检索数量。
 
-**证据一：表2，稠密检索的收益与例外。** NQ单数据集训练时，BM25的top-20准确率59.1，DPR为78.4，绝对增加19.3个百分点。SQuAD却由68.8下降到63.2。证据支持多数所测任务的提升，同时直接否定“语义检索必然全面替代词项检索”。论文讨论SQuAD的问题构造和数据分布特殊性，这属于解释线索，不是对所有失败的完整归因。
+**证据一：[表2](#llm-v6-032-table-2)，稠密检索的收益与例外。** NQ单数据集训练时，BM25的top-20准确率59.1，DPR为78.4，绝对增加19.3个百分点。SQuAD却由68.8下降到63.2。证据支持多数所测任务的提升，同时直接否定“语义检索必然全面替代词项检索”。论文讨论SQuAD的问题构造和数据分布特殊性，这属于解释线索，不是对所有失败的完整归因。
 
-**证据二：表3，负例与批内复用。** NQ开发集使用7个其他问题正段落作为负例时，非批内训练top-20为63.1，批内版本69.1；批内配置再加入困难负例能进一步改善。这个结果支持训练配对构造的重要性。表中也显示加两个困难负例并不一定好过一个，所以“负例越多越好”没有得到普遍支持。
+&lt;!-- figure-ref-v6:start:032-t2-2-anchor --&gt;
+&lt;a id=&quot;llm-v6-032-table-2&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:032-t2-2-anchor --&gt;
 
-**证据三：表4，检索改善能否传到答案。** 作者系统在NQ上，BM25对应最终EM32.6，DPR为41.5，增加8.9个百分点。但SQuAD同样出现退步。这说明召回与问答能力需要一起评估；表4来自其他论文的结果区块包含不同预训练和阅读器资源，不能把所有差值归因于检索器一项。
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/032-dpr-t2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/032-dpr-t2.png&quot; width=&quot;1701&quot; height=&quot;390&quot; alt=&quot;BM25、DPR及组合检索在多个问答数据集的Top-20和Top-100召回&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Vladimir Karpukhin 等，2020，表2，PDF第5页；&lt;a href=&quot;https://arxiv.org/pdf/2004.04906#page=5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+**证据二：[表3](https://arxiv.org/html/2004.04906#S5.T3)，负例与批内复用。** NQ开发集使用7个其他问题正段落作为负例时，非批内训练top-20为63.1，批内版本69.1；批内配置再加入困难负例能进一步改善。这个结果支持训练配对构造的重要性。表中也显示加两个困难负例并不一定好过一个，所以“负例越多越好”没有得到普遍支持。
+
+**证据三：[表4](https://arxiv.org/html/2004.04906#S5.T4)，检索改善能否传到答案。** 作者系统在NQ上，BM25对应最终EM32.6，DPR为41.5，增加8.9个百分点。但SQuAD同样出现退步。这说明召回与问答能力需要一起评估；[表4](https://arxiv.org/html/2004.04906#S5.T4)来自其他论文的结果区块包含不同预训练和阅读器资源，不能把所有差值归因于检索器一项。
 
 §5.4还揭示被在线延迟掩盖的成本：全库向量计算约需8张GPU运行8.8小时，索引构建另需约8.5小时，而Lucene倒排索引构建约30分钟。这些是当时特定配置的报告，不能作为今天服务延迟保证；它们说明索引刷新频繁时，总拥有成本可能改变选择。
 
-## 构造例子与诊断办法
+## 五、假负例和精确型号会暴露向量压缩限制
 
 自构例子：问题是“设备ZX-17的额定电压”。BM25能够紧抓型号，而稠密模型可能召回同类设备的通用说明。若题目换成“这台设备需要多大供电”，语义匹配又可能更有帮助。混合检索的价值来自错误类型不同，而不是把两个分数随便相加就必定改进。
 
-可以构造一个未执行的诊断集：一半问题做同义改写，一半只改变型号或年份，保持答案证据不变。比较BM25、DPR和混合方式的召回、阅读准确率及索引成本。若DPR只在改写题更强，就应给结论加上任务条件；若混合召回提高却EM下降，要检查候选噪声和阅读器排序，而不是马上扩大检索数量。
-
 还应检查过滤出的训练问题是什么类型。若BM25无法找到含答案正例的问题被丢弃，训练集合已经受到词项检索的选择偏差；这不推翻实验，但影响对真正低词汇重叠问题的外推。索引更新后也要保证新旧段落使用相同编码器版本，否则内积不再处于统一表示空间。
 
-## 贡献与限制
-
-DPR 把监督式双编码器检索确立为实用的问答组件，证明良好的训练样本组织能比更复杂的联合流程更有竞争力。它付出的代价包括标签构建、假负例、向量存储、索引维护，以及单向量表示压缩细粒度关系的损失。
+它付出的代价包括标签构建、假负例、向量存储、索引维护，以及单向量表示压缩细粒度关系的损失。
 
 五个前置概念分别是：倒排索引用词查文档，双编码器独立表示两端，内积衡量可学习匹配，批内负例复用已有编码，EM检查答案完全一致。理解这些之后，读RAG时就能分清检索表示来自哪里，以及生成器究竟在联合优化哪部分。
 
-|原有问题|作者改动|为什么可能有效|实验证据|代价与局限|
-|---|---|---|---|---|
-|词匹配漏掉语义相关证据|双编码器、批内与困难负例|可索引表示学习相关性边界|表2召回、表3负例、表4最终EM|假负例、索引成本、罕见实体弱点|
+## 六、把可索引检索模块接入生成系统
+
+检索到正段落后，生成器还需使用它。[RAG](034-rag.md)与[FiD](036-fid.md)分别讨论潜在文档混合和多段解码融合；检索召回是必要诊断，却不能代替最终答案评价。
 
 ## 自测与参考答案
 

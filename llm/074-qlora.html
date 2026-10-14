@@ -42,18 +42,19 @@
                 <span class="text-gray-500">QLoRA：把大模型放进显存，再用小适配器改变它</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="596016f076dce51d595010ebb402c6ecf11659e4ee4f6c44a8de2d065c24e192"><h1>074｜QLoRA：把大模型放进显存，再用小适配器改变它</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="f1556e2f87f2e7edccaca7dd4fbd97fca463179f03394ff7dddd889c16071739"><h1>074｜QLoRA：把大模型放进显存，再用小适配器改变它</h1>
 <p><a href="index.html">返回目录</a> · <a href="00-timeline.html">发展时间线</a></p>
-<p>论文：Tim Dettmers、Artidoro Pagnoni、Ari Holtzman、Luke Zettlemoyer，<em>QLoRA: Efficient Finetuning of Quantized LLMs</em>，2023。<a href="https://arxiv.org/abs/2305.14314">论文</a>、<a href="https://arxiv.org/html/2305.14314v1">正文 v1</a>、<a href="https://github.com/artidoro/qlora">官方代码</a>。本文核对方法、定量实验和训练超参数附录；没有独立复现65B训练，也没有把代码后续版本的默认值当成论文配置。</p>
-<h2 id="一分钟理解参数很少基座依然很大">一分钟理解：参数很少，基座依然很大</h2>
-<p>LoRA 只更新少量低秩参数，减少了梯度和优化器状态，但训练时仍要把庞大的基座模型放进显存。QLoRA 再向前走一步：基座以4位格式存储，使用时恢复到较高精度参与计算，只训练额外的 LoRA 分支。</p>
-<p>三项技术共同降低显存压力：NF4 为近似正态权重安排非均匀量化值；双重量化压缩量化尺度；分页优化器缓解偶发显存峰值。它不是把所有计算、梯度和参数都改成4位。</p>
-<p>作者展示65B模型可以在单张48GB GPU上做适配训练。但“保留全参数微调能力”要按实验拆开：较小模型有全参数对照，7B—65B的主要精度比较是16位 LoRA 对照，并没有全面验证65B全参数微调的等价性。</p>
-<p>一句话总结：在大模型适配受显存限制时，通过冻结4位基座、训练高精度低秩分支并压缩辅助状态，大幅降低训练显存门槛，限制是激活、序列长度和传输成本仍然存在，任务质量也依赖适配位置和数据。</p>
+<p>论文：Tim Dettmers、Artidoro Pagnoni、Ari Holtzman、Luke Zettlemoyer，<em>QLoRA: Efficient Finetuning of Quantized LLMs</em>，2023。<a href="https://arxiv.org/abs/2305.14314">论文</a>、<a href="https://arxiv.org/html/2305.14314v1">正文 v1</a>、<a href="https://github.com/artidoro/qlora">官方代码</a>。</p>
+<!-- figure-ref-v6:start:llm-license-074-qlora -->
+<p>图表来源：Tim Dettmers、Artidoro Pagnoni、Ari Holtzman、Luke Zettlemoyer，2023，<a href="https://arxiv.org/html/2305.14314v1">原文</a>；<a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>。本篇展示做了图形区域裁切、PNG格式转换，图中数据与标签未改动。</p>
+<!-- figure-ref-v6:end:llm-license-074-qlora -->
+
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="047-lora.html">LoRA</a>减少梯度与优化器状态，但完整冻结基座仍占显存。本篇直接承接这个缺口，以低位存储骨干、高精度计算和低秩训练组合降低门槛；<a href="061-gptq.html">GPTQ</a>与<a href="076-awq.html">AWQ</a>主要面向部署压缩，实验目标不同。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个概念：<strong>量化码本</strong>规定低位值对应什么实数；<strong>反量化</strong>恢复近似高精度值而非原始精确值；<strong>低秩更新</strong>用两个瘦矩阵表达参数变化；<strong>激活检查点</strong>用重算换保存内存；<strong>分页</strong>通过CPU/GPU间迁移状态应对容量压力。</p>
-<h2 id="背景冻结权重仍然需要参与反向传播">背景：冻结权重仍然需要参与反向传播</h2>
-<p>全参数微调需要权重、梯度、优化器状态以及前向激活。LoRA 去掉了绝大多数可训练权重状态，但不能跳过整个基座计算，否则前层适配器收不到正确梯度。</p>
+<h2 id="一问题设定lora更新很小怎样让庞大冻结基座也放进显存">一、问题设定：LoRA更新很小，怎样让庞大冻结基座也放进显存</h2>
+<p>训练显存除了可训练参数，还包含基座权重、激活及优化器状态。LoRA去掉了多数权重的训练状态，却必须让梯度经过基座计算才能抵达早期适配器；本篇进一步压缩冻结权重及尺度，并处理偶发内存峰值。</p>
 <p>QLoRA 属于监督微调与数值表示技术，论文聊天模型 Guanaco 也使用交叉熵，不使用强化学习。即使训练数据名为 HH-RLHF，选择其中响应做监督训练也不等于执行 RLHF。</p>
 <p>设输入 <span class="reading-math" data-tex="X\in\mathbb R^{b\times d}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>X</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><mi>b</mi><mo>×</mo><mi>d</mi></mrow></msup></mrow><annotation encoding="application/x-tex">X\in\mathbb R^{b\times d}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7224em;vertical-align:-0.0391em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8491em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">b</span><span class="mbin mtight">×</span><span class="mord mathnormal mtight">d</span></span></span></span></span></span></span></span></span></span></span></span></span>，基座权重近似为 <span class="reading-math" data-tex="\widehat W"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>W</mi><mo stretchy="true">^</mo></mover></mrow><annotation encoding="application/x-tex">\widehat W</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9233em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9233em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span></span><span class="svg-align" style="top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.24em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.24em" viewBox="0 0 1062 239" preserveAspectRatio="none"><path d="M529 0h5l519 115c5 1 9 5 9 10 0 1-1 2-1 3l-4 22
 c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg></span></span></span></span></span></span></span></span></span></span>，低秩矩阵为 <span class="reading-math" data-tex="A\in\mathbb R^{d\times r}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><mi>d</mi><mo>×</mo><mi>r</mi></mrow></msup></mrow><annotation encoding="application/x-tex">A\in\mathbb R^{d\times r}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7224em;vertical-align:-0.0391em;"></span><span class="mord mathnormal">A</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8491em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mbin mtight">×</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span></span></span></span></span></span></span></span></span></span></span></span></span>、<span class="reading-math" data-tex="B\in\mathbb R^{r\times o}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>B</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><mi>r</mi><mo>×</mo><mi>o</mi></mrow></msup></mrow><annotation encoding="application/x-tex">B\in\mathbb R^{r\times o}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7224em;vertical-align:-0.0391em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7713em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7713em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">r</span><span class="mbin mtight">×</span><span class="mord mathnormal mtight">o</span></span></span></span></span></span></span></span></span></span></span></span></span>：</p>
@@ -64,13 +65,22 @@ c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg><
 c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">Dequant</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">4</span><span class="mord mathnormal mtight">bi</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord text"><span class="mord">scales</span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="s"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">s</span></span></span></span></span> 是适配器缩放系数。训练更新 <span class="reading-math" data-tex="A,B"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi><mo separator="true">,</mo><mi>B</mi></mrow><annotation encoding="application/x-tex">A,B</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">A</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span></span></span></span></span>，不更新存储的 <span class="reading-math" data-tex="W_{4bit}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>W</mi><mrow><mn>4</mn><mi>b</mi><mi>i</mi><mi>t</mi></mrow></msub></mrow><annotation encoding="application/x-tex">W_{4bit}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">4</span><span class="mord mathnormal mtight">bi</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。但若要给前层传梯度，仍需计算与 <span class="reading-math" data-tex="\widehat W^\top"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mover accent="true"><mi>W</mi><mo stretchy="true">^</mo></mover><mi mathvariant="normal">⊤</mi></msup></mrow><annotation encoding="application/x-tex">\widehat W^\top</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9233em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9233em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span></span><span class="svg-align" style="top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.24em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.24em" viewBox="0 0 1062 239" preserveAspectRatio="none"><path d="M529 0h5l519 115c5 1 9 5 9 10 0 1-1 2-1 3l-4 22
 c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span></span></span></span></span> 有关的输入梯度。冻结表示“不求基座权重更新”，不表示“把整个基座放进无梯度上下文”。</p>
-<h2 id="方法nf4双重量化和分页分别解决哪一项">方法：NF4、双重量化和分页分别解决哪一项？</h2>
+<h2 id="二分开nf4权重代码量化常数与高精度计算">二、分开NF4权重代码、量化常数与高精度计算</h2>
 <p><strong>NF4 解决有限量化值怎样分配。</strong> 将权重分块并按绝对最大值归一，使用由正态分布分位数启发的16个表示值。权重密集的零附近分配更细的间距，稀疏尾部间距更大，并保留精确零。它不同于标准 FP4 的指数尾数组合。</p>
 <p>作者用信息论最优描述这项设计，需要保留分布前提：实际权重经分块和最大值归一后未必严格服从正态分布，分位数设计也不等于对所有下游任务损失全局最优。经验优势由量化和微调实验支持，而不是一条保证任何模型无损的定理。</p>
 <p><strong>双重量化解决尺度本身占空间。</strong> 每64个权重保存一个32位尺度，会额外花费 <span class="reading-math" data-tex="32/64=0.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>32</mn><mi mathvariant="normal">/</mi><mn>64</mn><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">32/64=0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">32/64</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span> bit/参数。将这些尺度再以8位存储，并每256个尺度设置二级32位尺度，额外成本约为：</p>
 <p><span class="reading-math" data-tex="\frac{8}{64}+\frac{32}{64\times256}\approx0.127\text{ bit/参数}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mfrac><mn>8</mn><mn>64</mn></mfrac><mo>+</mo><mfrac><mn>32</mn><mrow><mn>64</mn><mo>×</mo><mn>256</mn></mrow></mfrac><mo>≈</mo><mn>0.127</mn><mtext> bit/参数</mtext><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\frac{8}{64}+\frac{32}{64\times256}\approx0.127\text{ bit/参数}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.0074em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">64</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">8</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.0908em;vertical-align:-0.7693em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">64</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">256</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">32</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7693em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">0.127</span><span class="mord text"><span class="mord"> bit/</span><span class="mord cjk_fallback">参数</span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p>因此节省约0.373 bit/参数。它压缩的是量化元数据，不是对同一权重连续量化两次以神奇地恢复精度。实际还有偏移等辅助信息，计算是主要平均成本模型。</p>
 <p><strong>分页优化器解决峰值。</strong> 使用统一内存，在需要时把优化器状态在 GPU 和 CPU 内存之间迁移。这能帮助避免偶发显存不足，却不是免费增加显存；频繁换页可能造成传输等待。它也没有把所有激活自动压到4位。</p>
+<h3 id="压缩比例应把量化常数也放进分母">压缩比例应把量化常数也放进分母</h3>
+<p>“4 bit”首先描述权重代码，不包括每组权重使用的缩放常数。按论文双重量化讨论的块大小，每 64 个权重保存一个 FP32 常数时，常数额外占 <span class="reading-math" data-tex="32/64=0.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>32</mn><mi mathvariant="normal">/</mi><mn>64</mn><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">32/64=0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">32/64</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span> bit/参数。把这些常数再量化为 8 bit，并每 256 个常数保存一个 FP32 二级常数，理想均摊开销变为</p>
+<p><span class="reading-math" data-tex="\frac{8}{64}+\frac{32}{64\times256}\approx0.127\ \text{bit/参数}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mfrac><mn>8</mn><mn>64</mn></mfrac><mo>+</mo><mfrac><mn>32</mn><mrow><mn>64</mn><mo>×</mo><mn>256</mn></mrow></mfrac><mo>≈</mo><mn>0.127</mn><mtext> bit/参数</mtext><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\frac{8}{64}+\frac{32}{64\times256}\approx0.127\ \text{bit/参数}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.0074em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">64</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">8</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.0908em;vertical-align:-0.7693em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">64</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">256</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">32</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7693em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">0.127</span><span class="mspace"> </span><span class="mord text"><span class="mord">bit/</span><span class="mord cjk_fallback">参数</span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这里暂不计边界填充、偏移量及框架元数据，所以 4.127 bit 仍是结构性估算。NF4 存储值在计算时解量化；低位宽存储、矩阵乘的计算类型、可训练参数的精度必须分开报告。分页优化器处理峰值显存压力，也不意味着数据搬运或主机内存没有成本。</p>
+<p><strong>自构整块例子。</strong> 取恰好 16384 个权重，即 256 个 64 元素块。4 bit 权重代码占 8192 字节；一级 FP32 常数本来占 1024 字节，双重量化改为 256 字节的 8 bit 常数加 4 字节的二级常数，共 260 字节，节省 764 字节。这个小账本说明：双重量化压缩的是量化元数据，而不是再把 4 bit 权重变成 1 bit；模型训练的实际峰值还包括 LoRA 参数、梯度、优化器状态及激活。</p>
+<h3 id="冻结量化基座后的反向还需要哪些数值">冻结量化基座后的反向还需要哪些数值</h3>
+<p>线性层若用反量化后的基座矩阵参与前向，回传输入梯度仍要乘该矩阵的转置；只是不保存它自己的可训练梯度。早层LoRA要收到正确误差，依赖这条输入梯度路径。逐项检查requires_grad与图是否保留，比把“冻结”统一翻译成no_grad更准确。</p>
+<p>教法联系：<a href="https://huggingface.co/blog/peft">Sourab Mangrulkar、Sayak Paul的Parameter-Efficient Fine-Tuning</a>。算例为本文自构。</p>
+<h2 id="三保持梯度穿过基座并管理激活与分页峰值">三、保持梯度穿过基座并管理激活与分页峰值</h2>
 <pre><code class="language-text">输入：预训练模型 W、监督样本 D
 W4, first_scales = blockwise_NF4_quantize(W, block=64)
 scale8, second_scales = quantize_scales(first_scales, block=256)
@@ -84,8 +94,15 @@ for batch in D:
     update LoRA with paged optimizer
 输出：固定量化基座和训练后的适配器
 </code></pre>
-<p>损失还是交叉熵，量化不是新任务目标。LoRA 覆盖位置是一项关键训练设计：原文图2发现只放在 query/value 投影不足，覆盖 Transformer 线性层更接近较强16位基线。不能只比较位宽，却把适配器覆盖范围也悄悄改变。</p>
-<h2 id="实验设计区分精度恢复实验与聊天能力实验">实验设计：区分精度恢复实验与聊天能力实验</h2>
+<p>损失还是交叉熵，量化不是新任务目标。LoRA 覆盖位置是一项关键训练设计：原文<a href="#llm-v6-074-figure-2">图2</a>发现只放在 query/value 投影不足，覆盖 Transformer 线性层更接近较强16位基线。不能只比较位宽，却把适配器覆盖范围也悄悄改变。 每个散点是一组随机种子的训练结果；<a href="#llm-v6-074-figure-2">图2</a>以 Alpaca 的 RougeL 比较配置，只能支持该任务和适配层覆盖下的质量比较。</p>
+<!-- figure-ref-v6:start:074-f2-1 -->
+<p><a id="llm-v6-074-figure-2"></a></p>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/074-qlora-f2-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/074-qlora-f2-v6.png" width="1800" height="1730" alt="QLoRA不同可训练模块与四位、十六位配置的ROUGE-L对照" loading="lazy"></a><figcaption>原文图形摘引：Tim Dettmers、Artidoro Pagnoni、Ari Holtzman、Luke Zettlemoyer，2023，图2，PDF第6页；<a href="https://arxiv.org/html/2305.14314v1#S4.F2" target="_blank" rel="noopener noreferrer">核对原文</a>。</figcaption></figure>
+<!-- figure-ref-v6:end:074-f2-1 -->
+
+<p><strong>自构算例，未运行：</strong> 一个4096×4096线性层有约1678万参数，16位权重约32 MiB，4位裸权重约8 MiB，另需尺度。rank64的LoRA两个矩阵共有524288参数，约为基座参数的3.125%。即便适配器很小，训练时也仍需要输入激活和矩阵乘法工作区，所以不能把8 MiB加1 MiB当成整个训练的峰值显存。</p>
+<h2 id="四按位格式对照模型和评委口径检验质量">四、按位格式、对照模型和评委口径检验质量</h2>
+<p>先区分全参数对照与16位LoRA对照，再看聊天评审；4位存储收益和99.3%的相对评分各有独立分母。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -111,7 +128,7 @@ for batch in D:
 </tr>
 <tr>
 <td>OASST1预算</td>
-<td>表9：各尺寸1875步、batch16、长度512；7/13B学习率0.0002，33/65B为0.0001</td>
+<td><a href="https://arxiv.org/html/2305.14314v1#A2.T9">表9</a>：各尺寸1875步、batch16、长度512；7/13B学习率0.0002，33/65B为0.0001</td>
 </tr>
 <tr>
 <td>监督位置</td>
@@ -127,44 +144,31 @@ for batch in D:
 </tr>
 <tr>
 <td>重复口径</td>
-<td>图2各点含不同随机种子；Elo打乱比赛顺序10000次控制计分顺序，不是训练10000个模型</td>
+<td><a href="#llm-v6-074-figure-2">图2</a>各点含不同随机种子；Elo打乱比赛顺序10000次控制计分顺序，不是训练10000个模型</td>
 </tr>
 <tr>
 <td>成本边界</td>
 <td>单卡可容纳与训练耗时依赖batch、长度、检查点和分页；不能仅由参数量推断峰值显存</td>
 </tr>
 </tbody></table></div>
-<p>表9的 OASST1 设置尤其说明：正文关于“大模型加大batch”的一般描述存在具体数据集例外。复现应该采用对应行，而不是用一句概括覆盖所有实验。</p>
-<h2 id="结果五处证据比993-chatgpt更有用">结果：五处证据比“99.3% ChatGPT”更有用</h2>
-<p><strong>证据一：表2，位格式比较。</strong> 跨模型平均困惑度 Int4为34.34，FP4 E2M1为31.07，FP4 E3M0为29.48，NF4+DQ为27.41。越低越好。它支持所测试权重分布下 NF4 的优势；这是跨配置聚合，不是单个65B模型的困惑度，也不直接证明聊天质量提升同样大。</p>
-<p><strong>证据二：表3，小模型微调。</strong> T5-3B 的16位 LoRA 为55.4 ROUGE-L，NF4+DQ为55.3，作者复现的全参基线54.9；但 T5-11B 的原报告全参分数62.0，对比NF4+DQ60.9，且该列没有作者全参复现。正确读法是多个受控比较接近，而不是每个单元格严格无损。</p>
-<p><strong>证据三：表4，大模型的对照是谁。</strong> 跨尺寸与数据的16位 LoRA平均MMLU53.0，NF4+DQ53.1；33B/FLAN一项却从60.5到59.2，65B/FLAN从62.5到63.9。平均相近包含正负变化，不能推出每种任务都相同。更不能把大尺寸 LoRA 对照写成完整全参数微调对照。</p>
-<p><strong>证据四：表5和表6，数据适配具有任务性。</strong> 65B FLAN 的MMLU63.9高于Guanaco62.2，但 Vicuna 相对评分48.4低于Guanaco99.3。不同数据塑造不同能力，不能用单个考试成绩替代聊天评价，也不能把“小数据更好”推广成数据规模不重要。</p>
-<p><strong>证据五：表6、表7与§5.3，评委有偏差。</strong> Guanaco65B 相对ChatGPT评分99.3%，95%区间为±4.4个百分点；交换回答顺序时96.7%与101.9%不同。人类与GPT-4系统排序 Spearman相关0.55，逐例一致性Fleiss κ为0.25。99.3%只是一个小基准、特定评委和归一方式下的评分，不是99.3%的通用能力，更不是几乎同样可靠的保证。</p>
+<p><a href="https://arxiv.org/html/2305.14314v1#A2.T9">表9</a>的 OASST1 设置尤其说明：正文关于“大模型加大batch”的一般描述存在具体数据集例外。复现应该采用对应行，而不是用一句概括覆盖所有实验。</p>
+<p><strong>证据一：<a href="#llm-v6-074-table-2">表2</a>，位格式比较。</strong> 跨模型平均困惑度 Int4为34.34，FP4 E2M1为31.07，FP4 E3M0为29.48，NF4+DQ为27.41。越低越好。它支持所测试权重分布下 NF4 的优势；这是跨配置聚合，不是单个65B模型的困惑度，也不直接证明聊天质量提升同样大。</p>
+<!-- figure-ref-v6:start:074-t2-3-anchor -->
+<p><a id="llm-v6-074-table-2"></a></p>
+<!-- figure-ref-v6:end:074-t2-3-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/074-qlora-t2.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/074-qlora-t2.png" width="840" height="438" alt="不同四位量化格式的平均困惑度，包括NF4加双重量化" loading="lazy"></a><figcaption>实验结果表摘引：Tim Dettmers、Artidoro Pagnoni、Ari Holtzman、Luke Zettlemoyer，2023，表2，PDF第7页；<a href="https://arxiv.org/pdf/2305.14314v1#page=7" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据二：<a href="https://arxiv.org/html/2305.14314v1#S4.T3">表3</a>，小模型微调。</strong> T5-3B 的16位 LoRA 为55.4 ROUGE-L，NF4+DQ为55.3，作者复现的全参基线54.9；但 T5-11B 的原报告全参分数62.0，对比NF4+DQ60.9，且该列没有作者全参复现。正确读法是多个受控比较接近，而不是每个单元格严格无损。</p>
+<p><strong>证据三：<a href="https://arxiv.org/html/2305.14314v1#S4.T4">表4</a>，大模型的对照是谁。</strong> 跨尺寸与数据的16位 LoRA平均MMLU53.0，NF4+DQ53.1；33B/FLAN一项却从60.5到59.2，65B/FLAN从62.5到63.9。平均相近包含正负变化，不能推出每种任务都相同。更不能把大尺寸 LoRA 对照写成完整全参数微调对照。</p>
+<p><strong>证据四：<a href="https://arxiv.org/html/2305.14314v1#S5.T5">表5</a>和<a href="https://arxiv.org/html/2305.14314v1#S5.T6">表6</a>，数据适配具有任务性。</strong> 65B FLAN 的MMLU63.9高于Guanaco62.2，但 Vicuna 相对评分48.4低于Guanaco99.3。不同数据塑造不同能力，不能用单个考试成绩替代聊天评价，也不能把“小数据更好”推广成数据规模不重要。</p>
+<p><strong>证据五：<a href="https://arxiv.org/html/2305.14314v1#S5.T6">表6</a>、<a href="https://arxiv.org/html/2305.14314v1#S5.T7">表7</a>与§5.3，评委有偏差。</strong> Guanaco65B 相对ChatGPT评分99.3%，95%区间为±4.4个百分点；交换回答顺序时96.7%与101.9%不同。人类与GPT-4系统排序 Spearman相关0.55，逐例一致性Fleiss κ为0.25。99.3%只是一个小基准、特定评委和归一方式下的评分，不是99.3%的通用能力，更不是几乎同样可靠的保证。</p>
 <p>分页的效果还应另看§4：作者没有给出全面的峰值分页消融，报告的某个65B配置速度与普通优化器相近。可以说它解决了可运行性问题，不能声称任何长序列负载都没有额外开销。</p>
-<h2 id="贡献与局限省出的资源应该怎样使用">贡献与局限：省出的资源应该怎样使用？</h2>
-<p>QLoRA 的贡献是让低位存储与可训练高精度适配器形成可用配方，拓宽单卡可实验的模型规模。量化误差可以通过适配器在任务分布上部分补偿，但低秩更新没有义务修复所有输入上的数值差异。</p>
+<h2 id="五任务适配与量化补偿仍受数据和运行成本限制">五、任务适配与量化补偿仍受数据和运行成本限制</h2>
+<p>量化误差可以通过适配器在任务分布上部分补偿，但低秩更新没有义务修复所有输入上的数值差异。</p>
 <p>作者同时强调聊天基准不够可靠，并给出失败案例。进一步分析还包括：适配器部署必须匹配量化基座；合并到权重再重新量化可能改变输出；高质量数据与任务匹配并不是同一个概念；节省参数状态后，长序列激活可能成为新瓶颈。省显存意味着更可行，不自动意味着更快或更准确。</p>
-<h2 id="一个算例与五个前置概念">一个算例与五个前置概念</h2>
-<p><strong>自构算例，未运行：</strong> 一个4096×4096线性层有约1678万参数，16位权重约32 MiB，4位裸权重约8 MiB，另需尺度。rank64的LoRA两个矩阵共有524288参数，约为基座参数的3.125%。即便适配器很小，训练时也仍需要输入激活和矩阵乘法工作区，所以不能把8 MiB加1 MiB当成整个训练的峰值显存。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>LoRA虽少更新参数，基座与辅助状态仍占显存</td>
-<td>NF4冻结基座、双重量化、分页优化器、广泛LoRA覆盖</td>
-<td>压缩主要存储，同时保留高精度适配和梯度计算</td>
-<td>表2位格式；表3/4精度对照；图2覆盖消融；表6/7评价边界</td>
-<td>不是全4位计算；全参大模型对照有限；分页和激活成本；任务与评委影响结论</td>
-</tr>
-</tbody></table></div>
+<h2 id="六区分适配时低位基座与部署量化路线">六、区分适配时低位基座与部署量化路线</h2>
+<p>低位训练成功不等于所有部署内核都会更快。用<a href="061-gptq.html">GPTQ</a>和<a href="076-awq.html">AWQ</a>比较面向部署的量化目标，再检查合并适配器或重新量化是否引入新误差。</p>
 <h2 id="自测与答案">自测与答案</h2>
 <p><strong>1. 基座被冻结，为什么不能把整个基座前向都放在 no_grad 中？</strong></p>
 <p>答案：前层适配器的梯度需要穿过后续基座运算传播。可以不保存基座权重梯度，但必须保留对输入激活的求导路径。否则会切断某些可训练分支，而不是正确实现QLoRA。</p>
@@ -181,21 +185,19 @@ for batch in D:
 
 [返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
 
-论文：Tim Dettmers、Artidoro Pagnoni、Ari Holtzman、Luke Zettlemoyer，*QLoRA: Efficient Finetuning of Quantized LLMs*，2023。[论文](https://arxiv.org/abs/2305.14314)、[正文 v1](https://arxiv.org/html/2305.14314v1)、[官方代码](https://github.com/artidoro/qlora)。本文核对方法、定量实验和训练超参数附录；没有独立复现65B训练，也没有把代码后续版本的默认值当成论文配置。
+论文：Tim Dettmers、Artidoro Pagnoni、Ari Holtzman、Luke Zettlemoyer，*QLoRA: Efficient Finetuning of Quantized LLMs*，2023。[论文](https://arxiv.org/abs/2305.14314)、[正文 v1](https://arxiv.org/html/2305.14314v1)、[官方代码](https://github.com/artidoro/qlora)。
 
-## 一分钟理解：参数很少，基座依然很大
+&lt;!-- figure-ref-v6:start:llm-license-074-qlora --&gt;
+图表来源：Tim Dettmers、Artidoro Pagnoni、Ari Holtzman、Luke Zettlemoyer，2023，[原文](https://arxiv.org/html/2305.14314v1)；[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)。本篇展示做了图形区域裁切、PNG格式转换，图中数据与标签未改动。
+&lt;!-- figure-ref-v6:end:llm-license-074-qlora --&gt;
 
-LoRA 只更新少量低秩参数，减少了梯度和优化器状态，但训练时仍要把庞大的基座模型放进显存。QLoRA 再向前走一步：基座以4位格式存储，使用时恢复到较高精度参与计算，只训练额外的 LoRA 分支。
+### 先接住前作的问题
 
-三项技术共同降低显存压力：NF4 为近似正态权重安排非均匀量化值；双重量化压缩量化尺度；分页优化器缓解偶发显存峰值。它不是把所有计算、梯度和参数都改成4位。
+[LoRA](047-lora.md)减少梯度与优化器状态，但完整冻结基座仍占显存。本篇直接承接这个缺口，以低位存储骨干、高精度计算和低秩训练组合降低门槛；[GPTQ](061-gptq.md)与[AWQ](076-awq.md)主要面向部署压缩，实验目标不同。
 
-作者展示65B模型可以在单张48GB GPU上做适配训练。但“保留全参数微调能力”要按实验拆开：较小模型有全参数对照，7B—65B的主要精度比较是16位 LoRA 对照，并没有全面验证65B全参数微调的等价性。
+## 一、问题设定：LoRA更新很小，怎样让庞大冻结基座也放进显存
 
-一句话总结：在大模型适配受显存限制时，通过冻结4位基座、训练高精度低秩分支并压缩辅助状态，大幅降低训练显存门槛，限制是激活、序列长度和传输成本仍然存在，任务质量也依赖适配位置和数据。
-
-## 背景：冻结权重仍然需要参与反向传播
-
-全参数微调需要权重、梯度、优化器状态以及前向激活。LoRA 去掉了绝大多数可训练权重状态，但不能跳过整个基座计算，否则前层适配器收不到正确梯度。
+训练显存除了可训练参数，还包含基座权重、激活及优化器状态。LoRA去掉了多数权重的训练状态，却必须让梯度经过基座计算才能抵达早期适配器；本篇进一步压缩冻结权重及尺度，并处理偶发内存峰值。
 
 QLoRA 属于监督微调与数值表示技术，论文聊天模型 Guanaco 也使用交叉熵，不使用强化学习。即使训练数据名为 HH-RLHF，选择其中响应做监督训练也不等于执行 RLHF。
 
@@ -208,7 +210,7 @@ $$
 
 $s$ 是适配器缩放系数。训练更新 $A,B$，不更新存储的 $W_{4bit}$。但若要给前层传梯度，仍需计算与 $\widehat W^\top$ 有关的输入梯度。冻结表示“不求基座权重更新”，不表示“把整个基座放进无梯度上下文”。
 
-## 方法：NF4、双重量化和分页分别解决哪一项？
+## 二、分开NF4权重代码、量化常数与高精度计算
 
 **NF4 解决有限量化值怎样分配。** 将权重分块并按绝对最大值归一，使用由正态分布分位数启发的16个表示值。权重密集的零附近分配更细的间距，稀疏尾部间距更大，并保留精确零。它不同于标准 FP4 的指数尾数组合。
 
@@ -223,6 +225,24 @@ $$
 因此节省约0.373 bit/参数。它压缩的是量化元数据，不是对同一权重连续量化两次以神奇地恢复精度。实际还有偏移等辅助信息，计算是主要平均成本模型。
 
 **分页优化器解决峰值。** 使用统一内存，在需要时把优化器状态在 GPU 和 CPU 内存之间迁移。这能帮助避免偶发显存不足，却不是免费增加显存；频繁换页可能造成传输等待。它也没有把所有激活自动压到4位。
+
+### 压缩比例应把量化常数也放进分母
+
+“4 bit”首先描述权重代码，不包括每组权重使用的缩放常数。按论文双重量化讨论的块大小，每 64 个权重保存一个 FP32 常数时，常数额外占 $32/64=0.5$ bit/参数。把这些常数再量化为 8 bit，并每 256 个常数保存一个 FP32 二级常数，理想均摊开销变为
+
+$$\frac{8}{64}+\frac{32}{64\times256}\approx0.127\ \text{bit/参数}.$$
+
+这里暂不计边界填充、偏移量及框架元数据，所以 4.127 bit 仍是结构性估算。NF4 存储值在计算时解量化；低位宽存储、矩阵乘的计算类型、可训练参数的精度必须分开报告。分页优化器处理峰值显存压力，也不意味着数据搬运或主机内存没有成本。
+
+**自构整块例子。** 取恰好 16384 个权重，即 256 个 64 元素块。4 bit 权重代码占 8192 字节；一级 FP32 常数本来占 1024 字节，双重量化改为 256 字节的 8 bit 常数加 4 字节的二级常数，共 260 字节，节省 764 字节。这个小账本说明：双重量化压缩的是量化元数据，而不是再把 4 bit 权重变成 1 bit；模型训练的实际峰值还包括 LoRA 参数、梯度、优化器状态及激活。
+
+### 冻结量化基座后的反向还需要哪些数值
+
+线性层若用反量化后的基座矩阵参与前向，回传输入梯度仍要乘该矩阵的转置；只是不保存它自己的可训练梯度。早层LoRA要收到正确误差，依赖这条输入梯度路径。逐项检查requires_grad与图是否保留，比把“冻结”统一翻译成no_grad更准确。
+
+教法联系：[Sourab Mangrulkar、Sayak Paul的Parameter-Efficient Fine-Tuning](https://huggingface.co/blog/peft)。算例为本文自构。
+
+## 三、保持梯度穿过基座并管理激活与分页峰值
 
 ```text
 输入：预训练模型 W、监督样本 D
@@ -239,9 +259,18 @@ for batch in D:
 输出：固定量化基座和训练后的适配器
 ```
 
-损失还是交叉熵，量化不是新任务目标。LoRA 覆盖位置是一项关键训练设计：原文图2发现只放在 query/value 投影不足，覆盖 Transformer 线性层更接近较强16位基线。不能只比较位宽，却把适配器覆盖范围也悄悄改变。
+损失还是交叉熵，量化不是新任务目标。LoRA 覆盖位置是一项关键训练设计：原文[图2](#llm-v6-074-figure-2)发现只放在 query/value 投影不足，覆盖 Transformer 线性层更接近较强16位基线。不能只比较位宽，却把适配器覆盖范围也悄悄改变。 每个散点是一组随机种子的训练结果；[图2](#llm-v6-074-figure-2)以 Alpaca 的 RougeL 比较配置，只能支持该任务和适配层覆盖下的质量比较。
 
-## 实验设计：区分精度恢复实验与聊天能力实验
+&lt;!-- figure-ref-v6:start:074-f2-1 --&gt;
+&lt;a id=&quot;llm-v6-074-figure-2&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/074-qlora-f2-v6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/074-qlora-f2-v6.png&quot; width=&quot;1800&quot; height=&quot;1730&quot; alt=&quot;QLoRA不同可训练模块与四位、十六位配置的ROUGE-L对照&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原文图形摘引：Tim Dettmers、Artidoro Pagnoni、Ari Holtzman、Luke Zettlemoyer，2023，图2，PDF第6页；&lt;a href=&quot;https://arxiv.org/html/2305.14314v1#S4.F2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:074-f2-1 --&gt;
+
+**自构算例，未运行：** 一个4096×4096线性层有约1678万参数，16位权重约32 MiB，4位裸权重约8 MiB，另需尺度。rank64的LoRA两个矩阵共有524288参数，约为基座参数的3.125%。即便适配器很小，训练时也仍需要输入激活和矩阵乘法工作区，所以不能把8 MiB加1 MiB当成整个训练的峰值显存。
+
+## 四、按位格式、对照模型和评委口径检验质量
+
+先区分全参数对照与16位LoRA对照，再看聊天评审；4位存储收益和99.3%的相对评分各有独立分母。
 
 | 项目 | 配置与比较含义 |
 |---|---|
@@ -249,44 +278,44 @@ for batch in D:
 | 量化评测 | OPT、BLOOM、LLaMA、Pythia，不同位格式的语言建模困惑度与零样本任务 |
 | 聊天模型 | LLaMA 7B、13B、33B、65B；8种指令数据；Guanaco基于OASST1筛选数据 |
 | 主适配器 | 附录B.2：rank64、缩放超参数16；Transformer线性层添加LoRA；BF16计算 |
-| OASST1预算 | 表9：各尺寸1875步、batch16、长度512；7/13B学习率0.0002，33/65B为0.0001 |
+| OASST1预算 | [表9](https://arxiv.org/html/2305.14314v1#A2.T9)：各尺寸1875步、batch16、长度512；7/13B学习率0.0002，33/65B为0.0001 |
 | 监督位置 | 有明确指令/响应的数据通常只监督响应；OASST1与HH数据使用选择后的完整对话，包含用户文本 |
 | 聊天评估 | Vicuna80题、OA953个用户查询；温度0.7、top-p0.9；GPT-4与人类评价 |
 | 人工评价 | 与ChatGPT打分比较每项2名标注者；成对比较3名标注者；不能当作无误差的真实质量标签 |
-| 重复口径 | 图2各点含不同随机种子；Elo打乱比赛顺序10000次控制计分顺序，不是训练10000个模型 |
+| 重复口径 | [图2](#llm-v6-074-figure-2)各点含不同随机种子；Elo打乱比赛顺序10000次控制计分顺序，不是训练10000个模型 |
 | 成本边界 | 单卡可容纳与训练耗时依赖batch、长度、检查点和分页；不能仅由参数量推断峰值显存 |
 
-表9的 OASST1 设置尤其说明：正文关于“大模型加大batch”的一般描述存在具体数据集例外。复现应该采用对应行，而不是用一句概括覆盖所有实验。
+[表9](https://arxiv.org/html/2305.14314v1#A2.T9)的 OASST1 设置尤其说明：正文关于“大模型加大batch”的一般描述存在具体数据集例外。复现应该采用对应行，而不是用一句概括覆盖所有实验。
 
-## 结果：五处证据比“99.3% ChatGPT”更有用
+**证据一：[表2](#llm-v6-074-table-2)，位格式比较。** 跨模型平均困惑度 Int4为34.34，FP4 E2M1为31.07，FP4 E3M0为29.48，NF4+DQ为27.41。越低越好。它支持所测试权重分布下 NF4 的优势；这是跨配置聚合，不是单个65B模型的困惑度，也不直接证明聊天质量提升同样大。
 
-**证据一：表2，位格式比较。** 跨模型平均困惑度 Int4为34.34，FP4 E2M1为31.07，FP4 E3M0为29.48，NF4+DQ为27.41。越低越好。它支持所测试权重分布下 NF4 的优势；这是跨配置聚合，不是单个65B模型的困惑度，也不直接证明聊天质量提升同样大。
+&lt;!-- figure-ref-v6:start:074-t2-3-anchor --&gt;
+&lt;a id=&quot;llm-v6-074-table-2&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:074-t2-3-anchor --&gt;
 
-**证据二：表3，小模型微调。** T5-3B 的16位 LoRA 为55.4 ROUGE-L，NF4+DQ为55.3，作者复现的全参基线54.9；但 T5-11B 的原报告全参分数62.0，对比NF4+DQ60.9，且该列没有作者全参复现。正确读法是多个受控比较接近，而不是每个单元格严格无损。
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/074-qlora-t2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/074-qlora-t2.png&quot; width=&quot;840&quot; height=&quot;438&quot; alt=&quot;不同四位量化格式的平均困惑度，包括NF4加双重量化&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Tim Dettmers、Artidoro Pagnoni、Ari Holtzman、Luke Zettlemoyer，2023，表2，PDF第7页；&lt;a href=&quot;https://arxiv.org/pdf/2305.14314v1#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-**证据三：表4，大模型的对照是谁。** 跨尺寸与数据的16位 LoRA平均MMLU53.0，NF4+DQ53.1；33B/FLAN一项却从60.5到59.2，65B/FLAN从62.5到63.9。平均相近包含正负变化，不能推出每种任务都相同。更不能把大尺寸 LoRA 对照写成完整全参数微调对照。
+**证据二：[表3](https://arxiv.org/html/2305.14314v1#S4.T3)，小模型微调。** T5-3B 的16位 LoRA 为55.4 ROUGE-L，NF4+DQ为55.3，作者复现的全参基线54.9；但 T5-11B 的原报告全参分数62.0，对比NF4+DQ60.9，且该列没有作者全参复现。正确读法是多个受控比较接近，而不是每个单元格严格无损。
 
-**证据四：表5和表6，数据适配具有任务性。** 65B FLAN 的MMLU63.9高于Guanaco62.2，但 Vicuna 相对评分48.4低于Guanaco99.3。不同数据塑造不同能力，不能用单个考试成绩替代聊天评价，也不能把“小数据更好”推广成数据规模不重要。
+**证据三：[表4](https://arxiv.org/html/2305.14314v1#S4.T4)，大模型的对照是谁。** 跨尺寸与数据的16位 LoRA平均MMLU53.0，NF4+DQ53.1；33B/FLAN一项却从60.5到59.2，65B/FLAN从62.5到63.9。平均相近包含正负变化，不能推出每种任务都相同。更不能把大尺寸 LoRA 对照写成完整全参数微调对照。
 
-**证据五：表6、表7与§5.3，评委有偏差。** Guanaco65B 相对ChatGPT评分99.3%，95%区间为±4.4个百分点；交换回答顺序时96.7%与101.9%不同。人类与GPT-4系统排序 Spearman相关0.55，逐例一致性Fleiss κ为0.25。99.3%只是一个小基准、特定评委和归一方式下的评分，不是99.3%的通用能力，更不是几乎同样可靠的保证。
+**证据四：[表5](https://arxiv.org/html/2305.14314v1#S5.T5)和[表6](https://arxiv.org/html/2305.14314v1#S5.T6)，数据适配具有任务性。** 65B FLAN 的MMLU63.9高于Guanaco62.2，但 Vicuna 相对评分48.4低于Guanaco99.3。不同数据塑造不同能力，不能用单个考试成绩替代聊天评价，也不能把“小数据更好”推广成数据规模不重要。
+
+**证据五：[表6](https://arxiv.org/html/2305.14314v1#S5.T6)、[表7](https://arxiv.org/html/2305.14314v1#S5.T7)与§5.3，评委有偏差。** Guanaco65B 相对ChatGPT评分99.3%，95%区间为±4.4个百分点；交换回答顺序时96.7%与101.9%不同。人类与GPT-4系统排序 Spearman相关0.55，逐例一致性Fleiss κ为0.25。99.3%只是一个小基准、特定评委和归一方式下的评分，不是99.3%的通用能力，更不是几乎同样可靠的保证。
 
 分页的效果还应另看§4：作者没有给出全面的峰值分页消融，报告的某个65B配置速度与普通优化器相近。可以说它解决了可运行性问题，不能声称任何长序列负载都没有额外开销。
 
-## 贡献与局限：省出的资源应该怎样使用？
-
-QLoRA 的贡献是让低位存储与可训练高精度适配器形成可用配方，拓宽单卡可实验的模型规模。量化误差可以通过适配器在任务分布上部分补偿，但低秩更新没有义务修复所有输入上的数值差异。
-
-作者同时强调聊天基准不够可靠，并给出失败案例。进一步分析还包括：适配器部署必须匹配量化基座；合并到权重再重新量化可能改变输出；高质量数据与任务匹配并不是同一个概念；节省参数状态后，长序列激活可能成为新瓶颈。省显存意味着更可行，不自动意味着更快或更准确。
-
-## 一个算例与五个前置概念
-
-**自构算例，未运行：** 一个4096×4096线性层有约1678万参数，16位权重约32 MiB，4位裸权重约8 MiB，另需尺度。rank64的LoRA两个矩阵共有524288参数，约为基座参数的3.125%。即便适配器很小，训练时也仍需要输入激活和矩阵乘法工作区，所以不能把8 MiB加1 MiB当成整个训练的峰值显存。
+## 五、任务适配与量化补偿仍受数据和运行成本限制
 
 五个概念：**量化码本**规定低位值对应什么实数；**反量化**恢复近似高精度值而非原始精确值；**低秩更新**用两个瘦矩阵表达参数变化；**激活检查点**用重算换保存内存；**分页**通过CPU/GPU间迁移状态应对容量压力。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| LoRA虽少更新参数，基座与辅助状态仍占显存 | NF4冻结基座、双重量化、分页优化器、广泛LoRA覆盖 | 压缩主要存储，同时保留高精度适配和梯度计算 | 表2位格式；表3/4精度对照；图2覆盖消融；表6/7评价边界 | 不是全4位计算；全参大模型对照有限；分页和激活成本；任务与评委影响结论 |
+量化误差可以通过适配器在任务分布上部分补偿，但低秩更新没有义务修复所有输入上的数值差异。
+
+作者同时强调聊天基准不够可靠，并给出失败案例。进一步分析还包括：适配器部署必须匹配量化基座；合并到权重再重新量化可能改变输出；高质量数据与任务匹配并不是同一个概念；节省参数状态后，长序列激活可能成为新瓶颈。省显存意味着更可行，不自动意味着更快或更准确。
+
+## 六、区分适配时低位基座与部署量化路线
+
+低位训练成功不等于所有部署内核都会更快。用[GPTQ](061-gptq.md)和[AWQ](076-awq.md)比较面向部署的量化目标，再检查合并适配器或重新量化是否引入新误差。
 
 ## 自测与答案
 

@@ -42,17 +42,20 @@
                 <span class="text-gray-500">GQA：查询头可以很多，历史记忆不必人手一份</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="24bec29567ec88fa2266e0f0673464d96ab4fad489ce34b63d55bcd50575311a"><h1>073｜GQA：查询头可以很多，历史记忆不必人手一份</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="7a1dcb7bc8fa116d26775b6b1e713ef30e8f90a5b1b589d60ff3cafb7719a493"><h1>073｜GQA：查询头可以很多，历史记忆不必人手一份</h1>
 <p><a href="index.html">返回目录</a> · <a href="00-timeline.html">发展时间线</a></p>
-<p>论文：Joshua Ainslie 等，<em>GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints</em>，2023。<a href="https://arxiv.org/abs/2305.13245">论文</a>、<a href="https://arxiv.org/html/2305.13245v3">正文 v3</a>、<a href="https://github.com/google/flaxformer">论文采用的 Flaxformer</a>。本文核对全部方法与实验正文及训练稳定性附录；没有独立运行 TPU 基准。原文主实验是 T5 编码器—解码器模型，不把后来 decoder-only 模型的采用情况当作这篇论文的实验。</p>
-<h2 id="一分钟理解生成一个词也要搬动很多旧信息">一分钟理解：生成一个词，也要搬动很多旧信息</h2>
-<p>语言模型逐 token 生成时，会把历史 token 的 key 和 value 缓存下来。下一步不必重新计算历史表示，但仍需要读取它们。如果每个注意力头都有独立的历史缓存，长序列和大批量下的存储与搬运成本会很高。</p>
-<p>MQA 让所有查询头共享一组 key/value，可以减少缓存，却可能牺牲模型能力。GQA 在两端之间折中：保留多个查询头，把它们分组，同组共享 key/value。作者还提出把已有 MHA 模型转换后继续预训练，避免为新的结构从头训练一遍。</p>
-<p>表1中 T5-XXL 的 GQA-8 平均任务得分47.1，接近 MHA 的47.2；论文规定的推理时间为0.28秒，对比1.51秒。这里的时间是按样本和 TPU 芯片归一的基准，不能直接当作任意 GPU 单用户服务的首 token 延迟。</p>
-<p>一句话总结：在自回归推理受 KV 缓存搬运影响的场景下，通过分组共享 key/value 并对转换后的模型继续训练，改善质量与推理成本的折中，限制是结构变化需要适配，实际速度取决于硬件、批量和序列长度。</p>
+<p>论文：Joshua Ainslie 等，<em>GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints</em>，2023。<a href="https://arxiv.org/abs/2305.13245">论文</a>、<a href="https://arxiv.org/html/2305.13245v3">正文 v3</a>、<a href="https://github.com/google/flaxformer">论文采用的 Flaxformer</a>。原文主实验是 T5 编码器—解码器模型，不把后来 decoder-only 模型的采用情况当作这篇论文的实验。</p>
+<!-- figure-ref-v6:start:llm-license-073-gqa -->
+<p>图表来源：Joshua Ainslie 等，2023，<a href="https://arxiv.org/html/2305.13245v3">原文</a>；<a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>。本篇展示做了图形区域裁切，图中数据与标签未改动。</p>
+<!-- figure-ref-v6:end:llm-license-073-gqa -->
+
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="015-transformer.html">Transformer</a>每个头通常保存独立K/V，长历史解码时反复读取的缓存随头数增长。本篇在完全独立与MQA式单组共享之间引入分组；它可与<a href="059-flashattention.html">FlashAttention</a>的内核、<a href="079-vllm.html">vLLM</a>的布局组合，改变的是结构轴。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个概念：<strong>KV cache</strong>存储历史键值避免重复计算；<strong>query头</strong>决定每次如何读取历史；<strong>带宽瓶颈</strong>表示时间主要花在搬数据；<strong>继续预训练</strong>让已有模型适应结构或数据变化；<strong>吞吐与延迟</strong>分别衡量单位时间总工作量与单次请求等待时间。</p>
-<h2 id="背景mhamqa-和-gqa-到底共享什么">背景：MHA、MQA 和 GQA 到底共享什么？</h2>
+<h2 id="一问题设定查询头保留多样性时怎样减少历史kv搬运">一、问题设定：查询头保留多样性时，怎样减少历史KV搬运</h2>
+<p>缓存避免重复计算历史表示，却不免除下一步读取。若所有查询共享一份K/V，存储更省但表达约束更强；GQA保留多个查询头，调节它们共享多少组K/V，并研究已有MHA检查点怎样低成本适配。</p>
+<h2 id="二定义分组共享并分析均值初始化的非等价性">二、定义分组共享并分析均值初始化的非等价性</h2>
 <p>设查询头数为 <span class="reading-math" data-tex="H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>H</mi></mrow><annotation encoding="application/x-tex">H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span></span></span>，KV 头数为 <span class="reading-math" data-tex="G"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span></span></span></span></span>。MHA 对应 <span class="reading-math" data-tex="G=H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi><mo>=</mo><mi>H</mi></mrow><annotation encoding="application/x-tex">G=H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span></span></span>；MQA 对应 <span class="reading-math" data-tex="G=1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">G=1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>；GQA 在两者之间选择。每个查询头仍然有自己的 query 投影，所以共享 KV 不意味着组内所有头产生相同的注意力分布。</p>
 <p>对于查询头 <span class="reading-math" data-tex="h"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi></mrow><annotation encoding="application/x-tex">h</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">h</span></span></span></span></span>，令 <span class="reading-math" data-tex="g(h)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi><mo stretchy="false">(</mo><mi>h</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">g(h)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mopen">(</span><span class="mord mathnormal">h</span><span class="mclose">)</span></span></span></span></span> 为所属组，其输出为：</p>
 <p><span class="reading-math" data-tex="O_h=\operatorname{softmax}\left(\frac{Q_hK_{g(h)}^\top}{\sqrt{d_k}}+M\right)V_{g(h)}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>O</mi><mi>h</mi></msub><mo>=</mo><mi mathvariant="normal">softmax</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><mfrac><mrow><msub><mi>Q</mi><mi>h</mi></msub><msubsup><mi>K</mi><mrow><mi>g</mi><mo stretchy="false">(</mo><mi>h</mi><mo stretchy="false">)</mo></mrow><mi mathvariant="normal">⊤</mi></msubsup></mrow><msqrt><msub><mi>d</mi><mi>k</mi></msub></msqrt></mfrac><mo>+</mo><mi>M</mi><mo fence="true">)</mo></mrow><msub><mi>V</mi><mrow><mi>g</mi><mo stretchy="false">(</mo><mi>h</mi><mo stretchy="false">)</mo></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">O_h=\operatorname{softmax}\left(\frac{Q_hK_{g(h)}^\top}{\sqrt{d_k}}+M\right)V_{g(h)}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">O</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">h</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3em;vertical-align:-1.25em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size4">(</span></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.7361em;"><span style="top:-2.2528em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8572em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8172em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
@@ -70,13 +73,24 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 <p><span class="reading-math" data-tex="d_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>d</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">d_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是头维度，<span class="reading-math" data-tex="M"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi></mrow><annotation encoding="application/x-tex">M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">M</span></span></span></span></span> 是掩码；自回归自注意力使用因果限制。不同 <span class="reading-math" data-tex="Q_h"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>Q</mi><mi>h</mi></msub></mrow><annotation encoding="application/x-tex">Q_h</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">h</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 可以针对同一组历史键提出不同查询，因此仍有多种“读取视角”，只是历史信息的写入表示被共享了。</p>
 <p>本文不是删掉历史 token，也不缩短上下文窗口。缓存仍然覆盖相同序列，只是每个位置存储的 KV 头更少。它也不同于 FlashAttention：后者主要改变注意力计算与数据搬运组织，GQA 改变参数共享和表示容量。</p>
 <p>需要注意原文只对 decoder 自注意力和交叉注意力应用 MQA/GQA，encoder 自注意力保持 MHA。编码器并行处理输入，其性能瓶颈与逐 token 解码不完全相同。</p>
-<h2 id="方法分组平均不是精确等价变换">方法：分组平均不是精确等价变换</h2>
 <p>从已有 MHA 检查点转换时，每组的 key/value 投影取组内平均：</p>
 <p><span class="reading-math" data-tex="W_K^{(g)}=\frac{1}{|I_g|}\sum_{h\in I_g}W_K^{(h)},\qquad
 W_V^{(g)}=\frac{1}{|I_g|}\sum_{h\in I_g}W_V^{(h)}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msubsup><mi>W</mi><mi>K</mi><mrow><mo stretchy="false">(</mo><mi>g</mi><mo stretchy="false">)</mo></mrow></msubsup><mo>=</mo><mfrac><mn>1</mn><mrow><mi mathvariant="normal">∣</mi><msub><mi>I</mi><mi>g</mi></msub><mi mathvariant="normal">∣</mi></mrow></mfrac><munder><mo>∑</mo><mrow><mi>h</mi><mo>∈</mo><msub><mi>I</mi><mi>g</mi></msub></mrow></munder><msubsup><mi>W</mi><mi>K</mi><mrow><mo stretchy="false">(</mo><mi>h</mi><mo stretchy="false">)</mo></mrow></msubsup><mo separator="true">,</mo><mspace width="2em"/><msubsup><mi>W</mi><mi>V</mi><mrow><mo stretchy="false">(</mo><mi>g</mi><mo stretchy="false">)</mo></mrow></msubsup><mo>=</mo><mfrac><mn>1</mn><mrow><mi mathvariant="normal">∣</mi><msub><mi>I</mi><mi>g</mi></msub><mi mathvariant="normal">∣</mi></mrow></mfrac><munder><mo>∑</mo><mrow><mi>h</mi><mo>∈</mo><msub><mi>I</mi><mi>g</mi></msub></mrow></munder><msubsup><mi>W</mi><mi>V</mi><mrow><mo stretchy="false">(</mo><mi>h</mi><mo stretchy="false">)</mo></mrow></msubsup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">W_K^{(g)}=\frac{1}{|I_g|}\sum_{h\in I_g}W_K^{(h)},\qquad
 W_V^{(g)}=\frac{1}{|I_g|}\sum_{h\in I_g}W_V^{(h)}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.3383em;vertical-align:-0.2935em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.0448em;"><span style="top:-2.4065em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">K</span></span></span><span style="top:-3.2198em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2935em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.8209em;vertical-align:-1.4994em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">∣</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">∣</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.9721em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">h</span><span class="mrel mtight">∈</span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07847em;">I</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:-0.0785em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2819em;"><span></span></span></span></span></span></span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4994em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.0448em;"><span style="top:-2.4065em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">K</span></span></span><span style="top:-3.2198em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight">h</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2935em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.0448em;"><span style="top:-2.4065em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.22222em;">V</span></span></span><span style="top:-3.2198em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2935em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.8209em;vertical-align:-1.4994em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">∣</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">∣</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.9721em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">h</span><span class="mrel mtight">∈</span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07847em;">I</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:-0.0785em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2819em;"><span></span></span></span></span></span></span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4994em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.0448em;"><span style="top:-2.4065em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.22222em;">V</span></span></span><span style="top:-3.2198em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mopen mtight">(</span><span class="mord mathnormal mtight">h</span><span class="mclose mtight">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2935em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="I_g"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>I</mi><mi>g</mi></msub></mrow><annotation encoding="application/x-tex">I_g</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">g</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是该组的原始头集合。query 和输出投影按转换方案保留。平均值利用全部原始头的信息，是一个初始化选择；因为 softmax 非线性，平均投影后的注意力不等于原先多个注意力输出的平均，所以不能声称这是无损压缩。</p>
 <p>随后按原始预训练配方继续训练 <span class="reading-math" data-tex="\alpha"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span> 比例的步数。主实验取 <span class="reading-math" data-tex="\alpha=0.05"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi><mo>=</mo><mn>0.05</mn></mrow><annotation encoding="application/x-tex">\alpha=0.05</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.05</span></span></span></span></span>，即原预训练步数的5%。没有新的专用 GQA 损失；沿用 T5 的预训练目标，让各层共同适应共享结构。</p>
+<p>对于仅考虑 decoder 自注意力的简化计算，设层数 <span class="reading-math" data-tex="L"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi></mrow><annotation encoding="application/x-tex">L</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span></span></span></span></span>、批量 <span class="reading-math" data-tex="B"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>B</mi></mrow><annotation encoding="application/x-tex">B</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span></span></span></span></span>、历史长度 <span class="reading-math" data-tex="S"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi></mrow><annotation encoding="application/x-tex">S</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">S</span></span></span></span></span>、每个缓存元素 <span class="reading-math" data-tex="q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi></mrow><annotation encoding="application/x-tex">q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span></span></span></span> 字节，KV 存储量近似为：</p>
+<p><span class="reading-math" data-tex="\operatorname{Bytes}_{KV}=2LBSGd_kq."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mrow><mi mathvariant="normal">Bytes</mi><mo>⁡</mo></mrow><mrow><mi>K</mi><mi>V</mi></mrow></msub><mo>=</mo><mn>2</mn><mi>L</mi><mi>B</mi><mi>S</mi><mi>G</mi><msub><mi>d</mi><mi>k</mi></msub><mi>q</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\operatorname{Bytes}_{KV}=2LBSGd_kq.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9275em;vertical-align:-0.2441em;"></span><span class="mop"><span class="mop"><span class="mord mathrm">Bytes</span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2342em;"><span style="top:-2.4559em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">K</span><span class="mord mathnormal mtight" style="margin-right:0.22222em;">V</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2441em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord">2</span><span class="mord mathnormal">L</span><span class="mord mathnormal">BSG</span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>前面的2分别对应 key 和 value。在其他条件相同时，GQA 相对 MHA 的缓存比为 <span class="reading-math" data-tex="G/H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi><mi mathvariant="normal">/</mi><mi>H</mi></mrow><annotation encoding="application/x-tex">G/H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">G</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span></span></span>。这是缓存项的关系，不是总显存或总时间的关系；权重、激活、临时工作区和交叉注意力缓存都可能占用资源。</p>
+<p>此外，查询头数量没有减少，很多注意力乘法仍然存在。速度改善主要来自内存流量和更合适的并行布局。原文还讨论了 MQA 的单个 KV 头在多分片上复制的浪费；组数适当增加时，逻辑缓存增加不一定按同样比例转化为物理通信和存储增加。</p>
+<h3 id="为什么平均-kv-后还需要继续训练">为什么平均 K/V 后还需要继续训练？</h3>
+<p>即使查询 <span class="reading-math" data-tex="q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi></mrow><annotation encoding="application/x-tex">q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span></span></span></span> 相同，平均键之后的注意力也不等于原来注意力的平均，因为 softmax 是非线性的。设两个头对两个位置的打分分别为 <span class="reading-math" data-tex="(4,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>4</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(4,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">4</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span> 和 <span class="reading-math" data-tex="(0,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span>，它们给第一位置的权重为约 <span class="reading-math" data-tex="0.982"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0.982</mn></mrow><annotation encoding="application/x-tex">0.982</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.982</span></span></span></span></span> 和 <span class="reading-math" data-tex="0.5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0.5</mn></mrow><annotation encoding="application/x-tex">0.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span>；先分别归一化再平均得到 <span class="reading-math" data-tex="0.741"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0.741</mn></mrow><annotation encoding="application/x-tex">0.741</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.741</span></span></span></span></span>。先平均键导致打分变为 <span class="reading-math" data-tex="(2,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>2</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(2,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span>，归一化后却为 <span class="reading-math" data-tex="0.881"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0.881</mn></mrow><annotation encoding="application/x-tex">0.881</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.881</span></span></span></span></span>。即使值向量暂时保持相同，输出也已经改变。</p>
+<p>这解释了两阶段适配各自的作用：均值池化给共享 K/V 一个利用原检查点信息的初始化，继续预训练则让查询、共享表示和其他权重适应新约束。原文§3.3也指出，GQA转换后已经具有合理表现，继续预训练进一步改善质量；不能把适配带来的收益提升为“不训练就完全不可用”。它不是把原模型无损重排，也不能仅凭头数减少比例预测模型质量。</p>
+<p><strong>自构显存核算，未运行。</strong> 对仅计算 KV 缓存的单请求，取 32 层、序列长度 4096、每头维度 128、每数 2 字节。32 个 KV 头需要 <span class="reading-math" data-tex="2\times32\times4096\times32\times128\times2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mo>×</mo><mn>32</mn><mo>×</mo><mn>4096</mn><mo>×</mo><mn>32</mn><mo>×</mo><mn>128</mn><mo>×</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">2\times32\times4096\times32\times128\times2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">32</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">4096</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">32</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">128</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span></span></span></span></span> 字节，即 2 GiB；改为 8 个 KV 组后是 512 MiB。第一个因子 2 表示 K 和 V。查询头数保持 32，并不产生这份历史缓存；权重、工作区、分块浪费和批处理都没有包含在该数值中，因此它是缓存容量下降四倍，不是整个系统显存或延迟下降四倍。</p>
+<h3 id="共享键值仍允许两颗查询头读出不同内容">共享键值仍允许两颗查询头读出不同内容</h3>
+<p>设共享的两个key为(1,0)与(0,1)，两颗query分别为(1,0)和(0,1)，忽略相同缩放时分数分别为(1,0)和(0,1)。softmax权重彼此交换，因此读取同一份V也会得到不同输出。GQA减少的是历史K/V副本，不是把组内query的计算与表达全部合并。</p>
+<p>教法联系：<a href="https://lilianweng.github.io/posts/2023-01-10-inference-optimization/">Lilian Weng的Large Transformer Model Inference Optimization</a>。算例为本文自构。</p>
+<h2 id="三转换检查点并继续训练以适应共享约束">三、转换检查点并继续训练以适应共享约束</h2>
 <pre><code class="language-text">输入：已训练 MHA 检查点、组数 G、继续训练比例 α
 for decoder attention layer:
     divide H query heads into G groups
@@ -90,12 +104,8 @@ decode with G KV heads and H query heads
 输出：经适配的 GQA 模型及其质量/时间测量
 </code></pre>
 <p>数学目标是原任务损失；机制是共享投影与继续训练；指标是下游分数、稳定性和推理时间。“用5%算力”指利用已有模型后的增量适配，不是从随机初始化得到同等模型只需原训练成本的5%。</p>
-<h2 id="缓存为什么会变小为什么速度不按比例增长">缓存为什么会变小，为什么速度不按比例增长？</h2>
-<p>对于仅考虑 decoder 自注意力的简化计算，设层数 <span class="reading-math" data-tex="L"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi></mrow><annotation encoding="application/x-tex">L</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span></span></span></span></span>、批量 <span class="reading-math" data-tex="B"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>B</mi></mrow><annotation encoding="application/x-tex">B</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05017em;">B</span></span></span></span></span>、历史长度 <span class="reading-math" data-tex="S"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi></mrow><annotation encoding="application/x-tex">S</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.05764em;">S</span></span></span></span></span>、每个缓存元素 <span class="reading-math" data-tex="q"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi></mrow><annotation encoding="application/x-tex">q</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span></span></span></span> 字节，KV 存储量近似为：</p>
-<p><span class="reading-math" data-tex="\operatorname{Bytes}_{KV}=2LBSGd_kq."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mrow><mi mathvariant="normal">Bytes</mi><mo>⁡</mo></mrow><mrow><mi>K</mi><mi>V</mi></mrow></msub><mo>=</mo><mn>2</mn><mi>L</mi><mi>B</mi><mi>S</mi><mi>G</mi><msub><mi>d</mi><mi>k</mi></msub><mi>q</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\operatorname{Bytes}_{KV}=2LBSGd_kq.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9275em;vertical-align:-0.2441em;"></span><span class="mop"><span class="mop"><span class="mord mathrm">Bytes</span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2342em;"><span style="top:-2.4559em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">K</span><span class="mord mathnormal mtight" style="margin-right:0.22222em;">V</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2441em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord">2</span><span class="mord mathnormal">L</span><span class="mord mathnormal">BSG</span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mord">.</span></span></span></span></span></span></p>
-<p>前面的2分别对应 key 和 value。在其他条件相同时，GQA 相对 MHA 的缓存比为 <span class="reading-math" data-tex="G/H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi><mi mathvariant="normal">/</mi><mi>H</mi></mrow><annotation encoding="application/x-tex">G/H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">G</span><span class="mord">/</span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span></span></span>。这是缓存项的关系，不是总显存或总时间的关系；权重、激活、临时工作区和交叉注意力缓存都可能占用资源。</p>
-<p>此外，查询头数量没有减少，很多注意力乘法仍然存在。速度改善主要来自内存流量和更合适的并行布局。原文还讨论了 MQA 的单个 KV 头在多分片上复制的浪费；组数适当增加时，逻辑缓存增加不一定按同样比例转化为物理通信和存储增加。</p>
-<h2 id="实验质量比较和性能测量分别控制了什么">实验：质量比较和性能测量分别控制了什么？</h2>
+<h2 id="四同时读取组数质量恢复和计时单位">四、同时读取组数、质量恢复和计时单位</h2>
+<p>先统一表1和图3的计时口径，再比较组数；继续训练比例与任务质量共同限定“接近MHA”的含义。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -133,7 +143,7 @@ decode with G KV heads and H query heads
 </tr>
 <tr>
 <td>指标</td>
-<td>摘要ROUGE-1、翻译BLEU、问答F1；表1平均值混合了不同指标，并非统一的正确率</td>
+<td>摘要ROUGE-1、翻译BLEU、问答F1；<a href="https://arxiv.org/html/2305.13245v3#S3.T1">表1</a>平均值混合了不同指标，并非统一的正确率</td>
 </tr>
 <tr>
 <td>重复与稳定性</td>
@@ -141,43 +151,46 @@ decode with G KV heads and H query heads
 </tr>
 </tbody></table></div>
 <p>这里允许不同模型利用自身更小缓存选择更大批量，是合理的系统吞吐比较，但不是固定 batch、固定并行策略的纯算子消融。若关心交互式低延迟，需要另做 batch1、固定长度和相同硬件配置的实验。</p>
-<h2 id="结果四条证据与一个尚未解释的现象">结果：四条证据与一个尚未解释的现象</h2>
-<p><strong>证据一：表1与图3，主要折中。</strong> MHA-XXL、MQA-XXL、GQA-8-XXL 的平均分分别47.2、46.6、47.1；时间1.51、0.24、0.28秒。按表内时间自行计算，MHA/GQA约为5.39倍；这个比值仅适用于该测量。GQA 比 MQA 略慢，但平均分更接近 MHA。</p>
-<p><strong>证据二：表1的分任务结果。</strong> GQA 的 PubMed 为47.7，对比 MHA47.5；TriviaQA为81.6，对比81.9；CNN为43.5，对比43.8。因此“质量接近”不等于每项严格无损，也不能从略高的单项分数推出新结构本身更准确，尤其缺少完整不确定性区间时。</p>
-<p><strong>证据三：图4与图5，转换和恢复。</strong> 平均原始头的初始化优于保留单头和随机初始化；5%继续训练帮助 MQA 与 GQA，增加到10%的收益递减。这支持“保留已有表示再适配”的路线；图中趋势不能证明5%是其他模型、数据或组数上的最优比例。</p>
-<p><strong>证据四：图6，组数。</strong> 在输入2048、输出512的配置下，从1组增加到8组的时间开销较小，接近 MHA 时增加更明显。8组是作者选择的实用折中，不能因为一个后来的模型也使用8个 KV 头，就认为已经得到普适理论常数。</p>
+<p><strong>证据一：<a href="https://arxiv.org/html/2305.13245v3#S3.T1">表1</a>与<a href="#llm-v6-073-figure-3">图3</a>，主要折中。</strong> MHA-XXL、MQA-XXL、GQA-8-XXL 的平均分分别47.2、46.6、47.1；时间1.51、0.24、0.28秒。按表内时间自行计算，MHA/GQA约为5.39倍；这个比值仅适用于该测量。GQA 比 MQA 略慢，但平均分更接近 MHA。 质量—延迟图以每样本平均推理时间为横轴；组数图固定输入2048、输出512。更换生成长度后，不能直接搬用这条延迟比例。</p>
+<!-- figure-ref-v6:start:073-f3-2-anchor -->
+<p><a id="llm-v6-073-figure-3"></a></p>
+<!-- figure-ref-v6:end:073-f3-2-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/073-gqa-f3.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/073-gqa-f3.png" width="1344" height="1140" alt="GQA、MQA和MHA模型的平均质量与单样本推理时间折中" loading="lazy"></a><figcaption>原实验图摘引：Joshua Ainslie 等，2023，图3，PDF第3页；<a href="https://arxiv.org/pdf/2305.13245v3#page=3" target="_blank" rel="noopener noreferrer">核对原文</a>；<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>，仅裁切图区。</figcaption></figure>
+
+<p><strong>读图时留意单位：</strong> 这份 v3 原稿的图3横轴写作 ms，但<a href="https://arxiv.org/html/2305.13245v3#S3.T1">表1</a>把相同数值标成 s，二者标注不一致。本文的秒数沿用表1；图中只据相对位置比较速度与质量，不把 GQA 的 0.28 解读成 0.28 毫秒。</p>
+<p><strong>证据二：<a href="https://arxiv.org/html/2305.13245v3#S3.T1">表1</a>的分任务结果。</strong> GQA 的 PubMed 为47.7，对比 MHA47.5；TriviaQA为81.6，对比81.9；CNN为43.5，对比43.8。因此“质量接近”不等于每项严格无损，也不能从略高的单项分数推出新结构本身更准确，尤其缺少完整不确定性区间时。</p>
+<p><strong>证据三：<a href="#llm-v6-073-figure-4">图4</a>与<a href="#llm-v6-073-figure-5">图5</a>，转换和恢复。</strong> 平均原始头的初始化优于保留单头和随机初始化；5%继续训练帮助 MQA 与 GQA，增加到10%的收益递减。这支持“保留已有表示再适配”的路线；图中趋势不能证明5%是其他模型、数据或组数上的最优比例。</p>
+<!-- figure-ref-v6:start:073-f5-4 -->
+<p><a id="llm-v6-073-figure-5"></a></p>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/073-gqa-f5-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/073-gqa-f5-v6.png" width="1320" height="828" alt="GQA和MQA继续训练比例与下游表现的关系" loading="lazy"></a><figcaption>原文图形摘引：Joshua Ainslie 等，2023，图5，PDF第4页；<a href="https://arxiv.org/html/2305.13245v3#S3.F5" target="_blank" rel="noopener noreferrer">核对原文</a>。</figcaption></figure>
+<!-- figure-ref-v6:end:073-f5-4 -->
+
+<!-- figure-ref-v6:start:073-f4-3 -->
+<p><a id="llm-v6-073-figure-4"></a></p>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/073-gqa-f4-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/073-gqa-f4-v6.png" width="1356" height="732" alt="GQA从多头注意力检查点转换时均值、首头及随机初始化的表现" loading="lazy"></a><figcaption>原文图形摘引：Joshua Ainslie 等，2023，图4，PDF第4页；<a href="https://arxiv.org/html/2305.13245v3#S3.F4" target="_blank" rel="noopener noreferrer">核对原文</a>。</figcaption></figure>
+<!-- figure-ref-v6:end:073-f4-3 -->
+
+<p><strong>证据四：<a href="#llm-v6-073-figure-6">图6</a>，组数。</strong> 在输入2048、输出512的配置下，从1组增加到8组的时间开销较小，接近 MHA 时增加更明显。8组是作者选择的实用折中，不能因为一个后来的模型也使用8个 KV 头，就认为已经得到普适理论常数。</p>
+<!-- figure-ref-v6:start:073-f6-5 -->
+<p><a id="llm-v6-073-figure-6"></a></p>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/073-gqa-f6-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/073-gqa-f6-v6.png" width="1368" height="858" alt="GQA分组数增加时每个样本的推理时间" loading="lazy"></a><figcaption>原文图形摘引：Joshua Ainslie 等，2023，图6，PDF第4页；<a href="https://arxiv.org/html/2305.13245v3#S3.F6" target="_blank" rel="noopener noreferrer">核对原文</a>。</figcaption></figure>
+<!-- figure-ref-v6:end:073-f6-5 -->
+
 <p><strong>补充证据：附录A。</strong> 从头训练的多个 MQA T5-Large 出现损失尖峰，在长输入任务微调中发散；转换后 MQA 更稳定但仍有方差，GQA 看起来稳定。作者没有继续定位根因。因此可以报告观察到的稳定性差异，不能自行解释为“平均头一定消除了某种梯度病态”。</p>
-<h2 id="贡献与局限一条可复用的系统设计轴">贡献与局限：一条可复用的系统设计轴</h2>
-<p>真正的新意是提供 MHA 与 MQA 之间可调的结构轴，并给出从已有检查点转换的训练配方。它让部署约束能够进入模型架构设计，而不必在完全独立的 KV 与完全共享的 KV 之间二选一。</p>
+<h2 id="五缓存四倍压缩不保证整体四倍加速">五、缓存四倍压缩不保证整体四倍加速</h2>
+<p>它让部署约束能够进入模型架构设计，而不必在完全独立的 KV 与完全共享的 KV 之间二选一。</p>
 <p>作者承认主实验仅覆盖编码器—解码器结构，没有与从头训练的 XXL GQA 做等预算比较，也承认 ROUGE 不能全面评价生成质量。因此论文没有回答“同样总训练预算下，先训练MHA再转换，是否优于直接训练GQA”。</p>
 <p>进一步分析还包括：KV压缩对长序列大批量可能更有价值，但当权重搬运或计算成为主瓶颈时，收益会减弱；转换需要原预训练数据或足够匹配的替代数据；缓存省下来的显存可能用于更大批量，改变延迟与吞吐的折中。质量、总显存和速度应该分别测量。</p>
-<h2 id="自构算例与五个前置概念">自构算例与五个前置概念</h2>
-<p><strong>自构算例，未运行：</strong> 设32层、batch1、4096历史token、32个query头、头维度128、BF16每元素2字节。MHA自注意力KV约2 GiB；改成8组约0.5 GiB，减少75%。这个算例仅计算缓存，不包括模型权重，也不意味着总显存减少75%或速度提高4倍。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>MHA缓存大，MQA共享过强可能损失质量</td>
-<td>分组共享KV，对原头均值初始化并继续预训练</td>
-<td>减少缓存流量，同时保留比单KV头更多的表示容量</td>
-<td>表1质量/时间；图4初始化；图5恢复；图6组数</td>
-<td>增量训练不免费；质量非严格无损；性能依赖批量和硬件；主实验限T5</td>
-</tr>
-</tbody></table></div>
+<h2 id="六把缓存共享结构与内核分页组合">六、把缓存共享结构与内核、分页组合</h2>
+<p>共享K/V之后，<a href="079-vllm.html">vLLM</a>继续减少请求间分配浪费，<a href="059-flashattention.html">FlashAttention</a>优化读写路径。这是结构、布局与内核三个可组合层次，需在共同负载下重新测整体收益。</p>
 <h2 id="自测与答案">自测与答案</h2>
 <p><strong>1. 同组查询头共享 K 和 V，为什么输出仍然可以不同？</strong></p>
 <p>答案：每个头的 Q 仍不同，因而与相同 K 计算出的分数和 softmax 权重不同，可以从同一组 V 中读出不同组合。共享的是历史表示，不是查询方式，也不是最终注意力权重。</p>
 <p><strong>2. 把32个 KV 头改为8个，是否等于模型快4倍、总显存少75%？</strong></p>
 <p>答案：只在相同条件下，自注意力 KV 缓存项缩小到四分之一。模型权重和其他工作区并未同比缩小，查询相关运算也仍存在。必须测量具体瓶颈，才能预测端到端收益。</p>
 <p><strong>3. 为什么不能直接平均头后发布，并宣称和原模型等价？</strong></p>
-<p>答案：注意力包含非线性，平均投影不能保持原输出。需要测量转换后的质量并进行适配训练；原文图5也展示继续训练的作用。即便均值初始化优于其他方案，也只是好的起点，不是等价性证明。</p>
+<p>答案：注意力包含非线性，平均投影不能保持原输出。需要测量转换后的质量并决定所需适配训练；原文<a href="#llm-v6-073-figure-5">图5</a>也展示继续训练的作用。即便均值初始化优于其他方案，也只是好的起点，不是等价性证明。</p>
 </div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
         </article>
@@ -187,19 +200,21 @@ decode with G KV heads and H query heads
 
 [返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
 
-论文：Joshua Ainslie 等，*GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints*，2023。[论文](https://arxiv.org/abs/2305.13245)、[正文 v3](https://arxiv.org/html/2305.13245v3)、[论文采用的 Flaxformer](https://github.com/google/flaxformer)。本文核对全部方法与实验正文及训练稳定性附录；没有独立运行 TPU 基准。原文主实验是 T5 编码器—解码器模型，不把后来 decoder-only 模型的采用情况当作这篇论文的实验。
+论文：Joshua Ainslie 等，*GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints*，2023。[论文](https://arxiv.org/abs/2305.13245)、[正文 v3](https://arxiv.org/html/2305.13245v3)、[论文采用的 Flaxformer](https://github.com/google/flaxformer)。原文主实验是 T5 编码器—解码器模型，不把后来 decoder-only 模型的采用情况当作这篇论文的实验。
 
-## 一分钟理解：生成一个词，也要搬动很多旧信息
+&lt;!-- figure-ref-v6:start:llm-license-073-gqa --&gt;
+图表来源：Joshua Ainslie 等，2023，[原文](https://arxiv.org/html/2305.13245v3)；[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)。本篇展示做了图形区域裁切，图中数据与标签未改动。
+&lt;!-- figure-ref-v6:end:llm-license-073-gqa --&gt;
 
-语言模型逐 token 生成时，会把历史 token 的 key 和 value 缓存下来。下一步不必重新计算历史表示，但仍需要读取它们。如果每个注意力头都有独立的历史缓存，长序列和大批量下的存储与搬运成本会很高。
+### 先接住前作的问题
 
-MQA 让所有查询头共享一组 key/value，可以减少缓存，却可能牺牲模型能力。GQA 在两端之间折中：保留多个查询头，把它们分组，同组共享 key/value。作者还提出把已有 MHA 模型转换后继续预训练，避免为新的结构从头训练一遍。
+[Transformer](015-transformer.md)每个头通常保存独立K/V，长历史解码时反复读取的缓存随头数增长。本篇在完全独立与MQA式单组共享之间引入分组；它可与[FlashAttention](059-flashattention.md)的内核、[vLLM](079-vllm.md)的布局组合，改变的是结构轴。
 
-表1中 T5-XXL 的 GQA-8 平均任务得分47.1，接近 MHA 的47.2；论文规定的推理时间为0.28秒，对比1.51秒。这里的时间是按样本和 TPU 芯片归一的基准，不能直接当作任意 GPU 单用户服务的首 token 延迟。
+## 一、问题设定：查询头保留多样性时，怎样减少历史KV搬运
 
-一句话总结：在自回归推理受 KV 缓存搬运影响的场景下，通过分组共享 key/value 并对转换后的模型继续训练，改善质量与推理成本的折中，限制是结构变化需要适配，实际速度取决于硬件、批量和序列长度。
+缓存避免重复计算历史表示，却不免除下一步读取。若所有查询共享一份K/V，存储更省但表达约束更强；GQA保留多个查询头，调节它们共享多少组K/V，并研究已有MHA检查点怎样低成本适配。
 
-## 背景：MHA、MQA 和 GQA 到底共享什么？
+## 二、定义分组共享并分析均值初始化的非等价性
 
 设查询头数为 $H$，KV 头数为 $G$。MHA 对应 $G=H$；MQA 对应 $G=1$；GQA 在两者之间选择。每个查询头仍然有自己的 query 投影，所以共享 KV 不意味着组内所有头产生相同的注意力分布。
 
@@ -215,8 +230,6 @@ $d_k$ 是头维度，$M$ 是掩码；自回归自注意力使用因果限制。�
 
 需要注意原文只对 decoder 自注意力和交叉注意力应用 MQA/GQA，encoder 自注意力保持 MHA。编码器并行处理输入，其性能瓶颈与逐 token 解码不完全相同。
 
-## 方法：分组平均不是精确等价变换
-
 从已有 MHA 检查点转换时，每组的 key/value 投影取组内平均：
 
 $$
@@ -227,6 +240,32 @@ $$
 $I_g$ 是该组的原始头集合。query 和输出投影按转换方案保留。平均值利用全部原始头的信息，是一个初始化选择；因为 softmax 非线性，平均投影后的注意力不等于原先多个注意力输出的平均，所以不能声称这是无损压缩。
 
 随后按原始预训练配方继续训练 $\alpha$ 比例的步数。主实验取 $\alpha=0.05$，即原预训练步数的5%。没有新的专用 GQA 损失；沿用 T5 的预训练目标，让各层共同适应共享结构。
+
+对于仅考虑 decoder 自注意力的简化计算，设层数 $L$、批量 $B$、历史长度 $S$、每个缓存元素 $q$ 字节，KV 存储量近似为：
+
+$$
+\operatorname{Bytes}_{KV}=2LBSGd_kq.
+$$
+
+前面的2分别对应 key 和 value。在其他条件相同时，GQA 相对 MHA 的缓存比为 $G/H$。这是缓存项的关系，不是总显存或总时间的关系；权重、激活、临时工作区和交叉注意力缓存都可能占用资源。
+
+此外，查询头数量没有减少，很多注意力乘法仍然存在。速度改善主要来自内存流量和更合适的并行布局。原文还讨论了 MQA 的单个 KV 头在多分片上复制的浪费；组数适当增加时，逻辑缓存增加不一定按同样比例转化为物理通信和存储增加。
+
+### 为什么平均 K/V 后还需要继续训练？
+
+即使查询 $q$ 相同，平均键之后的注意力也不等于原来注意力的平均，因为 softmax 是非线性的。设两个头对两个位置的打分分别为 $(4,0)$ 和 $(0,0)$，它们给第一位置的权重为约 $0.982$ 和 $0.5$；先分别归一化再平均得到 $0.741$。先平均键导致打分变为 $(2,0)$，归一化后却为 $0.881$。即使值向量暂时保持相同，输出也已经改变。
+
+这解释了两阶段适配各自的作用：均值池化给共享 K/V 一个利用原检查点信息的初始化，继续预训练则让查询、共享表示和其他权重适应新约束。原文§3.3也指出，GQA转换后已经具有合理表现，继续预训练进一步改善质量；不能把适配带来的收益提升为“不训练就完全不可用”。它不是把原模型无损重排，也不能仅凭头数减少比例预测模型质量。
+
+**自构显存核算，未运行。** 对仅计算 KV 缓存的单请求，取 32 层、序列长度 4096、每头维度 128、每数 2 字节。32 个 KV 头需要 $2\times32\times4096\times32\times128\times2$ 字节，即 2 GiB；改为 8 个 KV 组后是 512 MiB。第一个因子 2 表示 K 和 V。查询头数保持 32，并不产生这份历史缓存；权重、工作区、分块浪费和批处理都没有包含在该数值中，因此它是缓存容量下降四倍，不是整个系统显存或延迟下降四倍。
+
+### 共享键值仍允许两颗查询头读出不同内容
+
+设共享的两个key为(1,0)与(0,1)，两颗query分别为(1,0)和(0,1)，忽略相同缩放时分数分别为(1,0)和(0,1)。softmax权重彼此交换，因此读取同一份V也会得到不同输出。GQA减少的是历史K/V副本，不是把组内query的计算与表达全部合并。
+
+教法联系：[Lilian Weng的Large Transformer Model Inference Optimization](https://lilianweng.github.io/posts/2023-01-10-inference-optimization/)。算例为本文自构。
+
+## 三、转换检查点并继续训练以适应共享约束
 
 ```text
 输入：已训练 MHA 检查点、组数 G、继续训练比例 α
@@ -244,19 +283,9 @@ decode with G KV heads and H query heads
 
 数学目标是原任务损失；机制是共享投影与继续训练；指标是下游分数、稳定性和推理时间。“用5%算力”指利用已有模型后的增量适配，不是从随机初始化得到同等模型只需原训练成本的5%。
 
-## 缓存为什么会变小，为什么速度不按比例增长？
+## 四、同时读取组数、质量恢复和计时单位
 
-对于仅考虑 decoder 自注意力的简化计算，设层数 $L$、批量 $B$、历史长度 $S$、每个缓存元素 $q$ 字节，KV 存储量近似为：
-
-$$
-\operatorname{Bytes}_{KV}=2LBSGd_kq.
-$$
-
-前面的2分别对应 key 和 value。在其他条件相同时，GQA 相对 MHA 的缓存比为 $G/H$。这是缓存项的关系，不是总显存或总时间的关系；权重、激活、临时工作区和交叉注意力缓存都可能占用资源。
-
-此外，查询头数量没有减少，很多注意力乘法仍然存在。速度改善主要来自内存流量和更合适的并行布局。原文还讨论了 MQA 的单个 KV 头在多分片上复制的浪费；组数适当增加时，逻辑缓存增加不一定按同样比例转化为物理通信和存储增加。
-
-## 实验：质量比较和性能测量分别控制了什么？
+先统一表1和图3的计时口径，再比较组数；继续训练比例与任务质量共同限定“接近MHA”的含义。
 
 | 项目 | 原文设置 |
 |---|---|
@@ -267,40 +296,57 @@ $$
 | 长度 | CNN/WMT输入512输出256；其余摘要2048/512；TriviaQA2048/32 |
 | 解码 | 贪心解码；主要报告开发集分数 |
 | 时间测量 | 8张TPU；每芯片选可容纳的最大batch，最多32；各模型独立优化并行方式；xprof测量 |
-| 指标 | 摘要ROUGE-1、翻译BLEU、问答F1；表1平均值混合了不同指标，并非统一的正确率 |
+| 指标 | 摘要ROUGE-1、翻译BLEU、问答F1；[表1](https://arxiv.org/html/2305.13245v3#S3.T1)平均值混合了不同指标，并非统一的正确率 |
 | 重复与稳定性 | 附录A：不稳定任务上的MQA报告3次微调平均；不能扩大为所有模型所有任务都进行了相同重复数 |
 
 这里允许不同模型利用自身更小缓存选择更大批量，是合理的系统吞吐比较，但不是固定 batch、固定并行策略的纯算子消融。若关心交互式低延迟，需要另做 batch1、固定长度和相同硬件配置的实验。
 
-## 结果：四条证据与一个尚未解释的现象
+**证据一：[表1](https://arxiv.org/html/2305.13245v3#S3.T1)与[图3](#llm-v6-073-figure-3)，主要折中。** MHA-XXL、MQA-XXL、GQA-8-XXL 的平均分分别47.2、46.6、47.1；时间1.51、0.24、0.28秒。按表内时间自行计算，MHA/GQA约为5.39倍；这个比值仅适用于该测量。GQA 比 MQA 略慢，但平均分更接近 MHA。 质量—延迟图以每样本平均推理时间为横轴；组数图固定输入2048、输出512。更换生成长度后，不能直接搬用这条延迟比例。
 
-**证据一：表1与图3，主要折中。** MHA-XXL、MQA-XXL、GQA-8-XXL 的平均分分别47.2、46.6、47.1；时间1.51、0.24、0.28秒。按表内时间自行计算，MHA/GQA约为5.39倍；这个比值仅适用于该测量。GQA 比 MQA 略慢，但平均分更接近 MHA。
+&lt;!-- figure-ref-v6:start:073-f3-2-anchor --&gt;
+&lt;a id=&quot;llm-v6-073-figure-3&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:073-f3-2-anchor --&gt;
 
-**证据二：表1的分任务结果。** GQA 的 PubMed 为47.7，对比 MHA47.5；TriviaQA为81.6，对比81.9；CNN为43.5，对比43.8。因此“质量接近”不等于每项严格无损，也不能从略高的单项分数推出新结构本身更准确，尤其缺少完整不确定性区间时。
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/073-gqa-f3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/073-gqa-f3.png&quot; width=&quot;1344&quot; height=&quot;1140&quot; alt=&quot;GQA、MQA和MHA模型的平均质量与单样本推理时间折中&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原实验图摘引：Joshua Ainslie 等，2023，图3，PDF第3页；&lt;a href=&quot;https://arxiv.org/pdf/2305.13245v3#page=3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;；&lt;a href=&quot;https://creativecommons.org/licenses/by/4.0/&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;CC BY 4.0&lt;/a&gt;，仅裁切图区。&lt;/figcaption&gt;&lt;/figure&gt;
 
-**证据三：图4与图5，转换和恢复。** 平均原始头的初始化优于保留单头和随机初始化；5%继续训练帮助 MQA 与 GQA，增加到10%的收益递减。这支持“保留已有表示再适配”的路线；图中趋势不能证明5%是其他模型、数据或组数上的最优比例。
+**读图时留意单位：** 这份 v3 原稿的图3横轴写作 ms，但[表1](https://arxiv.org/html/2305.13245v3#S3.T1)把相同数值标成 s，二者标注不一致。本文的秒数沿用表1；图中只据相对位置比较速度与质量，不把 GQA 的 0.28 解读成 0.28 毫秒。
 
-**证据四：图6，组数。** 在输入2048、输出512的配置下，从1组增加到8组的时间开销较小，接近 MHA 时增加更明显。8组是作者选择的实用折中，不能因为一个后来的模型也使用8个 KV 头，就认为已经得到普适理论常数。
+**证据二：[表1](https://arxiv.org/html/2305.13245v3#S3.T1)的分任务结果。** GQA 的 PubMed 为47.7，对比 MHA47.5；TriviaQA为81.6，对比81.9；CNN为43.5，对比43.8。因此“质量接近”不等于每项严格无损，也不能从略高的单项分数推出新结构本身更准确，尤其缺少完整不确定性区间时。
+
+**证据三：[图4](#llm-v6-073-figure-4)与[图5](#llm-v6-073-figure-5)，转换和恢复。** 平均原始头的初始化优于保留单头和随机初始化；5%继续训练帮助 MQA 与 GQA，增加到10%的收益递减。这支持“保留已有表示再适配”的路线；图中趋势不能证明5%是其他模型、数据或组数上的最优比例。
+
+&lt;!-- figure-ref-v6:start:073-f5-4 --&gt;
+&lt;a id=&quot;llm-v6-073-figure-5&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/073-gqa-f5-v6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/073-gqa-f5-v6.png&quot; width=&quot;1320&quot; height=&quot;828&quot; alt=&quot;GQA和MQA继续训练比例与下游表现的关系&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原文图形摘引：Joshua Ainslie 等，2023，图5，PDF第4页；&lt;a href=&quot;https://arxiv.org/html/2305.13245v3#S3.F5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:073-f5-4 --&gt;
+
+&lt;!-- figure-ref-v6:start:073-f4-3 --&gt;
+&lt;a id=&quot;llm-v6-073-figure-4&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/073-gqa-f4-v6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/073-gqa-f4-v6.png&quot; width=&quot;1356&quot; height=&quot;732&quot; alt=&quot;GQA从多头注意力检查点转换时均值、首头及随机初始化的表现&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原文图形摘引：Joshua Ainslie 等，2023，图4，PDF第4页；&lt;a href=&quot;https://arxiv.org/html/2305.13245v3#S3.F4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:073-f4-3 --&gt;
+
+**证据四：[图6](#llm-v6-073-figure-6)，组数。** 在输入2048、输出512的配置下，从1组增加到8组的时间开销较小，接近 MHA 时增加更明显。8组是作者选择的实用折中，不能因为一个后来的模型也使用8个 KV 头，就认为已经得到普适理论常数。
+
+&lt;!-- figure-ref-v6:start:073-f6-5 --&gt;
+&lt;a id=&quot;llm-v6-073-figure-6&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/073-gqa-f6-v6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/073-gqa-f6-v6.png&quot; width=&quot;1368&quot; height=&quot;858&quot; alt=&quot;GQA分组数增加时每个样本的推理时间&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原文图形摘引：Joshua Ainslie 等，2023，图6，PDF第4页；&lt;a href=&quot;https://arxiv.org/html/2305.13245v3#S3.F6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:073-f6-5 --&gt;
 
 **补充证据：附录A。** 从头训练的多个 MQA T5-Large 出现损失尖峰，在长输入任务微调中发散；转换后 MQA 更稳定但仍有方差，GQA 看起来稳定。作者没有继续定位根因。因此可以报告观察到的稳定性差异，不能自行解释为“平均头一定消除了某种梯度病态”。
 
-## 贡献与局限：一条可复用的系统设计轴
+## 五、缓存四倍压缩不保证整体四倍加速
 
-真正的新意是提供 MHA 与 MQA 之间可调的结构轴，并给出从已有检查点转换的训练配方。它让部署约束能够进入模型架构设计，而不必在完全独立的 KV 与完全共享的 KV 之间二选一。
+五个概念：**KV cache**存储历史键值避免重复计算；**query头**决定每次如何读取历史；**带宽瓶颈**表示时间主要花在搬数据；**继续预训练**让已有模型适应结构或数据变化；**吞吐与延迟**分别衡量单位时间总工作量与单次请求等待时间。
+
+它让部署约束能够进入模型架构设计，而不必在完全独立的 KV 与完全共享的 KV 之间二选一。
 
 作者承认主实验仅覆盖编码器—解码器结构，没有与从头训练的 XXL GQA 做等预算比较，也承认 ROUGE 不能全面评价生成质量。因此论文没有回答“同样总训练预算下，先训练MHA再转换，是否优于直接训练GQA”。
 
 进一步分析还包括：KV压缩对长序列大批量可能更有价值，但当权重搬运或计算成为主瓶颈时，收益会减弱；转换需要原预训练数据或足够匹配的替代数据；缓存省下来的显存可能用于更大批量，改变延迟与吞吐的折中。质量、总显存和速度应该分别测量。
 
-## 自构算例与五个前置概念
+## 六、把缓存共享结构与内核、分页组合
 
-**自构算例，未运行：** 设32层、batch1、4096历史token、32个query头、头维度128、BF16每元素2字节。MHA自注意力KV约2 GiB；改成8组约0.5 GiB，减少75%。这个算例仅计算缓存，不包括模型权重，也不意味着总显存减少75%或速度提高4倍。
-
-五个概念：**KV cache**存储历史键值避免重复计算；**query头**决定每次如何读取历史；**带宽瓶颈**表示时间主要花在搬数据；**继续预训练**让已有模型适应结构或数据变化；**吞吐与延迟**分别衡量单位时间总工作量与单次请求等待时间。
-
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| MHA缓存大，MQA共享过强可能损失质量 | 分组共享KV，对原头均值初始化并继续预训练 | 减少缓存流量，同时保留比单KV头更多的表示容量 | 表1质量/时间；图4初始化；图5恢复；图6组数 | 增量训练不免费；质量非严格无损；性能依赖批量和硬件；主实验限T5 |
+共享K/V之后，[vLLM](079-vllm.md)继续减少请求间分配浪费，[FlashAttention](059-flashattention.md)优化读写路径。这是结构、布局与内核三个可组合层次，需在共同负载下重新测整体收益。
 
 ## 自测与答案
 
@@ -314,7 +360,7 @@ $$
 
 **3. 为什么不能直接平均头后发布，并宣称和原模型等价？**
 
-答案：注意力包含非线性，平均投影不能保持原输出。需要测量转换后的质量并进行适配训练；原文图5也展示继续训练的作用。即便均值初始化优于其他方案，也只是好的起点，不是等价性证明。
+答案：注意力包含非线性，平均投影不能保持原输出。需要测量转换后的质量并决定所需适配训练；原文[图5](#llm-v6-073-figure-5)也展示继续训练的作用。即便均值初始化优于其他方案，也只是好的起点，不是等价性证明。
 </textarea>
     <script src="../js/vendor/marked.js"></script>
     <script src="../js/vendor/katex/katex.min.js"></script>

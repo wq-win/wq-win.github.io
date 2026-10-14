@@ -39,23 +39,21 @@
                 <span class="text-gray-400">/</span>
                 <a href="index.html" class="text-primary hover:underline">大语言模型</a>
                 <span class="text-gray-400">/</span>
-                <span class="text-gray-500">044 · Prefix-Tuning：把任务知识放进每层的虚拟上下文</span>
+                <span class="text-gray-500">Prefix-Tuning：把任务知识放进每层的虚拟上下文</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="9a412a3622b5c424c873303917de523c16828c4f8b43dbcfce2d1f8ddd39c004"><h1>044 · Prefix-Tuning：把任务知识放进每层的虚拟上下文</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="d98ecf1a68010a2d56980973eff6c773b2e63cc29a52a91038fa2d160448931a"><h1>044 · Prefix-Tuning：把任务知识放进每层的虚拟上下文</h1>
 <p><a href="index.html">返回目录</a> · <a href="043-clip.html">上一篇：CLIP</a> · <a href="045-prompt-tuning.html">下一篇：Prompt Tuning</a></p>
-<p>论文：Xiang Lisa Li、Percy Liang，<em>Prefix-Tuning: Optimizing Continuous Prompts for Generation</em>，2021。<a href="https://arxiv.org/pdf/2101.00190">原始论文</a>。依据§3–7、表1–5及附录的训练设置和外推实例；未独立复现。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>全量微调像给每个任务保存一本改写后的大字典。Prefix-Tuning提出：能否保留同一本大字典，只为每个任务学习一小段引导信息？这段信息不是人能读懂的提示词，而是可优化的连续向量，并且直接进入Transformer各层的注意力上下文。</p>
-<p>论文在表格转文本任务中用很少的任务参数得到接近全量微调的表现，在低数据与部分未见类别上更好。但摘要生成存在明确损失，所以“只训练0.1%参数就和全量一样”不是覆盖全文实验的结论。</p>
-<p>一句话：在预训练生成模型的任务适配中，通过冻结主模型并优化逐层前缀状态，减少每个任务需要保存的参数，在若干生成任务上保留较高质量，代价是受限的适配空间、前缀计算与对任务和初始化的依赖。</p>
+<p>论文：Xiang Lisa Li、Percy Liang，<em>Prefix-Tuning: Optimizing Continuous Prompts for Generation</em>，2021。<a href="https://arxiv.org/pdf/2101.00190">原始论文</a>。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="017-gpt.html">GPT</a>与<a href="028-bart.html">BART</a>通过微调迁移生成任务，却需要为每任务保存大量变化。本篇提供平行的冻结骨干方案：学习各层前缀状态，改变可读取上下文而非主权重。<a href="045-prompt-tuning.html">Prompt Tuning</a>随后研究更受约束的输入层接口。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>条件生成</strong>用输入约束输出分布；<strong>教师强制</strong>用真实历史token训练下一步；<strong>KV缓存</strong>保存注意力可读取的键和值；<strong>参数冻结</strong>禁止更新权重但不必阻断输入梯度；<strong>重参数化</strong>通过另一组变量生成实际被使用的参数，以改善优化。</p>
-<h2 id="研究问题与参照方法">研究问题与参照方法</h2>
-<p>论文研究监督式条件生成：输入 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 是线性化表格或新闻，输出 <span class="reading-math" data-tex="y"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">y</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span></span></span></span> 是描述或摘要。GPT-2负责表格转文本，BART负责摘要。没有强化学习奖励；结束由生成终止符和解码限制控制，训练则使用目标序列似然。</p>
+<h2 id="一问题设定冻结生成模型时逐层连续状态能承担多少任务适配">一、问题设定：冻结生成模型时，逐层连续状态能承担多少任务适配</h2>
+<p>输入 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 可以是线性化表格或新闻，输出 <span class="reading-math" data-tex="y"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">y</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span></span></span></span> 是描述或摘要。任务仍用目标序列似然训练、按终止符和解码限制结束；问题是能否共享GPT-2或BART主干，只为每个任务学习一小段逐层连续控制状态。</p>
 <p>全量微调更新预训练参数 <span class="reading-math" data-tex="\phi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϕ</mi></mrow><annotation encoding="application/x-tex">\phi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ϕ</span></span></span></span></span>，每个任务都需要独立权重。Adapter只添加较小模块，但模块仍嵌入计算路径。Prefix-Tuning选择另一种控制位置：让输入与输出token都能够注意到一组可学习的“历史状态”。它沿用主模型的注意力、前馈层和语言建模输出头，改变可训练参数及条件信息的提供方式。</p>
 <p>关键假设是预训练模型已经具有足够生成能力，小规模连续控制就能调用这些能力。冻结权重可能减少小数据过拟合，但也可能限制对新任务的改造幅度；这是需要实验判定的取舍，不是先验保证。</p>
-<h2 id="连续前缀到底是什么">连续前缀到底是什么</h2>
+<h2 id="二把前缀写成各层可读取的键和值">二、把前缀写成各层可读取的键和值</h2>
 <p>对自回归模型，设 <span class="reading-math" data-tex="P_\theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>P</mi><mi>θ</mi></msub></mrow><annotation encoding="application/x-tex">P_\theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是包含各层前缀状态的矩阵，普通位置的隐状态仍由冻结网络产生：</p>
 <p><span class="reading-math" data-tex="h_i=\begin{cases}
 P_\theta[i,:],&amp;i\in P_{\rm idx},\\
@@ -88,6 +86,14 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 \qquad \phi\text{固定}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><munder><mrow><mi>min</mi><mo>⁡</mo></mrow><mi>θ</mi></munder><mo>−</mo><munder><mo>∑</mo><mi>t</mi></munder><mi>log</mi><mo>⁡</mo><msub><mi>p</mi><mrow><mi>ϕ</mi><mo separator="true">,</mo><mi>θ</mi></mrow></msub><mo stretchy="false">(</mo><msub><mi>y</mi><mi>t</mi></msub><mo>∣</mo><mi>x</mi><mo separator="true">,</mo><msub><mi>y</mi><mrow><mo>&lt;</mo><mi>t</mi></mrow></msub><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><mi>ϕ</mi><mtext>固定</mtext><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\min_\theta -\sum_t\log p_{\phi,\theta}(y_t\mid x,y_{&lt;t}),
 \qquad \phi\text{固定}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.3em;vertical-align:-1.25em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-2.3479em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">min</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7521em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">ϕ</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">ϕ</span><span class="mord text"><span class="mord cjk_fallback">固定</span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p>§4还使用较小向量经过MLP生成完整前缀的重参数化以利优化。训练后可以只保存生成出的前缀并去掉MLP。因此训练期间参与优化的参数与最终每任务存储量要分别计算，不能只拿部署前缀大小推算训练内存。</p>
+<h3 id="前缀改变每一层可读取的记忆">前缀改变每一层可读取的记忆</h3>
+<p>对某层真实查询Q，键值扩为 <span class="reading-math" data-tex="[K_P;K_x]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">[</mo><msub><mi>K</mi><mi>P</mi></msub><mo separator="true">;</mo><msub><mi>K</mi><mi>x</mi></msub><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[K_P;K_x]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">;</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">]</span></span></span></span></span>、<span class="reading-math" data-tex="[V_P;V_x]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">[</mo><msub><mi>V</mi><mi>P</mi></msub><mo separator="true">;</mo><msub><mi>V</mi><mi>x</mi></msub><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[V_P;V_x]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">;</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">]</span></span></span></span></span>，其中下标 <span class="reading-math" data-tex="P"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi></mrow><annotation encoding="application/x-tex">P</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span></span></span></span></span> 表示前缀产生的键和值，下标 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 表示真实输入的键和值，分号表示沿序列维拼接；前缀 <span class="reading-math" data-tex="P"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi></mrow><annotation encoding="application/x-tex">P</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span></span></span></span></span> 提供可训练的连续状态，语言模型权重冻结。真实token的损失仍需经过冻结网络反传到P；冻结权重不等于关闭整个计算图。原文用小矩阵经MLP重参数化前缀改善训练，训练后可保存生成的前缀状态，因此训练参数和部署保存参数也需分别统计。</p>
+<p><strong>教学算例。</strong> 假设12层、每层总键和值宽度均768、前缀长20，直接保存全层KV需要 <span class="reading-math" data-tex="2\times12\times20\times768=368640"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mo>×</mo><mn>12</mn><mo>×</mo><mn>20</mn><mo>×</mo><mn>768</mn><mo>=</mo><mn>368640</mn></mrow><annotation encoding="application/x-tex">2\times12\times20\times768=368640</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">12</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">20</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">768</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">368640</span></span></span></span></span> 个数；若只训练输入层20个768维向量，则仅15360个，但约束也更强。两者不能只用“20个软token”概括。前缀还增加每步注意力读取量。</p>
+<p><strong>自构例子：</strong> 输入为“店名=青禾；菜系=川菜；价格=中等”。两个任务共享GPT-2：一个前缀学到简短介绍，另一个学到只列菜系和价格。前缀不应储存每家店的事实，而应改变如何使用当前表格。若输出捏造“可停车”，说明调节生成风格没有保证事实约束，需在评价中单独检查槽位覆盖和错误添加。</p>
+<h3 id="逐层前缀不必对应同一串可读词">逐层前缀不必对应同一串可读词</h3>
+<p>输入层词嵌入必须经过主干才能产生各层K/V；逐层前缀则直接提供各层可读取的连续状态。即使前缀长度相同，两者可控制的中间量也不同。检查任务增量时应逐层列出前缀张量，而不是把所有状态当成一份输入词表向量，更不能以“没有真实token”推出它不占注意力读取成本。</p>
+<p>教法联系：<a href="https://huggingface.co/blog/peft">Sourab Mangrulkar、Sayak Paul的Parameter-Efficient Fine-Tuning</a>。算例为本文自构。</p>
+<h2 id="三经冻结网络反传到前缀并区分训练与部署参数">三、经冻结网络反传到前缀，并区分训练与部署参数</h2>
 <pre><code class="language-text">输入：预训练模型 φ、训练对 (x,y)、前缀长度 m
 冻结 φ，初始化前缀生成参数 θ
 重复：
@@ -100,7 +106,8 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 输出：按指定 beam search 解码的描述或摘要
 </code></pre>
 <p>冻结网络并不意味着可以把所有前向过程都放在无梯度模式中：损失必须经网络传回前缀。节省主要来自任务参数、梯度与优化器状态，而不是把大模型的运算全部删掉。</p>
-<h2 id="实验设置与预算">实验设置与预算</h2>
+<h2 id="四对照表格生成摘要和输入层提示消融">四、对照表格生成、摘要和输入层提示消融</h2>
+<p>先按任务拆开收益和损失，再看已见/未见类别与前缀长度，避免把0.1%参数结论推广到全部生成任务。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -122,11 +129,11 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 </tr>
 <tr>
 <td>前缀训练配方</td>
-<td>表5，E2E为5 epoch/批量10/长度5；WebNLG为5 epoch/批量5/长度5；DART为10 epoch/批量5/长度10</td>
+<td><a href="https://arxiv.org/html/2101.00190#A1.T5">表5</a>，E2E为5 epoch/批量10/长度5；WebNLG为5 epoch/批量5/长度5；DART为10 epoch/批量5/长度10</td>
 </tr>
 <tr>
 <td>摘要配方</td>
-<td>表5，30 epoch、批量14、前缀长度100、学习率5×10⁻⁵</td>
+<td><a href="https://arxiv.org/html/2101.00190#A1.T5">表5</a>，30 epoch、批量14、前缀长度100、学习率5×10⁻⁵</td>
 </tr>
 <tr>
 <td>墙钟报告</td>
@@ -141,50 +148,29 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 <td>抽取小训练集并用开发集选参；WebNLG训练9类、测试另5类，XSUM另构造主题变化划分</td>
 </tr>
 </tbody></table></div>
-<p>不同方法表5的epoch、批量和学习率并不完全相同，不能把主表称为逐步数、逐算力严格等预算试验。BLEU和ROUGE衡量与参考文本的匹配，不能单独证明没有漏写或幻觉；附录的定性实例也提示这两种失败仍存在。</p>
-<h2 id="四组关键证据">四组关键证据</h2>
-<p><strong>证据一：表1，GPT-2 medium表格生成。</strong> E2E BLEU全量微调68.2，Prefix为69.7，差1.5分；WebNLG总体BLEU为46.5对55.1。更值得拆分的是已见类别64.2对62.9，未见类别27.7对45.6：总体优势主要不能解释为训练分布内一律更好。0.1% Adapter的E2E为66.3，说明放置可训练自由度的位置也重要。</p>
-<p><strong>证据二：表2，XSUM摘要。</strong> 全量ROUGE-L为37.25，2%前缀为36.05，0.1%前缀为35.05。对应绝对下降1.20和2.20分。作者讨论任务复杂度与数据量可能影响结果，但这些因素没有被完全独立控制，不能说已经证明“摘要需要多少参数”的普遍规律。</p>
-<p><strong>证据三：表4与图4，结构消融。</strong> E2E完整前缀BLEU69.7，仅调10个输入嵌入为62.2。图4显示前缀长度增加到一定程度后测试表现略降，即使训练损失更低。支持逐层干预和容量选择在这些配置中重要；不能据此断言输入层提示在更大模型上永远无效，下一篇恰好研究这一规模条件。</p>
-<p><strong>证据四：图3、表3与附录A.4。</strong> 小数据曲线偏向前缀；XSUM新闻到体育的ROUGE-L为31.51，全量为30.26。外推改善有真实主题划分依据，但附录指出前缀仍会遗漏表格内容，全量微调则常出现不符事实的生成。高自动指标并不能消除这两类风险。</p>
-<h2 id="贡献与教学例子">贡献与教学例子</h2>
+<p>不同方法<a href="https://arxiv.org/html/2101.00190#A1.T5">表5</a>的epoch、批量和学习率并不完全相同，不能把主表称为逐步数、逐算力严格等预算试验。BLEU和ROUGE衡量与参考文本的匹配，不能单独证明没有漏写或幻觉；附录的定性实例也提示这两种失败仍存在。</p>
+<p><strong>证据一：<a href="https://arxiv.org/html/2101.00190#S6.T1">表1</a>，GPT-2 medium表格生成。</strong> E2E BLEU全量微调68.2，Prefix为69.7，差1.5分；WebNLG总体BLEU为46.5对55.1。更值得拆分的是已见类别64.2对62.9，未见类别27.7对45.6：总体优势主要不能解释为训练分布内一律更好。0.1% Adapter的E2E为66.3，说明放置可训练自由度的位置也重要。</p>
+<p><strong>证据二：<a href="https://arxiv.org/html/2101.00190#S6.T2">表2</a>，XSUM摘要。</strong> 全量ROUGE-L为37.25，2%前缀为36.05，0.1%前缀为35.05。对应绝对下降1.20和2.20分。作者讨论任务复杂度与数据量可能影响结果，但这些因素没有被完全独立控制，不能说已经证明“摘要需要多少参数”的普遍规律。</p>
+<p><strong>证据三：<a href="https://arxiv.org/html/2101.00190#S7.T4">表4</a>与<a href="#llm-v6-044-figure-4">图4</a>，结构消融。</strong> E2E完整前缀BLEU69.7，仅调10个输入嵌入为62.2。<a href="#llm-v6-044-figure-4">图4</a>显示前缀长度增加到一定程度后测试表现略降，即使训练损失更低。支持逐层干预和容量选择在这些配置中重要；不能据此断言输入层提示在更大模型上永远无效，下一篇恰好研究这一规模条件。 前缀长度图的两种指标使用两条纵轴；同一曲线内看长度变化，不能直接比较两条曲线的高度来判断指标谁更好。</p>
+<!-- figure-ref-v6:start:044-f4-5-anchor -->
+<p><a id="llm-v6-044-figure-4"></a></p>
+<!-- figure-ref-v6:end:044-f4-5-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/044-prefix-tuning-f4.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/044-prefix-tuning-f4.png" width="2224" height="716" alt="Prefix Tuning的前缀长度对XSUM和DART两组指标的影响" loading="lazy"></a><figcaption>原实验图摘引：Xiang Lisa Li、Percy Liang，2021，图4；<a href="https://arxiv.org/html/2101.00190#S7.F4" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据四：<a href="#llm-v6-044-figure-3">图3</a>、<a href="https://arxiv.org/html/2101.00190#S6.T3">表3</a>与附录A.4。</strong> 小数据曲线偏向前缀；XSUM新闻到体育的ROUGE-L为31.51，全量为30.26。外推改善有真实主题划分依据，但附录指出前缀仍会遗漏表格内容，全量微调则常出现不符事实的生成。高自动指标并不能消除这两类风险。</p>
+<!-- figure-ref-v6:start:044-f3-6 -->
+<p><a id="llm-v6-044-figure-3"></a></p>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/044-prefix-tuning-f3-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/044-prefix-tuning-f3-v6.png" width="1801" height="600" alt="Prefix Tuning与全量微调在少数据条件下的生成示例与四项指标" loading="lazy"></a><figcaption>原文图形摘引：Xiang Lisa Li、Percy Liang，2021，图3，PDF第7页；<a href="https://arxiv.org/html/2101.00190v1#S6.F3" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:044-f3-6 -->
+
+<h2 id="五前缀长度与受限表达会影响质量和读取成本">五、前缀长度与受限表达会影响质量和读取成本</h2>
 <p>新意是把任务适配变成可学习的逐层条件状态，而不是换一种输出损失。作者提出的保留预训练参数有利外推，是与实验相符的解释；参数冻结、参数数量和优化路径同时变化，尚不能把收益完全归于单一原因。</p>
-<p><strong>自构例子：</strong> 输入为“店名=青禾；菜系=川菜；价格=中等”。两个任务共享GPT-2：一个前缀学到简短介绍，另一个学到只列菜系和价格。前缀不应储存每家店的事实，而应改变如何使用当前表格。若输出捏造“可停车”，说明调节生成风格没有保证事实约束，需在评价中单独检查槽位覆盖和错误添加。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>每任务保存整模型</td>
-<td>冻结主干并保存逐层前缀</td>
-<td>复用生成能力，以少量状态控制任务</td>
-<td>表1少量参数保持表格生成质量</td>
-<td>训练仍穿过大模型，存储节省不等于同倍率加速</td>
-</tr>
-<tr>
-<td>输入提示控制能力有限</td>
-<td>直接调整多层前缀K/V</td>
-<td>不受单层嵌入映射的同等约束</td>
-<td>表4完整69.7对EMB-10的62.2</td>
-<td>前缀长度和初始化敏感</td>
-</tr>
-<tr>
-<td>小数据与未见类别适配</td>
-<td>限制可训练自由度</td>
-<td>可能减轻任务过拟合</td>
-<td>图3、表3、WebNLG未见类别</td>
-<td>XSUM主结果下降，外推仍会漏写</td>
-</tr>
-</tbody></table></div>
+<h2 id="六比较输入提示与低秩权重改动">六、比较输入提示与低秩权重改动</h2>
+<p>逐层前缀之外，<a href="045-prompt-tuning.html">Prompt Tuning</a>把可训练入口限制到输入层，<a href="047-lora.html">LoRA</a>则改变权重方向。可固定任务和预算比较控制位置，避免把不同表达能力混成一个参数百分比。</p>
 <h2 id="自测与答案">自测与答案</h2>
 <p><strong>1. Prefix-Tuning和只学习几个输入词向量为什么不相同？</strong></p>
-<p>输入向量只能经冻结层逐层传播；Prefix-Tuning直接为多层注意力提供可训练上下文，拥有不同的控制自由度。表4在GPT-2表格生成上显示差异，但不构成所有规模和任务上的优劣定理。</p>
+<p>输入向量只能经冻结层逐层传播；Prefix-Tuning直接为多层注意力提供可训练上下文，拥有不同的控制自由度。<a href="https://arxiv.org/html/2101.00190#S7.T4">表4</a>在GPT-2表格生成上显示差异，但不构成所有规模和任务上的优劣定理。</p>
 <p><strong>2. 可训练参数只有0.1%，训练就会快1000倍吗？</strong></p>
 <p>不会。大模型仍需前向计算，且需要将梯度传到前缀。0.1%还涉及任务参数的统计口径，重参数化训练模块与最终存储不同。论文局部计时是每epoch约0.3小时到0.2小时，远非千倍。</p>
 <p><strong>3. 怎么判断前缀在WebNLG上改善的是记忆还是泛化？</strong></p>
@@ -198,25 +184,21 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 
 [返回目录](README.md) · [上一篇：CLIP](043-clip.md) · [下一篇：Prompt Tuning](045-prompt-tuning.md)
 
-论文：Xiang Lisa Li、Percy Liang，*Prefix-Tuning: Optimizing Continuous Prompts for Generation*，2021。[原始论文](https://arxiv.org/pdf/2101.00190)。依据§3–7、表1–5及附录的训练设置和外推实例；未独立复现。
+论文：Xiang Lisa Li、Percy Liang，*Prefix-Tuning: Optimizing Continuous Prompts for Generation*，2021。[原始论文](https://arxiv.org/pdf/2101.00190)。
 
-## 一分钟理解
+### 先接住前作的问题
 
-全量微调像给每个任务保存一本改写后的大字典。Prefix-Tuning提出：能否保留同一本大字典，只为每个任务学习一小段引导信息？这段信息不是人能读懂的提示词，而是可优化的连续向量，并且直接进入Transformer各层的注意力上下文。
+[GPT](017-gpt.md)与[BART](028-bart.md)通过微调迁移生成任务，却需要为每任务保存大量变化。本篇提供平行的冻结骨干方案：学习各层前缀状态，改变可读取上下文而非主权重。[Prompt Tuning](045-prompt-tuning.md)随后研究更受约束的输入层接口。
 
-论文在表格转文本任务中用很少的任务参数得到接近全量微调的表现，在低数据与部分未见类别上更好。但摘要生成存在明确损失，所以“只训练0.1%参数就和全量一样”不是覆盖全文实验的结论。
+## 一、问题设定：冻结生成模型时，逐层连续状态能承担多少任务适配
 
-一句话：在预训练生成模型的任务适配中，通过冻结主模型并优化逐层前缀状态，减少每个任务需要保存的参数，在若干生成任务上保留较高质量，代价是受限的适配空间、前缀计算与对任务和初始化的依赖。
-
-## 研究问题与参照方法
-
-论文研究监督式条件生成：输入 $x$ 是线性化表格或新闻，输出 $y$ 是描述或摘要。GPT-2负责表格转文本，BART负责摘要。没有强化学习奖励；结束由生成终止符和解码限制控制，训练则使用目标序列似然。
+输入 $x$ 可以是线性化表格或新闻，输出 $y$ 是描述或摘要。任务仍用目标序列似然训练、按终止符和解码限制结束；问题是能否共享GPT-2或BART主干，只为每个任务学习一小段逐层连续控制状态。
 
 全量微调更新预训练参数 $\phi$，每个任务都需要独立权重。Adapter只添加较小模块，但模块仍嵌入计算路径。Prefix-Tuning选择另一种控制位置：让输入与输出token都能够注意到一组可学习的“历史状态”。它沿用主模型的注意力、前馈层和语言建模输出头，改变可训练参数及条件信息的提供方式。
 
 关键假设是预训练模型已经具有足够生成能力，小规模连续控制就能调用这些能力。冻结权重可能减少小数据过拟合，但也可能限制对新任务的改造幅度；这是需要实验判定的取舍，不是先验保证。
 
-## 连续前缀到底是什么
+## 二、把前缀写成各层可读取的键和值
 
 对自回归模型，设 $P_\theta$ 是包含各层前缀状态的矩阵，普通位置的隐状态仍由冻结网络产生：
 
@@ -248,6 +230,22 @@ $$
 
 §4还使用较小向量经过MLP生成完整前缀的重参数化以利优化。训练后可以只保存生成出的前缀并去掉MLP。因此训练期间参与优化的参数与最终每任务存储量要分别计算，不能只拿部署前缀大小推算训练内存。
 
+### 前缀改变每一层可读取的记忆
+
+对某层真实查询Q，键值扩为 $[K_P;K_x]$、$[V_P;V_x]$，其中下标 $P$ 表示前缀产生的键和值，下标 $x$ 表示真实输入的键和值，分号表示沿序列维拼接；前缀 $P$ 提供可训练的连续状态，语言模型权重冻结。真实token的损失仍需经过冻结网络反传到P；冻结权重不等于关闭整个计算图。原文用小矩阵经MLP重参数化前缀改善训练，训练后可保存生成的前缀状态，因此训练参数和部署保存参数也需分别统计。
+
+**教学算例。** 假设12层、每层总键和值宽度均768、前缀长20，直接保存全层KV需要 $2\times12\times20\times768=368640$ 个数；若只训练输入层20个768维向量，则仅15360个，但约束也更强。两者不能只用“20个软token”概括。前缀还增加每步注意力读取量。
+
+**自构例子：** 输入为“店名=青禾；菜系=川菜；价格=中等”。两个任务共享GPT-2：一个前缀学到简短介绍，另一个学到只列菜系和价格。前缀不应储存每家店的事实，而应改变如何使用当前表格。若输出捏造“可停车”，说明调节生成风格没有保证事实约束，需在评价中单独检查槽位覆盖和错误添加。
+
+### 逐层前缀不必对应同一串可读词
+
+输入层词嵌入必须经过主干才能产生各层K/V；逐层前缀则直接提供各层可读取的连续状态。即使前缀长度相同，两者可控制的中间量也不同。检查任务增量时应逐层列出前缀张量，而不是把所有状态当成一份输入词表向量，更不能以“没有真实token”推出它不占注意力读取成本。
+
+教法联系：[Sourab Mangrulkar、Sayak Paul的Parameter-Efficient Fine-Tuning](https://huggingface.co/blog/peft)。算例为本文自构。
+
+## 三、经冻结网络反传到前缀，并区分训练与部署参数
+
 ```text
 输入：预训练模型 φ、训练对 (x,y)、前缀长度 m
 冻结 φ，初始化前缀生成参数 θ
@@ -263,50 +261,57 @@ $$
 
 冻结网络并不意味着可以把所有前向过程都放在无梯度模式中：损失必须经网络传回前缀。节省主要来自任务参数、梯度与优化器状态，而不是把大模型的运算全部删掉。
 
-## 实验设置与预算
+## 四、对照表格生成、摘要和输入层提示消融
+
+先按任务拆开收益和损失，再看已见/未见类别与前缀长度，避免把0.1%参数结论推广到全部生成任务。
 
 | 项目 | 原文设置 |
 |---|---|
 | 表格生成数据 | §5.1，E2E约50K样例、WebNLG约22K、DART约82K；这些是论文的数据集规模口径 |
 | 摘要数据 | XSUM约225K，BART-large；输入截断至512个BPE token |
 | 主对照 | 全量微调、只调顶部两层、Adapter；0.1% Adapter用于接近参数预算比较 |
-| 前缀训练配方 | 表5，E2E为5 epoch/批量10/长度5；WebNLG为5 epoch/批量5/长度5；DART为10 epoch/批量5/长度10 |
-| 摘要配方 | 表5，30 epoch、批量14、前缀长度100、学习率5×10⁻⁵ |
+| 前缀训练配方 | [表5](https://arxiv.org/html/2101.00190#A1.T5)，E2E为5 epoch/批量10/长度5；WebNLG为5 epoch/批量5/长度5；DART为10 epoch/批量5/长度10 |
+| 摘要配方 | [表5](https://arxiv.org/html/2101.00190#A1.T5)，30 epoch、批量14、前缀长度100、学习率5×10⁻⁵ |
 | 墙钟报告 | §5.3，22K样例每epoch前缀约0.2小时、全量约0.3小时；指定TITAN硬件上的局部结果 |
 | 解码 | 表格任务beam=5；摘要beam=6并使用长度归一化 |
 | 低数据与泛化 | 抽取小训练集并用开发集选参；WebNLG训练9类、测试另5类，XSUM另构造主题变化划分 |
 
-不同方法表5的epoch、批量和学习率并不完全相同，不能把主表称为逐步数、逐算力严格等预算试验。BLEU和ROUGE衡量与参考文本的匹配，不能单独证明没有漏写或幻觉；附录的定性实例也提示这两种失败仍存在。
+不同方法[表5](https://arxiv.org/html/2101.00190#A1.T5)的epoch、批量和学习率并不完全相同，不能把主表称为逐步数、逐算力严格等预算试验。BLEU和ROUGE衡量与参考文本的匹配，不能单独证明没有漏写或幻觉；附录的定性实例也提示这两种失败仍存在。
 
-## 四组关键证据
+**证据一：[表1](https://arxiv.org/html/2101.00190#S6.T1)，GPT-2 medium表格生成。** E2E BLEU全量微调68.2，Prefix为69.7，差1.5分；WebNLG总体BLEU为46.5对55.1。更值得拆分的是已见类别64.2对62.9，未见类别27.7对45.6：总体优势主要不能解释为训练分布内一律更好。0.1% Adapter的E2E为66.3，说明放置可训练自由度的位置也重要。
 
-**证据一：表1，GPT-2 medium表格生成。** E2E BLEU全量微调68.2，Prefix为69.7，差1.5分；WebNLG总体BLEU为46.5对55.1。更值得拆分的是已见类别64.2对62.9，未见类别27.7对45.6：总体优势主要不能解释为训练分布内一律更好。0.1% Adapter的E2E为66.3，说明放置可训练自由度的位置也重要。
+**证据二：[表2](https://arxiv.org/html/2101.00190#S6.T2)，XSUM摘要。** 全量ROUGE-L为37.25，2%前缀为36.05，0.1%前缀为35.05。对应绝对下降1.20和2.20分。作者讨论任务复杂度与数据量可能影响结果，但这些因素没有被完全独立控制，不能说已经证明“摘要需要多少参数”的普遍规律。
 
-**证据二：表2，XSUM摘要。** 全量ROUGE-L为37.25，2%前缀为36.05，0.1%前缀为35.05。对应绝对下降1.20和2.20分。作者讨论任务复杂度与数据量可能影响结果，但这些因素没有被完全独立控制，不能说已经证明“摘要需要多少参数”的普遍规律。
+**证据三：[表4](https://arxiv.org/html/2101.00190#S7.T4)与[图4](#llm-v6-044-figure-4)，结构消融。** E2E完整前缀BLEU69.7，仅调10个输入嵌入为62.2。[图4](#llm-v6-044-figure-4)显示前缀长度增加到一定程度后测试表现略降，即使训练损失更低。支持逐层干预和容量选择在这些配置中重要；不能据此断言输入层提示在更大模型上永远无效，下一篇恰好研究这一规模条件。 前缀长度图的两种指标使用两条纵轴；同一曲线内看长度变化，不能直接比较两条曲线的高度来判断指标谁更好。
 
-**证据三：表4与图4，结构消融。** E2E完整前缀BLEU69.7，仅调10个输入嵌入为62.2。图4显示前缀长度增加到一定程度后测试表现略降，即使训练损失更低。支持逐层干预和容量选择在这些配置中重要；不能据此断言输入层提示在更大模型上永远无效，下一篇恰好研究这一规模条件。
+&lt;!-- figure-ref-v6:start:044-f4-5-anchor --&gt;
+&lt;a id=&quot;llm-v6-044-figure-4&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:044-f4-5-anchor --&gt;
 
-**证据四：图3、表3与附录A.4。** 小数据曲线偏向前缀；XSUM新闻到体育的ROUGE-L为31.51，全量为30.26。外推改善有真实主题划分依据，但附录指出前缀仍会遗漏表格内容，全量微调则常出现不符事实的生成。高自动指标并不能消除这两类风险。
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/044-prefix-tuning-f4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/044-prefix-tuning-f4.png&quot; width=&quot;2224&quot; height=&quot;716&quot; alt=&quot;Prefix Tuning的前缀长度对XSUM和DART两组指标的影响&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原实验图摘引：Xiang Lisa Li、Percy Liang，2021，图4；&lt;a href=&quot;https://arxiv.org/html/2101.00190#S7.F4&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-## 贡献与教学例子
+**证据四：[图3](#llm-v6-044-figure-3)、[表3](https://arxiv.org/html/2101.00190#S6.T3)与附录A.4。** 小数据曲线偏向前缀；XSUM新闻到体育的ROUGE-L为31.51，全量为30.26。外推改善有真实主题划分依据，但附录指出前缀仍会遗漏表格内容，全量微调则常出现不符事实的生成。高自动指标并不能消除这两类风险。
+
+&lt;!-- figure-ref-v6:start:044-f3-6 --&gt;
+&lt;a id=&quot;llm-v6-044-figure-3&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/044-prefix-tuning-f3-v6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/044-prefix-tuning-f3-v6.png&quot; width=&quot;1801&quot; height=&quot;600&quot; alt=&quot;Prefix Tuning与全量微调在少数据条件下的生成示例与四项指标&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原文图形摘引：Xiang Lisa Li、Percy Liang，2021，图3，PDF第7页；&lt;a href=&quot;https://arxiv.org/html/2101.00190v1#S6.F3&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:044-f3-6 --&gt;
+
+## 五、前缀长度与受限表达会影响质量和读取成本
 
 新意是把任务适配变成可学习的逐层条件状态，而不是换一种输出损失。作者提出的保留预训练参数有利外推，是与实验相符的解释；参数冻结、参数数量和优化路径同时变化，尚不能把收益完全归于单一原因。
 
-**自构例子：** 输入为“店名=青禾；菜系=川菜；价格=中等”。两个任务共享GPT-2：一个前缀学到简短介绍，另一个学到只列菜系和价格。前缀不应储存每家店的事实，而应改变如何使用当前表格。若输出捏造“可停车”，说明调节生成风格没有保证事实约束，需在评价中单独检查槽位覆盖和错误添加。
-
 五个前置概念：**条件生成**用输入约束输出分布；**教师强制**用真实历史token训练下一步；**KV缓存**保存注意力可读取的键和值；**参数冻结**禁止更新权重但不必阻断输入梯度；**重参数化**通过另一组变量生成实际被使用的参数，以改善优化。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 每任务保存整模型 | 冻结主干并保存逐层前缀 | 复用生成能力，以少量状态控制任务 | 表1少量参数保持表格生成质量 | 训练仍穿过大模型，存储节省不等于同倍率加速 |
-| 输入提示控制能力有限 | 直接调整多层前缀K/V | 不受单层嵌入映射的同等约束 | 表4完整69.7对EMB-10的62.2 | 前缀长度和初始化敏感 |
-| 小数据与未见类别适配 | 限制可训练自由度 | 可能减轻任务过拟合 | 图3、表3、WebNLG未见类别 | XSUM主结果下降，外推仍会漏写 |
+## 六、比较输入提示与低秩权重改动
+
+逐层前缀之外，[Prompt Tuning](045-prompt-tuning.md)把可训练入口限制到输入层，[LoRA](047-lora.md)则改变权重方向。可固定任务和预算比较控制位置，避免把不同表达能力混成一个参数百分比。
 
 ## 自测与答案
 
 **1. Prefix-Tuning和只学习几个输入词向量为什么不相同？**
 
-输入向量只能经冻结层逐层传播；Prefix-Tuning直接为多层注意力提供可训练上下文，拥有不同的控制自由度。表4在GPT-2表格生成上显示差异，但不构成所有规模和任务上的优劣定理。
+输入向量只能经冻结层逐层传播；Prefix-Tuning直接为多层注意力提供可训练上下文，拥有不同的控制自由度。[表4](https://arxiv.org/html/2101.00190#S7.T4)在GPT-2表格生成上显示差异，但不构成所有规模和任务上的优劣定理。
 
 **2. 可训练参数只有0.1%，训练就会快1000倍吗？**
 

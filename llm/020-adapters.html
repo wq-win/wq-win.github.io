@@ -42,24 +42,28 @@
                 <span class="text-gray-500">Adapters：每个任务只保存一小组新增参数</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="93ae37b123465150cd50f3501c861092f90d555f2f7cc034a2b9fa2ba5e99c88"><h1>020｜Adapters：每个任务只保存一小组新增参数</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="195f5df5679db45026b2ce5694be103c9beba75e2f48a7f99dd1ad0caee0327b"><h1>020｜Adapters：每个任务只保存一小组新增参数</h1>
 <p><a href="index.html">目录</a> · <a href="019-transformer-xl.html">上一篇</a> · <a href="021-gpt2.html">下一篇</a></p>
 <p><strong>论文</strong>：Neil Houlsby 等，<em>Parameter-Efficient Transfer Learning for NLP</em>，ICML 2019。<a href="https://arxiv.org/abs/1902.00751">原文</a> · <a href="https://arxiv.org/pdf/1902.00751">PDF</a>。讨论原版瓶颈 adapter 与相应 BERT 微调实验，不把 LoRA、prefix 或所有现代 PEFT 方法混作相同实现。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>一个大模型服务许多任务，若每个任务都完整微调并保存一份权重，总存储会随任务数快速增加。Adapters 冻结主要预训练参数，在各层插入较小可训练模块，让任务变化由这些模块承担。</p>
-<p>作者展示较少新增参数可以获得接近全量微调的任务表现。节省最明确的是每任务可训练参数与存储；冻结骨干不等于前向不用计算，新增串行模块还可能增加推理延迟。不同资源需要分开评价。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="018-bert.html">BERT</a>通过全量微调迁移任务，却意味着每个任务可能保存一套大骨干。未解的资源问题是：任务变化能否由较小增量承担，让基础参数共享？本篇在BERT中组合瓶颈模块，改变可训练参数空间，而不重写预训练目标。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念是冻结参数、瓶颈变换、恒等初始化、优化器状态和共享骨干。它们分别解释学习范围、表达限制、稳定起点、训练资源和多任务存储方式。</p>
-<h2 id="背景迁移的成本不只在训练一次">背景：迁移的成本不只在训练一次</h2>
-<p>假设有十个分类任务，每个都保存一份完整 BERT，那么重复存储了大量相似基础知识。共享骨干、独立保存任务增量，可以让新增任务的边际存储更小，也避免直接修改其他任务已使用的骨干。</p>
-<p>但如果骨干与新领域差异很大，小模块可能不足以补偿。参数高效方法隐含一个适配假设：所需变化能够由受限的新增变换表达。这个假设需要任务与容量实验，而不是因为模块小就自动成立。</p>
+<h2 id="一问题设定每增加一个任务是否必须再保存完整预训练模型">一、问题设定：每增加一个任务是否必须再保存完整预训练模型</h2>
+<p>十个分类任务各自保存完整BERT，会重复存储大量相似基础知识。共享骨干并独立保存任务增量可降低边际存储，也避免直接覆盖其他任务使用的主参数；但适配变化能否被小模块表达，需要质量与容量实验检验。</p>
 <p>原论文还训练 LayerNorm 参数与任务输出层。因此“只训练 adapter”是过度简写，复现时必须说明哪些参数冻结、哪些可更新。遗漏这点可能改变质量，也让参数数量统计不准确。</p>
-<h2 id="方法降维非线性升维与跳连">方法：降维、非线性、升维与跳连</h2>
+<h2 id="二由瓶颈残差推导受限增量和局部秩">二、由瓶颈残差推导受限增量和局部秩</h2>
 <p>给定隐藏向量 <span class="reading-math" data-tex="h\in\mathbb R^d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mi>d</mi></msup></mrow><annotation encoding="application/x-tex">h\in\mathbb R^d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7335em;vertical-align:-0.0391em;"></span><span class="mord mathnormal">h</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8491em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">d</span></span></span></span></span></span></span></span></span></span></span></span>，瓶颈维度为 <span class="reading-math" data-tex="m\ll d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi><mo>≪</mo><mi>d</mi></mrow><annotation encoding="application/x-tex">m\ll d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em;"></span><span class="mord mathnormal">m</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≪</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span>：</p>
 <p><span class="reading-math" data-tex="\operatorname{Adapter}(h)=h+W_{up}f(W_{down}h+b_{down})+b_{up}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Adapter</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>h</mi><mo stretchy="false">)</mo><mo>=</mo><mi>h</mi><mo>+</mo><msub><mi>W</mi><mrow><mi>u</mi><mi>p</mi></mrow></msub><mi>f</mi><mo stretchy="false">(</mo><msub><mi>W</mi><mrow><mi>d</mi><mi>o</mi><mi>w</mi><mi>n</mi></mrow></msub><mi>h</mi><mo>+</mo><msub><mi>b</mi><mrow><mi>d</mi><mi>o</mi><mi>w</mi><mi>n</mi></mrow></msub><mo stretchy="false">)</mo><mo>+</mo><msub><mi>b</mi><mrow><mi>u</mi><mi>p</mi></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\operatorname{Adapter}(h)=h+W_{up}f(W_{down}h+b_{down})+b_{up}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">Adapter</span></span><span class="mopen">(</span><span class="mord mathnormal">h</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">h</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">u</span><span class="mord mathnormal mtight">p</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal">h</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">u</span><span class="mord mathnormal mtight">p</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="W_{down}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>W</mi><mrow><mi>d</mi><mi>o</mi><mi>w</mi><mi>n</mi></mrow></msub></mrow><annotation encoding="application/x-tex">W_{down}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 把维度降到 <span class="reading-math" data-tex="m"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi></mrow><annotation encoding="application/x-tex">m</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">m</span></span></span></span></span>，非线性产生任务相关变换，<span class="reading-math" data-tex="W_{up}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>W</mi><mrow><mi>u</mi><mi>p</mi></mrow></msub></mrow><annotation encoding="application/x-tex">W_{up}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">u</span><span class="mord mathnormal mtight">p</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 映射回原维度。残差让模块可以接近恒等映射，避免初始化时大幅破坏预训练表示。参数量约为 <span class="reading-math" data-tex="2dm+d+m"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mi>d</mi><mi>m</mi><mo>+</mo><mi>d</mi><mo>+</mo><mi>m</mi></mrow><annotation encoding="application/x-tex">2dm+d+m</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mord mathnormal">d</span><span class="mord mathnormal">m</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">d</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">m</span></span></span></span></span>，远小于多个 <span class="reading-math" data-tex="d\times d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo>×</mo><mi>d</mi></mrow><annotation encoding="application/x-tex">d\times d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">d</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span> 稠密变换。</p>
 <p>原版在 Transformer 每层的注意力相关子层与前馈相关子层后插入模块，具体位于投影后、相应残差与归一化安排之中。位置影响信息和梯度路径，不是把任意小 MLP 放在网络末尾都能视为同一方法。</p>
 <p>冻结权重通常仍参与前向；为了更新较早 adapter，也可能需要通过冻结层计算输入梯度。因而节省优化器状态不代表整个反向图消失。训练显存还取决于激活保存、精度和实现方式。</p>
+<h3 id="小瓶颈改变的是增量而非整条表示维度">小瓶颈改变的是增量，而非整条表示维度</h3>
+<p>Adapter可写成 <span class="reading-math" data-tex="a(h)=h+W_{up}\phi(W_{down}h+b_{down})+b_{up}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi><mo stretchy="false">(</mo><mi>h</mi><mo stretchy="false">)</mo><mo>=</mo><mi>h</mi><mo>+</mo><msub><mi>W</mi><mrow><mi>u</mi><mi>p</mi></mrow></msub><mi>ϕ</mi><mo stretchy="false">(</mo><msub><mi>W</mi><mrow><mi>d</mi><mi>o</mi><mi>w</mi><mi>n</mi></mrow></msub><mi>h</mi><mo>+</mo><msub><mi>b</mi><mrow><mi>d</mi><mi>o</mi><mi>w</mi><mi>n</mi></mrow></msub><mo stretchy="false">)</mo><mo>+</mo><msub><mi>b</mi><mrow><mi>u</mi><mi>p</mi></mrow></msub></mrow><annotation encoding="application/x-tex">a(h)=h+W_{up}\phi(W_{down}h+b_{down})+b_{up}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">a</span><span class="mopen">(</span><span class="mord mathnormal">h</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">h</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">u</span><span class="mord mathnormal mtight">p</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord mathnormal">ϕ</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal">h</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">u</span><span class="mord mathnormal mtight">p</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>。这里 <span class="reading-math" data-tex="W_{down},W_{up}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>W</mi><mrow><mi>d</mi><mi>o</mi><mi>w</mi><mi>n</mi></mrow></msub><mo separator="true">,</mo><msub><mi>W</mi><mrow><mi>u</mi><mi>p</mi></mrow></msub></mrow><annotation encoding="application/x-tex">W_{down},W_{up}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">u</span><span class="mord mathnormal mtight">p</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 为降维、升维矩阵，<span class="reading-math" data-tex="b_{down},b_{up}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>b</mi><mrow><mi>d</mi><mi>o</mi><mi>w</mi><mi>n</mi></mrow></msub><mo separator="true">,</mo><msub><mi>b</mi><mrow><mi>u</mi><mi>p</mi></mrow></msub></mrow><annotation encoding="application/x-tex">b_{down},b_{up}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">u</span><span class="mord mathnormal mtight">p</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 为偏置，<span class="reading-math" data-tex="\phi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϕ</mi></mrow><annotation encoding="application/x-tex">\phi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">ϕ</span></span></span></span></span> 为逐元素非线性；<span class="reading-math" data-tex="I"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi></mrow><annotation encoding="application/x-tex">I</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">I</span></span></span></span></span> 是 <span class="reading-math" data-tex="d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi></mrow><annotation encoding="application/x-tex">d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span> 维恒等矩阵，<span class="reading-math" data-tex="D_\phi"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>D</mi><mi>ϕ</mi></msub></mrow><annotation encoding="application/x-tex">D_\phi</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">ϕ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是当前点的激活导数对角矩阵。<span class="reading-math" data-tex="h"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>h</mi></mrow><annotation encoding="application/x-tex">h</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">h</span></span></span></span></span> 始终保留d维旁路，只把任务增量限制在m维中间表示。忽略非线性切换时，其局部Jacobian为 <span class="reading-math" data-tex="I+W_{up}D_\phi W_{down}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><mo>+</mo><msub><mi>W</mi><mrow><mi>u</mi><mi>p</mi></mrow></msub><msub><mi>D</mi><mi>ϕ</mi></msub><msub><mi>W</mi><mrow><mi>d</mi><mi>o</mi><mi>w</mi><mi>n</mi></mrow></msub></mrow><annotation encoding="application/x-tex">I+W_{up}D_\phi W_{down}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">I</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">u</span><span class="mord mathnormal mtight">p</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">D</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">ϕ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mord mathnormal mtight">o</span><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，相对恒等映射的增量秩不超过m。这个局部结论不能推广为“整个微调网络秩只有m”；多个插入位置和非线性会复合。</p>
+<h3 id="把适配器的任务存储与执行路径分开">把适配器的任务存储与执行路径分开</h3>
+<p>若宽度为100、瓶颈为4，只计两块主矩阵，单模块任务增量为800个权重；但它每次仍要先把100维降到4维，再升回100维并加残差。为十个任务保存增量约8000个权重，并不意味着一次运行十个模块，也不意味着可跳过共享骨干。</p>
+<p>教法联系：<a href="https://huggingface.co/blog/peft">Sourab Mangrulkar、Sayak Paul的Parameter-Efficient Fine-Tuning</a>。算例为本文自构。</p>
+<h2 id="三列清冻结范围额外参数和实际执行路径">三、列清冻结范围、额外参数和实际执行路径</h2>
 <pre><code class="language-text">输入：预训练Transformer、下游任务数据、瓶颈维度m
 冻结主要骨干权重
 按原版位置插入近似恒等初始化的adapter
@@ -71,8 +75,11 @@
 保存共享骨干一次，分别保存各任务增量
 推理时加载对应任务模块并运行完整路径
 </code></pre>
-<p>数学目标仍是任务监督损失；机制改变可训练参数空间；指标包括任务分数与每任务参数比例。它没有直接优化多任务联合知识共享，也不保证不同 adapter 可以随意相加组合。</p>
-<h2 id="实验与证据">实验与证据</h2>
+<p><strong>教学算例。</strong> <span class="reading-math" data-tex="d=768,m=64"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo>=</mo><mn>768</mn><mo separator="true">,</mo><mi>m</mi><mo>=</mo><mn>64</mn></mrow><annotation encoding="application/x-tex">d=768,m=64</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8389em;vertical-align:-0.1944em;"></span><span class="mord">768</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">m</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">64</span></span></span></span></span> 时，一个adapter有 <span class="reading-math" data-tex="2dm+d+m=99136"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mi>d</mi><mi>m</mi><mo>+</mo><mi>d</mi><mo>+</mo><mi>m</mi><mo>=</mo><mn>99136</mn></mrow><annotation encoding="application/x-tex">2dm+d+m=99136</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mord mathnormal">d</span><span class="mord mathnormal">m</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">d</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">m</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">99136</span></span></span></span></span> 个参数；每个Transformer层插入两处，12层合计2,379,264，另加任务头与可训练LayerNorm。只报 <span class="reading-math" data-tex="dm"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mi>m</mi></mrow><annotation encoding="application/x-tex">dm</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span><span class="mord mathnormal">m</span></span></span></span></span> 会漏掉升维矩阵、偏置与第二个插入位置。冻结骨干节省梯度及优化器状态，不自动免掉经过骨干的激活与反传计算。</p>
+<p>执行一个任务时仍要加载并运行约 103 单位参数路径，所以推理没有变成只算那 3 单位。若多个任务请求交错，模块切换和批处理也会影响延迟。参数高效与计算高效必须分别定义。</p>
+<h2 id="四按多任务总存储口径读取glue与模块消融">四、按多任务总存储口径读取GLUE与模块消融</h2>
+<p>它没有直接优化多任务联合知识共享，也不保证不同 adapter 可以随意相加组合。</p>
+<p>存储收益要按多个任务累计；单任务仍运行共享骨干，所以表中倍数不是推理加速比。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -109,38 +116,37 @@
 <td>新增参数比例不直接等于训练时间或推理速度改善</td>
 </tr>
 </tbody></table></div>
-<p>**证据一，图 2。**架构和绿色可训练部分明确哪些参数改变。这是读懂参数效率的基础，不能只看一个压缩百分比。</p>
-<p>**证据二，表 1。**调节规模的 adapters 平均 GLUE 为 80.0，全量微调为 80.4；为全部表列任务保存模型时，总参数约 1.3 倍与 9 倍骨干。这里比较的是多任务总存储口径，不能说单个推理模型变成原来的九分之一。</p>
-<p>**证据三，第 3.6 节与设计分析。**不同模块方案、瓶颈和移除实验研究容量及插入位置。它们支持简单瓶颈方案在这些任务上有效，但不证明任意新领域都只需要很小维度。</p>
+<p><strong>证据一，<a href="#llm-v6-020-figure-2">图2</a>。</strong>架构和绿色可训练部分明确哪些参数改变。这是读懂参数效率的基础，不能只看一个压缩百分比。 原图绿色部分才是适配时更新的模块，其中包含 LayerNorm；瓶颈矩阵之外的绿色层不能从参数账本里删掉。</p>
+<!-- figure-ref-v6:start:020-f2-1 -->
+<p><a id="llm-v6-020-figure-2"></a></p>
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/020-adapters-f2-v6.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/020-adapters-f2-v6.png" width="1386" height="1020" alt="Adapter在Transformer层中的插入位置与内部降维升维结构" loading="lazy"></a><figcaption>原文图形摘引：Neil Houlsby 等，2019，图2，PDF第3页；<a href="https://arxiv.org/html/1902.00751v2#S2.F2" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<!-- figure-ref-v6:end:020-f2-1 -->
+
+<p><strong>证据二，<a href="#llm-v6-020-table-1">表1</a>。</strong>调节规模的 adapters 平均 GLUE 为 80.0，全量微调为 80.4；为全部表列任务保存模型时，总参数约 1.3 倍与 9 倍骨干。这里比较的是多任务总存储口径，不能说单个推理模型变成原来的九分之一。</p>
+<!-- figure-ref-v6:start:020-t1-2-anchor -->
+<p><a id="llm-v6-020-table-1"></a></p>
+<!-- figure-ref-v6:end:020-t1-2-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/020-adapters-t1.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/020-adapters-t1.png" width="1701" height="213" alt="Adapters与BERT全量微调在GLUE上所需参数及任务分数" loading="lazy"></a><figcaption>实验结果表摘引：Neil Houlsby 等，2019，表1，PDF第5页；<a href="https://arxiv.org/pdf/1902.00751#page=5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据三，第 3.6 节与设计分析。</strong>不同模块方案、瓶颈和移除实验研究容量及插入位置。它们支持简单瓶颈方案在这些任务上有效，但不证明任意新领域都只需要很小维度。</p>
 <p>论文为缓解不稳定运行多个随机种子并选验证集最佳。因此表格不是这些运行的平均。若只复现一次，结果可能不同；报告时应把选择规则与调参预算列清楚。</p>
-<h2 id="教学例子存储节省到底在哪里">教学例子：存储节省到底在哪里</h2>
 <p>构造一个骨干有 100 单位参数，每个任务增量为 3。十个任务完整微调需约 1000 单位存储；共享骨干加十个增量为 130。这个自构算例解释边际存储收益，而非论文具体模型数据。</p>
-<p>执行一个任务时仍要加载并运行约 103 单位参数路径，所以推理没有变成只算那 3 单位。若多个任务请求交错，模块切换和批处理也会影响延迟。参数高效与计算高效必须分别定义。</p>
+<h2 id="五小模块表达任务隔离与串行延迟各有限制">五、小模块表达、任务隔离与串行延迟各有限制</h2>
 <p>再假设新任务要求完全不同的输入表示，小瓶颈可能表达不足。增大 <span class="reading-math" data-tex="m"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi></mrow><annotation encoding="application/x-tex">m</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">m</span></span></span></span></span> 可以提高能力，也增加参数和计算。正确问题不是“adapter 能否匹配所有任务”，而是质量随任务难度和增量预算怎样变化。</p>
-<h2 id="与全量微调和-lora-的关系">与全量微调和 LoRA 的关系</h2>
 <p>共享骨干冻结还改变了任务间干扰的方式。训练新任务的独立 adapter 不直接覆盖旧任务骨干参数，所以旧模块可继续使用原表示；但如果同时修改共享 LayerNorm、词表或公共预处理，隔离就可能被破坏。实际部署应明确哪些增量按任务保存，哪些组件真正共享。模块化提供可管理边界，不是所有组合都自动没有遗忘。</p>
 <p>全量微调允许骨干所有参数改变，表达范围大但每任务存储高；adapter 冻结骨干，通过新增非线性模块修改表示。LoRA 则通常将某些权重变化限制为低秩形式，计算接口不同，是否能合并进原权重也不同。</p>
 <p>所以不能因为两者都参数少，就假定部署成本一致。含非线性的串行 adapter 通常不能直接通过简单矩阵相加消除；其存在可能增加网络深度和调度开销。质量接近不等于执行特性相同。</p>
-<h2 id="贡献与局限">贡献与局限</h2>
-<p>本文把任务适配视为可独立保存的模块，提供多任务存储与持续扩展的实用路线。限制包括容量不足、串行延迟、任务切换、骨干依赖以及训练参数口径容易被误报。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>每个下游任务都保存全量微调模型，多任务存储随任务数扩大</td>
-<td>冻结大部分骨干，训练插入的瓶颈模块及约定的少量参数</td>
-<td>在共享预训练表示上用较小任务增量调整计算</td>
-<td>图2可训练部分，表1 GLUE与存储，§3.6设计分析</td>
-<td>原骨干仍参与推理，新增模块也有运行成本；容量需求依任务，参数效率不是同等推理加速</td>
-</tr>
-</tbody></table></div>
+<p>限制包括容量不足、串行延迟、任务切换、骨干依赖以及训练参数口径容易被误报。</p>
+<h2 id="六把本篇机制再推进一步">六、把本篇机制再推进一步</h2>
+<details>
+<summary>1. 新任务只换adapter，却改动共享LayerNorm，旧任务还能保证完全不受影响吗？</summary>
+
+<p><strong>参考答案</strong>：不能。旧任务仍使用共享LayerNorm时，其计算已改变，即使旧adapter权重未动。要获得任务隔离，需明确哪些归一化参数、词表与预处理按任务保存、哪些真正共享；模块化是可管理边界，不是自动无遗忘的证明。</p>
+</details>
+
+<h2 id="七对照全量微调与可合并的低秩权重增量">七、对照全量微调与可合并的低秩权重增量</h2>
+<p>串行瓶颈模块会留在执行路径中。<a href="047-lora.html">LoRA</a>改为可合并的低秩权重增量，<a href="044-prefix-tuning.html">Prefix-Tuning</a>改为可读取状态。三者都应同时比较任务存储、训练激活与推理路径。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 冻结骨干为什么不等于训练时不用经过骨干？</strong></p>
 <p>它仍参与前向生成表示，较早可训练模块还可能需要梯度穿过后续冻结层。冻结只阻止更新其权重，不自动移除计算和所有激活保存。</p>
@@ -159,21 +165,17 @@
 
 **论文**：Neil Houlsby 等，*Parameter-Efficient Transfer Learning for NLP*，ICML 2019。[原文](https://arxiv.org/abs/1902.00751) · [PDF](https://arxiv.org/pdf/1902.00751)。讨论原版瓶颈 adapter 与相应 BERT 微调实验，不把 LoRA、prefix 或所有现代 PEFT 方法混作相同实现。
 
-## 一分钟理解
+### 先接住前作的问题
 
-一个大模型服务许多任务，若每个任务都完整微调并保存一份权重，总存储会随任务数快速增加。Adapters 冻结主要预训练参数，在各层插入较小可训练模块，让任务变化由这些模块承担。
+[BERT](018-bert.md)通过全量微调迁移任务，却意味着每个任务可能保存一套大骨干。未解的资源问题是：任务变化能否由较小增量承担，让基础参数共享？本篇在BERT中组合瓶颈模块，改变可训练参数空间，而不重写预训练目标。
 
-作者展示较少新增参数可以获得接近全量微调的任务表现。节省最明确的是每任务可训练参数与存储；冻结骨干不等于前向不用计算，新增串行模块还可能增加推理延迟。不同资源需要分开评价。
+## 一、问题设定：每增加一个任务是否必须再保存完整预训练模型
 
-## 背景：迁移的成本不只在训练一次
-
-假设有十个分类任务，每个都保存一份完整 BERT，那么重复存储了大量相似基础知识。共享骨干、独立保存任务增量，可以让新增任务的边际存储更小，也避免直接修改其他任务已使用的骨干。
-
-但如果骨干与新领域差异很大，小模块可能不足以补偿。参数高效方法隐含一个适配假设：所需变化能够由受限的新增变换表达。这个假设需要任务与容量实验，而不是因为模块小就自动成立。
+十个分类任务各自保存完整BERT，会重复存储大量相似基础知识。共享骨干并独立保存任务增量可降低边际存储，也避免直接覆盖其他任务使用的主参数；但适配变化能否被小模块表达，需要质量与容量实验检验。
 
 原论文还训练 LayerNorm 参数与任务输出层。因此“只训练 adapter”是过度简写，复现时必须说明哪些参数冻结、哪些可更新。遗漏这点可能改变质量，也让参数数量统计不准确。
 
-## 方法：降维、非线性、升维与跳连
+## 二、由瓶颈残差推导受限增量和局部秩
 
 给定隐藏向量 $h\in\mathbb R^d$，瓶颈维度为 $m\ll d$：
 
@@ -186,6 +188,18 @@ $W_{down}$ 把维度降到 $m$，非线性产生任务相关变换，$W_{up}$ �
 原版在 Transformer 每层的注意力相关子层与前馈相关子层后插入模块，具体位于投影后、相应残差与归一化安排之中。位置影响信息和梯度路径，不是把任意小 MLP 放在网络末尾都能视为同一方法。
 
 冻结权重通常仍参与前向；为了更新较早 adapter，也可能需要通过冻结层计算输入梯度。因而节省优化器状态不代表整个反向图消失。训练显存还取决于激活保存、精度和实现方式。
+
+### 小瓶颈改变的是增量，而非整条表示维度
+
+Adapter可写成 $a(h)=h+W_{up}\phi(W_{down}h+b_{down})+b_{up}$。这里 $W_{down},W_{up}$ 为降维、升维矩阵，$b_{down},b_{up}$ 为偏置，$\phi$ 为逐元素非线性；$I$ 是 $d$ 维恒等矩阵，$D_\phi$ 是当前点的激活导数对角矩阵。$h$ 始终保留d维旁路，只把任务增量限制在m维中间表示。忽略非线性切换时，其局部Jacobian为 $I+W_{up}D_\phi W_{down}$，相对恒等映射的增量秩不超过m。这个局部结论不能推广为“整个微调网络秩只有m”；多个插入位置和非线性会复合。
+
+### 把适配器的任务存储与执行路径分开
+
+若宽度为100、瓶颈为4，只计两块主矩阵，单模块任务增量为800个权重；但它每次仍要先把100维降到4维，再升回100维并加残差。为十个任务保存增量约8000个权重，并不意味着一次运行十个模块，也不意味着可跳过共享骨干。
+
+教法联系：[Sourab Mangrulkar、Sayak Paul的Parameter-Efficient Fine-Tuning](https://huggingface.co/blog/peft)。算例为本文自构。
+
+## 三、列清冻结范围、额外参数和实际执行路径
 
 ```text
 输入：预训练Transformer、下游任务数据、瓶颈维度m
@@ -200,9 +214,15 @@ $W_{down}$ 把维度降到 $m$，非线性产生任务相关变换，$W_{up}$ �
 推理时加载对应任务模块并运行完整路径
 ```
 
-数学目标仍是任务监督损失；机制改变可训练参数空间；指标包括任务分数与每任务参数比例。它没有直接优化多任务联合知识共享，也不保证不同 adapter 可以随意相加组合。
+**教学算例。** $d=768,m=64$ 时，一个adapter有 $2dm+d+m=99136$ 个参数；每个Transformer层插入两处，12层合计2,379,264，另加任务头与可训练LayerNorm。只报 $dm$ 会漏掉升维矩阵、偏置与第二个插入位置。冻结骨干节省梯度及优化器状态，不自动免掉经过骨干的激活与反传计算。
 
-## 实验与证据
+执行一个任务时仍要加载并运行约 103 单位参数路径，所以推理没有变成只算那 3 单位。若多个任务请求交错，模块切换和批处理也会影响延迟。参数高效与计算高效必须分别定义。
+
+## 四、按多任务总存储口径读取GLUE与模块消融
+
+它没有直接优化多任务联合知识共享，也不保证不同 adapter 可以随意相加组合。
+
+存储收益要按多个任务累计；单任务仍运行共享骨干，所以表中倍数不是推理加速比。
 
 | 项目 | 原文范围 |
 |---|---|
@@ -214,23 +234,30 @@ $W_{down}$ 把维度降到 $m$，非线性产生任务相关变换，$W_{up}$ �
 | 额外可训练项 | LayerNorm 与分类层需计入 |
 | 成本边界 | 新增参数比例不直接等于训练时间或推理速度改善 |
 
-**证据一，图 2。**架构和绿色可训练部分明确哪些参数改变。这是读懂参数效率的基础，不能只看一个压缩百分比。
+**证据一，[图2](#llm-v6-020-figure-2)。**架构和绿色可训练部分明确哪些参数改变。这是读懂参数效率的基础，不能只看一个压缩百分比。 原图绿色部分才是适配时更新的模块，其中包含 LayerNorm；瓶颈矩阵之外的绿色层不能从参数账本里删掉。
 
-**证据二，表 1。**调节规模的 adapters 平均 GLUE 为 80.0，全量微调为 80.4；为全部表列任务保存模型时，总参数约 1.3 倍与 9 倍骨干。这里比较的是多任务总存储口径，不能说单个推理模型变成原来的九分之一。
+&lt;!-- figure-ref-v6:start:020-f2-1 --&gt;
+&lt;a id=&quot;llm-v6-020-figure-2&quot;&gt;&lt;/a&gt;
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/020-adapters-f2-v6.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/020-adapters-f2-v6.png&quot; width=&quot;1386&quot; height=&quot;1020&quot; alt=&quot;Adapter在Transformer层中的插入位置与内部降维升维结构&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原文图形摘引：Neil Houlsby 等，2019，图2，PDF第3页；&lt;a href=&quot;https://arxiv.org/html/1902.00751v2#S2.F2&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+&lt;!-- figure-ref-v6:end:020-f2-1 --&gt;
+
+**证据二，[表1](#llm-v6-020-table-1)。**调节规模的 adapters 平均 GLUE 为 80.0，全量微调为 80.4；为全部表列任务保存模型时，总参数约 1.3 倍与 9 倍骨干。这里比较的是多任务总存储口径，不能说单个推理模型变成原来的九分之一。
+
+&lt;!-- figure-ref-v6:start:020-t1-2-anchor --&gt;
+&lt;a id=&quot;llm-v6-020-table-1&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:020-t1-2-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/020-adapters-t1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/020-adapters-t1.png&quot; width=&quot;1701&quot; height=&quot;213&quot; alt=&quot;Adapters与BERT全量微调在GLUE上所需参数及任务分数&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Neil Houlsby 等，2019，表1，PDF第5页；&lt;a href=&quot;https://arxiv.org/pdf/1902.00751#page=5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 **证据三，第 3.6 节与设计分析。**不同模块方案、瓶颈和移除实验研究容量及插入位置。它们支持简单瓶颈方案在这些任务上有效，但不证明任意新领域都只需要很小维度。
 
 论文为缓解不稳定运行多个随机种子并选验证集最佳。因此表格不是这些运行的平均。若只复现一次，结果可能不同；报告时应把选择规则与调参预算列清楚。
 
-## 教学例子：存储节省到底在哪里
-
 构造一个骨干有 100 单位参数，每个任务增量为 3。十个任务完整微调需约 1000 单位存储；共享骨干加十个增量为 130。这个自构算例解释边际存储收益，而非论文具体模型数据。
 
-执行一个任务时仍要加载并运行约 103 单位参数路径，所以推理没有变成只算那 3 单位。若多个任务请求交错，模块切换和批处理也会影响延迟。参数高效与计算高效必须分别定义。
+## 五、小模块表达、任务隔离与串行延迟各有限制
 
 再假设新任务要求完全不同的输入表示，小瓶颈可能表达不足。增大 $m$ 可以提高能力，也增加参数和计算。正确问题不是“adapter 能否匹配所有任务”，而是质量随任务难度和增量预算怎样变化。
-
-## 与全量微调和 LoRA 的关系
 
 共享骨干冻结还改变了任务间干扰的方式。训练新任务的独立 adapter 不直接覆盖旧任务骨干参数，所以旧模块可继续使用原表示；但如果同时修改共享 LayerNorm、词表或公共预处理，隔离就可能被破坏。实际部署应明确哪些增量按任务保存，哪些组件真正共享。模块化提供可管理边界，不是所有组合都自动没有遗忘。
 
@@ -238,16 +265,22 @@ $W_{down}$ 把维度降到 $m$，非线性产生任务相关变换，$W_{up}$ �
 
 所以不能因为两者都参数少，就假定部署成本一致。含非线性的串行 adapter 通常不能直接通过简单矩阵相加消除；其存在可能增加网络深度和调度开销。质量接近不等于执行特性相同。
 
-## 贡献与局限
-
-本文把任务适配视为可独立保存的模块，提供多任务存储与持续扩展的实用路线。限制包括容量不足、串行延迟、任务切换、骨干依赖以及训练参数口径容易被误报。
+限制包括容量不足、串行延迟、任务切换、骨干依赖以及训练参数口径容易被误报。
 
 五个前置概念是冻结参数、瓶颈变换、恒等初始化、优化器状态和共享骨干。它们分别解释学习范围、表达限制、稳定起点、训练资源和多任务存储方式。
 
+## 六、把本篇机制再推进一步
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 每个下游任务都保存全量微调模型，多任务存储随任务数扩大 | 冻结大部分骨干，训练插入的瓶颈模块及约定的少量参数 | 在共享预训练表示上用较小任务增量调整计算 | 图2可训练部分，表1 GLUE与存储，§3.6设计分析 | 原骨干仍参与推理，新增模块也有运行成本；容量需求依任务，参数效率不是同等推理加速 |
+&lt;details&gt;
+&lt;summary&gt;1. 新任务只换adapter，却改动共享LayerNorm，旧任务还能保证完全不受影响吗？&lt;/summary&gt;
+
+**参考答案**：不能。旧任务仍使用共享LayerNorm时，其计算已改变，即使旧adapter权重未动。要获得任务隔离，需明确哪些归一化参数、词表与预处理按任务保存、哪些真正共享；模块化是可管理边界，不是自动无遗忘的证明。
+
+&lt;/details&gt;
+
+## 七、对照全量微调与可合并的低秩权重增量
+
+串行瓶颈模块会留在执行路径中。[LoRA](047-lora.md)改为可合并的低秩权重增量，[Prefix-Tuning](044-prefix-tuning.md)改为可读取状态。三者都应同时比较任务存储、训练激活与推理路径。
 
 ## 自测与参考答案
 

@@ -42,24 +42,27 @@
                 <span class="text-gray-500">T5：把不同语言任务变成同一种文本输入输出接口</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="3d67119fe9d85b45e8d274265d6c6385f0054d31eac0fc069f5e0518d2a02fb9"><h1>027｜T5：把不同语言任务变成同一种文本输入输出接口</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="0eec53f9c5065fb6974f9823b54cba9ae3be84015fa0e9a86191ed0e75884e1b"><h1>027｜T5：把不同语言任务变成同一种文本输入输出接口</h1>
 <p><a href="index.html">目录</a> · <a href="026-zero.html">上一篇</a> · <a href="028-bart.html">下一篇</a></p>
 <p><strong>论文</strong>：Colin Raffel 等，<em>Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer</em>，2019 年预印本、JMLR 2020。<a href="https://arxiv.org/abs/1910.10683">原文</a> · <a href="https://arxiv.org/pdf/1910.10683">PDF</a>。这是一篇包含大量受控研究的长论文；本文定向讨论统一接口、span corruption、数据与训练比较，不声称穷尽全部附录实验。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>分类输出标签，翻译输出句子，问答输出答案，是否必须使用完全不同的模型头？T5 把任务输入写成文本，把输出也写成文本，通过任务前缀区分要求。这样架构、损失和解码接口能够共享，便于比较预训练策略。</p>
-<p>作者系统研究架构、破坏目标、数据集、迁移方法与规模，最终结合有效设计形成 T5。贡献不只是一个去噪公式，而是一套统一实验平台。统一格式不等于所有任务无需标签，也不保证任务之间没有负迁移。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="017-gpt.html">GPT</a>和<a href="018-bert.html">BERT</a>让预训练服务多任务，但输入转换、任务头和目标同时变化，容易妨碍比较。本篇组合<a href="015-transformer.html">Transformer</a>编码解码与去噪思路，把输入输出统一为文本，提供控制这些选择的实验接口。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念是条件生成、任务前缀、span corruption、哨兵标记和控制变量。理解它们，就能区分“格式统一”“参数共享”和“无监督获得所有任务”三个不同主张。</p>
-<h2 id="背景接口差异会干扰算法比较">背景：接口差异会干扰算法比较</h2>
-<p>如果一项研究改变预训练目标，同时换了下游头和数据处理，结果很难归因。文本到文本让许多任务都使用同样的条件生成目标。例如情感分类生成“positive”，翻译生成目标语言句子，回归任务也可按规定文本形式表示。</p>
-<p>这种统一保留了任务差异：标签词、前缀、输出长度和评价方式仍不同。文本输出并不意味着评价只看字符串完全相同，也不意味着生成任何近义标签都自动算对。解码与任务映射必须固定。</p>
+<h2 id="一问题设定怎样统一任务接口以比较预训练而不抹去任务差异">一、问题设定：怎样统一任务接口以比较预训练，而不抹去任务差异</h2>
+<p>分类生成标签、翻译生成句子、问答生成答案，能否都写成同一条件文本生成接口？若改变预训练目标时还换任务头与数据处理，差异难以归因。本篇用任务前缀和文本标签减少接口变化，但输出长度、标签合法性与评价标准仍然按任务规定。</p>
+<p>文本输出并不意味着评价只看字符串完全相同，也不意味着生成任何近义标签都自动算对。解码与任务映射必须固定。</p>
 <p>预训练数据 C4 来自对 Common Crawl 的清洗。过滤策略决定哪些文本被保留，也可能排除某些语言或风格。因此数据集不是背景附件，而是方法和可复现性的核心部分。</p>
-<h2 id="方法缺失片段用哨兵串联">方法：缺失片段用哨兵串联</h2>
+<h2 id="二由缺失片段与哨兵推导输入输出长度">二、由缺失片段与哨兵推导输入输出长度</h2>
 <p>T5 的常用 span corruption 将连续片段替换为特殊哨兵 token，目标只生成被移除片段及相应哨兵，而非总是重建整段文本。设输入为 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span>、破坏函数为 <span class="reading-math" data-tex="C"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>C</mi></mrow><annotation encoding="application/x-tex">C</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">C</span></span></span></span></span>、目标缺失片段序列为 <span class="reading-math" data-tex="T(x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>T</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">T(x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span>：</p>
 <p><span class="reading-math" data-tex="L=-\log P_\theta(T(x)\mid C(x))."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>L</mi><mo>=</mo><mo>−</mo><mi>log</mi><mo>⁡</mo><msub><mi>P</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>T</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>∣</mo><mi>C</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">L=-\log P_\theta(T(x)\mid C(x)).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">C</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">))</span><span class="mord">.</span></span></span></span></span></span></p>
 <p>每个哨兵标识一个缺口，解码器据此输出相关内容。连续片段被单一哨兵替换，输入和目标长度可以较短，影响训练速度。破坏比例与平均片段长度控制任务难度及计算。</p>
 <p>编码器双向读取破坏输入，解码器因果生成目标。下游同样使用编码解码结构，只将输入换成任务文本。预训练目标和监督任务共用条件生成形式，不代表它们具有相同数据分布。</p>
 <p>论文还比较仅解码、前缀语言模型、不同去噪和迁移方式。最终选择应理解为其研究范围内有效组合，而非数学上唯一最优。尤其一些去噪变体质量差异不大，计算长度可能成为选择依据。</p>
+<h3 id="哨兵同时定义输入缺口和输出协议">哨兵同时定义输入缺口和输出协议</h3>
+<p>设损坏前长度为n、删除m个token并组成k段。每段用一个哨兵替换后，编码器长度约为 <span class="reading-math" data-tex="n-m+k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi><mo>−</mo><mi>m</mi><mo>+</mo><mi>k</mi></mrow><annotation encoding="application/x-tex">n-m+k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">m</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span>；目标包含m个被删token、k个片段起始哨兵与额外结束哨兵，约为 <span class="reading-math" data-tex="m+k+1"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi><mo>+</mo><mi>k</mi><mo>+</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">m+k+1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">m</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>，忽略常规EOS。相比重建全文，解码器主要为缺失内容付费。哨兵是例内不同片段的身份标记，并非“原位置数字”的直接编码。</p>
+<p><strong>合并教学例。</strong> 原序列为 <code>A B C D E</code>，遮住B与D后，输入是 <code>A &lt;extra_id_0&gt; C &lt;extra_id_1&gt; E</code>，目标是 <code>&lt;extra_id_0&gt; B &lt;extra_id_1&gt; D &lt;extra_id_2&gt;</code>，另按约定处理常规EOS。两个缺口共用一个mask会丢失逐段定位接口；把完整原句作为目标又会改变去噪任务。对应前面的长度账本，n=100、m=15、k=5时输入为90、目标约21；相同15%删除率若每token各成一段，哨兵更多，计算量和缺口难度都改变。</p>
+<h2 id="三固定任务前缀标签映射与条件生成">三、固定任务前缀、标签映射与条件生成</h2>
 <pre><code class="language-text">预训练：
     从清洗语料取文本
     选连续破坏片段，以不同哨兵替换
@@ -70,8 +73,9 @@
     按选定迁移策略训练
     解码并按任务规则还原预测，再使用原任务指标
 </code></pre>
-<p>数学目标统一为文本交叉熵，机制统一输入输出接口并设计去噪任务，指标仍然多样。不能因为训练统一，就把 GLUE、翻译 BLEU 与摘要 ROUGE 混成一个没有定义的总准确率。</p>
-<h2 id="实验与证据">实验与证据</h2>
+<p>分类教学例子中，输出“positive”本身只是标签编码。若换成无意义标记，只要训练映射一致，模型仍可学习；自然语言标签可能提供额外先验，但这需要控制实验，不能仅凭词义直觉判断。</p>
+<h2 id="四在相同文本和计算口径下读架构及span实验">四、在相同文本和计算口径下读架构及span实验</h2>
+<p>不能因为训练统一，就把 GLUE、翻译 BLEU 与摘要 ROUGE 混成一个没有定义的总准确率。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -101,46 +105,38 @@
 </tr>
 <tr>
 <td>不确定性</td>
-<td>表 1 明确基线均值与标准差；不能将其自动套到所有后续模型</td>
+<td><a href="https://arxiv.org/html/1910.10683#S3.T1">表1</a> 明确基线均值与标准差；不能将其自动套到所有后续模型</td>
 </tr>
 <tr>
 <td>预算</td>
 <td>小规模受控实验与最终大规模模型分层阅读</td>
 </tr>
 </tbody></table></div>
-<p>**证据一，统一框架与第 3 节研究设计。**固定接口让架构、目标与数据比较更清楚。它是实验组织贡献，不是证明所有任务具有相同统计难度。</p>
-<p>**证据二，表 1。**基线均值、标准差与无预训练对照说明不同任务受预训练影响并不相同。某些任务差距大、某些小，反映数据与任务条件，而不是一个恒定迁移收益。</p>
-<p>**证据三，表 7 与第 3.3.5 节。**不同平均span长度的效果较接近，较长片段在部分任务略差；作者强调不同目标造成的序列长度和速度差异。这支持同时比较质量与计算，不能只追逐一个微小分数差。</p>
+<p><strong>证据一，统一框架与第 3 节研究设计。</strong>固定接口让架构、目标与数据比较更清楚。它是实验组织贡献，不是证明所有任务具有相同统计难度。</p>
+<p><strong>证据二，<a href="https://arxiv.org/html/1910.10683#S3.T1">表1</a>。</strong>基线均值、标准差与无预训练对照说明不同任务受预训练影响并不相同。某些任务差距大、某些小，反映数据与任务条件，而不是一个恒定迁移收益。</p>
+<p><strong>证据三，<a href="#llm-v6-027-table-7">表7</a> 与第 3.3.5 节。</strong>不同平均span长度的效果较接近，较长片段在部分任务略差；作者强调不同目标造成的序列长度和速度差异。这支持同时比较质量与计算，不能只追逐一个微小分数差。</p>
+<!-- figure-ref-v6:start:027-t7-2-anchor -->
+<p><a id="llm-v6-027-table-7"></a></p>
+<!-- figure-ref-v6:end:027-t7-2-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/027-t5-t7.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/027-t5-t7.png" width="1701" height="378" alt="T5不同平均span长度下的多任务开发集分数" loading="lazy"></a><figcaption>实验结果表摘引：Colin Raffel 等，2019，表7，PDF第24页；<a href="https://arxiv.org/pdf/1910.10683#page=24" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <p>论文最后扩展模型和训练规模，成绩包含多种有效选择。不能拿最终大模型对小基线的差距，声称某一个哨兵设计带来了全部提升。长论文的受控研究与最终配方应分开引用。</p>
-<h2 id="教学例子哨兵的作用">教学例子：哨兵的作用</h2>
-<p>构造原文“红色小猫坐在温暖垫子上”，移除“小猫”和“温暖垫子”，输入可写成“红色<S1>坐在<S2>上”，目标为“<S1>小猫<S2>温暖垫子<S3>”。不同哨兵让解码器知道各段属于哪个缺口。</p>
-<p>与重建整句相比，只生成缺失部分减少目标长度，但也改变监督位置：已知片段不直接在目标中重复。若任务需要学习完整文本流畅生成，去噪形式与下游仍有差异，因此不能说压缩目标永远无损。</p>
-<p>分类教学例子中，输出“positive”本身只是标签编码。若换成无意义标记，只要训练映射一致，模型仍可学习；自然语言标签可能提供额外先验，但这需要控制实验，不能仅凭词义直觉判断。</p>
-<h2 id="数据与预算的公平性">数据与预算的公平性</h2>
 <p>同样步数下，不同破坏目标可能有不同输入输出 token 总量，因而计算不同。若只固定 batch 条数，质量更高可能来自更多有效监督或更长计算。应记录编码和解码长度，比较相同计算或相同原始文本覆盖下的结果。</p>
 <p>数据清洗同样需要完整说明。删除重复、模板或不符合规则的页面可能改善质量，也可能改变领域分布。评价某种清洗的收益，应查看任务分组，而不是只报告整体更好并忽略被削弱的内容类型。</p>
-<h2 id="贡献与局限">贡献与局限</h2>
+<h2 id="五统一生成格式仍有标签结构约束与数据偏差">五、统一生成格式仍有标签、结构约束与数据偏差</h2>
+<p>与重建整句相比，只生成缺失部分减少目标长度，但也改变监督位置：已知片段不直接在目标中重复。若任务需要学习完整文本流畅生成，去噪形式与下游仍有差异，因此不能说压缩目标永远无损。</p>
 <p>T5 将通用迁移学习的多种选择放在一致平台上，推动文本到文本成为常用接口。限制包括编码解码成本、任务格式依赖、数据偏差和昂贵规模扩展。统一接口也可能把数值或结构化任务的精确约束变成生成错误，需要额外验证。</p>
 <p>统一生成标签还引入解码空间问题。一个三类分类任务可以限制只在三个合法标签中打分，也可以自由生成后再解析；前者不会输出非法标签，后者可能产生同义词或额外解释。两种评价并不等价，应在实验中固定。若模型生成正确语义却字符串不合法，错误属于接口或解码协议，不能简单归为完全不懂任务。</p>
-<p>生成式统一接口并不意味着各任务的评价指标也被统一。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>任务与实验接口分散难比较</td>
-<td>统一text-to-text并系统比较预训练</td>
-<td>共享输入输出接口以隔离部分变量</td>
-<td>第3节设计、表1基线、表7span对照</td>
-<td>统一接口不统一难度，额外生成计算</td>
-</tr>
-</tbody></table></div>
+<h2 id="六把本篇机制再推进一步">六、把本篇机制再推进一步</h2>
+<details>
+<summary>1. 分类时自由生成标签与只给合法标签打分，可以直接比较吗？</summary>
+
+<p><strong>参考答案</strong>：需要分开记录。前者可能输出近义词或额外解释而被解析为错，后者先限制了答案空间。即便语义判断相近，两种接口的错误类型和计算不同；应固定映射、解码与判分，再讨论预训练目标优劣。</p>
+</details>
+
+<h2 id="七继续比较指令任务混合与模板稳健性">七、继续比较指令任务混合与模板稳健性</h2>
+<p>统一文本接口后，数据任务混合和提示表达仍影响迁移。<a href="050-flan.html">FLAN</a>与<a href="051-t0.html">T0</a>继续研究指令与多模板监督；可沿哨兵例子的做法，逐项检查输入、目标和留出条件是否真的一致。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 所有任务写成文本，是否意味着不用任务监督？</strong></p>
 <p>不是。监督标签只是转换为文本输出，来源仍然存在。统一的是接口与损失形式，数据获取成本和任务定义并未消失。</p>
@@ -159,21 +155,19 @@
 
 **论文**：Colin Raffel 等，*Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer*，2019 年预印本、JMLR 2020。[原文](https://arxiv.org/abs/1910.10683) · [PDF](https://arxiv.org/pdf/1910.10683)。这是一篇包含大量受控研究的长论文；本文定向讨论统一接口、span corruption、数据与训练比较，不声称穷尽全部附录实验。
 
-## 一分钟理解
+### 先接住前作的问题
 
-分类输出标签，翻译输出句子，问答输出答案，是否必须使用完全不同的模型头？T5 把任务输入写成文本，把输出也写成文本，通过任务前缀区分要求。这样架构、损失和解码接口能够共享，便于比较预训练策略。
+[GPT](017-gpt.md)和[BERT](018-bert.md)让预训练服务多任务，但输入转换、任务头和目标同时变化，容易妨碍比较。本篇组合[Transformer](015-transformer.md)编码解码与去噪思路，把输入输出统一为文本，提供控制这些选择的实验接口。
 
-作者系统研究架构、破坏目标、数据集、迁移方法与规模，最终结合有效设计形成 T5。贡献不只是一个去噪公式，而是一套统一实验平台。统一格式不等于所有任务无需标签，也不保证任务之间没有负迁移。
+## 一、问题设定：怎样统一任务接口以比较预训练，而不抹去任务差异
 
-## 背景：接口差异会干扰算法比较
+分类生成标签、翻译生成句子、问答生成答案，能否都写成同一条件文本生成接口？若改变预训练目标时还换任务头与数据处理，差异难以归因。本篇用任务前缀和文本标签减少接口变化，但输出长度、标签合法性与评价标准仍然按任务规定。
 
-如果一项研究改变预训练目标，同时换了下游头和数据处理，结果很难归因。文本到文本让许多任务都使用同样的条件生成目标。例如情感分类生成“positive”，翻译生成目标语言句子，回归任务也可按规定文本形式表示。
-
-这种统一保留了任务差异：标签词、前缀、输出长度和评价方式仍不同。文本输出并不意味着评价只看字符串完全相同，也不意味着生成任何近义标签都自动算对。解码与任务映射必须固定。
+文本输出并不意味着评价只看字符串完全相同，也不意味着生成任何近义标签都自动算对。解码与任务映射必须固定。
 
 预训练数据 C4 来自对 Common Crawl 的清洗。过滤策略决定哪些文本被保留，也可能排除某些语言或风格。因此数据集不是背景附件，而是方法和可复现性的核心部分。
 
-## 方法：缺失片段用哨兵串联
+## 二、由缺失片段与哨兵推导输入输出长度
 
 T5 的常用 span corruption 将连续片段替换为特殊哨兵 token，目标只生成被移除片段及相应哨兵，而非总是重建整段文本。设输入为 $x$、破坏函数为 $C$、目标缺失片段序列为 $T(x)$：
 
@@ -187,6 +181,16 @@ $$
 
 论文还比较仅解码、前缀语言模型、不同去噪和迁移方式。最终选择应理解为其研究范围内有效组合，而非数学上唯一最优。尤其一些去噪变体质量差异不大，计算长度可能成为选择依据。
 
+### 哨兵同时定义输入缺口和输出协议
+
+设损坏前长度为n、删除m个token并组成k段。每段用一个哨兵替换后，编码器长度约为 $n-m+k$；目标包含m个被删token、k个片段起始哨兵与额外结束哨兵，约为 $m+k+1$，忽略常规EOS。相比重建全文，解码器主要为缺失内容付费。哨兵是例内不同片段的身份标记，并非“原位置数字”的直接编码。
+
+**合并教学例。** 原序列为 `A B C D E`，遮住B与D后，输入是 `A &lt;extra_id_0&gt; C &lt;extra_id_1&gt; E`，目标是 `&lt;extra_id_0&gt; B &lt;extra_id_1&gt; D &lt;extra_id_2&gt;`，另按约定处理常规EOS。两个缺口共用一个mask会丢失逐段定位接口；把完整原句作为目标又会改变去噪任务。对应前面的长度账本，n=100、m=15、k=5时输入为90、目标约21；相同15%删除率若每token各成一段，哨兵更多，计算量和缺口难度都改变。
+
+
+
+## 三、固定任务前缀、标签映射与条件生成
+
 ```text
 预训练：
     从清洗语料取文本
@@ -199,9 +203,15 @@ $$
     解码并按任务规则还原预测，再使用原任务指标
 ```
 
-数学目标统一为文本交叉熵，机制统一输入输出接口并设计去噪任务，指标仍然多样。不能因为训练统一，就把 GLUE、翻译 BLEU 与摘要 ROUGE 混成一个没有定义的总准确率。
 
-## 实验与证据
+
+分类教学例子中，输出“positive”本身只是标签编码。若换成无意义标记，只要训练映射一致，模型仍可学习；自然语言标签可能提供额外先验，但这需要控制实验，不能仅凭词义直觉判断。
+
+## 四、在相同文本和计算口径下读架构及span实验
+
+不能因为训练统一，就把 GLUE、翻译 BLEU 与摘要 ROUGE 混成一个没有定义的总准确率。
+
+
 
 | 项目 | 原文范围 |
 |---|---|
@@ -210,32 +220,30 @@ $$
 | 目标 | 语言建模、去噪、不同破坏方式与span长度 |
 | 迁移 | 微调、多任务等策略，按实验单独控制 |
 | 任务 | 理解、问答、翻译、摘要等统一文本接口 |
-| 不确定性 | 表 1 明确基线均值与标准差；不能将其自动套到所有后续模型 |
+| 不确定性 | [表1](https://arxiv.org/html/1910.10683#S3.T1) 明确基线均值与标准差；不能将其自动套到所有后续模型 |
 | 预算 | 小规模受控实验与最终大规模模型分层阅读 |
 
 **证据一，统一框架与第 3 节研究设计。**固定接口让架构、目标与数据比较更清楚。它是实验组织贡献，不是证明所有任务具有相同统计难度。
 
-**证据二，表 1。**基线均值、标准差与无预训练对照说明不同任务受预训练影响并不相同。某些任务差距大、某些小，反映数据与任务条件，而不是一个恒定迁移收益。
+**证据二，[表1](https://arxiv.org/html/1910.10683#S3.T1)。**基线均值、标准差与无预训练对照说明不同任务受预训练影响并不相同。某些任务差距大、某些小，反映数据与任务条件，而不是一个恒定迁移收益。
 
-**证据三，表 7 与第 3.3.5 节。**不同平均span长度的效果较接近，较长片段在部分任务略差；作者强调不同目标造成的序列长度和速度差异。这支持同时比较质量与计算，不能只追逐一个微小分数差。
+**证据三，[表7](#llm-v6-027-table-7) 与第 3.3.5 节。**不同平均span长度的效果较接近，较长片段在部分任务略差；作者强调不同目标造成的序列长度和速度差异。这支持同时比较质量与计算，不能只追逐一个微小分数差。
+
+&lt;!-- figure-ref-v6:start:027-t7-2-anchor --&gt;
+&lt;a id=&quot;llm-v6-027-table-7&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:027-t7-2-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/027-t5-t7.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/027-t5-t7.png&quot; width=&quot;1701&quot; height=&quot;378&quot; alt=&quot;T5不同平均span长度下的多任务开发集分数&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Colin Raffel 等，2019，表7，PDF第24页；&lt;a href=&quot;https://arxiv.org/pdf/1910.10683#page=24&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 论文最后扩展模型和训练规模，成绩包含多种有效选择。不能拿最终大模型对小基线的差距，声称某一个哨兵设计带来了全部提升。长论文的受控研究与最终配方应分开引用。
-
-## 教学例子：哨兵的作用
-
-构造原文“红色小猫坐在温暖垫子上”，移除“小猫”和“温暖垫子”，输入可写成“红色&lt;S1&gt;坐在&lt;S2&gt;上”，目标为“&lt;S1&gt;小猫&lt;S2&gt;温暖垫子&lt;S3&gt;”。不同哨兵让解码器知道各段属于哪个缺口。
-
-与重建整句相比，只生成缺失部分减少目标长度，但也改变监督位置：已知片段不直接在目标中重复。若任务需要学习完整文本流畅生成，去噪形式与下游仍有差异，因此不能说压缩目标永远无损。
-
-分类教学例子中，输出“positive”本身只是标签编码。若换成无意义标记，只要训练映射一致，模型仍可学习；自然语言标签可能提供额外先验，但这需要控制实验，不能仅凭词义直觉判断。
-
-## 数据与预算的公平性
 
 同样步数下，不同破坏目标可能有不同输入输出 token 总量，因而计算不同。若只固定 batch 条数，质量更高可能来自更多有效监督或更长计算。应记录编码和解码长度，比较相同计算或相同原始文本覆盖下的结果。
 
 数据清洗同样需要完整说明。删除重复、模板或不符合规则的页面可能改善质量，也可能改变领域分布。评价某种清洗的收益，应查看任务分组，而不是只报告整体更好并忽略被削弱的内容类型。
 
-## 贡献与局限
+## 五、统一生成格式仍有标签、结构约束与数据偏差
+
+与重建整句相比，只生成缺失部分减少目标长度，但也改变监督位置：已知片段不直接在目标中重复。若任务需要学习完整文本流畅生成，去噪形式与下游仍有差异，因此不能说压缩目标永远无损。
 
 T5 将通用迁移学习的多种选择放在一致平台上，推动文本到文本成为常用接口。限制包括编码解码成本、任务格式依赖、数据偏差和昂贵规模扩展。统一接口也可能把数值或结构化任务的精确约束变成生成错误，需要额外验证。
 
@@ -243,11 +251,18 @@ T5 将通用迁移学习的多种选择放在一致平台上，推动文本到�
 
 统一生成标签还引入解码空间问题。一个三类分类任务可以限制只在三个合法标签中打分，也可以自由生成后再解析；前者不会输出非法标签，后者可能产生同义词或额外解释。两种评价并不等价，应在实验中固定。若模型生成正确语义却字符串不合法，错误属于接口或解码协议，不能简单归为完全不懂任务。
 
-生成式统一接口并不意味着各任务的评价指标也被统一。
+## 六、把本篇机制再推进一步
 
-|原有问题|作者改动|为什么可能有效|实验证据|代价与局限|
-|---|---|---|---|---|
-|任务与实验接口分散难比较|统一text-to-text并系统比较预训练|共享输入输出接口以隔离部分变量|第3节设计、表1基线、表7span对照|统一接口不统一难度，额外生成计算|
+&lt;details&gt;
+&lt;summary&gt;1. 分类时自由生成标签与只给合法标签打分，可以直接比较吗？&lt;/summary&gt;
+
+**参考答案**：需要分开记录。前者可能输出近义词或额外解释而被解析为错，后者先限制了答案空间。即便语义判断相近，两种接口的错误类型和计算不同；应固定映射、解码与判分，再讨论预训练目标优劣。
+
+&lt;/details&gt;
+
+## 七、继续比较指令任务混合与模板稳健性
+
+统一文本接口后，数据任务混合和提示表达仍影响迁移。[FLAN](050-flan.md)与[T0](051-t0.md)继续研究指令与多模板监督；可沿哨兵例子的做法，逐项检查输入、目标和留出条件是否真的一致。
 
 ## 自测与参考答案
 

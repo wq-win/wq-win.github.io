@@ -42,19 +42,17 @@
                 <span class="text-gray-500">负采样与短语表示：把全词表预测改成可扩展的局部判别</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="9b0f3be873a73fee613b417a48a6a3cca8a278946ce8f1a118d1ccd8b2838db8"><h1>005｜负采样与短语表示：把全词表预测改成可扩展的局部判别</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="b9ce871500a42cd6caa6b48b6a2375c7f9f1214b937d5e5e41c43d0104327d9e"><h1>005｜负采样与短语表示：把全词表预测改成可扩展的局部判别</h1>
 <p><a href="index.html">目录</a> · <a href="004-word2vec.html">上一篇</a> · <a href="006-seq2seq.html">下一篇</a></p>
 <p><strong>论文</strong>：Tomas Mikolov 等，<em>Distributed Representations of Words and Phrases and their Compositionality</em>，2013。<a href="https://arxiv.org/abs/1310.4546">原文</a> · <a href="https://arxiv.org/pdf/1310.4546">PDF</a>。重点是负采样、频繁词下采样与短语构造，而非重新介绍全部词向量历史。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>训练一个中心词与邻词的关系，是否需要每次都计算几十万个候选词？负采样把这个问题改成较小的二分类：提高真实词对得分，降低从噪声分布抽出的少量词对得分。论文还减少常见词的训练占比，并把一些高关联词组并成短语，使同样计算能学习更丰富的表示。</p>
-<p>这些设计分别改变输出目标、样本分布和基本符号单位。它们可以共同提高效率与关系任务效果，但不能笼统归结为“只换了损失”。短语任务中不同输出方案与下采样存在交互，恰好说明组合实验不能被简化成单一组件永远最好。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="004-word2vec.html">word2vec</a>已经删除昂贵隐藏层，但输出训练仍需处理很大的词表，高频词还会占去大量更新。本篇直接扩展其训练路线：用少量噪声词替换全词表判别，并分别改变样本分布与短语单位。这三个改动要独立追踪，不能只称作换了一个更快损失。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>理解本篇需要掌握 sigmoid 二分类、负例分布、下采样、共现统计和代理目标，特别要区分“抽样近似同一目标”和“换成另一个便宜目标”。</p>
-<h2 id="背景概率归一化并非表示学习唯一选择">背景：概率归一化并非表示学习唯一选择</h2>
-<p>完整 softmax 将中心词对每个候选上下文的得分一起归一化，计算成本随词表增长。若最终主要使用词向量的几何结构，可以选择一个更便宜的代理目标，而不强求每次更新都得到精确的归一化条件分布。</p>
-<p>但更便宜的目标与完整最大似然不是自动等价的。负采样学习“真实搭配比噪声搭配更像数据”，结果依赖噪声分布和负例数量。把它说成“无偏计算 softmax 梯度”会掩盖真正的建模变化，也无法解释为什么噪声分布会影响向量几何。</p>
+<h2 id="一问题设定每个真实词对是否必须遍历全词表">一、问题设定：每个真实词对是否必须遍历全词表</h2>
+<p>训练“中心词—邻词”关系时，完整 softmax 要把全部候选得分归一化，成本随词表扩大。既然最终主要使用词向量几何，能否转而区分真实搭配和少量噪声搭配？这会改变学习目标，而非只是更便宜地计算同一个精确条件分布。</p>
 <p>另一个问题来自词频。像冠词、介词这样的常见词产生大量训练对，却不一定提供同等多的新信息。下采样主动改变这些词出现的训练频率，节省计算，也改变中心与上下文统计。效率与表示质量因此可能同时变化。</p>
-<h2 id="方法一真实搭配对少量噪声搭配">方法一：真实搭配对少量噪声搭配</h2>
+<h2 id="二从数据噪声比推导点积再调整样本和词项">二、从数据噪声比推导点积，再调整样本和词项</h2>
 <p>设 <span class="reading-math" data-tex="v_w"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>v</mi><mi>w</mi></msub></mrow><annotation encoding="application/x-tex">v_w</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是中心词向量，<span class="reading-math" data-tex="u_c"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>u</mi><mi>c</mi></msub></mrow><annotation encoding="application/x-tex">u_c</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">c</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是上下文向量。一对真实词 <span class="reading-math" data-tex="(w,c)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>w</mi><mo separator="true">,</mo><mi>c</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(w,c)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">c</span><span class="mclose">)</span></span></span></span></span> 的目标为：</p>
 <p><span class="reading-math" data-tex="\log\sigma(u_c^Tv_w)
 +\sum_{i=1}^{k}\mathbb E_{n_i\sim P_n}
@@ -63,9 +61,16 @@
 \log\sigma(-u_{n_i}^Tv_w).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1413em;vertical-align:-0.25em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">c</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:3.1138em;vertical-align:-1.2777em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8361em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span><span class="mrel mtight">∼</span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:-0.1389em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2501em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="mopen">(</span><span class="mord">−</span><span class="mord"><span class="mord mathnormal">u</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8913em;"><span style="top:-2.453em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3471em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02691em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="\sigma"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>σ</mi></mrow><annotation encoding="application/x-tex">\sigma</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span></span></span></span></span> 为 sigmoid，<span class="reading-math" data-tex="P_n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>P</mi><mi>n</mi></msub></mrow><annotation encoding="application/x-tex">P_n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 为负例抽样分布，<span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 为负例数量。第一项推高真实搭配得分，第二项压低抽样噪声搭配。只需更新涉及的少量向量，不必遍历全部词表。论文使用词频分布的幂变换构造噪声，不能把“均匀随机抽词”当作完全相同的算法。</p>
 <p>这是判别式代理目标。某个点积很高，意味着它在给定噪声比较下更像真实搭配，而不是已经可以直接当成某个校准概率。要得到归一化语言模型，还需要另行定义输出和训练方法。</p>
-<h2 id="方法二调整样本和词项">方法二：调整样本和词项</h2>
 <p>频繁词下采样以较高概率跳过高频词，使模型减少重复学习常见搭配。短语检测则根据词对出现次数相对于各自频率的关联程度，合并如专名这样的组合。它是基于统计的预处理，不是一个已经理解所有语法结构的解析器。</p>
 <p>“纽约”和“新”加“约克”的意义并非总能简单相加，因此给短语一个独立词项可能有用；但合并过多会扩大词表、制造稀疏项，还可能把偶然共现当作固定短语。阈值和多轮合并影响数据，必须进入实验条件。</p>
+<h3 id="负样本到底把点积推向哪里">负样本到底把点积推向哪里</h3>
+<p>把一对词 <span class="reading-math" data-tex="(w,c)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>w</mi><mo separator="true">,</mo><mi>c</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(w,c)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">c</span><span class="mclose">)</span></span></span></span></span> 的点积暂视为可独立调节的标量 <span class="reading-math" data-tex="z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>z</mi></mrow><annotation encoding="application/x-tex">z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span></span></span></span></span>。若真实共现计数为 <span class="reading-math" data-tex="a"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi></mrow><annotation encoding="application/x-tex">a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span></span></span></span></span>、负例期望计数为 <span class="reading-math" data-tex="b"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>b</mi></mrow><annotation encoding="application/x-tex">b</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">b</span></span></span></span></span>，局部目标是 <span class="reading-math" data-tex="a\log\sigma(z)+b\log\sigma(-z)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi><mi>log</mi><mo>⁡</mo><mi>σ</mi><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo><mo>+</mo><mi>b</mi><mi>log</mi><mo>⁡</mo><mi>σ</mi><mo stretchy="false">(</mo><mo>−</mo><mi>z</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">a\log\sigma(z)+b\log\sigma(-z)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">b</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="mopen">(</span><span class="mord">−</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mclose">)</span></span></span></span></span>。求导为 <span class="reading-math" data-tex="a(1-\sigma(z))-b\sigma(z)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>σ</mi><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo><mo stretchy="false">)</mo><mo>−</mo><mi>b</mi><mi>σ</mi><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">a(1-\sigma(z))-b\sigma(z)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">a</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mclose">))</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">bσ</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mclose">)</span></span></span></span></span>，驻点满足 <span class="reading-math" data-tex="\sigma(z)=a/(a+b)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>σ</mi><mo stretchy="false">(</mo><mi>z</mi><mo stretchy="false">)</mo><mo>=</mo><mi>a</mi><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><mi>a</mi><mo>+</mo><mi>b</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\sigma(z)=a/(a+b)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">σ</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">a</span><span class="mord">/</span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">b</span><span class="mclose">)</span></span></span></span></span>，故 <span class="reading-math" data-tex="z=\log(a/b)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>z</mi><mo>=</mo><mi>log</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>a</mi><mi mathvariant="normal">/</mi><mi>b</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">z=\log(a/b)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mord">/</span><span class="mord mathnormal">b</span><span class="mclose">)</span></span></span></span></span>。这是本文给出的教学推导：有限维共享向量不能同时独立实现所有驻点，但它说明点积表达“相对噪声有多异常”，不是可直接归一化的下一词概率。</p>
+<p><strong>教学算例。</strong> 同一词对真实出现20次，负例期望为5次，最优独立点积为 <span class="reading-math" data-tex="\log4\approx1.386"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>log</mi><mo>⁡</mo><mn>4</mn><mo>≈</mo><mn>1.386</mn></mrow><annotation encoding="application/x-tex">\log4\approx1.386</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">4</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1.386</span></span></span></span></span>；若噪声分布改变令负例变成10次，则点积变为 <span class="reading-math" data-tex="\log2\approx0.693"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>log</mi><mo>⁡</mo><mn>2</mn><mo>≈</mo><mn>0.693</mn></mrow><annotation encoding="application/x-tex">\log2\approx0.693</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.693</span></span></span></span></span>，真实语料完全未变。调整负例数量或分布会改变学习问题；不能把更多负例只看成无关紧要的加速参数。</p>
+<p>构造语料中“咖啡—喝”为真实词对。若负例大多是极少见的专名，模型容易把真对与噪声区分，未必学会区分“咖啡—喝”和“咖啡—购买”这类更细关系。若负例集中为过于常见词，又会改变被强调的判别边界。负例不是纯粹计算附件，而是目标的一部分。</p>
+<h3 id="区分一次负例抽样与负例期望目标">区分一次负例抽样与负例期望目标</h3>
+<p>在式中的期望训练实现里，某次只抽到噪声词甲，不代表词乙永远没有排斥梯度；乙在多次更新中的出现频率由噪声分布决定。若把同一正例的负例数从5改为10，且逐项求和不改权重，负例期望贡献也翻倍。要做“仅增加估计精度”的对照，就必须另定义归一化目标，不能假定原算法自然保持同一个最优点。</p>
+<p>教法联系：<a href="https://jalammar.github.io/illustrated-word2vec/">Jay Alammar的The Illustrated Word2vec</a>。算例为本文自构。</p>
+<h2 id="三把短语合并下采样与负例抽样分开执行">三、把短语合并、下采样与负例抽样分开执行</h2>
 <pre><code class="language-text">输入：词序列、词频、短语阈值、负样本数 k
 根据局部共现统计识别并合并候选短语
 构建词表与负例分布 P_n
@@ -78,7 +83,9 @@
 导出表示，分别评价词关系和短语关系
 </code></pre>
 <p>目标函数改变、训练分布改变、词表改变，是三条独立的信息路径。若三者一起启用后成绩提高，不能仅凭一个总分判断哪个是主要原因，应阅读对应消融与交互比较。</p>
-<h2 id="实验与证据定位">实验与证据定位</h2>
+<h2 id="四逐块读负例数与下采样的交互结果">四、逐块读负例数与下采样的交互结果</h2>
+<p>现在按开关拆开表1与表3：负例更多是否值得，以及下采样会不会改变输出方法的排名。</p>
+<p><strong><a href="#llm-v6-005-table-1">表1</a>值得拆开读。</strong> 不下采样时，NEG-5 与 NEG-15 的总类比准确率为59%与61%，耗时38与97分钟；加上下采样后分别为60%与61%，耗时14与36分钟。增加负例与改变输入分布是两项干预；不能用最终一行把收益全算作负采样本身。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -111,41 +118,37 @@
 <td>未提供覆盖所有配置的现代多种子置信区间体系</td>
 </tr>
 </tbody></table></div>
-<p>**证据一，第 2 节与表 1。**负采样及下采样的定义配合词类比比较，说明廉价目标仍可学习有用表示。但这并没有证明与完整 softmax 相同的概率拟合质量。</p>
-<p>**证据二，表 3。**短语类比中，NEG-15 从无下采样的 27% 到下采样的 42%；层次 softmax 从 19% 到 47%。这些是该表具体设置下的结果，展示下采样与输出方法的相互作用。不能只摘“负采样有效”而忽略另一方法在组合配置中更高。</p>
-<p>**证据三，第 4.1 节及表 4—5。**作者进一步改变数据量、维度和上下文，并给出短语近邻与组合示例。展示说明向量承载了部分结构信息，但多项配置同时变化，无法仅归因于数据量或某个单独技巧。</p>
+<p><strong>证据一，第 2 节与<a href="#llm-v6-005-table-1">表1</a>。</strong>负采样及下采样的定义配合词类比比较，说明廉价目标仍可学习有用表示。但这并没有证明与完整 softmax 相同的概率拟合质量。</p>
+<p><strong>读表1先看上下两块。</strong> 下半块启用了高频词下采样，上半块没有；在同一方法的两行之间比较，才看得出样本选择的影响。第二列是分钟，后三列是语法、语义和总类比准确率。增加负例数要同时查看准确率与耗时，不能把NEG-15的总分单独当作免费提升。</p>
+<!-- figure-ref-v6:start:005-t1-1-anchor -->
+<p><a id="llm-v6-005-table-1"></a></p>
+<!-- figure-ref-v6:end:005-t1-1-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/005-negative-sampling-t1.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/005-negative-sampling-t1.png" width="1701" height="538" alt="负采样数量及高频词下采样对类比准确率和训练时间的影响" loading="lazy"></a><figcaption>实验结果表摘引：Tomas Mikolov 等，2013，表1，PDF第5页；<a href="https://arxiv.org/pdf/1310.4546#page=5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据二，<a href="https://arxiv.org/html/1310.4546#S4.T3">表3</a>。</strong>短语类比中，NEG-15 从无下采样的 27% 到下采样的 42%；层次 softmax 从 19% 到 47%。这些是该表具体设置下的结果，展示下采样与输出方法的相互作用。不能只摘“负采样有效”而忽略另一方法在组合配置中更高。</p>
+<p><strong>证据三，第 4.1 节及<a href="https://arxiv.org/html/1310.4546#S4.T4">表4</a>、<a href="https://arxiv.org/html/1310.4546#S5.T5">表5</a>。</strong>作者进一步改变数据量、维度和上下文，并给出短语近邻与组合示例。展示说明向量承载了部分结构信息，但多项配置同时变化，无法仅归因于数据量或某个单独技巧。</p>
 <p>评估还受词表覆盖影响。若某方法没有一个测试短语，是算错、跳过还是限定共同词表，会影响分数。比较词表示时，这种数据接口细节与网络公式同样重要。</p>
-<h2 id="教学推演负例分布为何重要">教学推演：负例分布为何重要</h2>
-<p>构造语料中“咖啡—喝”为真实词对。若负例大多是极少见的专名，模型容易把真对与噪声区分，未必学会区分“咖啡—喝”和“咖啡—购买”这类更细关系。若负例集中为过于常见词，又会改变被强调的判别边界。负例不是纯粹计算附件，而是目标的一部分。</p>
+<h2 id="五代理判别的几何不等于校准概率或世界事实">五、代理判别的几何不等于校准概率或世界事实</h2>
 <p>再想象一个真实但罕见搭配恰好被抽成负例。这不意味着训练立即矛盾到无法进行：目标是在统计上区分数据和噪声，抽样过程允许局部冲突。但它提醒我们，单次“负样本”不是人工确认的错误知识，不能将负采样标签解释成世界事实。</p>
 <p>向量加法也应这样理解。两个词的向量相加可能汇集共同上下文方向，得到相关概念，但没有机制保证逻辑合取、数值计算或事实关系都被准确执行。漂亮的几何例子可以启发机制分析，不能代替逻辑正确性的证明。</p>
-<h2 id="贡献与局限">贡献与局限</h2>
-<p>本文把大规模表示学习的三个实际瓶颈一起处理：输出昂贵、常见词重复、短语语义不可简单拆分。它提供的可迁移研究原则是，把计算资源集中到更有区分度的训练信号，并明确代理任务与最终用途的联系。</p>
+<p>它提供的可迁移研究原则是，把计算资源集中到更有区分度的训练信号，并明确代理任务与最终用途的联系。</p>
 <p>局限包括对噪声分布与窗口的依赖、静态词义混合、短语阈值误差和数据偏差。高效率让更多数据可用，但若新数据重复、偏斜或污染评价集，也不会自动提供更可靠的语义。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>输出训练昂贵、常见词重复更新多，单词切分难表达部分短语</td>
-<td>负采样、频繁词下采样和短语识别</td>
-<td>用更便宜的判别信号重新分配更新预算，并为短语单独建表示</td>
-<td>表1、表3以及§4.1的规模与组合实验</td>
-<td>噪声分布改变目标，负采样不是完整softmax的无偏替代；方法排序随配置改变</td>
-</tr>
-</tbody></table></div>
+<h2 id="六把本篇机制再推进一步">六、把本篇机制再推进一步</h2>
+<details>
+<summary>1. 负例数翻倍却保持相同训练词数，是纯粹多花计算吗？</summary>
+
+<p><strong>参考答案</strong>：不是。正文的独立点积推导给出数据计数与负例期望计数之比；负例期望改变时，最优点积也改变。比较时既要报告计算量，也要承认判别目标的权重变了。有限维共享向量还会使各词对相互约束，所以不能把标量驻点当作每个真实词向量都精确满足的公式。</p>
+</details>
+
+<h2 id="七从噪声对比转向全局共现拟合">七、从噪声对比转向全局共现拟合</h2>
+<p>噪声分布决定点积的参照系；<a href="008-glove.html">GloVe</a>从共现比例构造另一种统计目标。若问题转为未登录词，读<a href="013-fasttext.html">fastText</a>检查子词参数共享，增加负例并不能补出不存在的整词行。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 负采样是否就是用少量词精确估计 softmax 梯度？</strong></p>
 <p>不是。它使用真实搭配与噪声搭配的判别目标，通常不等于完整 softmax 的无偏梯度估计。目标由噪声分布和负例数量共同定义，因此训练出的点积不能直接当作归一化语言概率。</p>
 <p><strong>2. 为什么减少高频词样本可能同时加快训练、提高类比准确率？</strong></p>
 <p>常见词占据大量更新，包含的信息可能重复。下采样释放预算，并改变语义相关搭配在训练中的相对影响。但它也改变数据分布，效果依任务而定，不能理解成对所有任务都无损压缩。</p>
-<p><strong>3. 表 3 是否支持“负采样在任何条件下都优于层次 softmax”？</strong></p>
+<p><strong>3. <a href="https://arxiv.org/html/1310.4546#S4.T3">表3</a> 是否支持“负采样在任何条件下都优于层次 softmax”？</strong></p>
 <p>不支持。该表显示方法排序随下采样配置变化。更准确的结论是输出目标、样本选择和短语任务存在交互，比较时必须保留完整设置，而非给算法贴永久优劣标签。</p>
 </div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
@@ -158,21 +161,17 @@
 
 **论文**：Tomas Mikolov 等，*Distributed Representations of Words and Phrases and their Compositionality*，2013。[原文](https://arxiv.org/abs/1310.4546) · [PDF](https://arxiv.org/pdf/1310.4546)。重点是负采样、频繁词下采样与短语构造，而非重新介绍全部词向量历史。
 
-## 一分钟理解
+### 先接住前作的问题
 
-训练一个中心词与邻词的关系，是否需要每次都计算几十万个候选词？负采样把这个问题改成较小的二分类：提高真实词对得分，降低从噪声分布抽出的少量词对得分。论文还减少常见词的训练占比，并把一些高关联词组并成短语，使同样计算能学习更丰富的表示。
+[word2vec](004-word2vec.md)已经删除昂贵隐藏层，但输出训练仍需处理很大的词表，高频词还会占去大量更新。本篇直接扩展其训练路线：用少量噪声词替换全词表判别，并分别改变样本分布与短语单位。这三个改动要独立追踪，不能只称作换了一个更快损失。
 
-这些设计分别改变输出目标、样本分布和基本符号单位。它们可以共同提高效率与关系任务效果，但不能笼统归结为“只换了损失”。短语任务中不同输出方案与下采样存在交互，恰好说明组合实验不能被简化成单一组件永远最好。
+## 一、问题设定：每个真实词对是否必须遍历全词表
 
-## 背景：概率归一化并非表示学习唯一选择
-
-完整 softmax 将中心词对每个候选上下文的得分一起归一化，计算成本随词表增长。若最终主要使用词向量的几何结构，可以选择一个更便宜的代理目标，而不强求每次更新都得到精确的归一化条件分布。
-
-但更便宜的目标与完整最大似然不是自动等价的。负采样学习“真实搭配比噪声搭配更像数据”，结果依赖噪声分布和负例数量。把它说成“无偏计算 softmax 梯度”会掩盖真正的建模变化，也无法解释为什么噪声分布会影响向量几何。
+训练“中心词—邻词”关系时，完整 softmax 要把全部候选得分归一化，成本随词表扩大。既然最终主要使用词向量几何，能否转而区分真实搭配和少量噪声搭配？这会改变学习目标，而非只是更便宜地计算同一个精确条件分布。
 
 另一个问题来自词频。像冠词、介词这样的常见词产生大量训练对，却不一定提供同等多的新信息。下采样主动改变这些词出现的训练频率，节省计算，也改变中心与上下文统计。效率与表示质量因此可能同时变化。
 
-## 方法一：真实搭配对少量噪声搭配
+## 二、从数据噪声比推导点积，再调整样本和词项
 
 设 $v_w$ 是中心词向量，$u_c$ 是上下文向量。一对真实词 $(w,c)$ 的目标为：
 
@@ -186,11 +185,25 @@ $\sigma$ 为 sigmoid，$P_n$ 为负例抽样分布，$k$ 为负例数量。第�
 
 这是判别式代理目标。某个点积很高，意味着它在给定噪声比较下更像真实搭配，而不是已经可以直接当成某个校准概率。要得到归一化语言模型，还需要另行定义输出和训练方法。
 
-## 方法二：调整样本和词项
-
 频繁词下采样以较高概率跳过高频词，使模型减少重复学习常见搭配。短语检测则根据词对出现次数相对于各自频率的关联程度，合并如专名这样的组合。它是基于统计的预处理，不是一个已经理解所有语法结构的解析器。
 
 “纽约”和“新”加“约克”的意义并非总能简单相加，因此给短语一个独立词项可能有用；但合并过多会扩大词表、制造稀疏项，还可能把偶然共现当作固定短语。阈值和多轮合并影响数据，必须进入实验条件。
+
+### 负样本到底把点积推向哪里
+
+把一对词 $(w,c)$ 的点积暂视为可独立调节的标量 $z$。若真实共现计数为 $a$、负例期望计数为 $b$，局部目标是 $a\log\sigma(z)+b\log\sigma(-z)$。求导为 $a(1-\sigma(z))-b\sigma(z)$，驻点满足 $\sigma(z)=a/(a+b)$，故 $z=\log(a/b)$。这是本文给出的教学推导：有限维共享向量不能同时独立实现所有驻点，但它说明点积表达“相对噪声有多异常”，不是可直接归一化的下一词概率。
+
+**教学算例。** 同一词对真实出现20次，负例期望为5次，最优独立点积为 $\log4\approx1.386$；若噪声分布改变令负例变成10次，则点积变为 $\log2\approx0.693$，真实语料完全未变。调整负例数量或分布会改变学习问题；不能把更多负例只看成无关紧要的加速参数。
+
+构造语料中“咖啡—喝”为真实词对。若负例大多是极少见的专名，模型容易把真对与噪声区分，未必学会区分“咖啡—喝”和“咖啡—购买”这类更细关系。若负例集中为过于常见词，又会改变被强调的判别边界。负例不是纯粹计算附件，而是目标的一部分。
+
+### 区分一次负例抽样与负例期望目标
+
+在式中的期望训练实现里，某次只抽到噪声词甲，不代表词乙永远没有排斥梯度；乙在多次更新中的出现频率由噪声分布决定。若把同一正例的负例数从5改为10，且逐项求和不改权重，负例期望贡献也翻倍。要做“仅增加估计精度”的对照，就必须另定义归一化目标，不能假定原算法自然保持同一个最优点。
+
+教法联系：[Jay Alammar的The Illustrated Word2vec](https://jalammar.github.io/illustrated-word2vec/)。算例为本文自构。
+
+## 三、把短语合并、下采样与负例抽样分开执行
 
 ```text
 输入：词序列、词频、短语阈值、负样本数 k
@@ -207,7 +220,11 @@ $\sigma$ 为 sigmoid，$P_n$ 为负例抽样分布，$k$ 为负例数量。第�
 
 目标函数改变、训练分布改变、词表改变，是三条独立的信息路径。若三者一起启用后成绩提高，不能仅凭一个总分判断哪个是主要原因，应阅读对应消融与交互比较。
 
-## 实验与证据定位
+## 四、逐块读负例数与下采样的交互结果
+
+现在按开关拆开表1与表3：负例更多是否值得，以及下采样会不会改变输出方法的排名。
+
+**[表1](#llm-v6-005-table-1)值得拆开读。** 不下采样时，NEG-5 与 NEG-15 的总类比准确率为59%与61%，耗时38与97分钟；加上下采样后分别为60%与61%，耗时14与36分钟。增加负例与改变输入分布是两项干预；不能用最终一行把收益全算作负采样本身。
 
 | 项目 | 论文范围 |
 |---|---|
@@ -218,31 +235,44 @@ $\sigma$ 为 sigmoid，$P_n$ 为负例抽样分布，$k$ 为负例数量。第�
 | 展示 | 短语近邻与向量加法例子，用于解释而非代替统计 |
 | 不确定性 | 未提供覆盖所有配置的现代多种子置信区间体系 |
 
-**证据一，第 2 节与表 1。**负采样及下采样的定义配合词类比比较，说明廉价目标仍可学习有用表示。但这并没有证明与完整 softmax 相同的概率拟合质量。
+**证据一，第 2 节与[表1](#llm-v6-005-table-1)。**负采样及下采样的定义配合词类比比较，说明廉价目标仍可学习有用表示。但这并没有证明与完整 softmax 相同的概率拟合质量。
 
-**证据二，表 3。**短语类比中，NEG-15 从无下采样的 27% 到下采样的 42%；层次 softmax 从 19% 到 47%。这些是该表具体设置下的结果，展示下采样与输出方法的相互作用。不能只摘“负采样有效”而忽略另一方法在组合配置中更高。
+**读表1先看上下两块。** 下半块启用了高频词下采样，上半块没有；在同一方法的两行之间比较，才看得出样本选择的影响。第二列是分钟，后三列是语法、语义和总类比准确率。增加负例数要同时查看准确率与耗时，不能把NEG-15的总分单独当作免费提升。
 
-**证据三，第 4.1 节及表 4—5。**作者进一步改变数据量、维度和上下文，并给出短语近邻与组合示例。展示说明向量承载了部分结构信息，但多项配置同时变化，无法仅归因于数据量或某个单独技巧。
+&lt;!-- figure-ref-v6:start:005-t1-1-anchor --&gt;
+&lt;a id=&quot;llm-v6-005-table-1&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:005-t1-1-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/005-negative-sampling-t1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/005-negative-sampling-t1.png&quot; width=&quot;1701&quot; height=&quot;538&quot; alt=&quot;负采样数量及高频词下采样对类比准确率和训练时间的影响&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Tomas Mikolov 等，2013，表1，PDF第5页；&lt;a href=&quot;https://arxiv.org/pdf/1310.4546#page=5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+**证据二，[表3](https://arxiv.org/html/1310.4546#S4.T3)。**短语类比中，NEG-15 从无下采样的 27% 到下采样的 42%；层次 softmax 从 19% 到 47%。这些是该表具体设置下的结果，展示下采样与输出方法的相互作用。不能只摘“负采样有效”而忽略另一方法在组合配置中更高。
+
+**证据三，第 4.1 节及[表4](https://arxiv.org/html/1310.4546#S4.T4)、[表5](https://arxiv.org/html/1310.4546#S5.T5)。**作者进一步改变数据量、维度和上下文，并给出短语近邻与组合示例。展示说明向量承载了部分结构信息，但多项配置同时变化，无法仅归因于数据量或某个单独技巧。
 
 评估还受词表覆盖影响。若某方法没有一个测试短语，是算错、跳过还是限定共同词表，会影响分数。比较词表示时，这种数据接口细节与网络公式同样重要。
 
-## 教学推演：负例分布为何重要
-
-构造语料中“咖啡—喝”为真实词对。若负例大多是极少见的专名，模型容易把真对与噪声区分，未必学会区分“咖啡—喝”和“咖啡—购买”这类更细关系。若负例集中为过于常见词，又会改变被强调的判别边界。负例不是纯粹计算附件，而是目标的一部分。
+## 五、代理判别的几何不等于校准概率或世界事实
 
 再想象一个真实但罕见搭配恰好被抽成负例。这不意味着训练立即矛盾到无法进行：目标是在统计上区分数据和噪声，抽样过程允许局部冲突。但它提醒我们，单次“负样本”不是人工确认的错误知识，不能将负采样标签解释成世界事实。
 
 向量加法也应这样理解。两个词的向量相加可能汇集共同上下文方向，得到相关概念，但没有机制保证逻辑合取、数值计算或事实关系都被准确执行。漂亮的几何例子可以启发机制分析，不能代替逻辑正确性的证明。
 
-## 贡献与局限
-
-本文把大规模表示学习的三个实际瓶颈一起处理：输出昂贵、常见词重复、短语语义不可简单拆分。它提供的可迁移研究原则是，把计算资源集中到更有区分度的训练信号，并明确代理任务与最终用途的联系。
+它提供的可迁移研究原则是，把计算资源集中到更有区分度的训练信号，并明确代理任务与最终用途的联系。
 
 局限包括对噪声分布与窗口的依赖、静态词义混合、短语阈值误差和数据偏差。高效率让更多数据可用，但若新数据重复、偏斜或污染评价集，也不会自动提供更可靠的语义。理解本篇需要掌握 sigmoid 二分类、负例分布、下采样、共现统计和代理目标，特别要区分“抽样近似同一目标”和“换成另一个便宜目标”。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 输出训练昂贵、常见词重复更新多，单词切分难表达部分短语 | 负采样、频繁词下采样和短语识别 | 用更便宜的判别信号重新分配更新预算，并为短语单独建表示 | 表1、表3以及§4.1的规模与组合实验 | 噪声分布改变目标，负采样不是完整softmax的无偏替代；方法排序随配置改变 |
+## 六、把本篇机制再推进一步
+
+&lt;details&gt;
+&lt;summary&gt;1. 负例数翻倍却保持相同训练词数，是纯粹多花计算吗？&lt;/summary&gt;
+
+**参考答案**：不是。正文的独立点积推导给出数据计数与负例期望计数之比；负例期望改变时，最优点积也改变。比较时既要报告计算量，也要承认判别目标的权重变了。有限维共享向量还会使各词对相互约束，所以不能把标量驻点当作每个真实词向量都精确满足的公式。
+
+&lt;/details&gt;
+
+## 七、从噪声对比转向全局共现拟合
+
+噪声分布决定点积的参照系；[GloVe](008-glove.md)从共现比例构造另一种统计目标。若问题转为未登录词，读[fastText](013-fasttext.md)检查子词参数共享，增加负例并不能补出不存在的整词行。
 
 ## 自测与参考答案
 
@@ -254,7 +284,7 @@ $\sigma$ 为 sigmoid，$P_n$ 为负例抽样分布，$k$ 为负例数量。第�
 
 常见词占据大量更新，包含的信息可能重复。下采样释放预算，并改变语义相关搭配在训练中的相对影响。但它也改变数据分布，效果依任务而定，不能理解成对所有任务都无损压缩。
 
-**3. 表 3 是否支持“负采样在任何条件下都优于层次 softmax”？**
+**3. [表3](https://arxiv.org/html/1310.4546#S4.T3) 是否支持“负采样在任何条件下都优于层次 softmax”？**
 
 不支持。该表显示方法排序随下采样配置变化。更准确的结论是输出目标、样本选择和短语任务存在交互，比较时必须保留完整设置，而非给算法贴永久优劣标签。
 </textarea>

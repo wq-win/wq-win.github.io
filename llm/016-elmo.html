@@ -42,19 +42,16 @@
                 <span class="text-gray-500">ELMo：一个词的表示，应由它在当前句子中的用法决定</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="8bc8b725414f5146257dfa9415a1dc66ef69e4386ca91151b426989fa856e9fb"><h1>016｜ELMo：一个词的表示，应由它在当前句子中的用法决定</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="8a220a6576a4f2031e317125fc6565c6558cfa5b053c50a71a51356b9ad04367"><h1>016｜ELMo：一个词的表示，应由它在当前句子中的用法决定</h1>
 <p><a href="index.html">目录</a> · <a href="015-transformer.html">上一篇</a> · <a href="017-gpt.html">下一篇</a></p>
 <p><strong>论文</strong>：Matthew E. Peters 等，<em>Deep Contextualized Word Representations</em>，NAACL 2018。<a href="https://arxiv.org/abs/1802.05365">原文</a> · <a href="https://arxiv.org/pdf/1802.05365">PDF</a>。重点是双向语言模型的分层上下文化特征与下游加权组合，不把它写成 BERT 式掩码预训练。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>“银行”出现在金融句子和河流句子里，静态词向量通常相同。ELMo 用预训练双向语言模型为每个具体位置生成表示，让同一个词随着上下文变化。下游任务还能学习不同层的组合，而不是只能拿最后一层。</p>
-<p>作者在六类 NLP 任务上评价，并通过层次分析研究不同表示包含的信息。贡献是把上下文和深层特征引入通用词表示接口；代价是执行预训练模型的计算，以及特征与下游任务、领域之间的适配需求。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="004-word2vec.html">word2vec</a>、<a href="008-glove.html">GloVe</a>与<a href="013-fasttext.html">fastText</a>都主要给词类型固定表示，子词共享并不告诉模型这个词在当前句子中的用法。本篇改变表示对象：取预训练语言模型在具体位置的激活。循环骨干组合LSTM，迁移方式则与整体微调路线平行。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念是双向语言建模、上下文化、层混合、特征迁移和领域适配。它们分别回答表示来自哪里、何时变化、怎样选择、如何接入任务以及额外数据怎样影响结果。</p>
-<h2 id="背景静态表示难以区分用法">背景：静态表示难以区分用法</h2>
-<p>word2vec、GloVe 和子词向量主要给词项一个固定向量。子词可以改善稀有词共享，却不能仅靠拼写判断当前语义。ELMo 的输入不仅是词身份，还包括整句上下文，表示因出现位置而变化。</p>
-<p>预训练使用前向和后向语言建模。前向模型根据左边预测，后向模型根据右边预测；把两者隐藏状态结合，得到位置的双向信息。这与单个网络在同一层同时读取所有左右词的 BERT 机制不同，不能因为都叫双向就忽略计算方式。</p>
-<p>下游系统仍有自己的结构和监督数据。把 ELMo 特征加入问答模型，不等于 ELMo 单独解决问答；任务头、交互层和训练标注仍然贡献性能。论文的比较常以原下游基线与加入特征后的模型为单位。</p>
-<h2 id="方法多个层次由任务决定怎么组合">方法：多个层次，由任务决定怎么组合</h2>
+<h2 id="一问题设定同一拼写在不同句子里怎样获得不同表示">一、问题设定：同一拼写在不同句子里怎样获得不同表示</h2>
+<p>英文bank在金融与河岸语境中拼写相同，静态查表通常返回同一词向量；子词也无法仅凭拼写确定当前用法。本篇让表示依赖整句上下文，并开放多层特征给下游任务选择，而非只导出每个词的一组固定参数。</p>
+<h2 id="二区分双向语言预测位置激活与任务层混合">二、区分双向语言预测、位置激活与任务层混合</h2>
 <p>对位置 <span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span>，预训练模型提供从输入表示到多层隐藏状态的集合 <span class="reading-math" data-tex="R_k=\{h_{k,j}\}_{j=0}^{L}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>R</mi><mi>k</mi></msub><mo>=</mo><mo stretchy="false">{</mo><msub><mi>h</mi><mrow><mi>k</mi><mo separator="true">,</mo><mi>j</mi></mrow></msub><msubsup><mo stretchy="false">}</mo><mrow><mi>j</mi><mo>=</mo><mn>0</mn></mrow><mi>L</mi></msubsup></mrow><annotation encoding="application/x-tex">R_k=\{h_{k,j}\}_{j=0}^{L}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.00773em;">R</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0077em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2361em;vertical-align:-0.3948em;"></span><span class="mopen">{</span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose"><span class="mclose">}</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-2.4413em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span><span class="mrel mtight">=</span><span class="mord mtight">0</span></span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">L</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3948em;"><span></span></span></span></span></span></span></span></span></span></span>。下游任务使用：</p>
 <p><span class="reading-math" data-tex="\operatorname{ELMo}_k^{task}
 =\gamma^{task}\sum_{j=0}^{L}s_j^{task}h_{k,j}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msubsup><mrow><mi mathvariant="normal">ELMo</mi><mo>⁡</mo></mrow><mi>k</mi><mrow><mi>t</mi><mi>a</mi><mi>s</mi><mi>k</mi></mrow></msubsup><mo>=</mo><msup><mi>γ</mi><mrow><mi>t</mi><mi>a</mi><mi>s</mi><mi>k</mi></mrow></msup><munderover><mo>∑</mo><mrow><mi>j</mi><mo>=</mo><mn>0</mn></mrow><mi>L</mi></munderover><msubsup><mi>s</mi><mi>j</mi><mrow><mi>t</mi><mi>a</mi><mi>s</mi><mi>k</mi></mrow></msubsup><msub><mi>h</mi><mrow><mi>k</mi><mo separator="true">,</mo><mi>j</mi></mrow></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\operatorname{ELMo}_k^{task}
@@ -62,6 +59,14 @@
 <p><span class="reading-math" data-tex="s_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">s_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 通常经 softmax 归一化，表示层权重；<span class="reading-math" data-tex="\gamma"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi></mrow><annotation encoding="application/x-tex">\gamma</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span></span></span></span></span> 调整整体尺度。不同任务可以强调不同层，避免假定最深层总是最佳特征。这里学习的是任务级层混合，并非每个词都由一个自由路由器选择完全不同层权重。</p>
 <p>语言模型使用字符层输入表示与双向循环层，使形态信息和上下文共同参与。预训练目标仍是两个方向的语言似然，不直接使用每个下游任务标签。论文还涉及领域相关语言模型适配，所以“完全冻结一个通用模型、所有任务直接使用”并不能概括所有实验。</p>
 <p>下游通常将 ELMo 拼接到已有表示的某些位置，再训练任务网络及层混合权重。加入位置本身是实验变量：靠近输入或较深层可能作用不同。预训练参数是否领域适配、是否冻结，应按具体实验区分。</p>
+<h3 id="双向特征与双向预测要分清">双向特征与双向预测要分清</h3>
+<p>ELMo先分别优化正向 <span class="reading-math" data-tex="\log p(t_k\mid t_{&lt;k})"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>log</mi><mo>⁡</mo><mi>p</mi><mo stretchy="false">(</mo><msub><mi>t</mi><mi>k</mi></msub><mo>∣</mo><msub><mi>t</mi><mrow><mo>&lt;</mo><mi>k</mi></mrow></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\log p(t_k\mid t_{&lt;k})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">t</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">t</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&lt;</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span> 和反向 <span class="reading-math" data-tex="\log p(t_k\mid t_{&gt;k})"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>log</mi><mo>⁡</mo><mi>p</mi><mo stretchy="false">(</mo><msub><mi>t</mi><mi>k</mi></msub><mo>∣</mo><msub><mi>t</mi><mrow><mo>&gt;</mo><mi>k</mi></mrow></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\log p(t_k\mid t_{&gt;k})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">t</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">t</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mrel mtight">&gt;</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1774em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>，两个LSTM方向不在预测同一token时互相偷看答案；下游才拼接各方向表示，并以 <span class="reading-math" data-tex="\gamma\sum_j\operatorname{softmax}(a)_j h_{k,j}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi><msub><mo>∑</mo><mi>j</mi></msub><mi mathvariant="normal">softmax</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>a</mi><msub><mo stretchy="false">)</mo><mi>j</mi></msub><msub><mi>h</mi><mrow><mi>k</mi><mo separator="true">,</mo><mi>j</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\gamma\sum_j\operatorname{softmax}(a)_j h_{k,j}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1858em;vertical-align:-0.4358em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 混合层。这里 <span class="reading-math" data-tex="t_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>t</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">t_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7651em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">t</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 为第 <span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 个词，<span class="reading-math" data-tex="h_{k,j}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>h</mi><mrow><mi>k</mi><mo separator="true">,</mo><mi>j</mi></mrow></msub></mrow><annotation encoding="application/x-tex">h_{k,j}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 为它在第 <span class="reading-math" data-tex="j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span></span></span></span></span> 层的双向特征，<span class="reading-math" data-tex="a"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>a</mi></mrow><annotation encoding="application/x-tex">a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">a</span></span></span></span></span> 为各层可训练混合分数，<span class="reading-math" data-tex="\gamma"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi></mrow><annotation encoding="application/x-tex">\gamma</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span></span></span></span></span> 为可训练整体尺度。层权重通常是任务级参数，不是每个词都单独产生一套路由分数。上下文化主要来自 <span class="reading-math" data-tex="h_{k,j}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>h</mi><mrow><mi>k</mi><mo separator="true">,</mo><mi>j</mi></mrow></msub></mrow><annotation encoding="application/x-tex">h_{k,j}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 随句子变化，层混合让任务选择使用哪一级特征。</p>
+<p><strong>教学算例。</strong> 三层候选表示在某一维为 <span class="reading-math" data-tex="(1,2,4)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>2</mn><mo separator="true">,</mo><mn>4</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1,2,4)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">4</span><span class="mclose">)</span></span></span></span></span>，任务权重为 <span class="reading-math" data-tex="(0.2,0.3,0.5)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0.2</mn><mo separator="true">,</mo><mn>0.3</mn><mo separator="true">,</mo><mn>0.5</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0.2,0.3,0.5)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.3</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.5</span><span class="mclose">)</span></span></span></span></span>，缩放 <span class="reading-math" data-tex="\gamma=2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi><mo>=</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">\gamma=2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span></span></span></span></span>，则该维输出为 <span class="reading-math" data-tex="2(0.2+0.6+2)=5.6"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mo stretchy="false">(</mo><mn>0.2</mn><mo>+</mo><mn>0.6</mn><mo>+</mo><mn>2</mn><mo stretchy="false">)</mo><mo>=</mo><mn>5.6</mn></mrow><annotation encoding="application/x-tex">2(0.2+0.6+2)=5.6</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mopen">(</span><span class="mord">0.2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">0.6</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">5.6</span></span></span></span></span>。另一任务即便读取同一个冻结语言模型，只把层权重改为 <span class="reading-math" data-tex="(0.6,0.3,0.1)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0.6</mn><mo separator="true">,</mo><mn>0.3</mn><mo separator="true">,</mo><mn>0.1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0.6,0.3,0.1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.6</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.3</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.1</span><span class="mclose">)</span></span></span></span></span>，输出就变为3.2。预训练参数没变不代表下游输入特征的使用方式没变。</p>
+<p>构造英文词 bank 在“在银行存钱”和“沿河岸行走”对应英文语境中的两次出现，即使目标词拼写相同，左右词不同，循环状态也不同。ELMo 可以产生不同位置向量；静态查表则给出相同词项参数，除非后续另有上下文网络。中文“银行”本身不具有英文 bank 的河岸义，因此教学例子应保留英文词，避免把翻译歧义错当作中文一词多义。</p>
+<h3 id="防止双向特征里混入预测标签">防止双向特征里混入预测标签</h3>
+<p>对“甲 乙 丙”，正向语言模型在预测“乙”时只用“甲”，反向模型用右侧“丙”。下游表示才把两个方向的隐状态组合。若训练正向预测时直接给它已包含“乙”的双向拼接表示，就改变了原来的语言建模条件；“下游用双向”不能成为训练时泄漏当前词的理由。</p>
+<p>教法联系：<a href="https://colah.github.io/posts/2015-08-Understanding-LSTMs/">Christopher Olah的Understanding LSTM Networks</a>。算例为本文自构。</p>
+<h2 id="三将预训练特征接入下游并记录领域适配">三、将预训练特征接入下游，并记录领域适配</h2>
 <pre><code class="language-text">预训练：
     用无标签文本训练前向与后向语言模型
     保留字符输入层和各层上下文状态
@@ -73,7 +78,8 @@
 评价：使用相同任务与数据划分比较加入前后表现
 </code></pre>
 <p>数学目标分成预训练语言建模与下游任务损失；机制是上下文化分层特征迁移；指标依任务而异。不能把六个不同任务的 F1、准确率和相关量简单平均成一个没有定义的“理解率”。</p>
-<h2 id="实验与证据">实验与证据</h2>
+<h2 id="四按任务模型层选择和重复协议读取收益">四、按任务模型、层选择和重复协议读取收益</h2>
+<p>实验单位是原任务系统与加入特征后的系统；层分析再回答特征从哪里提供帮助。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -103,46 +109,40 @@
 </tr>
 <tr>
 <td>重复</td>
-<td>表 1 对 NER、SST-5 给出五次随机运行均值与标准差；不能扩展成所有列均同协议</td>
+<td><a href="#llm-v6-016-table-1">表1</a> 对 NER、SST-5 给出五次随机运行均值与标准差；不能扩展成所有列均同协议</td>
 </tr>
 </tbody></table></div>
-<p>**证据一，第 3 节方法。**层加权式说明“深层表示”如何成为任务接口。作者没有要求下游只读取最后一层，这正是与更早单层特征方案的重要区别。</p>
-<p>**证据二，表 1。**语义角色标注的相应基线 F1 从 81.4 到 84.6，共指从 67.2 到 70.4。数值属于具体任务模型的加入前后对照，不是 ELMo 单独预测的成绩。</p>
-<p>**证据三，第 5.1 节及后续层分析。**比较使用全部层与只用末层，检验层组合必要性；分析揭示不同层在句法与语义信息上的差异。探针发现可解码信息，不等于证明下游真正以同样方式使用这些信息。</p>
+<p><strong>证据一，第 3 节方法。</strong>层加权式说明“深层表示”如何成为任务接口。作者没有要求下游只读取最后一层，这正是与更早单层特征方案的重要区别。</p>
+<p><strong>证据二，<a href="#llm-v6-016-table-1">表1</a>。</strong>语义角色标注的相应基线 F1 从 81.4 到 84.6，共指从 67.2 到 70.4。数值属于具体任务模型的加入前后对照，不是 ELMo 单独预测的成绩。</p>
+<!-- figure-ref-v6:start:016-t1-1-anchor -->
+<p><a id="llm-v6-016-table-1"></a></p>
+<!-- figure-ref-v6:end:016-t1-1-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/016-elmo-t1.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/016-elmo-t1.png" width="1701" height="527" alt="ELMo加入前后六类自然语言任务的结果及绝对和相对增益" loading="lazy"></a><figcaption>实验结果表摘引：Matthew E. Peters 等，2018，表1，PDF第5页；<a href="https://arxiv.org/pdf/1802.05365#page=5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据三，第 5.1 节及后续层分析。</strong>比较使用全部层与只用末层，检验层组合必要性；分析揭示不同层在句法与语义信息上的差异。探针发现可解码信息，不等于证明下游真正以同样方式使用这些信息。</p>
 <p>还应注意领域适配带来的额外数据访问。如果语言模型在任务相关文本上再训练，收益可能同时来自领域分布接近与特征形式。阅读附录设置能避免把这部分归因遗漏。</p>
-<h2 id="教学例子同词不同向量">教学例子：同词不同向量</h2>
-<p>构造英文词 bank 在“在银行存钱”和“沿河岸行走”对应英文语境中的两次出现，即使目标词拼写相同，左右词不同，循环状态也不同。ELMo 可以产生不同位置向量；静态查表则给出相同词项参数，除非后续另有上下文网络。中文“银行”本身不具有英文 bank 的河岸义，因此教学例子应保留英文词，避免把翻译歧义错当作中文一词多义。</p>
-<p>更准确地说，ELMo 并没有为词典里每种词义分配一个固定编号。表示是连续函数，语境变化会连续影响它。含糊句子仍可能无法消歧，错误或稀有用法也可能导致不稳定表示。</p>
 <p>层混合的教学类比是使用不同抽象层次的特征。实体边界可能更依赖局部形态，长程角色关系可能需要更深上下文；但这只是直觉，不能预先把每层钉死为某一功能。论文通过任务实验与分析来检验，而不是仅靠命名。</p>
-<h2 id="为什么上下文化不是全部答案">为什么上下文化不是全部答案</h2>
+<h2 id="五上下文化仍需检验关系使用与运行成本">五、上下文化仍需检验关系使用与运行成本</h2>
+<p>更准确地说，ELMo 并没有为词典里每种词义分配一个固定编号。表示是连续函数，语境变化会连续影响它。含糊句子仍可能无法消歧，错误或稀有用法也可能导致不稳定表示。</p>
 <p>一个模型看见上下文，不代表它忠实理解否定、数量或实体关系。它可能利用数据中的关联捷径。要验证语义，应构造保持词汇但交换关系的对照，而不是仅查看近邻是否按主题聚类。</p>
 <p>上下文化还增加每条输入的计算；静态向量可以直接查表，ELMo 需要运行循环模型。多任务共享预训练参数节省知识学习，但执行成本仍在。任务性能与延迟、缓存和批量策略应分别比较。</p>
-<h2 id="贡献与局限">贡献与局限</h2>
-<p>ELMo 展示了预训练模型的内部层可以作为可迁移特征，帮助多种任务，推动从静态词向量走向上下文表示。局限包括循环顺序成本、领域依赖、下游结构复杂以及预训练目标与语义任务间的距离。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>静态词向量不随语境变化，下游难获得不同层次的语言信息</td>
-<td>预训练双向语言模型，并学习任务特定的层表示组合</td>
-<td>同一个词可根据上下文得到不同表示，下游可选择有用层次</td>
-<td>表1多任务加入前后对照，§5.1层组合分析</td>
-<td>额外语言模型计算与存储；探针可解码的信息不一定就是下游实际使用的信息</td>
-</tr>
-</tbody></table></div>
+<p>局限包括循环顺序成本、领域依赖、下游结构复杂以及预训练目标与语义任务间的距离。</p>
+<h2 id="六把本篇机制再推进一步">六、把本篇机制再推进一步</h2>
+<details>
+<summary>1. 冻结语言模型以后，两个任务得到的最终ELMo特征一定相同吗？</summary>
+
+<p><strong>参考答案</strong>：不一定。底层各层激活可以相同，但任务级层权重和整体缩放会改变最终组合；正文的5.6与3.2算例展示了这一点。应区分预训练参数是否更新、层混合是否学习和输入语境是否变化，不能把三者统称为“冻结表示”。</p>
+</details>
+
+<h2 id="七对照特征迁移整体微调与深层双向交互">七、对照特征迁移、整体微调与深层双向交互</h2>
+<p>任务层混合依赖已经形成的双向特征。<a href="018-bert.html">BERT</a>改用掩码恢复，并通常更新骨干做下游微调；比较这两种迁移方式时，应把预训练条件、任务参数和训练预算一起列出。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. ELMo 的双向与 BERT 的双向为何不同？</strong></p>
 <p>ELMo 组合分别按两个方向训练的循环语言模型状态；BERT 的掩码编码器让位置在同一网络中交互左右信息。两者都提供双向上下文，但训练目标和信息融合路径不同。</p>
 <p><strong>2. 为什么不直接取最深层？</strong></p>
 <p>不同层可能保留不同类型信息，最适合语言预测的末层未必最适合所有任务。任务学习混合权重能够利用多个层次；是否获益要通过消融检验。</p>
-<p><strong>3. 表 1 提升是否意味着只加入向量就无需标注？</strong></p>
+<p><strong>3. <a href="#llm-v6-016-table-1">表1</a> 提升是否意味着只加入向量就无需标注？</strong></p>
 <p>不是。下游模型仍在任务标注上训练，ELMo 提供额外预训练特征。应把无标签预训练、领域适配和任务监督的数据来源分别说明。</p>
 </div><!-- READING:END -->
             <div id="article-pager" class="flex justify-between gap-4 mt-8"></div>
@@ -155,21 +155,15 @@
 
 **论文**：Matthew E. Peters 等，*Deep Contextualized Word Representations*，NAACL 2018。[原文](https://arxiv.org/abs/1802.05365) · [PDF](https://arxiv.org/pdf/1802.05365)。重点是双向语言模型的分层上下文化特征与下游加权组合，不把它写成 BERT 式掩码预训练。
 
-## 一分钟理解
+### 先接住前作的问题
 
-“银行”出现在金融句子和河流句子里，静态词向量通常相同。ELMo 用预训练双向语言模型为每个具体位置生成表示，让同一个词随着上下文变化。下游任务还能学习不同层的组合，而不是只能拿最后一层。
+[word2vec](004-word2vec.md)、[GloVe](008-glove.md)与[fastText](013-fasttext.md)都主要给词类型固定表示，子词共享并不告诉模型这个词在当前句子中的用法。本篇改变表示对象：取预训练语言模型在具体位置的激活。循环骨干组合LSTM，迁移方式则与整体微调路线平行。
 
-作者在六类 NLP 任务上评价，并通过层次分析研究不同表示包含的信息。贡献是把上下文和深层特征引入通用词表示接口；代价是执行预训练模型的计算，以及特征与下游任务、领域之间的适配需求。
+## 一、问题设定：同一拼写在不同句子里怎样获得不同表示
 
-## 背景：静态表示难以区分用法
+英文bank在金融与河岸语境中拼写相同，静态查表通常返回同一词向量；子词也无法仅凭拼写确定当前用法。本篇让表示依赖整句上下文，并开放多层特征给下游任务选择，而非只导出每个词的一组固定参数。
 
-word2vec、GloVe 和子词向量主要给词项一个固定向量。子词可以改善稀有词共享，却不能仅靠拼写判断当前语义。ELMo 的输入不仅是词身份，还包括整句上下文，表示因出现位置而变化。
-
-预训练使用前向和后向语言建模。前向模型根据左边预测，后向模型根据右边预测；把两者隐藏状态结合，得到位置的双向信息。这与单个网络在同一层同时读取所有左右词的 BERT 机制不同，不能因为都叫双向就忽略计算方式。
-
-下游系统仍有自己的结构和监督数据。把 ELMo 特征加入问答模型，不等于 ELMo 单独解决问答；任务头、交互层和训练标注仍然贡献性能。论文的比较常以原下游基线与加入特征后的模型为单位。
-
-## 方法：多个层次，由任务决定怎么组合
+## 二、区分双向语言预测、位置激活与任务层混合
 
 对位置 $k$，预训练模型提供从输入表示到多层隐藏状态的集合 $R_k=\{h_{k,j}\}_{j=0}^{L}$。下游任务使用：
 
@@ -183,6 +177,22 @@ $s_j$ 通常经 softmax 归一化，表示层权重；$\gamma$ 调整整体尺�
 语言模型使用字符层输入表示与双向循环层，使形态信息和上下文共同参与。预训练目标仍是两个方向的语言似然，不直接使用每个下游任务标签。论文还涉及领域相关语言模型适配，所以“完全冻结一个通用模型、所有任务直接使用”并不能概括所有实验。
 
 下游通常将 ELMo 拼接到已有表示的某些位置，再训练任务网络及层混合权重。加入位置本身是实验变量：靠近输入或较深层可能作用不同。预训练参数是否领域适配、是否冻结，应按具体实验区分。
+
+### 双向特征与双向预测要分清
+
+ELMo先分别优化正向 $\log p(t_k\mid t_{&lt;k})$ 和反向 $\log p(t_k\mid t_{&gt;k})$，两个LSTM方向不在预测同一token时互相偷看答案；下游才拼接各方向表示，并以 $\gamma\sum_j\operatorname{softmax}(a)_j h_{k,j}$ 混合层。这里 $t_k$ 为第 $k$ 个词，$h_{k,j}$ 为它在第 $j$ 层的双向特征，$a$ 为各层可训练混合分数，$\gamma$ 为可训练整体尺度。层权重通常是任务级参数，不是每个词都单独产生一套路由分数。上下文化主要来自 $h_{k,j}$ 随句子变化，层混合让任务选择使用哪一级特征。
+
+**教学算例。** 三层候选表示在某一维为 $(1,2,4)$，任务权重为 $(0.2,0.3,0.5)$，缩放 $\gamma=2$，则该维输出为 $2(0.2+0.6+2)=5.6$。另一任务即便读取同一个冻结语言模型，只把层权重改为 $(0.6,0.3,0.1)$，输出就变为3.2。预训练参数没变不代表下游输入特征的使用方式没变。
+
+构造英文词 bank 在“在银行存钱”和“沿河岸行走”对应英文语境中的两次出现，即使目标词拼写相同，左右词不同，循环状态也不同。ELMo 可以产生不同位置向量；静态查表则给出相同词项参数，除非后续另有上下文网络。中文“银行”本身不具有英文 bank 的河岸义，因此教学例子应保留英文词，避免把翻译歧义错当作中文一词多义。
+
+### 防止双向特征里混入预测标签
+
+对“甲 乙 丙”，正向语言模型在预测“乙”时只用“甲”，反向模型用右侧“丙”。下游表示才把两个方向的隐状态组合。若训练正向预测时直接给它已包含“乙”的双向拼接表示，就改变了原来的语言建模条件；“下游用双向”不能成为训练时泄漏当前词的理由。
+
+教法联系：[Christopher Olah的Understanding LSTM Networks](https://colah.github.io/posts/2015-08-Understanding-LSTMs/)。算例为本文自构。
+
+## 三、将预训练特征接入下游，并记录领域适配
 
 ```text
 预训练：
@@ -198,7 +208,9 @@ $s_j$ 通常经 softmax 归一化，表示层权重；$\gamma$ 调整整体尺�
 
 数学目标分成预训练语言建模与下游任务损失；机制是上下文化分层特征迁移；指标依任务而异。不能把六个不同任务的 F1、准确率和相关量简单平均成一个没有定义的“理解率”。
 
-## 实验与证据
+## 四、按任务模型、层选择和重复协议读取收益
+
+实验单位是原任务系统与加入特征后的系统；层分析再回答特征从哪里提供帮助。
 
 | 项目 | 原文范围 |
 |---|---|
@@ -207,40 +219,48 @@ $s_j$ 通常经 softmax 归一化，表示层权重；$\gamma$ 调整整体尺�
 | 预训练来源 | 双向语言模型；部分任务使用领域适配版本 |
 | 指标 | SQuAD/SRL/NER 等 F1、SNLI/SST 准确率、共指平均 F1 |
 | 消融 | 层混合、特征加入位置及预训练层信息分析 |
-| 重复 | 表 1 对 NER、SST-5 给出五次随机运行均值与标准差；不能扩展成所有列均同协议 |
+| 重复 | [表1](#llm-v6-016-table-1) 对 NER、SST-5 给出五次随机运行均值与标准差；不能扩展成所有列均同协议 |
 
 **证据一，第 3 节方法。**层加权式说明“深层表示”如何成为任务接口。作者没有要求下游只读取最后一层，这正是与更早单层特征方案的重要区别。
 
-**证据二，表 1。**语义角色标注的相应基线 F1 从 81.4 到 84.6，共指从 67.2 到 70.4。数值属于具体任务模型的加入前后对照，不是 ELMo 单独预测的成绩。
+**证据二，[表1](#llm-v6-016-table-1)。**语义角色标注的相应基线 F1 从 81.4 到 84.6，共指从 67.2 到 70.4。数值属于具体任务模型的加入前后对照，不是 ELMo 单独预测的成绩。
+
+&lt;!-- figure-ref-v6:start:016-t1-1-anchor --&gt;
+&lt;a id=&quot;llm-v6-016-table-1&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:016-t1-1-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/016-elmo-t1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/016-elmo-t1.png&quot; width=&quot;1701&quot; height=&quot;527&quot; alt=&quot;ELMo加入前后六类自然语言任务的结果及绝对和相对增益&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Matthew E. Peters 等，2018，表1，PDF第5页；&lt;a href=&quot;https://arxiv.org/pdf/1802.05365#page=5&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 **证据三，第 5.1 节及后续层分析。**比较使用全部层与只用末层，检验层组合必要性；分析揭示不同层在句法与语义信息上的差异。探针发现可解码信息，不等于证明下游真正以同样方式使用这些信息。
 
 还应注意领域适配带来的额外数据访问。如果语言模型在任务相关文本上再训练，收益可能同时来自领域分布接近与特征形式。阅读附录设置能避免把这部分归因遗漏。
 
-## 教学例子：同词不同向量
-
-构造英文词 bank 在“在银行存钱”和“沿河岸行走”对应英文语境中的两次出现，即使目标词拼写相同，左右词不同，循环状态也不同。ELMo 可以产生不同位置向量；静态查表则给出相同词项参数，除非后续另有上下文网络。中文“银行”本身不具有英文 bank 的河岸义，因此教学例子应保留英文词，避免把翻译歧义错当作中文一词多义。
-
-更准确地说，ELMo 并没有为词典里每种词义分配一个固定编号。表示是连续函数，语境变化会连续影响它。含糊句子仍可能无法消歧，错误或稀有用法也可能导致不稳定表示。
-
 层混合的教学类比是使用不同抽象层次的特征。实体边界可能更依赖局部形态，长程角色关系可能需要更深上下文；但这只是直觉，不能预先把每层钉死为某一功能。论文通过任务实验与分析来检验，而不是仅靠命名。
 
-## 为什么上下文化不是全部答案
+## 五、上下文化仍需检验关系使用与运行成本
+
+更准确地说，ELMo 并没有为词典里每种词义分配一个固定编号。表示是连续函数，语境变化会连续影响它。含糊句子仍可能无法消歧，错误或稀有用法也可能导致不稳定表示。
 
 一个模型看见上下文，不代表它忠实理解否定、数量或实体关系。它可能利用数据中的关联捷径。要验证语义，应构造保持词汇但交换关系的对照，而不是仅查看近邻是否按主题聚类。
 
 上下文化还增加每条输入的计算；静态向量可以直接查表，ELMo 需要运行循环模型。多任务共享预训练参数节省知识学习，但执行成本仍在。任务性能与延迟、缓存和批量策略应分别比较。
 
-## 贡献与局限
-
-ELMo 展示了预训练模型的内部层可以作为可迁移特征，帮助多种任务，推动从静态词向量走向上下文表示。局限包括循环顺序成本、领域依赖、下游结构复杂以及预训练目标与语义任务间的距离。
+局限包括循环顺序成本、领域依赖、下游结构复杂以及预训练目标与语义任务间的距离。
 
 五个前置概念是双向语言建模、上下文化、层混合、特征迁移和领域适配。它们分别回答表示来自哪里、何时变化、怎样选择、如何接入任务以及额外数据怎样影响结果。
 
+## 六、把本篇机制再推进一步
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 静态词向量不随语境变化，下游难获得不同层次的语言信息 | 预训练双向语言模型，并学习任务特定的层表示组合 | 同一个词可根据上下文得到不同表示，下游可选择有用层次 | 表1多任务加入前后对照，§5.1层组合分析 | 额外语言模型计算与存储；探针可解码的信息不一定就是下游实际使用的信息 |
+&lt;details&gt;
+&lt;summary&gt;1. 冻结语言模型以后，两个任务得到的最终ELMo特征一定相同吗？&lt;/summary&gt;
+
+**参考答案**：不一定。底层各层激活可以相同，但任务级层权重和整体缩放会改变最终组合；正文的5.6与3.2算例展示了这一点。应区分预训练参数是否更新、层混合是否学习和输入语境是否变化，不能把三者统称为“冻结表示”。
+
+&lt;/details&gt;
+
+## 七、对照特征迁移、整体微调与深层双向交互
+
+任务层混合依赖已经形成的双向特征。[BERT](018-bert.md)改用掩码恢复，并通常更新骨干做下游微调；比较这两种迁移方式时，应把预训练条件、任务参数和训练预算一起列出。
 
 ## 自测与参考答案
 
@@ -252,7 +272,7 @@ ELMo 组合分别按两个方向训练的循环语言模型状态；BERT 的掩�
 
 不同层可能保留不同类型信息，最适合语言预测的末层未必最适合所有任务。任务学习混合权重能够利用多个层次；是否获益要通过消融检验。
 
-**3. 表 1 提升是否意味着只加入向量就无需标注？**
+**3. [表1](#llm-v6-016-table-1) 提升是否意味着只加入向量就无需标注？**
 
 不是。下游模型仍在任务标注上训练，ELMo 提供额外预训练特征。应把无标签预训练、领域适配和任务监督的数据来源分别说明。
 </textarea>

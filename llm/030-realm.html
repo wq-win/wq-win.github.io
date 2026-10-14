@@ -42,24 +42,30 @@
                 <span class="text-gray-500">REALM：让语言模型在预训练时学会检索外部知识</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="791e0171e713205092393523f97b1651d042b49c2a6061e8bf5a8316eeb8631b"><h1>030｜REALM：让语言模型在预训练时学会检索外部知识</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="bbb5f1d14ef5e9fe043c16cebe9de1bb3e56f74ccf9c2de43fd8d8e13af428b2"><h1>030｜REALM：让语言模型在预训练时学会检索外部知识</h1>
 <p><a href="index.html">目录</a> · <a href="029-scaling-laws.html">上一篇</a> · <a href="031-electra.html">下一篇</a></p>
 <p><strong>论文</strong>：Kelvin Guu 等，<em>REALM: Retrieval-Augmented Language Model Pre-Training</em>，ICML 2020。<a href="https://arxiv.org/abs/2002.08909">原文</a> · <a href="https://arxiv.org/pdf/2002.08909">PDF</a>。本文聚焦潜在文档检索、掩码预训练和索引刷新，不把它简化成部署时手工加一次搜索。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>事实都写进参数，需要大容量且更新困难。REALM 给语言模型外部文本库，并让检索器学习哪些文档能帮助恢复被遮盖内容。检索不是只有人工标注的匹配任务，而可从最终词预测是否改善获得训练信号。</p>
-<p>作者在开放域问答上验证预训练检索的价值。核心是把文档作为潜变量，并通过任务似然训练检索选择；代价是索引维护、近似搜索、知识库质量和训练稳定性。检索到文档不等于生成或抽取结果自动真实。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="018-bert.html">BERT</a>把恢复文本所需信息主要压入参数，事实更新与容量因此受限。本篇组合遮盖预测与外部文档检索，追问没有逐条相关性标签时，阅读收益能否训练检索器。<a href="032-dpr.html">DPR</a>的问答监督检索是平行路线，不能把两种训练信号混为一谈。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念是潜变量、边缘似然、稠密检索、最大内积搜索和索引刷新。掌握它们，后续读 DPR、RAG 与 Self-RAG 时就能辨别哪些部分在训练、哪些只是部署接口。</p>
-<h2 id="背景知识存在哪里">背景：知识存在哪里</h2>
-<p>参数化模型从训练文本压缩信息，更新一个事实通常需要再训练或其他编辑。外部文档库则可以直接替换内容，但模型需要找到相关材料，并正确利用它。知识存储与推理因此被拆成检索和阅读两个环节。</p>
+<h2 id="一问题设定外部文档怎样从词预测收益中获得检索监督">一、问题设定：外部文档怎样从词预测收益中获得检索监督</h2>
+<p>参数模型从语料压缩知识，更新事实通常需要再训练或编辑；外部文档可直接替换，却还需被找到并正确读取。本篇把知识访问拆为检索和阅读，希望最终词预测的改善给检索器提供监督，而非只优化词面匹配或独立相关性。</p>
 <p>如果检索器只用词面匹配，问题与答案文档的表达差异可能导致漏检。若检索器独立训练，它优化的相关性未必等于阅读器真正需要的信息。REALM 希望让“帮助预测目标”成为检索学习的依据。</p>
-<p>不过，训练信号可能稀疏：一开始检索不准，阅读器看不到有用信息，检索器也难知道该改哪里。初始化、掩码选择和检索近似因此是方法关键，而不是无关工程细节。</p>
-<h2 id="方法对潜在文档边缘化">方法：对潜在文档边缘化</h2>
+<h2 id="二从文档边缘似然推导后验责任差">二、从文档边缘似然推导后验责任差</h2>
 <p>设输入为 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span>、目标为 <span class="reading-math" data-tex="y"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">y</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span></span></span></span>、检索文档为 <span class="reading-math" data-tex="z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>z</mi></mrow><annotation encoding="application/x-tex">z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span></span></span></span></span>：</p>
 <p><span class="reading-math" data-tex="P(y\mid x)=\sum_zP_\eta(z\mid x)P_\theta(y\mid x,z)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>P</mi><mo stretchy="false">(</mo><mi>y</mi><mo>∣</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><munder><mo>∑</mo><mi>z</mi></munder><msub><mi>P</mi><mi>η</mi></msub><mo stretchy="false">(</mo><mi>z</mi><mo>∣</mo><mi>x</mi><mo stretchy="false">)</mo><msub><mi>P</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>y</mi><mo>∣</mo><mi>x</mi><mo separator="true">,</mo><mi>z</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">P(y\mid x)=\sum_zP_\eta(z\mid x)P_\theta(y\mid x,z).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3em;vertical-align:-1.25em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.04398em;">z</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">η</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
 <p>检索器参数为 <span class="reading-math" data-tex="\eta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>η</mi></mrow><annotation encoding="application/x-tex">\eta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">η</span></span></span></span></span>，知识增强编码器参数为 <span class="reading-math" data-tex="\theta"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>θ</mi></mrow><annotation encoding="application/x-tex">\theta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span></span></span></span></span>。文档得分通常由查询与文档嵌入内积构成，再归一化成检索概率。实际无法遍历全库，使用最大内积近似检索找到较少候选进行计算。</p>
 <p>若某文档使正确目标概率高于当前总体水平，其检索权重可获得正向学习信号；没有帮助的文档则相对被压低。直觉上，阅读成功为检索提供弱监督，但这是通过概率目标而非显式“这篇文档相关”标签实现。</p>
 <p>文档编码器更新后，索引中的旧向量可能过时。论文通过异步刷新等机制减轻陈旧问题。梯度训练文档表示不等于每次更新后整个大型索引瞬间完全一致，这个系统近似影响训练质量。</p>
+<h3 id="检索器收到的是后验责任与先验之差">检索器收到的是后验责任与先验之差</h3>
+<p>固定问题或损坏输入 <span class="reading-math" data-tex="x"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 和正确目标 <span class="reading-math" data-tex="y"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">y</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span></span></span></span></span>，令 <span class="reading-math" data-tex="z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>z</mi></mrow><annotation encoding="application/x-tex">z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span></span></span></span></span> 枚举候选文档。检索概率为 <span class="reading-math" data-tex="r_z=p(z\mid x)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>r</mi><mi>z</mi></msub><mo>=</mo><mi>p</mi><mo stretchy="false">(</mo><mi>z</mi><mo>∣</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">r_z=p(z\mid x)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.04398em;">z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span>，文档条件答案概率为 <span class="reading-math" data-tex="a_z=p(y\mid x,z)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>a</mi><mi>z</mi></msub><mo>=</mo><mi>p</mi><mo stretchy="false">(</mo><mi>y</mi><mo>∣</mo><mi>x</mi><mo separator="true">,</mo><mi>z</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">a_z=p(y\mid x,z)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.04398em;">z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mclose">)</span></span></span></span></span>，边缘概率 <span class="reading-math" data-tex="p_y=\sum_zr_za_z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mi>y</mi></msub><mo>=</mo><msub><mo>∑</mo><mi>z</mi></msub><msub><mi>r</mi><mi>z</mi></msub><msub><mi>a</mi><mi>z</mi></msub></mrow><annotation encoding="application/x-tex">p_y=\sum_zr_za_z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">y</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0497em;vertical-align:-0.2997em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.0017em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.04398em;">z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2997em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.04398em;">z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.04398em;">z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。对检索logit <span class="reading-math" data-tex="s_z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>s</mi><mi>z</mi></msub></mrow><annotation encoding="application/x-tex">s_z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.04398em;">z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 求导得 <span class="reading-math" data-tex="\partial\log p_y/\partial s_z=r_za_z/p_y-r_z"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∂</mi><mi>log</mi><mo>⁡</mo><msub><mi>p</mi><mi>y</mi></msub><mi mathvariant="normal">/</mi><mi mathvariant="normal">∂</mi><msub><mi>s</mi><mi>z</mi></msub><mo>=</mo><msub><mi>r</mi><mi>z</mi></msub><msub><mi>a</mi><mi>z</mi></msub><mi mathvariant="normal">/</mi><msub><mi>p</mi><mi>y</mi></msub><mo>−</mo><msub><mi>r</mi><mi>z</mi></msub></mrow><annotation encoding="application/x-tex">\partial\log p_y/\partial s_z=r_za_z/p_y-r_z</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">y</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.04398em;">z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.04398em;">z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.04398em;">z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">y</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.04398em;">z</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。第一项正是给定正确答案后的文档后验责任。帮助解释正确答案超过其原有检索份额的文档被抬高，无需人工逐条标注哪篇相关。</p>
+<p><strong>教学算例。</strong> 两篇文档检索概率各0.5，答案概率分别0.8和0.2，则边缘答案概率0.5，文档后验为0.8和0.2，两个logit梯度为+0.3与−0.3。若正确文档根本没进top-k，这次近似训练不会凭空给它同样梯度；索引召回与刷新频率因此直接影响学习，不仅影响查询速度。</p>
+<p>构造问题“某定理由谁提出”，两篇候选分别是相关数学史与无关旅游文章。若相关文档使正确名字概率更高，边缘似然倾向提高它的检索权重。检索器因此可以从预测收益学习，不需要每个问题单独标注文档ID。</p>
+<h3 id="文档责任在全部候选同样无用时怎样变化">文档责任在全部候选同样无用时怎样变化</h3>
+<p>若所有候选都给正确答案相同概率0.2，则边缘概率也为0.2，正文的后验责任恰等于检索先验，各检索logit梯度为零。检索训练需要阅读器能区分候选对目标的帮助；仅有不同检索分数并不足以产生“哪篇更有用”的信号。这个退化例可用于检查边缘化梯度实现。</p>
+<p>教法联系：<a href="https://lilianweng.github.io/posts/2024-07-07-hallucination/">Lilian Weng的Extrinsic Hallucinations in LLMs</a>。算例为本文自构。</p>
+<h2 id="三在候选近似与异步刷新之间训练检索和阅读">三、在候选近似与异步刷新之间训练检索和阅读</h2>
 <pre><code class="language-text">输入：无标签文本、外部文档库、初始化检索与阅读模型
 选择有信息的遮盖目标，构造查询输入
 用查询嵌入在当前文档索引中检索top-k候选
@@ -69,8 +75,10 @@
 周期或异步重编码文档并刷新索引
 下游开放问答微调时继续使用检索与阅读接口
 </code></pre>
-<p>数学目标是潜变量似然，机制是可学习外部知识访问，指标是问答准确率及检索相关分析。它不是仅把搜索结果拼到固定模型前，也不等同于后续 RAG 的所有生成形式。</p>
-<h2 id="实验与证据">实验与证据</h2>
+<p>再把知识库文档更新为新事实，但索引向量仍是旧版本。检索可能找不到新内容，或得分不再匹配实际文本。知识可编辑不等于系统即时完成一致更新，文本、向量和缓存都需要版本管理。</p>
+<h2 id="四按配置读取开放问答与陈旧索引消融">四、按配置读取开放问答与陈旧索引消融</h2>
+<p>它不是仅把搜索结果拼到固定模型前，也不等同于后续 RAG 的所有生成形式。</p>
+<p>先保持语料与评估集身份，再读最终EM、检索器替换和索引陈旧消融。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -96,7 +104,7 @@
 </tr>
 <tr>
 <td>下游数据</td>
-<td>表 1 列 NQ 约 79k/4k、WQ 约 3k/2k、CT 约 1k/1k 训练/测试样本</td>
+<td><a href="https://arxiv.org/html/2002.08909#S4.T1">表1</a> 列 NQ 约 79k/4k、WQ 约 3k/2k、CT 约 1k/1k 训练/测试样本</td>
 </tr>
 <tr>
 <td>最直接对照</td>
@@ -112,40 +120,33 @@
 </tr>
 </tbody></table></div>
 <p>这些设置来自<a href="https://arxiv.org/html/2002.08909">原文 §4.3、§4.5 与表 1</a>。独立随机种子次数及统一置信区间在这里未逐项确认，因此下面按原表的点估计解释结果。</p>
-<p>**证据一，方法中的潜变量定义与检索梯度。**它说明最终预测怎样监督检索。候选近似和索引陈旧意味着实现不是精确全库求和。</p>
-<p>**证据二，表 1 的开放问答测试结果。**ORQA 的 NQ/WQ/CT EM 为 33.3/36.4/30.1；Wikipedia 预训练的 REALM 为 39.2/40.2/46.8，CC-News 预训练版本为 40.4/40.7/42.9。以 NQ 为例，CC-News 版本比 ORQA 高 7.1 个百分点；但它在 CT 上低于 Wikipedia 版本 3.9 个百分点。数据配方没有在所有任务上同方向改善，不能拼接各列最优值，创造一个并不存在的统一模型结果。<a href="https://arxiv.org/html/2002.08909">原文表 1</a></p>
-<p>**证据三，表 2 的 NQ 开发集消融。**完整 REALM 的 EM 为 38.2；换回基线检索器后为 35.3；索引陈旧程度增加 30 倍时为 28.7。最后一项比完整模型低 9.5 个百分点，直接支持刷新机制在该训练设置中的重要性。这里是开发集，不能与表 1 的测试分数直接相减；消融也没有证明任何系统都应固定每 500 步刷新。<a href="https://arxiv.org/html/2002.08909">原文表 2、§4.5</a></p>
-<p>**证据四，表 3 的遮盖词例子。**相关文档使正确词的条件概率明显提高，但对候选边缘化后的概率仍取决于检索权重。这个例子展示训练机制如何起作用，不能替代全体查询的统计，也没有测量答案对来源的普遍忠实程度。<a href="https://arxiv.org/html/2002.08909">原文表 3</a></p>
+<p><strong>证据一，方法中的潜变量定义与检索梯度。</strong>它说明最终预测怎样监督检索。候选近似和索引陈旧意味着实现不是精确全库求和。</p>
+<p><strong>证据二，<a href="https://arxiv.org/html/2002.08909#S4.T1">表1</a> 的开放问答测试结果。</strong>ORQA 的 NQ/WQ/CT EM 为 33.3/36.4/30.1；Wikipedia 预训练的 REALM 为 39.2/40.2/46.8，CC-News 预训练版本为 40.4/40.7/42.9。以 NQ 为例，CC-News 版本比 ORQA 高 7.1 个百分点；但它在 CT 上低于 Wikipedia 版本 3.9 个百分点。数据配方没有在所有任务上同方向改善，不能拼接各列最优值，创造一个并不存在的统一模型结果。<a href="https://arxiv.org/html/2002.08909">原文表 1</a></p>
+<p><strong>证据三，<a href="#llm-v6-030-table-2">表2</a> 的 NQ 开发集消融。</strong>完整 REALM 的 EM 为 38.2；换回基线检索器后为 35.3；索引陈旧程度增加 30 倍时为 28.7。最后一项比完整模型低 9.5 个百分点，直接支持刷新机制在该训练设置中的重要性。这里是开发集，不能与<a href="https://arxiv.org/html/2002.08909#S4.T1">表1</a> 的测试分数直接相减；消融也没有证明任何系统都应固定每 500 步刷新。<a href="#llm-v6-030-table-2">原文表 2、§4.5</a></p>
+<!-- figure-ref-v6:start:030-t2-2-anchor -->
+<p><a id="llm-v6-030-table-2"></a></p>
+<!-- figure-ref-v6:end:030-t2-2-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/030-realm-t2.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/030-realm-t2.png" width="1404" height="792" alt="REALM检索器、遮盖方式与索引刷新速度的开发集消融" loading="lazy"></a><figcaption>实验结果表摘引：Kelvin Guu 等，2020，表2，PDF第7页；<a href="https://arxiv.org/pdf/2002.08909#page=7" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据四，<a href="https://arxiv.org/html/2002.08909#S4.T3">表3</a> 的遮盖词例子。</strong>相关文档使正确词的条件概率明显提高，但对候选边缘化后的概率仍取决于检索权重。这个例子展示训练机制如何起作用，不能替代全体查询的统计，也没有测量答案对来源的普遍忠实程度。<a href="https://arxiv.org/html/2002.08909">原文表 3</a></p>
 <p>文档库可能包含答案与相近表述，这是检索任务允许的知识来源；但评价问题或标注格式直接泄露进训练又是另一问题。应区分合法知识访问与测试污染，不能把所有答案出现在文档中都称为污染，也不能完全不检查来源。</p>
-<h2 id="教学例子怎样产生检索梯度">教学例子：怎样产生检索梯度</h2>
-<p>构造问题“某定理由谁提出”，两篇候选分别是相关数学史与无关旅游文章。若相关文档使正确名字概率更高，边缘似然倾向提高它的检索权重。检索器因此可以从预测收益学习，不需要每个问题单独标注文档ID。</p>
-<p>如果阅读器已经靠参数记住答案，所有文档给出类似概率，检索学习信号可能较弱。反过来，如果检索完全漏掉有用材料，阅读器无法从候选中发现正确证据。这说明两模块训练存在相互依赖，并非联合目标自动解决冷启动。</p>
-<p>再把知识库文档更新为新事实，但索引向量仍是旧版本。检索可能找不到新内容，或得分不再匹配实际文本。知识可编辑不等于系统即时完成一致更新，文本、向量和缓存都需要版本管理。</p>
-<h2 id="评价不能只看最终答案">评价不能只看最终答案</h2>
 <p>应分别检查检索召回、阅读条件准确率和最终EM。最终答对可能来自参数记忆，检索正确也可能被阅读器误用；拆开指标才能定位失败。还可以替换相关文档为反事实版本，观察模型是否依赖提供材料，但这种测试不等于真实事实校验。</p>
 <p>费用也需要包含建索引与刷新。若只报告一次查询延迟，忽略大规模文档重编码，就低估训练或知识更新成本。检索增加外部资源使用，是性能机制的一部分，应透明记录。</p>
-<h2 id="贡献与局限">贡献与局限</h2>
-<p>REALM 把外部知识访问纳入预训练，展示任务信号可以学习检索。限制包括候选漏检、索引陈旧、知识库错误、模块耦合和计算。它提供更灵活知识来源，不保证答案有可追踪引用或不会忽略证据。</p>
+<h2 id="五答对不证明使用证据更新文档也不等于更新系统">五、答对不证明使用证据，更新文档也不等于更新系统</h2>
+<p>如果阅读器已经靠参数记住答案，所有文档给出类似概率，检索学习信号可能较弱。反过来，如果检索完全漏掉有用材料，阅读器无法从候选中发现正确证据。这说明两模块训练存在相互依赖，并非联合目标自动解决冷启动。</p>
+<p>限制包括候选漏检、索引陈旧、知识库错误、模块耦合和计算。它提供更灵活知识来源，不保证答案有可追踪引用或不会忽略证据。</p>
 <p>可以构造四格诊断：相关文档被检索且答案正确、检索正确但答案错误、未检索到相关材料却答对、两者都失败。前两格区分阅读能力，第三格提示参数知识或猜测，第四格需要进一步定位。再限制阅读器只能使用候选证据，并与原模型比较，能够更清楚检验外部知识贡献。所有这些都是教学实验方案，未执行前不能报告比例；其价值是把一个最终EM分数拆成能够行动的误差来源，而不是增加另一项模糊总分。</p>
 <p>知识库可更新是一种系统能力；若新文档没有进入索引，或者查询编码器无法召回它，参数之外的最新事实仍无法帮助回答。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>事实知识主要压在模型参数里，检索器难从无标签预训练中获得任务监督</td>
-<td>把文档作为潜变量，对检索与遮盖预测联合训练并刷新索引</td>
-<td>让有助于恢复目标的文档获得学习信号，外部库提供额外信息</td>
-<td>表 1 的开放问答，表 2 的检索器与陈旧索引消融</td>
-<td>候选漏检、索引重编码成本、外部知识质量；答对不等于忠实使用证据</td>
-</tr>
-</tbody></table></div>
+<h2 id="六把本篇机制再推进一步">六、把本篇机制再推进一步</h2>
+<details>
+<summary>1. 阅读器不用文档也能答对时，检索器一定获得强监督吗？</summary>
+
+<p><strong>参考答案</strong>：不一定。若各候选使正确答案概率接近，后验责任与原检索概率接近，检索logit梯度就弱。最终EM高可能掩盖这种情况；可分别看召回、条件阅读和替换证据实验，但未执行前不能把参数记忆比例当作已测结论。</p>
+</details>
+
+<h2 id="七对照监督检索再转向序列生成边缘化">七、对照监督检索，再转向序列生成边缘化</h2>
+<p>从遮盖目标学习检索之后，还可把阅读输出改为文本生成。<a href="034-rag.html">RAG</a>沿检索增强发展不同文档混合方式；<a href="032-dpr.html">DPR</a>提供显式正段落监督的平行检索路线，可比较两者如何得到检索梯度。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 没有文档相关标签，检索器怎样学习？</strong></p>
 <p>通过正确目标的边缘似然。能让阅读器更好预测的文档得到相对更有利的梯度，形成任务驱动的弱监督，但候选必须包含有用信息。</p>
@@ -164,21 +165,17 @@
 
 **论文**：Kelvin Guu 等，*REALM: Retrieval-Augmented Language Model Pre-Training*，ICML 2020。[原文](https://arxiv.org/abs/2002.08909) · [PDF](https://arxiv.org/pdf/2002.08909)。本文聚焦潜在文档检索、掩码预训练和索引刷新，不把它简化成部署时手工加一次搜索。
 
-## 一分钟理解
+### 先接住前作的问题
 
-事实都写进参数，需要大容量且更新困难。REALM 给语言模型外部文本库，并让检索器学习哪些文档能帮助恢复被遮盖内容。检索不是只有人工标注的匹配任务，而可从最终词预测是否改善获得训练信号。
+[BERT](018-bert.md)把恢复文本所需信息主要压入参数，事实更新与容量因此受限。本篇组合遮盖预测与外部文档检索，追问没有逐条相关性标签时，阅读收益能否训练检索器。[DPR](032-dpr.md)的问答监督检索是平行路线，不能把两种训练信号混为一谈。
 
-作者在开放域问答上验证预训练检索的价值。核心是把文档作为潜变量，并通过任务似然训练检索选择；代价是索引维护、近似搜索、知识库质量和训练稳定性。检索到文档不等于生成或抽取结果自动真实。
+## 一、问题设定：外部文档怎样从词预测收益中获得检索监督
 
-## 背景：知识存在哪里
-
-参数化模型从训练文本压缩信息，更新一个事实通常需要再训练或其他编辑。外部文档库则可以直接替换内容，但模型需要找到相关材料，并正确利用它。知识存储与推理因此被拆成检索和阅读两个环节。
+参数模型从语料压缩知识，更新事实通常需要再训练或编辑；外部文档可直接替换，却还需被找到并正确读取。本篇把知识访问拆为检索和阅读，希望最终词预测的改善给检索器提供监督，而非只优化词面匹配或独立相关性。
 
 如果检索器只用词面匹配，问题与答案文档的表达差异可能导致漏检。若检索器独立训练，它优化的相关性未必等于阅读器真正需要的信息。REALM 希望让“帮助预测目标”成为检索学习的依据。
 
-不过，训练信号可能稀疏：一开始检索不准，阅读器看不到有用信息，检索器也难知道该改哪里。初始化、掩码选择和检索近似因此是方法关键，而不是无关工程细节。
-
-## 方法：对潜在文档边缘化
+## 二、从文档边缘似然推导后验责任差
 
 设输入为 $x$、目标为 $y$、检索文档为 $z$：
 
@@ -192,6 +189,22 @@ $$
 
 文档编码器更新后，索引中的旧向量可能过时。论文通过异步刷新等机制减轻陈旧问题。梯度训练文档表示不等于每次更新后整个大型索引瞬间完全一致，这个系统近似影响训练质量。
 
+### 检索器收到的是后验责任与先验之差
+
+固定问题或损坏输入 $x$ 和正确目标 $y$，令 $z$ 枚举候选文档。检索概率为 $r_z=p(z\mid x)$，文档条件答案概率为 $a_z=p(y\mid x,z)$，边缘概率 $p_y=\sum_zr_za_z$。对检索logit $s_z$ 求导得 $\partial\log p_y/\partial s_z=r_za_z/p_y-r_z$。第一项正是给定正确答案后的文档后验责任。帮助解释正确答案超过其原有检索份额的文档被抬高，无需人工逐条标注哪篇相关。
+
+**教学算例。** 两篇文档检索概率各0.5，答案概率分别0.8和0.2，则边缘答案概率0.5，文档后验为0.8和0.2，两个logit梯度为+0.3与−0.3。若正确文档根本没进top-k，这次近似训练不会凭空给它同样梯度；索引召回与刷新频率因此直接影响学习，不仅影响查询速度。
+
+构造问题“某定理由谁提出”，两篇候选分别是相关数学史与无关旅游文章。若相关文档使正确名字概率更高，边缘似然倾向提高它的检索权重。检索器因此可以从预测收益学习，不需要每个问题单独标注文档ID。
+
+### 文档责任在全部候选同样无用时怎样变化
+
+若所有候选都给正确答案相同概率0.2，则边缘概率也为0.2，正文的后验责任恰等于检索先验，各检索logit梯度为零。检索训练需要阅读器能区分候选对目标的帮助；仅有不同检索分数并不足以产生“哪篇更有用”的信号。这个退化例可用于检查边缘化梯度实现。
+
+教法联系：[Lilian Weng的Extrinsic Hallucinations in LLMs](https://lilianweng.github.io/posts/2024-07-07-hallucination/)。算例为本文自构。
+
+## 三、在候选近似与异步刷新之间训练检索和阅读
+
 ```text
 输入：无标签文本、外部文档库、初始化检索与阅读模型
 选择有信息的遮盖目标，构造查询输入
@@ -203,9 +216,13 @@ $$
 下游开放问答微调时继续使用检索与阅读接口
 ```
 
-数学目标是潜变量似然，机制是可学习外部知识访问，指标是问答准确率及检索相关分析。它不是仅把搜索结果拼到固定模型前，也不等同于后续 RAG 的所有生成形式。
+再把知识库文档更新为新事实，但索引向量仍是旧版本。检索可能找不到新内容，或得分不再匹配实际文本。知识可编辑不等于系统即时完成一致更新，文本、向量和缓存都需要版本管理。
 
-## 实验与证据
+## 四、按配置读取开放问答与陈旧索引消融
+
+它不是仅把搜索结果拼到固定模型前，也不等同于后续 RAG 的所有生成形式。
+
+先保持语料与评估集身份，再读最终EM、检索器替换和索引陈旧消融。
 
 | 项目 | 原文范围 |
 |---|---|
@@ -213,7 +230,7 @@ $$
 | 知识库规模 | 2018-12-20 英文 Wikipedia 快照，按最多 288 个 BERT wordpiece 切块，超过 1300 万个候选 |
 | 训练预算 | 200k 步，batch size 512，学习率 $3\times10^{-5}$，使用 64 个 Google Cloud TPU；文档嵌入另在 16 个 TPU 上并行计算 |
 | 候选与更新 | 预训练对 8 个候选边缘化，包含空文档；微调及推理考虑 top-5，索引约每 500 步刷新 |
-| 下游数据 | 表 1 列 NQ 约 79k/4k、WQ 约 3k/2k、CT 约 1k/1k 训练/测试样本 |
+| 下游数据 | [表1](https://arxiv.org/html/2002.08909#S4.T1) 列 NQ 约 79k/4k、WQ 约 3k/2k、CT 约 1k/1k 训练/测试样本 |
 | 最直接对照 | ORQA；作者保持微调设置、超参数和训练数据一致，比较预训练机制 |
 | 指标 | 最终答案 exact match（EM），以及消融中的零样本检索 Recall@5；两者评价的模块不同 |
 | 资源边界 | 330M 参数之外还有外部知识库、索引和重编码；单机 12GB GPU 可执行不等于整个训练只用这些资源 |
@@ -222,31 +239,29 @@ $$
 
 **证据一，方法中的潜变量定义与检索梯度。**它说明最终预测怎样监督检索。候选近似和索引陈旧意味着实现不是精确全库求和。
 
-**证据二，表 1 的开放问答测试结果。**ORQA 的 NQ/WQ/CT EM 为 33.3/36.4/30.1；Wikipedia 预训练的 REALM 为 39.2/40.2/46.8，CC-News 预训练版本为 40.4/40.7/42.9。以 NQ 为例，CC-News 版本比 ORQA 高 7.1 个百分点；但它在 CT 上低于 Wikipedia 版本 3.9 个百分点。数据配方没有在所有任务上同方向改善，不能拼接各列最优值，创造一个并不存在的统一模型结果。[原文表 1](https://arxiv.org/html/2002.08909)
+**证据二，[表1](https://arxiv.org/html/2002.08909#S4.T1) 的开放问答测试结果。**ORQA 的 NQ/WQ/CT EM 为 33.3/36.4/30.1；Wikipedia 预训练的 REALM 为 39.2/40.2/46.8，CC-News 预训练版本为 40.4/40.7/42.9。以 NQ 为例，CC-News 版本比 ORQA 高 7.1 个百分点；但它在 CT 上低于 Wikipedia 版本 3.9 个百分点。数据配方没有在所有任务上同方向改善，不能拼接各列最优值，创造一个并不存在的统一模型结果。[原文表 1](https://arxiv.org/html/2002.08909)
 
-**证据三，表 2 的 NQ 开发集消融。**完整 REALM 的 EM 为 38.2；换回基线检索器后为 35.3；索引陈旧程度增加 30 倍时为 28.7。最后一项比完整模型低 9.5 个百分点，直接支持刷新机制在该训练设置中的重要性。这里是开发集，不能与表 1 的测试分数直接相减；消融也没有证明任何系统都应固定每 500 步刷新。[原文表 2、§4.5](https://arxiv.org/html/2002.08909)
+**证据三，[表2](#llm-v6-030-table-2) 的 NQ 开发集消融。**完整 REALM 的 EM 为 38.2；换回基线检索器后为 35.3；索引陈旧程度增加 30 倍时为 28.7。最后一项比完整模型低 9.5 个百分点，直接支持刷新机制在该训练设置中的重要性。这里是开发集，不能与[表1](https://arxiv.org/html/2002.08909#S4.T1) 的测试分数直接相减；消融也没有证明任何系统都应固定每 500 步刷新。[原文表 2、§4.5](#llm-v6-030-table-2)
 
-**证据四，表 3 的遮盖词例子。**相关文档使正确词的条件概率明显提高，但对候选边缘化后的概率仍取决于检索权重。这个例子展示训练机制如何起作用，不能替代全体查询的统计，也没有测量答案对来源的普遍忠实程度。[原文表 3](https://arxiv.org/html/2002.08909)
+&lt;!-- figure-ref-v6:start:030-t2-2-anchor --&gt;
+&lt;a id=&quot;llm-v6-030-table-2&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:030-t2-2-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/030-realm-t2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/030-realm-t2.png&quot; width=&quot;1404&quot; height=&quot;792&quot; alt=&quot;REALM检索器、遮盖方式与索引刷新速度的开发集消融&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Kelvin Guu 等，2020，表2，PDF第7页；&lt;a href=&quot;https://arxiv.org/pdf/2002.08909#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+**证据四，[表3](https://arxiv.org/html/2002.08909#S4.T3) 的遮盖词例子。**相关文档使正确词的条件概率明显提高，但对候选边缘化后的概率仍取决于检索权重。这个例子展示训练机制如何起作用，不能替代全体查询的统计，也没有测量答案对来源的普遍忠实程度。[原文表 3](https://arxiv.org/html/2002.08909)
 
 文档库可能包含答案与相近表述，这是检索任务允许的知识来源；但评价问题或标注格式直接泄露进训练又是另一问题。应区分合法知识访问与测试污染，不能把所有答案出现在文档中都称为污染，也不能完全不检查来源。
-
-## 教学例子：怎样产生检索梯度
-
-构造问题“某定理由谁提出”，两篇候选分别是相关数学史与无关旅游文章。若相关文档使正确名字概率更高，边缘似然倾向提高它的检索权重。检索器因此可以从预测收益学习，不需要每个问题单独标注文档ID。
-
-如果阅读器已经靠参数记住答案，所有文档给出类似概率，检索学习信号可能较弱。反过来，如果检索完全漏掉有用材料，阅读器无法从候选中发现正确证据。这说明两模块训练存在相互依赖，并非联合目标自动解决冷启动。
-
-再把知识库文档更新为新事实，但索引向量仍是旧版本。检索可能找不到新内容，或得分不再匹配实际文本。知识可编辑不等于系统即时完成一致更新，文本、向量和缓存都需要版本管理。
-
-## 评价不能只看最终答案
 
 应分别检查检索召回、阅读条件准确率和最终EM。最终答对可能来自参数记忆，检索正确也可能被阅读器误用；拆开指标才能定位失败。还可以替换相关文档为反事实版本，观察模型是否依赖提供材料，但这种测试不等于真实事实校验。
 
 费用也需要包含建索引与刷新。若只报告一次查询延迟，忽略大规模文档重编码，就低估训练或知识更新成本。检索增加外部资源使用，是性能机制的一部分，应透明记录。
 
-## 贡献与局限
+## 五、答对不证明使用证据，更新文档也不等于更新系统
 
-REALM 把外部知识访问纳入预训练，展示任务信号可以学习检索。限制包括候选漏检、索引陈旧、知识库错误、模块耦合和计算。它提供更灵活知识来源，不保证答案有可追踪引用或不会忽略证据。
+如果阅读器已经靠参数记住答案，所有文档给出类似概率，检索学习信号可能较弱。反过来，如果检索完全漏掉有用材料，阅读器无法从候选中发现正确证据。这说明两模块训练存在相互依赖，并非联合目标自动解决冷启动。
+
+限制包括候选漏检、索引陈旧、知识库错误、模块耦合和计算。它提供更灵活知识来源，不保证答案有可追踪引用或不会忽略证据。
 
 五个前置概念是潜变量、边缘似然、稠密检索、最大内积搜索和索引刷新。掌握它们，后续读 DPR、RAG 与 Self-RAG 时就能辨别哪些部分在训练、哪些只是部署接口。
 
@@ -254,9 +269,18 @@ REALM 把外部知识访问纳入预训练，展示任务信号可以学习检�
 
 知识库可更新是一种系统能力；若新文档没有进入索引，或者查询编码器无法召回它，参数之外的最新事实仍无法帮助回答。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 事实知识主要压在模型参数里，检索器难从无标签预训练中获得任务监督 | 把文档作为潜变量，对检索与遮盖预测联合训练并刷新索引 | 让有助于恢复目标的文档获得学习信号，外部库提供额外信息 | 表 1 的开放问答，表 2 的检索器与陈旧索引消融 | 候选漏检、索引重编码成本、外部知识质量；答对不等于忠实使用证据 |
+## 六、把本篇机制再推进一步
+
+&lt;details&gt;
+&lt;summary&gt;1. 阅读器不用文档也能答对时，检索器一定获得强监督吗？&lt;/summary&gt;
+
+**参考答案**：不一定。若各候选使正确答案概率接近，后验责任与原检索概率接近，检索logit梯度就弱。最终EM高可能掩盖这种情况；可分别看召回、条件阅读和替换证据实验，但未执行前不能把参数记忆比例当作已测结论。
+
+&lt;/details&gt;
+
+## 七、对照监督检索，再转向序列生成边缘化
+
+从遮盖目标学习检索之后，还可把阅读输出改为文本生成。[RAG](034-rag.md)沿检索增强发展不同文档混合方式；[DPR](032-dpr.md)提供显式正段落监督的平行检索路线，可比较两者如何得到检索梯度。
 
 ## 自测与参考答案
 

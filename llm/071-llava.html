@@ -42,22 +42,23 @@
                 <span class="text-gray-500">LLaVA：用文字教师，教会视觉模型听懂指令</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="a01da14fb4aa1059b4be0da8efcf2c3e2642938c15ac0d508302e873ffa8dbf9"><h1>071｜LLaVA：用文字教师，教会视觉模型听懂指令</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="e3410b00e0d116efd6cd48bfbb2a03c3cd6458d2c47f8df3ac07d76ed33709f6"><h1>071｜LLaVA：用文字教师，教会视觉模型听懂指令</h1>
 <p><a href="index.html">返回目录</a> · <a href="00-timeline.html">发展时间线</a></p>
-<p>论文：Haotian Liu、Chunyuan Li、Qingyang Wu、Yong Jae Lee，<em>Visual Instruction Tuning</em>，2023。<a href="https://arxiv.org/abs/2304.08485">原始论文</a>、<a href="https://arxiv.org/html/2304.08485v2">正文 v2</a>、<a href="https://llava-vl.github.io/">官方项目</a>。本文依据 v2 的方法、实验、训练细节与限制解读，不把后续 LLaVA-1.5 等版本的配置倒灌进初代方法；没有独立复现训练。</p>
-<h2 id="一分钟理解看见图像和回答问题是两回事">一分钟理解：看见图像和回答问题是两回事</h2>
-<p>用户问“图片里有什么不寻常的地方”，模型回答“一个男人和一辆车”，可能没有认错物体，却没有完成任务。视觉描述能力不等于根据指令选择信息、解释关系和开展对话的能力。</p>
-<p>LLaVA 的核心办法很直接：把已经训练好的 CLIP 视觉编码器连接到 Vicuna 语言模型，再用图像指令数据微调。真正值得学习的创新不只是连接层，而是数据制造方式：让当时只能读取文字的 GPT-4 根据图片描述与物体边界框生成视觉问答、详细描述和复杂推理数据。</p>
-<p>实验支持视觉指令数据能显著改变模型的回答行为。表4中完整指令数据的相对评分为85.1，未进行指令微调为21.5。但这个分数不是85.1%的题目答对，也不是相对于直接看图的多模态 GPT-4 的全面能力比例。</p>
-<p>一句话总结：在已有视觉编码器和指令语言模型的条件下，通过符号描述辅助生成视觉指令数据并进行两阶段训练，改善图像对话与指令遵循，限制是教师看不到全部像素、评价也依赖文字描述，细节绑定和幻觉仍然存在。</p>
+<p>论文：Haotian Liu、Chunyuan Li、Qingyang Wu、Yong Jae Lee，<em>Visual Instruction Tuning</em>，2023。<a href="https://arxiv.org/abs/2304.08485">原始论文</a>、<a href="https://arxiv.org/html/2304.08485v2">正文 v2</a>、<a href="https://llava-vl.github.io/">官方项目</a>。不把后续 LLaVA-1.5 等版本的配置倒灌进初代方法。</p>
+<!-- figure-ref-v6:start:llm-license-071-llava -->
+<p>图表来源：Haotian Liu、Chunyuan Li、Qingyang Wu、Yong Jae Lee，2023，<a href="https://arxiv.org/html/2304.08485v2">原文</a>；<a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>。本篇展示做了图形区域裁切，图中数据与标签未改动。</p>
+<!-- figure-ref-v6:end:llm-license-071-llava -->
+
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="043-clip.html">CLIP</a>提供图文表示，<a href="066-blip2.html">BLIP-2</a>研究冻结两端的查询桥梁，但这些能力不自动等于视觉指令遵循。本篇采用更直接的投影，把重点转向怎样制造多模态对话监督，追问“看见了”之后怎样回答用户的问题。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念：<strong>视觉编码器</strong>把像素映射为特征；<strong>投影层</strong>对齐特征维度和表示；<strong>冻结参数</strong>表示反向传播不更新对应权重；<strong>指令微调</strong>用任务请求与示范回答塑造行为；<strong>模型评委</strong>用另一模型评分，可靠性需要独立校准。</p>
-<h2 id="研究背景图像表示怎样进入语言模型">研究背景：图像表示怎样进入语言模型？</h2>
-<p>CLIP 学会了图像与文本之间的语义联系，Vicuna 学会了文字对话，但两者的表示空间和输入接口不同。直接把视觉特征当作词向量输入，不保证语言模型能解释它。</p>
+<h2 id="一问题设定识别图中物体后怎样按指令选择信息并对话">一、问题设定：识别图中物体后，怎样按指令选择信息并对话</h2>
+<p>CLIP视觉编码器与Vicuna对话模型的空间和接口不同，投影可以连接尺寸，却不足以规定回答应关注哪些关系。用户问“不寻常之处”时只列出物体仍会失败；本篇同时处理视觉接口和根据指令选择信息的行为监督。</p>
 <p>BLIP-2 使用 Q-Former 作为连接模块，Flamingo 引入跨模态注意力。LLaVA 选择一个简单线性投影，优先研究数据和训练方式。这里的简单是连接器结构简单，不是整个系统没有强大的预训练依赖。</p>
 <p>任务属于监督式多模态指令学习，没有环境奖励、策略梯度或在线探索。输入是一张图和文本指令，输出是答案 token；多轮对话共享图像，停止标记决定回复边界。ScienceQA 是单独的领域微调设定，不能和通用聊天模型视为完全相同的一个检查点。</p>
 <p>关键假设有两个：图像描述和边界框足以帮助文本教师产生有用的视觉指令；已有视觉与语言知识能够通过较少连接训练迁移到新任务。二者都只在有限数据与基准上得到经验支持。</p>
-<h2 id="方法冻结谁监督哪些-token">方法：冻结谁，监督哪些 token？</h2>
+<h2 id="二推导视觉投影怎样由回答token获得梯度">二、推导视觉投影怎样由回答token获得梯度</h2>
 <p>设图像为 <span class="reading-math" data-tex="X_v"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>X</mi><mi>v</mi></msub></mrow><annotation encoding="application/x-tex">X_v</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，固定视觉编码器为 <span class="reading-math" data-tex="g"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi></mrow><annotation encoding="application/x-tex">g</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span></span></span></span></span>，视觉网格特征为 <span class="reading-math" data-tex="Z_v=g(X_v)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>Z</mi><mi>v</mi></msub><mo>=</mo><mi>g</mi><mo stretchy="false">(</mo><msub><mi>X</mi><mi>v</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">Z_v=g(X_v)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>。论文式1使用投影矩阵 <span class="reading-math" data-tex="W"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>W</mi></mrow><annotation encoding="application/x-tex">W</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span></span></span></span></span> 得到：</p>
 <p><span class="reading-math" data-tex="H_v=WZ_v."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>H</mi><mi>v</mi></msub><mo>=</mo><mi>W</mi><msub><mi>Z</mi><mi>v</mi></msub><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">H_v=WZ_v.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
 <p><span class="reading-math" data-tex="H_v"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>H</mi><mi>v</mi></msub></mrow><annotation encoding="application/x-tex">H_v</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 与语言模型词嵌入维度一致，因此可以作为连续的视觉 token 放入输入序列。它们不是把图像先翻译成一段离散 caption；语言模型仍然接收视觉特征。</p>
@@ -66,6 +67,16 @@
 <p><span class="reading-math" data-tex="\mathcal A"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="script">A</mi></mrow><annotation encoding="application/x-tex">\mathcal A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathcal">A</span></span></span></span></span> 只包含助手回复及其停止位置，用户问题和系统提示参与条件输入，但不作为要拟合的回答。这个区别防止把“能复述用户问题”误当成学会回答。</p>
 <p>第一阶段使用过滤后的595K图文对，只训练 <span class="reading-math" data-tex="W"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>W</mi></mrow><annotation encoding="application/x-tex">W</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span></span></span></span></span>，视觉编码器和语言模型都冻结。第二阶段使用158K指令样本，继续冻结视觉编码器，更新 <span class="reading-math" data-tex="W"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>W</mi></mrow><annotation encoding="application/x-tex">W</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span></span></span></span></span> 和语言模型参数。因此标题中的端到端训练不能读成第二阶段所有模块都更新。</p>
 <p>数据包含58K对话、23K详细描述和77K复杂推理。GPT-4 的输入是 captions、边界框及少量人工设计示例，不是原始图片。学生训练时却接收图片。教师标签可能丰富，但不能凭空恢复符号输入没有保存的细节。</p>
+<h3 id="回答位置没有视觉标签投影层为何还能学">回答位置没有视觉标签，投影层为何还能学？</h3>
+<p>把视觉特征按列排成 <span class="reading-math" data-tex="Z\in\mathbb R^{d_v\times m}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Z</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><msub><mi>d</mi><mi>v</mi></msub><mo>×</mo><mi>m</mi></mrow></msup></mrow><annotation encoding="application/x-tex">Z\in\mathbb R^{d_v\times m}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7224em;vertical-align:-0.0391em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8491em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span><span class="mbin mtight">×</span><span class="mord mathnormal mtight">m</span></span></span></span></span></span></span></span></span></span></span></span></span>，投影为 <span class="reading-math" data-tex="H=WZ"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>H</mi><mo>=</mo><mi>W</mi><mi>Z</mi></mrow><annotation encoding="application/x-tex">H=WZ</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span></span></span></span></span>，其中 <span class="reading-math" data-tex="m"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi></mrow><annotation encoding="application/x-tex">m</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">m</span></span></span></span></span> 是视觉 token 数，<span class="reading-math" data-tex="W\in\mathbb R^{d_l\times d_v}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>W</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><msub><mi>d</mi><mi>l</mi></msub><mo>×</mo><msub><mi>d</mi><mi>v</mi></msub></mrow></msup></mrow><annotation encoding="application/x-tex">W\in\mathbb R^{d_l\times d_v}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7224em;vertical-align:-0.0391em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8491em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.3488em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.01968em;">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1512em;"><span></span></span></span></span></span></span><span class="mbin mtight">×</span><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span>。令回答 token 的总交叉熵为 <span class="reading-math" data-tex="L"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi></mrow><annotation encoding="application/x-tex">L</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span></span></span></span></span>，冻结语言模型并不截断它对输入的导数。链式法则仍给出</p>
+<p><span class="reading-math" data-tex="\frac{\partial L}{\partial W}=\frac{\partial L}{\partial H}Z^\top."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mfrac><mrow><mi mathvariant="normal">∂</mi><mi>L</mi></mrow><mrow><mi mathvariant="normal">∂</mi><mi>W</mi></mrow></mfrac><mo>=</mo><mfrac><mrow><mi mathvariant="normal">∂</mi><mi>L</mi></mrow><mrow><mi mathvariant="normal">∂</mi><mi>H</mi></mrow></mfrac><msup><mi>Z</mi><mi mathvariant="normal">⊤</mi></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\frac{\partial L}{\partial W}=\frac{\partial L}{\partial H}Z^\top.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.0574em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3714em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal">L</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.0574em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3714em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal">L</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07153em;">Z</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>右边的 <span class="reading-math" data-tex="\partial L/\partial H"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∂</mi><mi>L</mi><mi mathvariant="normal">/</mi><mi mathvariant="normal">∂</mi><mi>H</mi></mrow><annotation encoding="application/x-tex">\partial L/\partial H</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal">L</span><span class="mord">/</span><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal" style="margin-right:0.08125em;">H</span></span></span></span></span> 经过冻结语言模型中的注意力路径，把“这幅图支持哪个回答”传回视觉接口。第一阶段只更新 <span class="reading-math" data-tex="W"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>W</mi></mrow><annotation encoding="application/x-tex">W</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span></span></span></span></span>，第二阶段还更新语言模型参数；视觉编码器在这两阶段都冻结。冻结、停止梯度、没有监督标签是三个不同概念。这里得到的是对回答任务有用的接口，并没有逐个视觉 token 与某个词的一一对齐保证。</p>
+<p><strong>自构梯度例子。</strong> 取一个视觉向量 <span class="reading-math" data-tex="z=(2,1)^\top"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>z</mi><mo>=</mo><mo stretchy="false">(</mo><mn>2</mn><mo separator="true">,</mo><mn>1</mn><msup><mo stretchy="false">)</mo><mi mathvariant="normal">⊤</mi></msup></mrow><annotation encoding="application/x-tex">z=(2,1)^\top</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0991em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span></span></span></span></span>，语言模型回传给两个投影维度的梯度 <span class="reading-math" data-tex="g=(0.3,-0.2)^\top"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi><mo>=</mo><mo stretchy="false">(</mo><mn>0.3</mn><mo separator="true">,</mo><mo>−</mo><mn>0.2</mn><msup><mo stretchy="false">)</mo><mi mathvariant="normal">⊤</mi></msup></mrow><annotation encoding="application/x-tex">g=(0.3,-0.2)^\top</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0991em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.3</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">−</span><span class="mord">0.2</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span></span></span></span></span>，则单个样本对 <span class="reading-math" data-tex="W"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>W</mi></mrow><annotation encoding="application/x-tex">W</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">W</span></span></span></span></span> 的梯度为 <span class="reading-math" data-tex="gz^\top=\left[\begin{smallmatrix}0.6&amp;0.3\\-0.4&amp;-0.2\end{smallmatrix}\right]"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi><msup><mi>z</mi><mi mathvariant="normal">⊤</mi></msup><mo>=</mo><mrow><mo fence="true">[</mo><mstyle scriptlevel="1"><mtable rowspacing="0.1em" columnspacing="0.2778em"><mtr><mtd><mstyle scriptlevel="1" displaystyle="false"><mn>0.6</mn></mstyle></mtd><mtd><mstyle scriptlevel="1" displaystyle="false"><mn>0.3</mn></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="1" displaystyle="false"><mrow><mo>−</mo><mn>0.4</mn></mrow></mstyle></mtd><mtd><mstyle scriptlevel="1" displaystyle="false"><mrow><mo>−</mo><mn>0.2</mn></mrow></mstyle></mtd></mtr></mtable></mstyle><mo fence="true">]</mo></mrow></mrow><annotation encoding="application/x-tex">gz^\top=\left[\begin{smallmatrix}0.6&amp;0.3\\-0.4&amp;-0.2\end{smallmatrix}\right]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0435em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2622em;vertical-align:-0.3811em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size1">[</span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8811em;"><span style="top:-3.13em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mtight sizing reset-size6 size3"><span class="mord mtight">0.6</span></span></span><span style="top:-2.4989em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mtight sizing reset-size6 size3"><span class="mord mtight">−</span><span class="mord mtight">0.4</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3811em;"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.1945em;"></span><span class="arraycolsep" style="width:0.1945em;"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8811em;"><span style="top:-3.13em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mtight sizing reset-size6 size3"><span class="mord mtight">0.3</span></span></span><span style="top:-2.4989em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mtight sizing reset-size6 size3"><span class="mord mtight">−</span><span class="mord mtight">0.2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3811em;"><span></span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size1">]</span></span></span></span></span></span></span>。图像位置即使不直接计算词表交叉熵，也能收到这个学习信号。但如果文本教师依据“一个人在车旁”的描述擅自补出颜色，梯度会教学生迎合该颜色标签，无法凭目标函数识别教师没有真正看过图。这解释了为什么 §3 的描述与框信息既能便宜地产生监督，也给视觉细节的可信度设下边界。</p>
+<p><strong>自构例子，未运行：</strong> 图片是一只红杯子和一只蓝碗。教师只收到“杯子、碗、桌子”的描述与框，可以生成位置问题，却不能可靠生成颜色问题。若擅自写出“红碗”，学生会在看图训练时受到错误监督。更好的数据构造应保留颜色与对象绑定，或避免生成无法由描述确认的问题。</p>
+<h3 id="回答掩码与下一词标签要错开一个位置">回答掩码与下一词标签要错开一个位置</h3>
+<p>在“图像前缀＋用户问题＋助手回答”序列中，损失只保留助手目标，并不意味着用同位置输入预测同一个token。自回归目标仍要移位：预测首个助手词的隐藏状态来自它之前的前缀。若标签掩码移位与输入移位不同步，可能多监督用户末词或漏掉助手首词，视觉投影也会收到错误任务信号。</p>
+<p>教法联系：<a href="https://huggingface.co/blog/peft">Sourab Mangrulkar、Sayak Paul的Parameter-Efficient Fine-Tuning</a>。算例为本文自构。</p>
+<h2 id="三先对齐投影再用符号描述生成的指令训练">三、先对齐投影，再用符号描述生成的指令训练</h2>
 <pre><code class="language-text">输入：图文对、COCO 描述和框、CLIP、Vicuna
 instruction_data = GPT4_generate(captions, boxes, seed_examples)
 initialize linear projector W
@@ -80,8 +91,9 @@ for image, dialogue in instruction_data:
     update W and Vicuna using assistant-answer token loss
 输出：给定图像与指令生成回答的多模态模型
 </code></pre>
-<p>数学目标仍是预测示范答案；机制是视觉连接、数据生成与分阶段更新；改善指标包括评分和选择题准确率。训练损失没有直接验证每个视觉名词是否真实存在，因此降低交叉熵并不保证消除视觉幻觉。</p>
-<h2 id="实验设计小规模适配建立在大规模预训练之上">实验设计：小规模适配建立在大规模预训练之上</h2>
+<p>训练损失没有直接验证每个视觉名词是否真实存在，因此降低交叉熵并不保证消除视觉幻觉。</p>
+<h2 id="四拆开相对评分scienceqa组合与属性失败">四、拆开相对评分、ScienceQA组合与属性失败</h2>
+<p>先看数据类型消融，再核对评委看到什么、分数除以什么；单模型和组合系统的ScienceQA结果不能合并。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -123,42 +135,29 @@ for image, dialogue in instruction_data:
 </tr>
 <tr>
 <td>不确定性</td>
-<td>表5前三行是3次推理的均值和标准差；另有固定输出、重复调用评委3次的检查，不是3次完整训练</td>
+<td><a href="https://arxiv.org/html/2304.08485v2#S5.T5">表5</a>前三行是3次推理的均值和标准差；另有固定输出、重复调用评委3次的检查，不是3次完整训练</td>
 </tr>
 </tbody></table></div>
 <p>各模型的预训练数据、指令训练与结构并不相同。BLIP-2、OpenFlamingo 的对比说明所测试检查点在该指令基准上的表现，不能孤立归因于线性投影比 Q-Former 或跨注意力更好。</p>
 <p>ScienceQA 有些带图题可以仅凭文字知识回答。因此图像类别的准确率提高，不足以证明模型更善于读取图中证据；还应比较移除图片、置换图片及真正必须看图的题目。</p>
-<h2 id="结果相对分数单模型和组合系统">结果：相对分数、单模型和组合系统</h2>
-<p><strong>证据一：表4，数据类型消融。</strong> 完整数据总分85.1，仅对话73.8，不做指令训练21.5；对话加少量描述与推理数据达到80.5。它支持指令数据和数据多样性的重要性，但数据子集的数量也变化，因此不能完全拆开“更多样”和“更多样本”的贡献。</p>
-<p><strong>证据二：表5，野外图像评价。</strong> LLaVA 得分67.3±2.0，BLIP-2 为38.1±1.0，OpenFlamingo 为19.1±0.4。这是相对于文本 GPT-4 参考回答的评分口径，不是正确率。固定 LLaVA 输出再换3次评委调用得到66.7±0.3，支持这批样本上的评分重复性，不能证明不存在系统性偏好或遗漏。</p>
-<p><strong>证据三：表7，ScienceQA。</strong> LLaVA 单模型90.92%，MM-CoT Large 为91.68%；LLaVA 与 GPT-4 组合、由 GPT-4 重新判断分歧后为92.53%。组合比 LLaVA 增加1.61个百分点，是自行做减法得到的绝对差。不能把92.53%写成无外部调用的 LLaVA 独立表现。简单用 LLaVA 补足 GPT-4 拒答仅为90.97%，也说明组合策略本身有影响。</p>
-<p><strong>证据四：表8，表示和预对齐。</strong> 使用倒数阶段的视觉特征为90.92%，最后一层89.96%；省去对齐预训练降到85.81%；7B为89.84%。这里“from scratch”指省去这一步多模态对齐，不是把 CLIP 和语言模型都随机初始化。作者关于中间视觉特征保留更多局部信息的解释是机制假设，分数差本身没有直接测量局部信息量。</p>
-<p><strong>证据五：§5.1限制与表6，属性绑定失败。</strong> 图中有草莓和酸奶，模型却回答存在草莓味酸奶。识别两个物体，并不等于把“口味”正确绑定到容器。这一例子揭示重要失败模式，但不能由一个例子估计总体幻觉率。</p>
-<p>表8旁关于先理由、后答案的文字描述与最佳配置没有把所有组合完整列齐。适合采用的结论是作者观察到收敛速度变化；不应把缺少完整配对的结果当成严格控制其他变量后的普遍“思维链增益”。</p>
-<h2 id="贡献局限与读者应该带走的判断">贡献、局限与读者应该带走的判断</h2>
-<p>LLaVA 将多模态能力建设转化为一个可操作的数据问题：已有视觉和语言基础模型之间，除了表示接口，还需要适合人类指令的行为监督。简单连接器使研究者能快速试验数据设计，但论文没有证明它是所有预算下最好的连接方案。</p>
+<p><strong>证据一：<a href="#llm-v6-071-table-4">表4</a>，数据类型消融。</strong> 完整数据总分85.1，仅对话73.8，不做指令训练21.5；对话加少量描述与推理数据达到80.5。它支持指令数据和数据多样性的重要性，但数据子集的数量也变化，因此不能完全拆开“更多样”和“更多样本”的贡献。</p>
+<!-- figure-ref-v6:start:071-t4-2-anchor -->
+<p><a id="llm-v6-071-table-4"></a></p>
+<!-- figure-ref-v6:end:071-t4-2-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/071-llava-t4.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/071-llava-t4.png" width="1701" height="311" alt="LLaVA不同指令数据组合的对话、细节描述和推理分数" loading="lazy"></a><figcaption>实验结果表摘引：Haotian Liu、Chunyuan Li、Qingyang Wu、Yong Jae Lee，2023，表4，PDF第7页；<a href="https://arxiv.org/pdf/2304.08485v2#page=7" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据二：<a href="https://arxiv.org/html/2304.08485v2#S5.T5">表5</a>，野外图像评价。</strong> LLaVA 得分67.3±2.0，BLIP-2 为38.1±1.0，OpenFlamingo 为19.1±0.4。这是相对于文本 GPT-4 参考回答的评分口径，不是正确率。固定 LLaVA 输出再换3次评委调用得到66.7±0.3，支持这批样本上的评分重复性，不能证明不存在系统性偏好或遗漏。</p>
+<p><strong>证据三：<a href="https://arxiv.org/html/2304.08485v2#S5.T7">表7</a>，ScienceQA。</strong> LLaVA 单模型90.92%，MM-CoT Large 为91.68%；LLaVA 与 GPT-4 组合、由 GPT-4 重新判断分歧后为92.53%。组合比 LLaVA 增加1.61个百分点，是自行做减法得到的绝对差。不能把92.53%写成无外部调用的 LLaVA 独立表现。简单用 LLaVA 补足 GPT-4 拒答仅为90.97%，也说明组合策略本身有影响。</p>
+<p><strong>证据四：<a href="https://arxiv.org/html/2304.08485v2#S5.T8">表8</a>，表示和预对齐。</strong> 使用倒数阶段的视觉特征为90.92%，最后一层89.96%；省去对齐预训练降到85.81%；7B为89.84%。这里“from scratch”指省去这一步多模态对齐，不是把 CLIP 和语言模型都随机初始化。作者关于中间视觉特征保留更多局部信息的解释是机制假设，分数差本身没有直接测量局部信息量。</p>
+<p><strong>证据五：§5.1限制与<a href="https://arxiv.org/html/2304.08485v2#S5.T6">表6</a>，属性绑定失败。</strong> 图中有草莓和酸奶，模型却回答存在草莓味酸奶。识别两个物体，并不等于把“口味”正确绑定到容器。这一例子揭示重要失败模式，但不能由一个例子估计总体幻觉率。</p>
+<p><a href="https://arxiv.org/html/2304.08485v2#S5.T8">表8</a>旁关于先理由、后答案的文字描述与最佳配置没有把所有组合完整列齐。适合采用的结论是作者观察到收敛速度变化；不应把缺少完整配对的结果当成严格控制其他变量后的普遍“思维链增益”。</p>
+<h2 id="五文本教师缺少像素会给监督可信度设限">五、文本教师缺少像素会给监督可信度设限</h2>
+<p>简单连接器使研究者能快速试验数据设计，但论文没有证明它是所有预算下最好的连接方案。</p>
 <p>作者明确承认视觉幻觉、细粒度感知和评估复杂性。进一步分析可见一个闭环风险：教师生成数据时依赖文字描述，评委判分也依赖类似描述。如果描述遗漏了细节，学生即使说错，评委也可能没有足够信息发现。这不是指所有分数无效，而是说明该评价偏重可文字化的视觉语义。</p>
 <p>另一条边界是“未在指令数据中出现”不等于“整个系统从未见过”。CLIP 和语言模型已经携带大规模预训练知识。某些名人或艺术作品的识别，可以来自预训练迁移，不能直接用来证明从少量指令中凭空学出了新视觉概念。</p>
-<h2 id="自构例子与前置知识">自构例子与前置知识</h2>
-<p><strong>自构例子，未运行：</strong> 图片是一只红杯子和一只蓝碗。教师只收到“杯子、碗、桌子”的描述与框，可以生成位置问题，却不能可靠生成颜色问题。若擅自写出“红碗”，学生会在看图训练时受到错误监督。更好的数据构造应保留颜色与对象绑定，或避免生成无法由描述确认的问题。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>图像描述模型不一定遵循用户指令</td>
-<td>文本教师生成多类型视觉指令；CLIP线性连接Vicuna并两阶段训练</td>
-<td>对齐视觉表示，同时提供根据问题选择回答内容的监督</td>
-<td>表4数据消融、表5野外评分、表7单模型与组合、表8对齐消融</td>
-<td>教师和评委依赖描述；基础模型成本未消失；属性绑定与幻觉仍未解决</td>
-</tr>
-</tbody></table></div>
+<h2 id="六沿回答监督原则比较纯文本对话训练">六、沿回答监督原则比较纯文本对话训练</h2>
+<p>多模态数据仍有教师看不到像素的边界。对照<a href="078-llama2.html">Llama 2</a>的纯文本回答监督，可检验损失掩码与偏好阶段怎样分工；这是训练接口的教学联系，不是历史继承。</p>
 <h2 id="自测与答案">自测与答案</h2>
 <p><strong>1. 文本 GPT-4 没有看过图片，为什么还能生成视觉训练数据？哪里最容易失真？</strong></p>
 <p>答案：描述与边界框把部分视觉信息转换成文字，教师可以据此组织问题和回答。但没有进入符号表示的颜色、文字、细小物体或关系不能被可靠恢复。数据质量受符号信息覆盖约束，而不是只受教师语言能力约束。</p>
@@ -175,21 +174,19 @@ for image, dialogue in instruction_data:
 
 [返回目录](README.md) · [发展时间线](00-发展时间线总览.md)
 
-论文：Haotian Liu、Chunyuan Li、Qingyang Wu、Yong Jae Lee，*Visual Instruction Tuning*，2023。[原始论文](https://arxiv.org/abs/2304.08485)、[正文 v2](https://arxiv.org/html/2304.08485v2)、[官方项目](https://llava-vl.github.io/)。本文依据 v2 的方法、实验、训练细节与限制解读，不把后续 LLaVA-1.5 等版本的配置倒灌进初代方法；没有独立复现训练。
+论文：Haotian Liu、Chunyuan Li、Qingyang Wu、Yong Jae Lee，*Visual Instruction Tuning*，2023。[原始论文](https://arxiv.org/abs/2304.08485)、[正文 v2](https://arxiv.org/html/2304.08485v2)、[官方项目](https://llava-vl.github.io/)。不把后续 LLaVA-1.5 等版本的配置倒灌进初代方法。
 
-## 一分钟理解：看见图像和回答问题是两回事
+&lt;!-- figure-ref-v6:start:llm-license-071-llava --&gt;
+图表来源：Haotian Liu、Chunyuan Li、Qingyang Wu、Yong Jae Lee，2023，[原文](https://arxiv.org/html/2304.08485v2)；[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)。本篇展示做了图形区域裁切，图中数据与标签未改动。
+&lt;!-- figure-ref-v6:end:llm-license-071-llava --&gt;
 
-用户问“图片里有什么不寻常的地方”，模型回答“一个男人和一辆车”，可能没有认错物体，却没有完成任务。视觉描述能力不等于根据指令选择信息、解释关系和开展对话的能力。
+### 先接住前作的问题
 
-LLaVA 的核心办法很直接：把已经训练好的 CLIP 视觉编码器连接到 Vicuna 语言模型，再用图像指令数据微调。真正值得学习的创新不只是连接层，而是数据制造方式：让当时只能读取文字的 GPT-4 根据图片描述与物体边界框生成视觉问答、详细描述和复杂推理数据。
+[CLIP](043-clip.md)提供图文表示，[BLIP-2](066-blip2.md)研究冻结两端的查询桥梁，但这些能力不自动等于视觉指令遵循。本篇采用更直接的投影，把重点转向怎样制造多模态对话监督，追问“看见了”之后怎样回答用户的问题。
 
-实验支持视觉指令数据能显著改变模型的回答行为。表4中完整指令数据的相对评分为85.1，未进行指令微调为21.5。但这个分数不是85.1%的题目答对，也不是相对于直接看图的多模态 GPT-4 的全面能力比例。
+## 一、问题设定：识别图中物体后，怎样按指令选择信息并对话
 
-一句话总结：在已有视觉编码器和指令语言模型的条件下，通过符号描述辅助生成视觉指令数据并进行两阶段训练，改善图像对话与指令遵循，限制是教师看不到全部像素、评价也依赖文字描述，细节绑定和幻觉仍然存在。
-
-## 研究背景：图像表示怎样进入语言模型？
-
-CLIP 学会了图像与文本之间的语义联系，Vicuna 学会了文字对话，但两者的表示空间和输入接口不同。直接把视觉特征当作词向量输入，不保证语言模型能解释它。
+CLIP视觉编码器与Vicuna对话模型的空间和接口不同，投影可以连接尺寸，却不足以规定回答应关注哪些关系。用户问“不寻常之处”时只列出物体仍会失败；本篇同时处理视觉接口和根据指令选择信息的行为监督。
 
 BLIP-2 使用 Q-Former 作为连接模块，Flamingo 引入跨模态注意力。LLaVA 选择一个简单线性投影，优先研究数据和训练方式。这里的简单是连接器结构简单，不是整个系统没有强大的预训练依赖。
 
@@ -197,7 +194,7 @@ BLIP-2 使用 Q-Former 作为连接模块，Flamingo 引入跨模态注意力。
 
 关键假设有两个：图像描述和边界框足以帮助文本教师产生有用的视觉指令；已有视觉与语言知识能够通过较少连接训练迁移到新任务。二者都只在有限数据与基准上得到经验支持。
 
-## 方法：冻结谁，监督哪些 token？
+## 二、推导视觉投影怎样由回答token获得梯度
 
 设图像为 $X_v$，固定视觉编码器为 $g$，视觉网格特征为 $Z_v=g(X_v)$。论文式1使用投影矩阵 $W$ 得到：
 
@@ -219,6 +216,26 @@ $\mathcal A$ 只包含助手回复及其停止位置，用户问题和系统提�
 
 数据包含58K对话、23K详细描述和77K复杂推理。GPT-4 的输入是 captions、边界框及少量人工设计示例，不是原始图片。学生训练时却接收图片。教师标签可能丰富，但不能凭空恢复符号输入没有保存的细节。
 
+### 回答位置没有视觉标签，投影层为何还能学？
+
+把视觉特征按列排成 $Z\in\mathbb R^{d_v\times m}$，投影为 $H=WZ$，其中 $m$ 是视觉 token 数，$W\in\mathbb R^{d_l\times d_v}$。令回答 token 的总交叉熵为 $L$，冻结语言模型并不截断它对输入的导数。链式法则仍给出
+
+$$\frac{\partial L}{\partial W}=\frac{\partial L}{\partial H}Z^\top.$$
+
+右边的 $\partial L/\partial H$ 经过冻结语言模型中的注意力路径，把“这幅图支持哪个回答”传回视觉接口。第一阶段只更新 $W$，第二阶段还更新语言模型参数；视觉编码器在这两阶段都冻结。冻结、停止梯度、没有监督标签是三个不同概念。这里得到的是对回答任务有用的接口，并没有逐个视觉 token 与某个词的一一对齐保证。
+
+**自构梯度例子。** 取一个视觉向量 $z=(2,1)^\top$，语言模型回传给两个投影维度的梯度 $g=(0.3,-0.2)^\top$，则单个样本对 $W$ 的梯度为 $gz^\top=\left[\begin{smallmatrix}0.6&amp;0.3\\-0.4&amp;-0.2\end{smallmatrix}\right]$。图像位置即使不直接计算词表交叉熵，也能收到这个学习信号。但如果文本教师依据“一个人在车旁”的描述擅自补出颜色，梯度会教学生迎合该颜色标签，无法凭目标函数识别教师没有真正看过图。这解释了为什么 §3 的描述与框信息既能便宜地产生监督，也给视觉细节的可信度设下边界。
+
+**自构例子，未运行：** 图片是一只红杯子和一只蓝碗。教师只收到“杯子、碗、桌子”的描述与框，可以生成位置问题，却不能可靠生成颜色问题。若擅自写出“红碗”，学生会在看图训练时受到错误监督。更好的数据构造应保留颜色与对象绑定，或避免生成无法由描述确认的问题。
+
+### 回答掩码与下一词标签要错开一个位置
+
+在“图像前缀＋用户问题＋助手回答”序列中，损失只保留助手目标，并不意味着用同位置输入预测同一个token。自回归目标仍要移位：预测首个助手词的隐藏状态来自它之前的前缀。若标签掩码移位与输入移位不同步，可能多监督用户末词或漏掉助手首词，视觉投影也会收到错误任务信号。
+
+教法联系：[Sourab Mangrulkar、Sayak Paul的Parameter-Efficient Fine-Tuning](https://huggingface.co/blog/peft)。算例为本文自构。
+
+## 三、先对齐投影，再用符号描述生成的指令训练
+
 ```text
 输入：图文对、COCO 描述和框、CLIP、Vicuna
 instruction_data = GPT4_generate(captions, boxes, seed_examples)
@@ -235,9 +252,11 @@ for image, dialogue in instruction_data:
 输出：给定图像与指令生成回答的多模态模型
 ```
 
-数学目标仍是预测示范答案；机制是视觉连接、数据生成与分阶段更新；改善指标包括评分和选择题准确率。训练损失没有直接验证每个视觉名词是否真实存在，因此降低交叉熵并不保证消除视觉幻觉。
+训练损失没有直接验证每个视觉名词是否真实存在，因此降低交叉熵并不保证消除视觉幻觉。
 
-## 实验设计：小规模适配建立在大规模预训练之上
+## 四、拆开相对评分、ScienceQA组合与属性失败
+
+先看数据类型消融，再核对评委看到什么、分数除以什么；单模型和组合系统的ScienceQA结果不能合并。
 
 | 维度 | 原文设定 |
 |---|---|
@@ -249,43 +268,43 @@ for image, dialogue in instruction_data:
 | COCO评测 | 30张验证图、90个问题；教师与评委使用描述和框等文字信息 |
 | 野外评测 | 24张图、60个问题，含照片、绘画、梗图等；人工细致描述支持评分 |
 | ScienceQA | 训练12726、验证4241、测试4241；单独微调12 epochs；答案选择准确率 |
-| 不确定性 | 表5前三行是3次推理的均值和标准差；另有固定输出、重复调用评委3次的检查，不是3次完整训练 |
+| 不确定性 | [表5](https://arxiv.org/html/2304.08485v2#S5.T5)前三行是3次推理的均值和标准差；另有固定输出、重复调用评委3次的检查，不是3次完整训练 |
 
 各模型的预训练数据、指令训练与结构并不相同。BLIP-2、OpenFlamingo 的对比说明所测试检查点在该指令基准上的表现，不能孤立归因于线性投影比 Q-Former 或跨注意力更好。
 
 ScienceQA 有些带图题可以仅凭文字知识回答。因此图像类别的准确率提高，不足以证明模型更善于读取图中证据；还应比较移除图片、置换图片及真正必须看图的题目。
 
-## 结果：相对分数、单模型和组合系统
+**证据一：[表4](#llm-v6-071-table-4)，数据类型消融。** 完整数据总分85.1，仅对话73.8，不做指令训练21.5；对话加少量描述与推理数据达到80.5。它支持指令数据和数据多样性的重要性，但数据子集的数量也变化，因此不能完全拆开“更多样”和“更多样本”的贡献。
 
-**证据一：表4，数据类型消融。** 完整数据总分85.1，仅对话73.8，不做指令训练21.5；对话加少量描述与推理数据达到80.5。它支持指令数据和数据多样性的重要性，但数据子集的数量也变化，因此不能完全拆开“更多样”和“更多样本”的贡献。
+&lt;!-- figure-ref-v6:start:071-t4-2-anchor --&gt;
+&lt;a id=&quot;llm-v6-071-table-4&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:071-t4-2-anchor --&gt;
 
-**证据二：表5，野外图像评价。** LLaVA 得分67.3±2.0，BLIP-2 为38.1±1.0，OpenFlamingo 为19.1±0.4。这是相对于文本 GPT-4 参考回答的评分口径，不是正确率。固定 LLaVA 输出再换3次评委调用得到66.7±0.3，支持这批样本上的评分重复性，不能证明不存在系统性偏好或遗漏。
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/071-llava-t4.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/071-llava-t4.png&quot; width=&quot;1701&quot; height=&quot;311&quot; alt=&quot;LLaVA不同指令数据组合的对话、细节描述和推理分数&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Haotian Liu、Chunyuan Li、Qingyang Wu、Yong Jae Lee，2023，表4，PDF第7页；&lt;a href=&quot;https://arxiv.org/pdf/2304.08485v2#page=7&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
-**证据三：表7，ScienceQA。** LLaVA 单模型90.92%，MM-CoT Large 为91.68%；LLaVA 与 GPT-4 组合、由 GPT-4 重新判断分歧后为92.53%。组合比 LLaVA 增加1.61个百分点，是自行做减法得到的绝对差。不能把92.53%写成无外部调用的 LLaVA 独立表现。简单用 LLaVA 补足 GPT-4 拒答仅为90.97%，也说明组合策略本身有影响。
+**证据二：[表5](https://arxiv.org/html/2304.08485v2#S5.T5)，野外图像评价。** LLaVA 得分67.3±2.0，BLIP-2 为38.1±1.0，OpenFlamingo 为19.1±0.4。这是相对于文本 GPT-4 参考回答的评分口径，不是正确率。固定 LLaVA 输出再换3次评委调用得到66.7±0.3，支持这批样本上的评分重复性，不能证明不存在系统性偏好或遗漏。
 
-**证据四：表8，表示和预对齐。** 使用倒数阶段的视觉特征为90.92%，最后一层89.96%；省去对齐预训练降到85.81%；7B为89.84%。这里“from scratch”指省去这一步多模态对齐，不是把 CLIP 和语言模型都随机初始化。作者关于中间视觉特征保留更多局部信息的解释是机制假设，分数差本身没有直接测量局部信息量。
+**证据三：[表7](https://arxiv.org/html/2304.08485v2#S5.T7)，ScienceQA。** LLaVA 单模型90.92%，MM-CoT Large 为91.68%；LLaVA 与 GPT-4 组合、由 GPT-4 重新判断分歧后为92.53%。组合比 LLaVA 增加1.61个百分点，是自行做减法得到的绝对差。不能把92.53%写成无外部调用的 LLaVA 独立表现。简单用 LLaVA 补足 GPT-4 拒答仅为90.97%，也说明组合策略本身有影响。
 
-**证据五：§5.1限制与表6，属性绑定失败。** 图中有草莓和酸奶，模型却回答存在草莓味酸奶。识别两个物体，并不等于把“口味”正确绑定到容器。这一例子揭示重要失败模式，但不能由一个例子估计总体幻觉率。
+**证据四：[表8](https://arxiv.org/html/2304.08485v2#S5.T8)，表示和预对齐。** 使用倒数阶段的视觉特征为90.92%，最后一层89.96%；省去对齐预训练降到85.81%；7B为89.84%。这里“from scratch”指省去这一步多模态对齐，不是把 CLIP 和语言模型都随机初始化。作者关于中间视觉特征保留更多局部信息的解释是机制假设，分数差本身没有直接测量局部信息量。
 
-表8旁关于先理由、后答案的文字描述与最佳配置没有把所有组合完整列齐。适合采用的结论是作者观察到收敛速度变化；不应把缺少完整配对的结果当成严格控制其他变量后的普遍“思维链增益”。
+**证据五：§5.1限制与[表6](https://arxiv.org/html/2304.08485v2#S5.T6)，属性绑定失败。** 图中有草莓和酸奶，模型却回答存在草莓味酸奶。识别两个物体，并不等于把“口味”正确绑定到容器。这一例子揭示重要失败模式，但不能由一个例子估计总体幻觉率。
 
-## 贡献、局限与读者应该带走的判断
+[表8](https://arxiv.org/html/2304.08485v2#S5.T8)旁关于先理由、后答案的文字描述与最佳配置没有把所有组合完整列齐。适合采用的结论是作者观察到收敛速度变化；不应把缺少完整配对的结果当成严格控制其他变量后的普遍“思维链增益”。
 
-LLaVA 将多模态能力建设转化为一个可操作的数据问题：已有视觉和语言基础模型之间，除了表示接口，还需要适合人类指令的行为监督。简单连接器使研究者能快速试验数据设计，但论文没有证明它是所有预算下最好的连接方案。
+## 五、文本教师缺少像素会给监督可信度设限
+
+五个前置概念：**视觉编码器**把像素映射为特征；**投影层**对齐特征维度和表示；**冻结参数**表示反向传播不更新对应权重；**指令微调**用任务请求与示范回答塑造行为；**模型评委**用另一模型评分，可靠性需要独立校准。
+
+简单连接器使研究者能快速试验数据设计，但论文没有证明它是所有预算下最好的连接方案。
 
 作者明确承认视觉幻觉、细粒度感知和评估复杂性。进一步分析可见一个闭环风险：教师生成数据时依赖文字描述，评委判分也依赖类似描述。如果描述遗漏了细节，学生即使说错，评委也可能没有足够信息发现。这不是指所有分数无效，而是说明该评价偏重可文字化的视觉语义。
 
 另一条边界是“未在指令数据中出现”不等于“整个系统从未见过”。CLIP 和语言模型已经携带大规模预训练知识。某些名人或艺术作品的识别，可以来自预训练迁移，不能直接用来证明从少量指令中凭空学出了新视觉概念。
 
-## 自构例子与前置知识
+## 六、沿回答监督原则比较纯文本对话训练
 
-**自构例子，未运行：** 图片是一只红杯子和一只蓝碗。教师只收到“杯子、碗、桌子”的描述与框，可以生成位置问题，却不能可靠生成颜色问题。若擅自写出“红碗”，学生会在看图训练时受到错误监督。更好的数据构造应保留颜色与对象绑定，或避免生成无法由描述确认的问题。
-
-五个前置概念：**视觉编码器**把像素映射为特征；**投影层**对齐特征维度和表示；**冻结参数**表示反向传播不更新对应权重；**指令微调**用任务请求与示范回答塑造行为；**模型评委**用另一模型评分，可靠性需要独立校准。
-
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 图像描述模型不一定遵循用户指令 | 文本教师生成多类型视觉指令；CLIP线性连接Vicuna并两阶段训练 | 对齐视觉表示，同时提供根据问题选择回答内容的监督 | 表4数据消融、表5野外评分、表7单模型与组合、表8对齐消融 | 教师和评委依赖描述；基础模型成本未消失；属性绑定与幻觉仍未解决 |
+多模态数据仍有教师看不到像素的边界。对照[Llama 2](078-llama2.md)的纯文本回答监督，可检验损失掩码与偏好阶段怎样分工；这是训练接口的教学联系，不是历史继承。
 
 ## 自测与答案
 

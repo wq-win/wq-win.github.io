@@ -42,19 +42,18 @@
                 <span class="text-gray-500">GloVe：让词向量解释全局共现统计</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="5dde55ac482d32fc4b6d27ab0ba738e8cf33051e59de4dbc04b7842e5d339846"><h1>008｜GloVe：让词向量解释全局共现统计</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="67b8e682823ea9a167e7c39291e34ccec1b3add33d2c67416990a9e1c73b3f22"><h1>008｜GloVe：让词向量解释全局共现统计</h1>
 <p><a href="index.html">目录</a> · <a href="007-attention.html">上一篇</a> · <a href="009-adam.html">下一篇</a></p>
 <p><strong>论文</strong>：Jeffrey Pennington、Richard Socher、Christopher Manning，<em>GloVe: Global Vectors for Word Representation</em>，EMNLP 2014。<a href="https://aclanthology.org/D14-1162/">论文页面</a> · <a href="https://aclanthology.org/D14-1162.pdf">PDF</a>。本文讨论加权共现拟合、词关系实验与命名实体识别，不把静态词向量等同于上下文化语言模型。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>“冰”和“蒸汽”都可能出现在谈论水的文章中，但“固体”对二者的关联差异更有区分度。GloVe 从全局词共现统计出发，试图让向量关系反映这种相对差异。它通过加权最小二乘拟合共现次数的对数，把统计矩阵与连续表示连接起来。</p>
-<p>作者用类比、相似度和命名实体识别检验表示。核心贡献是一个计算可行、具有统计动机的全局训练目标；限制是共现窗口和语料决定了可学习信息，单个词仍只有静态表示，漂亮的几何不等于完整语义理解。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="005-negative-sampling.html">负采样</a>通过真实搭配与噪声的对比学习局部点积，但尚未给出一个显式拟合全局计数的目标。本篇换到平行统计路线：用共现概率比解释词关系，并对对数计数加权拟合。这个教学连接不能把 GloVe 的偏置和权重函数说成负采样的同一损失。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念是共现矩阵、条件概率比、低秩表示、加权最小二乘和秩相关。它们分别解释统计来源、设计动机、压缩形式、优化目标与评价尺度。将这五层拆开，就不容易把“全局向量”误认为一个没有边界的语义模型。</p>
-<h2 id="背景只看次数还是看相对关系">背景：只看次数，还是看相对关系</h2>
-<p>共现矩阵 <span class="reading-math" data-tex="X_{ij}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>X</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub></mrow><annotation encoding="application/x-tex">X_{ij}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 记录词 <span class="reading-math" data-tex="j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span></span></span></span></span> 在词 <span class="reading-math" data-tex="i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span></span> 上下文中出现的次数。原始计数差异巨大：常见词几乎与所有词出现，罕见搭配则统计不稳。直接对矩阵做普通低秩分解，会受到频率尺度和稀疏性的影响。</p>
+<h2 id="一问题设定怎样让向量反映词之间的相对共现关系">一、问题设定：怎样让向量反映词之间的相对共现关系</h2>
+<p>“冰”和“蒸汽”都与水相关，“固体”对二者的关联差异却更有区分度。共现矩阵 <span class="reading-math" data-tex="X_{ij}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>X</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub></mrow><annotation encoding="application/x-tex">X_{ij}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 记录词 <span class="reading-math" data-tex="j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.05724em;">j</span></span></span></span></span> 出现在词 <span class="reading-math" data-tex="i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span></span> 上下文中的次数，但常见词的巨大计数与罕见搭配的不稳定性会影响直接低秩分解；问题是怎样利用相对关系，又控制频率尺度。</p>
 <p>GloVe 的动机强调条件共现概率的比值。一个上下文词如果与两个候选词同样相关，就不太能区分它们；若明显偏向其中一个，则可能承载关系信息。这不是先定义人类语义类别，而是从分布差异寻找可编码结构。</p>
 <p>局部预测方法和全局计数方法并不是互不相关的两派：二者都利用共现规律，只是目标、抽样和权重不同。GloVe 的问题是怎样把全局信息放进一个直接可优化的目标，而不是证明所有局部预测都丢掉了全局统计。</p>
-<h2 id="方法拟合对数共现而非逐词归一化">方法：拟合对数共现，而非逐词归一化</h2>
+<h2 id="二从概率比推到带偏置的对数共现拟合">二、从概率比推到带偏置的对数共现拟合</h2>
 <p>核心损失为：</p>
 <p><span class="reading-math" data-tex="J=\sum_{i,j:X_{ij}&gt;0}f(X_{ij})
 \left(w_i^T\widetilde w_j+b_i+\widetilde b_j-\log X_{ij}\right)^2."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>J</mi><mo>=</mo><munder><mo>∑</mo><mrow><mi>i</mi><mo separator="true">,</mo><mi>j</mi><mo>:</mo><msub><mi>X</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>&gt;</mo><mn>0</mn></mrow></munder><mi>f</mi><mo stretchy="false">(</mo><msub><mi>X</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo stretchy="false">)</mo><msup><mrow><mo fence="true">(</mo><msubsup><mi>w</mi><mi>i</mi><mi>T</mi></msubsup><msub><mover accent="true"><mi>w</mi><mo stretchy="true">~</mo></mover><mi>j</mi></msub><mo>+</mo><msub><mi>b</mi><mi>i</mi></msub><mo>+</mo><msub><mover accent="true"><mi>b</mi><mo stretchy="true">~</mo></mover><mi>j</mi></msub><mo>−</mo><mi>log</mi><mo>⁡</mo><msub><mi>X</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo fence="true">)</mo></mrow><mn>2</mn></msup><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">J=\sum_{i,j:X_{ij}&gt;0}f(X_{ij})
@@ -74,6 +73,13 @@
 -68.267.847-113-73.952-191-73.952z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 分别是词和上下文向量，偏置吸收部分频率效应；<span class="reading-math" data-tex="f"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>f</mi></mrow><annotation encoding="application/x-tex">f</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.10764em;">f</span></span></span></span></span> 控制不同计数项的相对影响。对数压缩极大计数的尺度，权重函数使极少见项不过分主导，同时避免频繁项无限加权。仅对正共现项求和，也避开 <span class="reading-math" data-tex="\log0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>log</mi><mo>⁡</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\log0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span></span></span></span></span>。</p>
 <p>这个目标没有对每个中心词计算全词表 softmax。它直接让内积加偏置接近某个统计量，因此训练损失不是下一词交叉熵，不能直接拿来与语言模型困惑度比较。想要生成语言，还需要定义序列条件概率模型。</p>
 <p>两组向量有对称但不同的角色。论文使用词与上下文表示的组合来获得最终向量；不同组合会改变下游结果，应把它写入评价协议。向量维度、窗口大小、语料来源与训练次数也都是实质条件，不是可以忽略的实现尾注。</p>
+<h3 id="从概率比走到内积差">从概率比走到内积差</h3>
+<p>设 <span class="reading-math" data-tex="P_{ik}=X_{ik}/X_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>P</mi><mrow><mi>i</mi><mi>k</mi></mrow></msub><mo>=</mo><msub><mi>X</mi><mrow><mi>i</mi><mi>k</mi></mrow></msub><mi mathvariant="normal">/</mi><msub><mi>X</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">P_{ik}=X_{ik}/X_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">ik</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">ik</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，其中 <span class="reading-math" data-tex="X_{ik}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>X</mi><mrow><mi>i</mi><mi>k</mi></mrow></msub></mrow><annotation encoding="application/x-tex">X_{ik}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">ik</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是目标词 <span class="reading-math" data-tex="i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span></span> 与上下文词 <span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 的共现次数，<span class="reading-math" data-tex="X_i=\sum_kX_{ik}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>X</mi><mi>i</mi></msub><mo>=</mo><msub><mo>∑</mo><mi>k</mi></msub><msub><mi>X</mi><mrow><mi>i</mi><mi>k</mi></mrow></msub></mrow><annotation encoding="application/x-tex">X_i=\sum_kX_{ik}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0497em;vertical-align:-0.2997em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1864em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2997em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">ik</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>；<span class="reading-math" data-tex="w_i,w_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>w</mi><mi>i</mi></msub><mo separator="true">,</mo><msub><mi>w</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">w_i,w_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span> 是两个目标词向量，<span class="reading-math" data-tex="\tilde w_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mover accent="true"><mi>w</mi><mo>~</mo></mover><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">\tilde w_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8179em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span></span><span style="top:-3.35em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">~</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是上下文向量，<span class="reading-math" data-tex="F"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>F</mi></mrow><annotation encoding="application/x-tex">F</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">F</span></span></span></span></span> 是待选的标量映射。以下对数推导只讨论正计数项。要求关系由向量差表达，即 <span class="reading-math" data-tex="F((w_i-w_j)^\top\tilde w_k)=P_{ik}/P_{jk}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>F</mi><mo stretchy="false">(</mo><mo stretchy="false">(</mo><msub><mi>w</mi><mi>i</mi></msub><mo>−</mo><msub><mi>w</mi><mi>j</mi></msub><msup><mo stretchy="false">)</mo><mi mathvariant="normal">⊤</mi></msup><msub><mover accent="true"><mi>w</mi><mo>~</mo></mover><mi>k</mi></msub><mo stretchy="false">)</mo><mo>=</mo><msub><mi>P</mi><mrow><mi>i</mi><mi>k</mi></mrow></msub><mi mathvariant="normal">/</mi><msub><mi>P</mi><mrow><mi>j</mi><mi>k</mi></mrow></msub></mrow><annotation encoding="application/x-tex">F((w_i-w_j)^\top\tilde w_k)=P_{ik}/P_{jk}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.13889em;">F</span><span class="mopen">((</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1352em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span></span><span style="top:-3.35em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">~</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">ik</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord">/</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">jk</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>；选择把加法映为乘法的指数函数后，取对数得到 <span class="reading-math" data-tex="(w_i-w_j)^\top\tilde w_k=\log P_{ik}-\log P_{jk}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><msub><mi>w</mi><mi>i</mi></msub><mo>−</mo><msub><mi>w</mi><mi>j</mi></msub><msup><mo stretchy="false">)</mo><mi mathvariant="normal">⊤</mi></msup><msub><mover accent="true"><mi>w</mi><mo>~</mo></mover><mi>k</mi></msub><mo>=</mo><mi>log</mi><mo>⁡</mo><msub><mi>P</mi><mrow><mi>i</mi><mi>k</mi></mrow></msub><mo>−</mo><mi>log</mi><mo>⁡</mo><msub><mi>P</mi><mrow><mi>j</mi><mi>k</mi></mrow></msub></mrow><annotation encoding="application/x-tex">(w_i-w_j)^\top\tilde w_k=\log P_{ik}-\log P_{jk}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1352em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span></span><span style="top:-3.35em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">~</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0269em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">ik</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">P</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">jk</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>。再把与上下文 <span class="reading-math" data-tex="k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 无关的词频项交给偏置，形成对 <span class="reading-math" data-tex="\log X_{ik}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>log</mi><mo>⁡</mo><msub><mi>X</mi><mrow><mi>i</mi><mi>k</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\log X_{ik}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0785em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">ik</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 的近似拟合。这里是模型设计约束导出的动机，并非任意真实共现矩阵都存在精确低维解。</p>
+<p><strong>教学算例。</strong> 若上下文“固态”在两个目标词周围的概率为0.08和0.01，比值8对应对数差 <span class="reading-math" data-tex="\log8\approx2.079"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>log</mi><mo>⁡</mo><mn>8</mn><mo>≈</mo><mn>2.079</mn></mrow><annotation encoding="application/x-tex">\log8\approx2.079</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">8</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2.079</span></span></span></span></span>；共同相关词若概率为0.20和0.20，对数差为0。相比单看“共同相关词出现很多”，比值指出哪个上下文真正区分目标词。若某项计数为零，不能直接把 <span class="reading-math" data-tex="\log0"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>log</mi><mo>⁡</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\log0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span></span></span></span></span> 代入数值程序；原目标以零权重排除未观察项，而不是声称未出现就绝无关系。</p>
+<p>构造词“水”与大量上下文共现，而稀有化学术语只出现几次。若没有频率偏置，模型可能把“很常见”硬塞进向量方向，妨碍表示关系。偏置提供吸收总体频率的通道，让内积更专注于词对之间的结构，但不能保证完全剥离频率。</p>
+<h3 id="用共同平移检验偏置吸收了什么">用共同平移检验偏置吸收了什么</h3>
+<p>对固定中心词，将它与所有上下文的非零共现数都乘2，会给各个对数目标共同加上log 2。若权重函数暂不变，这个共同偏移可由中心词偏置吸收，未必需要改变所有向量方向；真实目标还会因计数权重变化而改变。这个分步检查把共现比例信号与高频样本权重区分开。</p>
+<h2 id="三先建非零共现矩阵再优化并组合两组向量">三、先建非零共现矩阵，再优化并组合两组向量</h2>
 <pre><code class="language-text">输入：文本、上下文窗口、向量维度
 统计非零共现对 X[i,j]
 初始化词向量 w、上下文向量 u 与各自偏置
@@ -84,8 +90,9 @@
 按既定规则组合词与上下文向量
 独立评价词类比、相似度及命名实体识别
 </code></pre>
-<p>数学上优化加权矩阵拟合，机制上利用全局共现与频率权重，最终指标检验几何与下游可用性。作者关于概率比值的动机帮助解释设计，但不能被当作“所有语义关系一定是向量差”的证明。</p>
-<h2 id="实验设计与证据">实验设计与证据</h2>
+<h2 id="四把类比相似度排序和实体识别分开评价">四、把类比、相似度排序和实体识别分开评价</h2>
+<p>作者关于概率比值的动机帮助解释设计，但不能被当作“所有语义关系一定是向量差”的证明。</p>
+<p>损失拟合统计量，评价却是另一层：先看词关系，再看这些表示能否为下游模型提供信息。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -122,37 +129,31 @@
 <td>未对所有设置报告统一的多随机种子区间</td>
 </tr>
 </tbody></table></div>
-<p>**证据一，第 2 节模型推导与目标函数。**它把共现比值的动机落成可计算损失。这里应分清设计动机和经验验证：一个解释合理的损失仍需要数据证明其用途。</p>
-<p>**证据二，表 2 与表 3。**类比和相似度分别检验不同性质，不能因为一种任务提升就概括为所有语义更好。表 3 使用 Spearman 相关，比较的是向量相似度排序与人工判断排序，不是词语分类正确率。</p>
-<p>**证据三，表 4 的命名实体识别。**把向量交给下游模型，检验内在几何是否能够转化为任务信息。这比只展示近邻更接近应用，但结果仍依赖下游模型、特征和训练数据，不能推断向量单独完成了实体识别。</p>
+<p><strong>证据一，第 2 节模型推导与目标函数。</strong>它把共现比值的动机落成可计算损失。这里应分清设计动机和经验验证：一个解释合理的损失仍需要数据证明其用途。</p>
+<p><strong>证据二，<a href="https://aclanthology.org/D14-1162.pdf#page=6">表2</a> 与<a href="#llm-v6-008-table-3">表3</a>。</strong>类比和相似度分别检验不同性质，不能因为一种任务提升就概括为所有语义更好。<a href="#llm-v6-008-table-3">表3</a> 使用 Spearman 相关，比较的是向量相似度排序与人工判断排序，不是词语分类正确率。</p>
+<!-- figure-ref-v6:start:008-t3-2-anchor -->
+<p><a id="llm-v6-008-table-3"></a></p>
+<!-- figure-ref-v6:end:008-t3-2-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/008-glove-t3.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/008-glove-t3.png" width="1356" height="1194" alt="不同词向量方法在词相似度数据集上的Spearman相关系数" loading="lazy"></a><figcaption>实验结果表摘引：Jeffrey Pennington、Richard Socher、Christopher Manning，2014，表3，PDF第8页；<a href="https://aclanthology.org/D14-1162.pdf#page=8" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据三，<a href="https://aclanthology.org/D14-1162.pdf#page=9">表4</a> 的命名实体识别。</strong>把向量交给下游模型，检验内在几何是否能够转化为任务信息。这比只展示近邻更接近应用，但结果仍依赖下游模型、特征和训练数据，不能推断向量单独完成了实体识别。</p>
 <p>论文包含从十亿级到更大网页语料的设置。不同语料不仅数量不同，体裁和词汇覆盖也不同。因此“使用较少文本优于另一个公开向量”可能是有意义的系统比较，却不自动等于严格的数据效率定律。</p>
-<h2 id="教学例子偏置与权重为什么不能删掉">教学例子：偏置与权重为什么不能删掉</h2>
-<p>构造词“水”与大量上下文共现，而稀有化学术语只出现几次。若没有频率偏置，模型可能把“很常见”硬塞进向量方向，妨碍表示关系。偏置提供吸收总体频率的通道，让内积更专注于词对之间的结构，但不能保证完全剥离频率。</p>
-<p>再设某罕见词对只出现一次，可能是真实关联，也可能是拼写错误。若给所有非零项相同巨大影响，噪声会被过度拟合；若彻底忽略少量共现，稀有知识又学不到。权重函数是在可靠性与覆盖之间折中，不存在脱离任务和语料的唯一正确形状。</p>
 <p>这些例子是教学构造，并非论文报告数据。一个可操作的验证是固定共现矩阵，分别移除偏置、改变权重、保持其他参数不变，观察低频词和高频词分组表现。只看整体平均，可能隐藏某组获益、另一组受损。</p>
-<h2 id="几何结论应该怎样阅读">几何结论应该怎样阅读</h2>
+<h2 id="五共现几何仍受频率窗口与语境混合约束">五、共现几何仍受频率、窗口与语境混合约束</h2>
+<p>再设某罕见词对只出现一次，可能是真实关联，也可能是拼写错误。若给所有非零项相同巨大影响，噪声会被过度拟合；若彻底忽略少量共现，稀有知识又学不到。权重函数是在可靠性与覆盖之间折中，不存在脱离任务和语料的唯一正确形状。</p>
 <p>余弦相似度消除了向量模长的一部分影响，但仍可能受到空间各向异性与高频方向影响。类比通常把若干向量相加减再检索近邻，结果依赖候选排除规则；如果测试词不在词表，处理方式也改变分数。</p>
 <p>词相似与可替换性也不是一回事。“热”和“冷”可能因为相似语境靠近，尽管意义相反。GloVe 学到的是文本分布中的结构，不是带逻辑公理的概念库。这样理解才能既看到其价值，也不要求它完成训练目标没有规定的任务。</p>
-<h2 id="贡献与局限">贡献与局限</h2>
-<p>GloVe 为全局统计与可扩展表示训练提供了简洁连接。局限是静态多义词混合、词表外问题、窗口信息丢失，以及共现矩阵构建和存储成本。更大语料能够改善估计，但同时继承语料中的偏差和错误。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>全局共现统计与预测式词表示的优势难在同一目标中结合</td>
-<td>对非零共现计数的对数做加权拟合，学习词与上下文向量</td>
-<td>保留全局计数关系，同时控制不同频率词对对损失的影响</td>
-<td>表2类比、表3相似度、表4命名实体识别</td>
-<td>共现构建和存储成本、窗口与权重选择；静态向量不能分开同词的全部语境</td>
-</tr>
-</tbody></table></div>
+<p>局限是静态多义词混合、词表外问题、窗口信息丢失，以及共现矩阵构建和存储成本。更大语料能够改善估计，但同时继承语料中的偏差和错误。</p>
+<h2 id="六把本篇机制再推进一步">六、把本篇机制再推进一步</h2>
+<details>
+<summary>1. 未观察到的词对在损失中被跳过，能否解释为模型认定它们没有关系？</summary>
+
+<p><strong>参考答案</strong>：不能。跳过是为避免直接拟合零计数的对数，也是稀疏目标的选择；未观察到可能来自语料不足。向量还受其他共现项共享约束，因此仍可能对未见词对产生相近表示。要判断遗漏是否有害，需要按频率和覆盖分组评价，而非把稀疏零项当成语义否定。</p>
+</details>
+
+<h2 id="七从静态词类型转到上下文中的词">七、从静态词类型转到上下文中的词</h2>
+<p>静态向量仍把一个词的多种用法压在同一位置。<a href="016-elmo.html">ELMo</a>改变表示对象，让特征依赖当前句子；这是上下文化方向，而不是仅换一种共现拟合损失。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 为什么 GloVe 训练损失下降，不等于语言困惑度下降？</strong></p>
 <p>它拟合的是对数共现统计，未定义每一步归一化的条件词概率。语言困惑度需要完整的概率模型与一致分词。两者目标不同，只有把表示放进语言模型并评价，才能讨论困惑度变化。</p>
@@ -171,21 +172,19 @@
 
 **论文**：Jeffrey Pennington、Richard Socher、Christopher Manning，*GloVe: Global Vectors for Word Representation*，EMNLP 2014。[论文页面](https://aclanthology.org/D14-1162/) · [PDF](https://aclanthology.org/D14-1162.pdf)。本文讨论加权共现拟合、词关系实验与命名实体识别，不把静态词向量等同于上下文化语言模型。
 
-## 一分钟理解
+### 先接住前作的问题
 
-“冰”和“蒸汽”都可能出现在谈论水的文章中，但“固体”对二者的关联差异更有区分度。GloVe 从全局词共现统计出发，试图让向量关系反映这种相对差异。它通过加权最小二乘拟合共现次数的对数，把统计矩阵与连续表示连接起来。
+[负采样](005-negative-sampling.md)通过真实搭配与噪声的对比学习局部点积，但尚未给出一个显式拟合全局计数的目标。本篇换到平行统计路线：用共现概率比解释词关系，并对对数计数加权拟合。这个教学连接不能把 GloVe 的偏置和权重函数说成负采样的同一损失。
 
-作者用类比、相似度和命名实体识别检验表示。核心贡献是一个计算可行、具有统计动机的全局训练目标；限制是共现窗口和语料决定了可学习信息，单个词仍只有静态表示，漂亮的几何不等于完整语义理解。
+## 一、问题设定：怎样让向量反映词之间的相对共现关系
 
-## 背景：只看次数，还是看相对关系
-
-共现矩阵 $X_{ij}$ 记录词 $j$ 在词 $i$ 上下文中出现的次数。原始计数差异巨大：常见词几乎与所有词出现，罕见搭配则统计不稳。直接对矩阵做普通低秩分解，会受到频率尺度和稀疏性的影响。
+“冰”和“蒸汽”都与水相关，“固体”对二者的关联差异却更有区分度。共现矩阵 $X_{ij}$ 记录词 $j$ 出现在词 $i$ 上下文中的次数，但常见词的巨大计数与罕见搭配的不稳定性会影响直接低秩分解；问题是怎样利用相对关系，又控制频率尺度。
 
 GloVe 的动机强调条件共现概率的比值。一个上下文词如果与两个候选词同样相关，就不太能区分它们；若明显偏向其中一个，则可能承载关系信息。这不是先定义人类语义类别，而是从分布差异寻找可编码结构。
 
 局部预测方法和全局计数方法并不是互不相关的两派：二者都利用共现规律，只是目标、抽样和权重不同。GloVe 的问题是怎样把全局信息放进一个直接可优化的目标，而不是证明所有局部预测都丢掉了全局统计。
 
-## 方法：拟合对数共现，而非逐词归一化
+## 二、从概率比推到带偏置的对数共现拟合
 
 核心损失为：
 
@@ -200,6 +199,20 @@ $w_i$ 与 $\widetilde w_j$ 分别是词和上下文向量，偏置吸收部分�
 
 两组向量有对称但不同的角色。论文使用词与上下文表示的组合来获得最终向量；不同组合会改变下游结果，应把它写入评价协议。向量维度、窗口大小、语料来源与训练次数也都是实质条件，不是可以忽略的实现尾注。
 
+### 从概率比走到内积差
+
+设 $P_{ik}=X_{ik}/X_i$，其中 $X_{ik}$ 是目标词 $i$ 与上下文词 $k$ 的共现次数，$X_i=\sum_kX_{ik}$；$w_i,w_j$ 是两个目标词向量，$\tilde w_k$ 是上下文向量，$F$ 是待选的标量映射。以下对数推导只讨论正计数项。要求关系由向量差表达，即 $F((w_i-w_j)^\top\tilde w_k)=P_{ik}/P_{jk}$；选择把加法映为乘法的指数函数后，取对数得到 $(w_i-w_j)^\top\tilde w_k=\log P_{ik}-\log P_{jk}$。再把与上下文 $k$ 无关的词频项交给偏置，形成对 $\log X_{ik}$ 的近似拟合。这里是模型设计约束导出的动机，并非任意真实共现矩阵都存在精确低维解。
+
+**教学算例。** 若上下文“固态”在两个目标词周围的概率为0.08和0.01，比值8对应对数差 $\log8\approx2.079$；共同相关词若概率为0.20和0.20，对数差为0。相比单看“共同相关词出现很多”，比值指出哪个上下文真正区分目标词。若某项计数为零，不能直接把 $\log0$ 代入数值程序；原目标以零权重排除未观察项，而不是声称未出现就绝无关系。
+
+构造词“水”与大量上下文共现，而稀有化学术语只出现几次。若没有频率偏置，模型可能把“很常见”硬塞进向量方向，妨碍表示关系。偏置提供吸收总体频率的通道，让内积更专注于词对之间的结构，但不能保证完全剥离频率。
+
+### 用共同平移检验偏置吸收了什么
+
+对固定中心词，将它与所有上下文的非零共现数都乘2，会给各个对数目标共同加上log 2。若权重函数暂不变，这个共同偏移可由中心词偏置吸收，未必需要改变所有向量方向；真实目标还会因计数权重变化而改变。这个分步检查把共现比例信号与高频样本权重区分开。
+
+## 三、先建非零共现矩阵，再优化并组合两组向量
+
 ```text
 输入：文本、上下文窗口、向量维度
 统计非零共现对 X[i,j]
@@ -212,9 +225,11 @@ $w_i$ 与 $\widetilde w_j$ 分别是词和上下文向量，偏置吸收部分�
 独立评价词类比、相似度及命名实体识别
 ```
 
-数学上优化加权矩阵拟合，机制上利用全局共现与频率权重，最终指标检验几何与下游可用性。作者关于概率比值的动机帮助解释设计，但不能被当作“所有语义关系一定是向量差”的证明。
+## 四、把类比、相似度排序和实体识别分开评价
 
-## 实验设计与证据
+作者关于概率比值的动机帮助解释设计，但不能被当作“所有语义关系一定是向量差”的证明。
+
+损失拟合统计量，评价却是另一层：先看词关系，再看这些表示能否为下游模型提供信息。
 
 | 项目 | 原文范围与解释 |
 |---|---|
@@ -228,35 +243,44 @@ $w_i$ 与 $\widetilde w_j$ 分别是词和上下文向量，偏置吸收部分�
 
 **证据一，第 2 节模型推导与目标函数。**它把共现比值的动机落成可计算损失。这里应分清设计动机和经验验证：一个解释合理的损失仍需要数据证明其用途。
 
-**证据二，表 2 与表 3。**类比和相似度分别检验不同性质，不能因为一种任务提升就概括为所有语义更好。表 3 使用 Spearman 相关，比较的是向量相似度排序与人工判断排序，不是词语分类正确率。
+**证据二，[表2](https://aclanthology.org/D14-1162.pdf#page=6) 与[表3](#llm-v6-008-table-3)。**类比和相似度分别检验不同性质，不能因为一种任务提升就概括为所有语义更好。[表3](#llm-v6-008-table-3) 使用 Spearman 相关，比较的是向量相似度排序与人工判断排序，不是词语分类正确率。
 
-**证据三，表 4 的命名实体识别。**把向量交给下游模型，检验内在几何是否能够转化为任务信息。这比只展示近邻更接近应用，但结果仍依赖下游模型、特征和训练数据，不能推断向量单独完成了实体识别。
+&lt;!-- figure-ref-v6:start:008-t3-2-anchor --&gt;
+&lt;a id=&quot;llm-v6-008-table-3&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:008-t3-2-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/008-glove-t3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/008-glove-t3.png&quot; width=&quot;1356&quot; height=&quot;1194&quot; alt=&quot;不同词向量方法在词相似度数据集上的Spearman相关系数&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Jeffrey Pennington、Richard Socher、Christopher Manning，2014，表3，PDF第8页；&lt;a href=&quot;https://aclanthology.org/D14-1162.pdf#page=8&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+**证据三，[表4](https://aclanthology.org/D14-1162.pdf#page=9) 的命名实体识别。**把向量交给下游模型，检验内在几何是否能够转化为任务信息。这比只展示近邻更接近应用，但结果仍依赖下游模型、特征和训练数据，不能推断向量单独完成了实体识别。
 
 论文包含从十亿级到更大网页语料的设置。不同语料不仅数量不同，体裁和词汇覆盖也不同。因此“使用较少文本优于另一个公开向量”可能是有意义的系统比较，却不自动等于严格的数据效率定律。
 
-## 教学例子：偏置与权重为什么不能删掉
-
-构造词“水”与大量上下文共现，而稀有化学术语只出现几次。若没有频率偏置，模型可能把“很常见”硬塞进向量方向，妨碍表示关系。偏置提供吸收总体频率的通道，让内积更专注于词对之间的结构，但不能保证完全剥离频率。
-
-再设某罕见词对只出现一次，可能是真实关联，也可能是拼写错误。若给所有非零项相同巨大影响，噪声会被过度拟合；若彻底忽略少量共现，稀有知识又学不到。权重函数是在可靠性与覆盖之间折中，不存在脱离任务和语料的唯一正确形状。
-
 这些例子是教学构造，并非论文报告数据。一个可操作的验证是固定共现矩阵，分别移除偏置、改变权重、保持其他参数不变，观察低频词和高频词分组表现。只看整体平均，可能隐藏某组获益、另一组受损。
 
-## 几何结论应该怎样阅读
+## 五、共现几何仍受频率、窗口与语境混合约束
+
+再设某罕见词对只出现一次，可能是真实关联，也可能是拼写错误。若给所有非零项相同巨大影响，噪声会被过度拟合；若彻底忽略少量共现，稀有知识又学不到。权重函数是在可靠性与覆盖之间折中，不存在脱离任务和语料的唯一正确形状。
 
 余弦相似度消除了向量模长的一部分影响，但仍可能受到空间各向异性与高频方向影响。类比通常把若干向量相加减再检索近邻，结果依赖候选排除规则；如果测试词不在词表，处理方式也改变分数。
 
 词相似与可替换性也不是一回事。“热”和“冷”可能因为相似语境靠近，尽管意义相反。GloVe 学到的是文本分布中的结构，不是带逻辑公理的概念库。这样理解才能既看到其价值，也不要求它完成训练目标没有规定的任务。
 
-## 贡献与局限
-
-GloVe 为全局统计与可扩展表示训练提供了简洁连接。局限是静态多义词混合、词表外问题、窗口信息丢失，以及共现矩阵构建和存储成本。更大语料能够改善估计，但同时继承语料中的偏差和错误。
+局限是静态多义词混合、词表外问题、窗口信息丢失，以及共现矩阵构建和存储成本。更大语料能够改善估计，但同时继承语料中的偏差和错误。
 
 五个前置概念是共现矩阵、条件概率比、低秩表示、加权最小二乘和秩相关。它们分别解释统计来源、设计动机、压缩形式、优化目标与评价尺度。将这五层拆开，就不容易把“全局向量”误认为一个没有边界的语义模型。
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 全局共现统计与预测式词表示的优势难在同一目标中结合 | 对非零共现计数的对数做加权拟合，学习词与上下文向量 | 保留全局计数关系，同时控制不同频率词对对损失的影响 | 表2类比、表3相似度、表4命名实体识别 | 共现构建和存储成本、窗口与权重选择；静态向量不能分开同词的全部语境 |
+## 六、把本篇机制再推进一步
+
+&lt;details&gt;
+&lt;summary&gt;1. 未观察到的词对在损失中被跳过，能否解释为模型认定它们没有关系？&lt;/summary&gt;
+
+**参考答案**：不能。跳过是为避免直接拟合零计数的对数，也是稀疏目标的选择；未观察到可能来自语料不足。向量还受其他共现项共享约束，因此仍可能对未见词对产生相近表示。要判断遗漏是否有害，需要按频率和覆盖分组评价，而非把稀疏零项当成语义否定。
+
+&lt;/details&gt;
+
+## 七、从静态词类型转到上下文中的词
+
+静态向量仍把一个词的多种用法压在同一位置。[ELMo](016-elmo.md)改变表示对象，让特征依赖当前句子；这是上下文化方向，而不是仅换一种共现拟合损失。
 
 ## 自测与参考答案
 

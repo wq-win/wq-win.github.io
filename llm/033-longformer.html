@@ -39,23 +39,21 @@
                 <span class="text-gray-400">/</span>
                 <a href="index.html" class="text-primary hover:underline">大语言模型</a>
                 <span class="text-gray-400">/</span>
-                <span class="text-gray-500">033 · Longformer：长文本不必让所有词两两相看</span>
+                <span class="text-gray-500">Longformer：长文本不必让所有词两两相看</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="6d259cef4c6900adf1a2ab3e284853fe030282cb01c18ba92c56ce8a36cf716c"><h1>033 · Longformer：长文本不必让所有词两两相看</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="9f3af73b9d0b27b75979a5c04f19c75fc86021fc9f5ea9a422f11036823da842"><h1>033 · Longformer：长文本不必让所有词两两相看</h1>
 <p><a href="index.html">返回目录</a> · <a href="032-dpr.html">上一篇：DPR</a> · <a href="034-rag.html">下一篇：RAG</a></p>
-<p>论文：Iz Beltagy、Matthew E. Peters、Arman Cohan，<em>Longformer: The Long-Document Transformer</em>，2020。<a href="https://arxiv.org/pdf/2004.05150">原始论文</a>。阅读重点为§3注意力结构、§4实验、表2与表5；未独立复现底层计算核。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>普通自注意力把一篇文章里的每个词都与所有词比较，文章长度翻倍，配对数量大约变为四倍。Longformer 让大部分词只关注附近窗口，再指定少量位置能连接全文。这样既保留局部语言结构，也给远距离信息提供通路。</p>
-<p>它解决的是长文档的计算与内存约束，不是让模型自动理解任意长度文本。窗口宽度、全局位置数量、预训练长度和具体任务都会影响有效范围。原论文同时考察字符语言建模与从 RoBERTa 继续预训练的长文档理解，两类实验不能混用预算和指标。</p>
-<p>一句话：在需要处理长上下文的任务中，通过局部窗口与少量全局注意力，降低注意力随长度增长的成本，代价是人为限制连接模式并需要适配位置表示与训练分布。</p>
+<p>论文：Iz Beltagy、Matthew E. Peters、Arman Cohan，<em>Longformer: The Long-Document Transformer</em>，2020。<a href="https://arxiv.org/pdf/2004.05150">原始论文</a>。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="015-transformer.html">Transformer</a>直接连接位置，却带来平方数量的交互；<a href="023-roberta.html">RoBERTa</a>的强短编码器也不能仅改长度参数就读取长文。本篇直接改连接图，并研究如何迁移既有权重，留下的是可达性、训练适配与执行效率三项不同检验。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念是：自注意力按内容聚合信息，感受野描述能访问的范围，全局词提供全文连接，绝对位置嵌入区分顺序，BPC用以比特表示预测损失。掌握后可以与BigBird的随机连接、Performer的核近似分别比较，而不要都称为同一种“线性注意力”。</p>
-<h2 id="长度问题为何不能只靠截断">长度问题为何不能只靠截断</h2>
-<p>对于文档分类，决定标签的证据可能在末尾；对于多跳问答，两个线索可能跨越不同段落。截断会直接丢失信息，分块独立编码则缺少跨块联系。扩大普通 Transformer 的输入长度又会产生大量注意力分数。</p>
+<h2 id="一问题设定怎样保留长文证据而不计算全部位置对">一、问题设定：怎样保留长文证据而不计算全部位置对</h2>
+<p>文档标签证据可能在末尾，多跳问答线索又可能跨段落。截断会丢信息，独立分块缺少跨块交流，扩大完整注意力则产生大量位置配对。本篇以局部窗口加少量全局位置保留路径，检验节省成本后哪些长文能力仍可学到。</p>
 <p>设序列长 <span class="reading-math" data-tex="n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span>、隐维度 <span class="reading-math" data-tex="d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi></mrow><annotation encoding="application/x-tex">d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span>，全注意力的配对运算通常为 <span class="reading-math" data-tex="O(n^2d)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>O</mi><mo stretchy="false">(</mo><msup><mi>n</mi><mn>2</mn></msup><mi>d</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">O(n^2d)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">O</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mord mathnormal">d</span><span class="mclose">)</span></span></span></span></span>，分数矩阵为 <span class="reading-math" data-tex="O(n^2)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>O</mi><mo stretchy="false">(</mo><msup><mi>n</mi><mn>2</mn></msup><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">O(n^2)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">O</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>。这不意味着整个网络只有这一项成本：前馈层、投影和激活也占资源，所以注意力变成线性后，整机速度不会自动按理论比例提升。</p>
 <p>Longformer 属于模型架构与系统效率研究，没有环境状态、动作或奖励。输入是长序列，输出随目标而变：语言模型预测字符，预训练编码器恢复遮盖词，微调模型完成问答或分类。</p>
-<h2 id="连接图与核心公式">连接图与核心公式</h2>
+<h2 id="二从局部与全局边推导可达范围和复杂度">二、从局部与全局边推导可达范围和复杂度</h2>
 <p>为位置 <span class="reading-math" data-tex="i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span></span> 定义局部邻域 <span class="reading-math" data-tex="W_i"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>W</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">W_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，全局位置集合为 <span class="reading-math" data-tex="G"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span></span></span></span></span>。普通位置能够访问 <span class="reading-math" data-tex="W_i\cup G"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>W</mi><mi>i</mi></msub><mo>∪</mo><mi>G</mi></mrow><annotation encoding="application/x-tex">W_i\cup G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">∪</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">G</span></span></span></span></span>；全局位置能够访问所有位置。用掩码表达单个注意力头：</p>
 <p><span class="reading-math" data-tex="a_{ij}=\operatorname{softmax}_{j}\left(\frac{q_i^\top k_j}{\sqrt d}+m_{ij}\right),\qquad
 m_{ij}=\begin{cases}0,&amp;j\in W_i\cup G\text{ 或 }i\in G\\-\infty,&amp;\text{其他}\end{cases}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>a</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>=</mo><msub><mrow><mi mathvariant="normal">softmax</mi><mo>⁡</mo></mrow><mi>j</mi></msub><mrow><mo fence="true">(</mo><mfrac><mrow><msubsup><mi>q</mi><mi>i</mi><mi mathvariant="normal">⊤</mi></msubsup><msub><mi>k</mi><mi>j</mi></msub></mrow><msqrt><mi>d</mi></msqrt></mfrac><mo>+</mo><msub><mi>m</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo fence="true">)</mo></mrow><mo separator="true">,</mo><mspace width="2em"/><msub><mi>m</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>=</mo><mrow><mo fence="true">{</mo><mtable rowspacing="0.36em" columnalign="left left" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mn>0</mn><mo separator="true">,</mo></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>j</mi><mo>∈</mo><msub><mi>W</mi><mi>i</mi></msub><mo>∪</mo><mi>G</mi><mtext> 或 </mtext><mi>i</mi><mo>∈</mo><mi>G</mi></mrow></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mo>−</mo><mi mathvariant="normal">∞</mi><mo separator="true">,</mo></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mtext>其他</mtext></mstyle></mtd></mtr></mtable></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">a_{ij}=\operatorname{softmax}_{j}\left(\frac{q_i^\top k_j}{\sqrt d}+m_{ij}\right),\qquad
@@ -74,6 +72,12 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 <p>输出为 <span class="reading-math" data-tex="h_i'=\sum_j a_{ij}v_j"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>h</mi><mi>i</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msubsup><mo>=</mo><msub><mo>∑</mo><mi>j</mi></msub><msub><mi>a</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><msub><mi>v</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">h_i&#x27;=\sum_j a_{ij}v_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0106em;vertical-align:-0.2587em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7519em;"><span style="top:-2.4413em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">′</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2587em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1858em;vertical-align:-0.4358em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span></span></span></span></span>。这个式子解释允许哪些连接；实际实现不能先生成完整 <span class="reading-math" data-tex="n\times n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi><mo>×</mo><mi>n</mi></mrow><annotation encoding="application/x-tex">n\times n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 矩阵再遮盖，否则节省内存的意义就消失了。论文为局部和全局连接使用不同投影，教学式省略了这一参数区分。</p>
 <p>若窗口大小 <span class="reading-math" data-tex="w"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>w</mi></mrow><annotation encoding="application/x-tex">w</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span></span></span></span></span> 与全局位置数 <span class="reading-math" data-tex="g"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi></mrow><annotation encoding="application/x-tex">g</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span></span></span></span></span> 都固定，连接数量约为 <span class="reading-math" data-tex="O(nw+ng)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>O</mi><mo stretchy="false">(</mo><mi>n</mi><mi>w</mi><mo>+</mo><mi>n</mi><mi>g</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">O(nw+ng)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">O</span><span class="mopen">(</span><span class="mord mathnormal">n</span><span class="mord mathnormal" style="margin-right:0.02691em;">w</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">n</span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mclose">)</span></span></span></span></span>。如果把所有词设成全局位置，<span class="reading-math" data-tex="g"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>g</mi></mrow><annotation encoding="application/x-tex">g</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span></span></span></span></span> 随 <span class="reading-math" data-tex="n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 增长，又回到了平方规模。因此“线性复杂度”有明确条件。</p>
 <p>局部窗口叠多层后，信息可以逐步传播到更远处；全局词则提供较短路径。分类可让特殊汇总词连接全文，问答可把问题词设为全局。这不是由测试答案指定位置，不应引入答案所在段落的特权信息。论文也讨论膨胀窗口，但从 RoBERTa 迁移的配置并非所有连接变体都获益。</p>
+<p><strong>教学算例。</strong> 长度1024、每侧r=2、4层纯局部网络，位置500最多接触492到508附近信息；相距100的事实仍不可达。加入全局问题token后拓扑距离缩短，但若问题token把两个同名人混淆，信息虽到达仍会读错。实验应拆成“边是否允许”和“模型是否学会利用边”两个检查。</p>
+<p>自构文档第一段说“项目负责人是林某”，最后一段说“负责人签署最终许可”。要回答谁签署，短截断可能只看到一端。局部窗口让相邻句先整合信息，问题的全局位置再从全文收集相关内容。</p>
+<h3 id="两层窗口的感受野不能当作一层注意力">两层窗口的感受野不能当作一层注意力</h3>
+<p>在无全局节点、单向距离半径1的示意图中，位置5一层可接收4、5、6，两层才可能经4接到3。信息到达需经过中间表示的压缩与非线性，不能当成位置5直接对3计算原始注意力分数。全局连接改变路径长度，局部窗口叠层改变间接可达范围，二者应分别测试。</p>
+<p>教法联系：<a href="https://lilianweng.github.io/posts/2020-04-07-the-transformer-family/">Lilian Weng的The Transformer Family</a>。算例为本文自构。</p>
+<h2 id="三实现稀疏算子并迁移短模型的位置表示">三、实现稀疏算子并迁移短模型的位置表示</h2>
 <pre><code class="language-text">输入：长序列x、每层窗口、任务指定的全局位置G
 对每层：
     为局部和全局注意力计算所需投影
@@ -86,10 +90,12 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 输出：长文本表示及任务预测
 </code></pre>
 <p>这份流程描述双向编码场景。自回归字符建模还必须限制未来信息；不能照搬双向掩码后报告语言模型困惑度，否则会泄漏预测目标。</p>
-<h2 id="从短模型变成长模型">从短模型变成长模型</h2>
 <p>RoBERTa 使用有限长度的可学习绝对位置嵌入。扩展到4096时，新增位置若随机初始化，会破坏已有表示。论文复制原有512个位置向量来初始化更长位置表，然后继续预训练。复制是初始化方案，训练后各位置仍可适配，不是宣称每512个词在语义上完全重复。</p>
 <p>从旧权重迁移还受到注意力结构兼容性约束。论文提到，在这一路线中加入部分膨胀注意力反而损害表现，可能与预训练权重不兼容有关。这里“可能”是作者解释，不是已被完全隔离验证的因果结论。</p>
-<h2 id="实验设置">实验设置</h2>
+<h3 id="可达不等于一层直接看到">可达不等于一层直接看到</h3>
+<p>若每个位置只读左右各r个邻居，堆叠L层后影响范围最多延伸Lr个位置，路径长度随距离增长。全局token在一层汇入远端信息、下一层再被其他位置读取，可提供两跳通路；但所有远处内容都经少数全局表示压缩，仍有容量与选择瓶颈。论文把全局注意力双向加入，并为其设置独立投影，不能仅在局部mask中随便多开一个位置就称完整复现。</p>
+<h2 id="四分别读内存曲线字符建模与位置初始化消融">四、分别读内存曲线、字符建模与位置初始化消融</h2>
+<p>同样连接可有不同内核速度，字符BPC与编码器MLM口径也应分开。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -115,7 +121,7 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 </tr>
 <tr>
 <td>系统指标</td>
-<td>图1比较时间与内存，同时区分循环、分块向量化、自定义CUDA实现</td>
+<td><a href="#llm-v6-033-figure-1">图1</a>比较时间与内存，同时区分循环、分块向量化、自定义CUDA实现</td>
 </tr>
 <tr>
 <td>任务指标</td>
@@ -126,43 +132,23 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 <td>主表未统一报告所有配置的多种子置信区间；小差异不自动等于稳定优势</td>
 </tr>
 </tbody></table></div>
-<p>表6列出任务上下文长度分布。例如TriviaQA的平均长度与长尾都明显超过短编码器常见上限。评价长模型时应同时报告截断比例，否则很难分清收益来自新结构还是单纯保留了更多有效证据。</p>
-<h2 id="结果与三处关键证据">结果与三处关键证据</h2>
-<p><strong>证据一：图1与§3.2，理论连接怎样落到系统。</strong> 不同稀疏实现的速度不同，图中分块向量化实现最快；这说明运算图稀疏不等于硬件利用率高。图支持长序列时的内存扩展优势，但不能证明任何长度、任何设备都比高优化的全注意力快。</p>
-<p><strong>证据二：表2与表3，建模能力并未因稀疏连接消失。</strong> 小模型在text8和enwik8测试BPC分别1.10、1.00。表3大模型enwik8为0.99，与部分类似规模稀疏模型相当，而更大模型可以更好。证据支持效率与建模质量之间可取得有用平衡，不支持它在所有参数预算下支配其他方法。</p>
-<p><strong>证据三：表5，位置初始化和继续训练不可省略。</strong> base配置扩展后随机位置初始化的MLM BPC为10.299，复制位置嵌入后降至1.957；继续2k步为1.753、65k步为1.705。这组对照清楚表明，把输入长度参数改大不等于得到可用长模型。这里的BPC是该MLM评估口径，不能与字符自回归表2的BPC直接横比。</p>
-<p>作者报告更长输入上的多类任务收益，但任务不同，全局连接策略也不同。因此最严谨的概括是“提供了可迁移的长文本编码方法”，而不是“稀疏注意力在任何任务上更准确”。</p>
-<h2 id="一个构造例子">一个构造例子</h2>
-<p>自构文档第一段说“项目负责人是林某”，最后一段说“负责人签署最终许可”。要回答谁签署，短截断可能只看到一端。局部窗口让相邻句先整合信息，问题的全局位置再从全文收集相关内容。</p>
-<p>但如果几十处都出现同名人物，全局汇总仍可能混淆关系。连接存在只保证信息有传播路径，不保证优化学会正确选择。可以把证据距离逐步拉大并插入干扰段，观察准确率、显存和延迟。这是自构实验方案，未运行时不能画出虚构的退化曲线。</p>
+<p><a href="https://arxiv.org/html/2004.05150#S5.T6">表6</a>列出任务上下文长度分布。例如TriviaQA的平均长度与长尾都明显超过短编码器常见上限。评价长模型时应同时报告截断比例，否则很难分清收益来自新结构还是单纯保留了更多有效证据。</p>
 <p>一个公平版本要控制答案证据是否被截断：先比较所有模型都能容纳的短样本，再比较真正需要长上下文的样本；同时区分同长度计算成本与各自最大长度任务效果。否则两个不同问题会混成一个结论。</p>
-<h2 id="贡献局限与前置概念">贡献、局限与前置概念</h2>
-<p>贡献包括可用于多任务的局部—全局稀疏注意力、有效实现及从已有短编码器迁移的实证方案。局限包括全局位置设计、长程细节压缩、预训练分布适配，以及稀疏核的工程复杂性。它节省配对成本，却不解决数据是否可信或答案是否忠实的问题。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>全注意力配对随长度平方增长</td>
-<td>局部窗口与少量全局连接</td>
-<td>减少连接并保留远程路径</td>
-<td>图1系统曲线、表2建模结果</td>
-<td>全局位置过多会失去线性条件</td>
-</tr>
-<tr>
-<td>短模型直接扩长失效</td>
-<td>复制位置嵌入并继续预训练</td>
-<td>保留已有局部结构、适配长分布</td>
-<td>表5初始化与更新步数对照</td>
-<td>仍需额外训练，不能无限外推</td>
-</tr>
-</tbody></table></div>
+<p><strong>证据一：<a href="#llm-v6-033-figure-1">图1</a>与§3.2，理论连接怎样落到系统。</strong> 不同稀疏实现的速度不同，图中分块向量化实现最快；这说明运算图稀疏不等于硬件利用率高。图支持长序列时的内存扩展优势，但不能证明任何长度、任何设备都比高优化的全注意力快。 图中还区分 loop、chunk 和 CUDA 实现。相同稀疏连接模式可以有不同运行时间，内存的线性趋势不能单独预测哪种内核最快。</p>
+<!-- figure-ref-v6:start:033-f1-1-anchor -->
+<p><a id="llm-v6-033-figure-1"></a></p>
+<!-- figure-ref-v6:end:033-f1-1-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/033-longformer-f1.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/033-longformer-f1.png" width="1600" height="693" alt="不同Longformer实现和全注意力的时间及显存随序列长度变化" loading="lazy"></a><figcaption>原实验图摘引：Iz Beltagy、Matthew E. Peters、Arman Cohan，2020，图1；<a href="https://arxiv.org/html/2004.05150#S1.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据二：<a href="https://arxiv.org/html/2004.05150#S4.T2">表2</a>与<a href="https://arxiv.org/html/2004.05150#S4.T3">表3</a>，建模能力并未因稀疏连接消失。</strong> 小模型在text8和enwik8测试BPC分别1.10、1.00。<a href="https://arxiv.org/html/2004.05150#S4.T3">表3</a>大模型enwik8为0.99，与部分类似规模稀疏模型相当，而更大模型可以更好。证据支持效率与建模质量之间可取得有用平衡，不支持它在所有参数预算下支配其他方法。</p>
+<p><strong>证据三：<a href="https://arxiv.org/html/2004.05150#S5.T5">表5</a>，位置初始化和继续训练不可省略。</strong> base配置扩展后随机位置初始化的MLM BPC为10.299，复制位置嵌入后降至1.957；继续2k步为1.753、65k步为1.705。这组对照清楚表明，把输入长度参数改大不等于得到可用长模型。这里的BPC是该MLM评估口径，不能与字符自回归<a href="https://arxiv.org/html/2004.05150#S4.T2">表2</a>的BPC直接横比。</p>
+<p>作者报告更长输入上的多类任务收益，但任务不同，全局连接策略也不同。因此最严谨的概括是“提供了可迁移的长文本编码方法”，而不是“稀疏注意力在任何任务上更准确”。</p>
+<h2 id="五有连接路径仍可能读错关系或压缩细节">五、有连接路径仍可能读错关系或压缩细节</h2>
+<p>但如果几十处都出现同名人物，全局汇总仍可能混淆关系。连接存在只保证信息有传播路径，不保证优化学会正确选择。可以把证据距离逐步拉大并插入干扰段，观察准确率、显存和延迟。这是自构实验方案，未运行时不能画出虚构的退化曲线。</p>
+<p>局限包括全局位置设计、长程细节压缩、预训练分布适配，以及稀疏核的工程复杂性。它节省配对成本，却不解决数据是否可信或答案是否忠实的问题。</p>
+<h2 id="六比较稀疏图随机核近似与精确io优化">六、比较稀疏图、随机核近似与精确IO优化</h2>
+<p>稀疏边让长输入可计算，位置利用仍要实测。<a href="038-bigbird.html">BigBird</a>增加随机与全局连接的结构分析，<a href="077-lost-middle.html">Lost in the Middle</a>则控制证据位置检验读者。它们分别回答可达性与实际使用问题。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 把全注意力矩阵算完再遮掉大部分元素，能获得论文的内存收益吗？</strong></p>
 <p>不能。完整矩阵已经占用平方内存；必须在实际计算与存储上只处理允许的连接，或用相应分块实现避免完整展开。</p>
@@ -179,25 +165,21 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 
 [返回目录](README.md) · [上一篇：DPR](032-dpr.md) · [下一篇：RAG](034-rag.md)
 
-论文：Iz Beltagy、Matthew E. Peters、Arman Cohan，*Longformer: The Long-Document Transformer*，2020。[原始论文](https://arxiv.org/pdf/2004.05150)。阅读重点为§3注意力结构、§4实验、表2与表5；未独立复现底层计算核。
+论文：Iz Beltagy、Matthew E. Peters、Arman Cohan，*Longformer: The Long-Document Transformer*，2020。[原始论文](https://arxiv.org/pdf/2004.05150)。
 
-## 一分钟理解
+### 先接住前作的问题
 
-普通自注意力把一篇文章里的每个词都与所有词比较，文章长度翻倍，配对数量大约变为四倍。Longformer 让大部分词只关注附近窗口，再指定少量位置能连接全文。这样既保留局部语言结构，也给远距离信息提供通路。
+[Transformer](015-transformer.md)直接连接位置，却带来平方数量的交互；[RoBERTa](023-roberta.md)的强短编码器也不能仅改长度参数就读取长文。本篇直接改连接图，并研究如何迁移既有权重，留下的是可达性、训练适配与执行效率三项不同检验。
 
-它解决的是长文档的计算与内存约束，不是让模型自动理解任意长度文本。窗口宽度、全局位置数量、预训练长度和具体任务都会影响有效范围。原论文同时考察字符语言建模与从 RoBERTa 继续预训练的长文档理解，两类实验不能混用预算和指标。
+## 一、问题设定：怎样保留长文证据而不计算全部位置对
 
-一句话：在需要处理长上下文的任务中，通过局部窗口与少量全局注意力，降低注意力随长度增长的成本，代价是人为限制连接模式并需要适配位置表示与训练分布。
-
-## 长度问题为何不能只靠截断
-
-对于文档分类，决定标签的证据可能在末尾；对于多跳问答，两个线索可能跨越不同段落。截断会直接丢失信息，分块独立编码则缺少跨块联系。扩大普通 Transformer 的输入长度又会产生大量注意力分数。
+文档标签证据可能在末尾，多跳问答线索又可能跨段落。截断会丢信息，独立分块缺少跨块交流，扩大完整注意力则产生大量位置配对。本篇以局部窗口加少量全局位置保留路径，检验节省成本后哪些长文能力仍可学到。
 
 设序列长 $n$、隐维度 $d$，全注意力的配对运算通常为 $O(n^2d)$，分数矩阵为 $O(n^2)$。这不意味着整个网络只有这一项成本：前馈层、投影和激活也占资源，所以注意力变成线性后，整机速度不会自动按理论比例提升。
 
 Longformer 属于模型架构与系统效率研究，没有环境状态、动作或奖励。输入是长序列，输出随目标而变：语言模型预测字符，预训练编码器恢复遮盖词，微调模型完成问答或分类。
 
-## 连接图与核心公式
+## 二、从局部与全局边推导可达范围和复杂度
 
 为位置 $i$ 定义局部邻域 $W_i$，全局位置集合为 $G$。普通位置能够访问 $W_i\cup G$；全局位置能够访问所有位置。用掩码表达单个注意力头：
 
@@ -211,6 +193,18 @@ $$
 若窗口大小 $w$ 与全局位置数 $g$ 都固定，连接数量约为 $O(nw+ng)$。如果把所有词设成全局位置，$g$ 随 $n$ 增长，又回到了平方规模。因此“线性复杂度”有明确条件。
 
 局部窗口叠多层后，信息可以逐步传播到更远处；全局词则提供较短路径。分类可让特殊汇总词连接全文，问答可把问题词设为全局。这不是由测试答案指定位置，不应引入答案所在段落的特权信息。论文也讨论膨胀窗口，但从 RoBERTa 迁移的配置并非所有连接变体都获益。
+
+**教学算例。** 长度1024、每侧r=2、4层纯局部网络，位置500最多接触492到508附近信息；相距100的事实仍不可达。加入全局问题token后拓扑距离缩短，但若问题token把两个同名人混淆，信息虽到达仍会读错。实验应拆成“边是否允许”和“模型是否学会利用边”两个检查。
+
+自构文档第一段说“项目负责人是林某”，最后一段说“负责人签署最终许可”。要回答谁签署，短截断可能只看到一端。局部窗口让相邻句先整合信息，问题的全局位置再从全文收集相关内容。
+
+### 两层窗口的感受野不能当作一层注意力
+
+在无全局节点、单向距离半径1的示意图中，位置5一层可接收4、5、6，两层才可能经4接到3。信息到达需经过中间表示的压缩与非线性，不能当成位置5直接对3计算原始注意力分数。全局连接改变路径长度，局部窗口叠层改变间接可达范围，二者应分别测试。
+
+教法联系：[Lilian Weng的The Transformer Family](https://lilianweng.github.io/posts/2020-04-07-the-transformer-family/)。算例为本文自构。
+
+## 三、实现稀疏算子并迁移短模型的位置表示
 
 ```text
 输入：长序列x、每层窗口、任务指定的全局位置G
@@ -227,13 +221,17 @@ $$
 
 这份流程描述双向编码场景。自回归字符建模还必须限制未来信息；不能照搬双向掩码后报告语言模型困惑度，否则会泄漏预测目标。
 
-## 从短模型变成长模型
-
 RoBERTa 使用有限长度的可学习绝对位置嵌入。扩展到4096时，新增位置若随机初始化，会破坏已有表示。论文复制原有512个位置向量来初始化更长位置表，然后继续预训练。复制是初始化方案，训练后各位置仍可适配，不是宣称每512个词在语义上完全重复。
 
 从旧权重迁移还受到注意力结构兼容性约束。论文提到，在这一路线中加入部分膨胀注意力反而损害表现，可能与预训练权重不兼容有关。这里“可能”是作者解释，不是已被完全隔离验证的因果结论。
 
-## 实验设置
+### 可达不等于一层直接看到
+
+若每个位置只读左右各r个邻居，堆叠L层后影响范围最多延伸Lr个位置，路径长度随距离增长。全局token在一层汇入远端信息、下一层再被其他位置读取，可提供两跳通路；但所有远处内容都经少数全局表示压缩，仍有容量与选择瓶颈。论文把全局注意力双向加入，并为其设置独立投影，不能仅在局部mask中随便多开一个位置就称完整复现。
+
+## 四、分别读内存曲线、字符建模与位置初始化消融
+
+同样连接可有不同内核速度，字符BPC与编码器MLM口径也应分开。
 
 |项目|原文设置与比较目的|
 |---|---|
@@ -241,40 +239,39 @@ RoBERTa 使用有限长度的可学习绝对位置嵌入。扩展到4096时，�
 |编码器预训练|从RoBERTa继续训练，序列4096，批量64，65k次更新；最大学习率$3\times10^{-5}$，预热500步|
 |理解任务|WikiHop、TriviaQA、HotpotQA、OntoNotes、IMDB、Hyperpartisan等，长短分布不同|
 |基线|全注意力模型、其他长序列模型、RoBERTa及初始化消融|
-|系统指标|图1比较时间与内存，同时区分循环、分块向量化、自定义CUDA实现|
+|系统指标|[图1](#llm-v6-033-figure-1)比较时间与内存，同时区分循环、分块向量化、自定义CUDA实现|
 |任务指标|语言建模BPC越低越好；理解任务使用各自准确率或F1，不能与BPC合并平均|
 |不确定性|主表未统一报告所有配置的多种子置信区间；小差异不自动等于稳定优势|
 
-表6列出任务上下文长度分布。例如TriviaQA的平均长度与长尾都明显超过短编码器常见上限。评价长模型时应同时报告截断比例，否则很难分清收益来自新结构还是单纯保留了更多有效证据。
-
-## 结果与三处关键证据
-
-**证据一：图1与§3.2，理论连接怎样落到系统。** 不同稀疏实现的速度不同，图中分块向量化实现最快；这说明运算图稀疏不等于硬件利用率高。图支持长序列时的内存扩展优势，但不能证明任何长度、任何设备都比高优化的全注意力快。
-
-**证据二：表2与表3，建模能力并未因稀疏连接消失。** 小模型在text8和enwik8测试BPC分别1.10、1.00。表3大模型enwik8为0.99，与部分类似规模稀疏模型相当，而更大模型可以更好。证据支持效率与建模质量之间可取得有用平衡，不支持它在所有参数预算下支配其他方法。
-
-**证据三：表5，位置初始化和继续训练不可省略。** base配置扩展后随机位置初始化的MLM BPC为10.299，复制位置嵌入后降至1.957；继续2k步为1.753、65k步为1.705。这组对照清楚表明，把输入长度参数改大不等于得到可用长模型。这里的BPC是该MLM评估口径，不能与字符自回归表2的BPC直接横比。
-
-作者报告更长输入上的多类任务收益，但任务不同，全局连接策略也不同。因此最严谨的概括是“提供了可迁移的长文本编码方法”，而不是“稀疏注意力在任何任务上更准确”。
-
-## 一个构造例子
-
-自构文档第一段说“项目负责人是林某”，最后一段说“负责人签署最终许可”。要回答谁签署，短截断可能只看到一端。局部窗口让相邻句先整合信息，问题的全局位置再从全文收集相关内容。
-
-但如果几十处都出现同名人物，全局汇总仍可能混淆关系。连接存在只保证信息有传播路径，不保证优化学会正确选择。可以把证据距离逐步拉大并插入干扰段，观察准确率、显存和延迟。这是自构实验方案，未运行时不能画出虚构的退化曲线。
+[表6](https://arxiv.org/html/2004.05150#S5.T6)列出任务上下文长度分布。例如TriviaQA的平均长度与长尾都明显超过短编码器常见上限。评价长模型时应同时报告截断比例，否则很难分清收益来自新结构还是单纯保留了更多有效证据。
 
 一个公平版本要控制答案证据是否被截断：先比较所有模型都能容纳的短样本，再比较真正需要长上下文的样本；同时区分同长度计算成本与各自最大长度任务效果。否则两个不同问题会混成一个结论。
 
-## 贡献、局限与前置概念
+**证据一：[图1](#llm-v6-033-figure-1)与§3.2，理论连接怎样落到系统。** 不同稀疏实现的速度不同，图中分块向量化实现最快；这说明运算图稀疏不等于硬件利用率高。图支持长序列时的内存扩展优势，但不能证明任何长度、任何设备都比高优化的全注意力快。 图中还区分 loop、chunk 和 CUDA 实现。相同稀疏连接模式可以有不同运行时间，内存的线性趋势不能单独预测哪种内核最快。
 
-贡献包括可用于多任务的局部—全局稀疏注意力、有效实现及从已有短编码器迁移的实证方案。局限包括全局位置设计、长程细节压缩、预训练分布适配，以及稀疏核的工程复杂性。它节省配对成本，却不解决数据是否可信或答案是否忠实的问题。
+&lt;!-- figure-ref-v6:start:033-f1-1-anchor --&gt;
+&lt;a id=&quot;llm-v6-033-figure-1&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:033-f1-1-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/033-longformer-f1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/033-longformer-f1.png&quot; width=&quot;1600&quot; height=&quot;693&quot; alt=&quot;不同Longformer实现和全注意力的时间及显存随序列长度变化&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原实验图摘引：Iz Beltagy、Matthew E. Peters、Arman Cohan，2020，图1；&lt;a href=&quot;https://arxiv.org/html/2004.05150#S1.F1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+**证据二：[表2](https://arxiv.org/html/2004.05150#S4.T2)与[表3](https://arxiv.org/html/2004.05150#S4.T3)，建模能力并未因稀疏连接消失。** 小模型在text8和enwik8测试BPC分别1.10、1.00。[表3](https://arxiv.org/html/2004.05150#S4.T3)大模型enwik8为0.99，与部分类似规模稀疏模型相当，而更大模型可以更好。证据支持效率与建模质量之间可取得有用平衡，不支持它在所有参数预算下支配其他方法。
+
+**证据三：[表5](https://arxiv.org/html/2004.05150#S5.T5)，位置初始化和继续训练不可省略。** base配置扩展后随机位置初始化的MLM BPC为10.299，复制位置嵌入后降至1.957；继续2k步为1.753、65k步为1.705。这组对照清楚表明，把输入长度参数改大不等于得到可用长模型。这里的BPC是该MLM评估口径，不能与字符自回归[表2](https://arxiv.org/html/2004.05150#S4.T2)的BPC直接横比。
+
+作者报告更长输入上的多类任务收益，但任务不同，全局连接策略也不同。因此最严谨的概括是“提供了可迁移的长文本编码方法”，而不是“稀疏注意力在任何任务上更准确”。
+
+## 五、有连接路径仍可能读错关系或压缩细节
+
+但如果几十处都出现同名人物，全局汇总仍可能混淆关系。连接存在只保证信息有传播路径，不保证优化学会正确选择。可以把证据距离逐步拉大并插入干扰段，观察准确率、显存和延迟。这是自构实验方案，未运行时不能画出虚构的退化曲线。
+
+局限包括全局位置设计、长程细节压缩、预训练分布适配，以及稀疏核的工程复杂性。它节省配对成本，却不解决数据是否可信或答案是否忠实的问题。
 
 五个前置概念是：自注意力按内容聚合信息，感受野描述能访问的范围，全局词提供全文连接，绝对位置嵌入区分顺序，BPC用以比特表示预测损失。掌握后可以与BigBird的随机连接、Performer的核近似分别比较，而不要都称为同一种“线性注意力”。
 
-|原有问题|作者改动|为什么可能有效|实验证据|代价与局限|
-|---|---|---|---|---|
-|全注意力配对随长度平方增长|局部窗口与少量全局连接|减少连接并保留远程路径|图1系统曲线、表2建模结果|全局位置过多会失去线性条件|
-|短模型直接扩长失效|复制位置嵌入并继续预训练|保留已有局部结构、适配长分布|表5初始化与更新步数对照|仍需额外训练，不能无限外推|
+## 六、比较稀疏图、随机核近似与精确IO优化
+
+稀疏边让长输入可计算，位置利用仍要实测。[BigBird](038-bigbird.md)增加随机与全局连接的结构分析，[Lost in the Middle](077-lost-middle.md)则控制证据位置检验读者。它们分别回答可达性与实际使用问题。
 
 ## 自测与参考答案
 

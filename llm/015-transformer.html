@@ -42,19 +42,18 @@
                 <span class="text-gray-500">Transformer：用注意力连接序列位置，让训练不必逐步递归</span>
             </div>
             <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
-            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="9b5d35dbc60fa42780a1293b15e97290fbf4de4c57c3189ecc35e3f100b6b4da"><h1>015｜Transformer：用注意力连接序列位置，让训练不必逐步递归</h1>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="ddc1692fed52408ebb7771c533febab14f809d99c30edbb3d2d299b4bb27a2de"><h1>015｜Transformer：用注意力连接序列位置，让训练不必逐步递归</h1>
 <p><a href="index.html">目录</a> · <a href="014-sparse-moe.html">上一篇</a> · <a href="016-elmo.html">下一篇</a></p>
 <p><strong>论文</strong>：Ashish Vaswani 等，<em>Attention Is All You Need</em>，NeurIPS 2017。<a href="https://arxiv.org/abs/1706.03762">原文</a> · <a href="https://arxiv.org/pdf/1706.03762">PDF</a>。本文讨论原始编码器—解码器 Transformer；后续 decoder-only、Pre-LN、旋转位置等变体应另行区分。</p>
-<h2 id="一分钟理解">一分钟理解</h2>
-<p>循环模型训练一段序列时，后一步隐藏状态依赖前一步计算。Transformer 改为让位置之间通过注意力直接交换信息，配合逐位置前馈网络，使已知训练序列的多数位置可以并行处理。位置编码提供顺序信息，因果掩码阻止解码器看到未来答案。</p>
-<p>作者在翻译任务上报告了较强质量和训练效率。重要贡献是整体序列架构与计算路径，不是仅发明一个公式。训练可以并行不等于自回归生成可以一次输出所有 token；全注意力的序列交互仍有长度相关成本。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="007-attention.html">Bahdanau注意力</a>让解码器动态访问多个源位置，却仍依赖循环状态逐步计算。未解的问题是：能否把可微读取扩展为序列内部的主要交互，同时取消训练中的递归依赖？Transformer直接承接注意力思想，并组合<a href="012-layernorm.html">LayerNorm</a>和<a href="009-adam.html">Adam</a>；这些模块并非本篇重新发明。</p>
 <h3 id="五个前置概念">五个前置概念</h3>
 <p>五个前置概念是查询键值、因果掩码、多头投影、残差连接和条件生成。理解这些比死记层数更重要，因为后续论文通常是在这些接口上改变资源与信息路径。</p>
-<h2 id="背景路径长度与并行性是两个问题">背景：路径长度与并行性是两个问题</h2>
-<p>一个词需要引用很远的词时，循环网络要通过多步状态传递信息。注意力允许直接连接相关位置，缩短某些依赖路径。与此同时，取消递归使一层中的多个位置可以一起计算，改善训练设备利用率。这两个收益相关，但并不完全相同。</p>
+<h2 id="一问题设定远距信息怎样直接交互同时去掉训练中的递归依赖">一、问题设定：远距信息怎样直接交互，同时去掉训练中的递归依赖</h2>
+<p>循环模型让远处词通过多步状态传递，还要求后一步等待前一步。注意力可缩短相关位置之间的路径，取消递归又能让已知训练序列的多个位置并行；这两项收益相关但不同。顺序信息与解码因果性仍需由位置表示和掩码明确提供。</p>
 <p>原模型仍分编码器和解码器。编码器可以访问全部源句，解码器对目标前缀使用因果 self-attention，并通过 cross-attention 读取编码结果。后来的 GPT 主要保留因果解码路线；不能把所有 Transformer 都画成只有一种掩码的方块。</p>
 <p>模型优化条件翻译似然。所谓“attention is all you need”是论文标题，不应按字面理解为系统真的只有注意力：前馈层、残差、归一化、位置、嵌入和优化配方都是重要组成。</p>
-<h2 id="核心运算按查询读取值">核心运算：按查询读取值</h2>
+<h2 id="二从查询键值缩放和掩码推到多头交互">二、从查询键值、缩放和掩码推到多头交互</h2>
 <p><span class="reading-math" data-tex="\operatorname{Attention}(Q,K,V)
 =\operatorname{softmax}\left(\frac{QK^T}{\sqrt{d_k}}+M\right)V."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Attention</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>Q</mi><mo separator="true">,</mo><mi>K</mi><mo separator="true">,</mo><mi>V</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="normal">softmax</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><mfrac><mrow><mi>Q</mi><msup><mi>K</mi><mi>T</mi></msup></mrow><msqrt><msub><mi>d</mi><mi>k</mi></msub></msqrt></mfrac><mo>+</mo><mi>M</mi><mo fence="true">)</mo></mrow><mi>V</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\operatorname{Attention}(Q,K,V)
 =\operatorname{softmax}\left(\frac{QK^T}{\sqrt{d_k}}+M\right)V.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">Attention</span></span><span class="mopen">(</span><span class="mord mathnormal">Q</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4684em;vertical-align:-0.95em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">(</span></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.5183em;"><span style="top:-2.2528em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8572em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8172em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
@@ -73,6 +72,25 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 <p>多头注意力使用不同投影，在多个子空间计算，再拼接并投影。它允许不同交互模式，但不保证每个头都对应一个可命名的语法功能，也不保证头数越多越好。每头维度、总隐藏维度和参数预算需要一起考虑。</p>
 <p>位置编码打破不含位置时的排列对称性。原论文使用正弦余弦方案并比较可学习位置表示。位置编码提供辨别顺序的输入，不是自动证明模型能够外推到任意长序列。</p>
 <p>逐位置前馈网络通常包含两次线性变换与非线性；它对每个位置独立处理同一组参数。注意力负责位置交互，前馈负责局部特征变换，但整个功能不能完全分割，因为多层复合后两者共同塑造表示。</p>
+<h3 id="从维度检查到缩放推导">从维度检查到缩放推导</h3>
+<p>若本层输入 <span class="reading-math" data-tex="X\in\mathbb R^{n\times d}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>X</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><mi>n</mi><mo>×</mo><mi>d</mi></mrow></msup></mrow><annotation encoding="application/x-tex">X\in\mathbb R^{n\times d}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7224em;vertical-align:-0.0391em;"></span><span class="mord mathnormal" style="margin-right:0.07847em;">X</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8491em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mbin mtight">×</span><span class="mord mathnormal mtight">d</span></span></span></span></span></span></span></span></span></span></span></span></span>，单头 <span class="reading-math" data-tex="Q,K\in\mathbb R^{n\times d_k}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Q</mi><mo separator="true">,</mo><mi>K</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><mi>n</mi><mo>×</mo><msub><mi>d</mi><mi>k</mi></msub></mrow></msup></mrow><annotation encoding="application/x-tex">Q,K\in\mathbb R^{n\times d_k}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.07153em;">K</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8491em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mbin mtight">×</span><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.3488em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1512em;"><span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span>、<span class="reading-math" data-tex="V\in\mathbb R^{n\times d_v}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>V</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><mi>n</mi><mo>×</mo><msub><mi>d</mi><mi>v</mi></msub></mrow></msup></mrow><annotation encoding="application/x-tex">V\in\mathbb R^{n\times d_v}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7224em;vertical-align:-0.0391em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8491em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mbin mtight">×</span><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span>，其中 <span class="reading-math" data-tex="n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 是序列长度、<span class="reading-math" data-tex="d"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi></mrow><annotation encoding="application/x-tex">d</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span> 是模型宽度、<span class="reading-math" data-tex="d_k,d_v"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>d</mi><mi>k</mi></msub><mo separator="true">,</mo><msub><mi>d</mi><mi>v</mi></msub></mrow><annotation encoding="application/x-tex">d_k,d_v</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是键和值的单头宽度；<span class="reading-math" data-tex="q,k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi><mo separator="true">,</mo><mi>k</mi></mrow><annotation encoding="application/x-tex">q,k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 表示单个查询和键向量。权重矩阵为 <span class="reading-math" data-tex="n\times n"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi><mo>×</mo><mi>n</mi></mrow><annotation encoding="application/x-tex">n\times n</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span>，输出为 <span class="reading-math" data-tex="n\times d_v"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi><mo>×</mo><msub><mi>d</mi><mi>v</mi></msub></mrow><annotation encoding="application/x-tex">n\times d_v</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>。假设各坐标独立、均值0、方差1，点积 <span class="reading-math" data-tex="q^\top k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>q</mi><mi mathvariant="normal">⊤</mi></msup><mi>k</mi></mrow><annotation encoding="application/x-tex">q^\top k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0435em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span></span></span></span></span> 的方差为 <span class="reading-math" data-tex="d_k"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>d</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">d_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>；除以 <span class="reading-math" data-tex="\sqrt{d_k}"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msqrt><msub><mi>d</mi><mi>k</mi></msub></msqrt></mrow><annotation encoding="application/x-tex">\sqrt{d_k}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1828em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8572em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8172em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1828em;"><span></span></span></span></span></span></span></span></span></span> 后恢复单位量级。它是控制初始尺度的统计动机，不是训练全过程都保持独立同分布的保证。多头把总宽度切到多个子空间，不能在比较时偷偷让每头都保留全宽。</p>
+<p><strong>教学数值例。</strong> 两个缩放后分数为 <span class="reading-math" data-tex="(0,\log3)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0</mn><mo separator="true">,</mo><mi>log</mi><mo>⁡</mo><mn>3</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0,\log3)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">3</span><span class="mclose">)</span></span></span></span></span>，softmax权重就是 <span class="reading-math" data-tex="(1/4,3/4)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mi mathvariant="normal">/</mi><mn>4</mn><mo separator="true">,</mo><mn>3</mn><mi mathvariant="normal">/</mi><mn>4</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(1/4,3/4)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1/4</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">3/4</span><span class="mclose">)</span></span></span></span></span>。若对应值为 <span class="reading-math" data-tex="(2,0)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>2</mn><mo separator="true">,</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(2,0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span></span> 与 <span class="reading-math" data-tex="(0,4)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0</mn><mo separator="true">,</mo><mn>4</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0,4)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">4</span><span class="mclose">)</span></span></span></span></span>，读取结果为 <span class="reading-math" data-tex="(0.5,3)"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>0.5</mn><mo separator="true">,</mo><mn>3</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(0.5,3)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.5</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">3</span><span class="mclose">)</span></span></span></span></span>。键决定配多少权重，值决定读出什么；把第二个值换掉而不改键，权重完全不变，输出却会改变。这也说明注意力热图不等于完整的因果解释。</p>
+<h3 id="用同一套尺寸读懂图1的三种注意力">用同一套尺寸读懂图1的三种注意力</h3>
+<p>取一个自构小模型：源句5个位置、目标前缀3个位置，模型宽度8，4个头，每头键和值宽度均为2。编码器自注意力的分数矩阵是 <span class="reading-math" data-tex="5\times5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>5</mn><mo>×</mo><mn>5</mn></mrow><annotation encoding="application/x-tex">5\times5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">5</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">5</span></span></span></span></span>；解码器因果自注意力是 <span class="reading-math" data-tex="3\times3"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>3</mn><mo>×</mo><mn>3</mn></mrow><annotation encoding="application/x-tex">3\times3</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">3</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">3</span></span></span></span></span>；交叉注意力的查询来自目标、键值来自源，因此是 <span class="reading-math" data-tex="3\times5"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>3</mn><mo>×</mo><mn>5</mn></mrow><annotation encoding="application/x-tex">3\times5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">3</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">5</span></span></span></span></span>。softmax沿每一行的键位置归一化，不沿查询行，也不沿特征通道。交叉读取后每头输出 <span class="reading-math" data-tex="3\times2"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>3</mn><mo>×</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">3\times2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">3</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span></span></span></span></span>，4头拼接回 <span class="reading-math" data-tex="3\times8"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>3</mn><mo>×</mo><mn>8</mn></mrow><annotation encoding="application/x-tex">3\times8</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">3</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">8</span></span></span></span></span>，再经输出投影，才能和同形状的残差相加。</p>
+<p>沿原图1追箭头时，可以给左下、右下、右中三个注意力框分别写上这三个尺寸：右中框不会因读取5个源位置就产生5个目标输出，输出位置数始终由查询决定。若把所有位置当成同一种“注意力序列长度”，实现里很容易把掩码或归一化轴用错。</p>
+<p>教法参考：<a href="https://jalammar.github.io/illustrated-transformer/">Jay Alammar：The Illustrated Transformer</a>；<a href="https://lilianweng.github.io/posts/2020-04-07-the-transformer-family/">Lilian Weng：The Transformer Family</a>。上面的尺寸与诊断为本文自构，论文机制以本篇原文公式和图表为准。</p>
+<h2 id="三按原版残差顺序实现并分开训练与生成">三、按原版残差顺序实现，并分开训练与生成</h2>
 <pre><code class="language-text">输入：源 token、移位后的真实目标 token
 加入词嵌入与位置表示
 编码器各层：
@@ -86,7 +104,12 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 推理时逐步生成目标前缀，并按解码协议搜索
 </code></pre>
 <p>上述是结构伪代码，原版归一化位置和残差顺序需依原图实现。把它无标注地换成现代 Pre-LN，会改变训练机制。训练使用 label smoothing 等配方时，损失也不完全等同于简单 one-hot 交叉熵。</p>
-<h2 id="实验与证据">实验与证据</h2>
+<p>构造目标句“猫坐在垫子上”。训练预测“垫子”时，如果注意力能直接读取当前位置真实“垫子”的输入表示，模型可以抄答案而不学习合法条件概率。右移目标输入与因果掩码共同防止这种泄露。</p>
+<p>编码器看到完整源句并不违反因果条件，因为源句是已知输入；解码器看到未来目标词才是问题。这个区别也解释了为什么 BERT 可以双向读取被破坏的输入，而 GPT 的标准下一词训练需要前缀限制。</p>
+<p>训练时所有真实前缀已知，可以一次计算多个位置的预测损失；推理时第一个新 token 未生成，就不知道第二个位置要读取的前缀。因此标准自回归生成仍逐步进行。缓存历史键值能减少重复计算，但不消除新 token 的依赖。</p>
+<p>全注意力还需要位置对交互，长序列下内存和计算成为瓶颈。后来的稀疏注意力、FlashAttention、GQA 等分别改变计算结构、内存访问或缓存组织，不能把这些后续优势全部归给 2017 原版。</p>
+<h2 id="四按结构图翻译主结果和base消融逐层归因">四、按结构图、翻译主结果和base消融逐层归因</h2>
+<p>完整执行条件固定后，图1解释信息流，表2给系统结果，表3才靠近组件归因。</p>
 <div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
 <thead>
 <tr>
@@ -116,44 +139,42 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 </tr>
 <tr>
 <td>消融</td>
-<td>头数、维度、dropout、位置表示等，原文表 3</td>
+<td>头数、维度、dropout、位置表示等，原文<a href="#llm-v6-015-table-3">表3</a></td>
 </tr>
 <tr>
 <td>统计边界</td>
 <td>检查点平均不是独立模型多种子置信区间</td>
 </tr>
 </tbody></table></div>
-<p>**证据一，图 1、第 3 节与表 1。**结构图、公式与计算比较展示了取消循环后的路径和成本。表 1 的理论复杂度不能直接视为每种硬件上的速度排名。</p>
-<p>**证据二，表 2。**big 英德 BLEU 为 28.4，并列出其他系统和训练成本。跨论文对比包含数据与训练细节差异，支持系统级结果，不意味着每个组成模块都已被因果隔离。</p>
-<p>**证据三，表 3。**组件变化检验部分设计选择，说明性能依赖头数、规模与正则等组合。它提供比主结果更直接的机制证据，但并未覆盖所有配置组合和所有任务。</p>
+<p><strong>证据一，<a href="#llm-v6-015-figure-1">图1</a>、第 3 节与<a href="https://arxiv.org/html/1706.03762#S4.T1">表1</a>。</strong>结构图、公式与计算比较展示了取消循环后的路径和成本。<a href="https://arxiv.org/html/1706.03762#S4.T1">表1</a> 的理论复杂度不能直接视为每种硬件上的速度排名。 左侧编码器生成可读取的表示，右侧解码器的交叉注意力再读取它；右侧最下层注意力带因果掩码。按这三种信息来源追箭头，比把所有方框统称为“注意力”更能看清架构。</p>
+<!-- figure-ref-v6:start:015-f1-1-anchor -->
+<p><a id="llm-v6-015-figure-1"></a></p>
+<!-- figure-ref-v6:end:015-f1-1-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/015-transformer-f1.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/015-transformer-f1.png" width="1520" height="2239" alt="Transformer编码器和解码器中的多头注意力、前馈层、残差连接及移位目标输入" loading="lazy"></a><figcaption>方法结构图摘引：Ashish Vaswani 等，2017，图1；<a href="https://arxiv.org/html/1706.03762#S3.F1" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+<p><strong>证据二，<a href="https://arxiv.org/html/1706.03762#S6.T2">表2</a>。</strong>big 英德 BLEU 为 28.4，并列出其他系统和训练成本。跨论文对比包含数据与训练细节差异，支持系统级结果，不意味着每个组成模块都已被因果隔离。</p>
+<p><strong>证据三，<a href="#llm-v6-015-table-3">表3</a>。</strong>组件变化检验部分设计选择，说明性能依赖头数、规模与正则等组合。它提供比主结果更直接的机制证据，但并未覆盖所有配置组合和所有任务。</p>
+<p><strong>读表3先定位base行。</strong> 空白配置格沿用base设置，A—E各组再改变头数、键宽度、模型规模、正则或位置表示。PPL(dev)越低越好，BLEU(dev)越高越好，二者是不同指标；big行还增加了训练步数，所以不能把它对base的差值归给头数或宽度中的单个改动。</p>
+<!-- figure-ref-v6:start:015-t3-3-anchor -->
+<p><a id="llm-v6-015-table-3"></a></p>
+<!-- figure-ref-v6:end:015-t3-3-anchor -->
+
+<figure class="reading-evidence-figure"><a href="/llm/assets/papers/015-transformer-t3.png" target="_blank" rel="noopener noreferrer"><img src="/llm/assets/papers/015-transformer-t3.png" width="1701" height="1157" alt="Transformer结构变体的验证困惑度、BLEU与参数量消融" loading="lazy"></a><figcaption>实验结果表摘引：Ashish Vaswani 等，2017，表3，PDF第9页；<a href="https://arxiv.org/pdf/1706.03762#page=9" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
 <p>原文还讨论句法解析等任务，但不能据此直接推出后来的通用聊天能力。Transformer 提供了可扩展架构，数据、目标和训练规模的发展仍是后续论文的独立贡献。</p>
-<h2 id="教学例子因果掩码为何不可省略">教学例子：因果掩码为何不可省略</h2>
-<p>构造目标句“猫坐在垫子上”。训练预测“垫子”时，如果注意力能直接读取当前位置真实“垫子”的输入表示，模型可以抄答案而不学习合法条件概率。右移目标输入与因果掩码共同防止这种泄露。</p>
-<p>编码器看到完整源句并不违反因果条件，因为源句是已知输入；解码器看到未来目标词才是问题。这个区别也解释了为什么 BERT 可以双向读取被破坏的输入，而 GPT 的标准下一词训练需要前缀限制。</p>
+<h2 id="五短路径不保证有效读取长度成本仍然存在">五、短路径不保证有效读取，长度成本仍然存在</h2>
 <p>再构造长序列中两个距离很远但有关的词。自注意力让它们在一层内发生交互，但模型仍要学会正确权重。直接连接只是可能的信息路径，不保证实际使用，也不保证在干扰项很多时稳定找到目标。</p>
-<h2 id="并行训练与串行生成">并行训练与串行生成</h2>
-<p>训练时所有真实前缀已知，可以一次计算多个位置的预测损失；推理时第一个新 token 未生成，就不知道第二个位置要读取的前缀。因此标准自回归生成仍逐步进行。缓存历史键值能减少重复计算，但不消除新 token 的依赖。</p>
-<p>全注意力还需要位置对交互，长序列下内存和计算成为瓶颈。后来的稀疏注意力、FlashAttention、GQA 等分别改变计算结构、内存访问或缓存组织，不能把这些后续优势全部归给 2017 原版。</p>
-<h2 id="贡献与局限">贡献与局限</h2>
-<p>Transformer 把序列建模组织为可并行的注意力与前馈层堆叠，提供了后来预训练扩展的重要基础。限制包括长序列成本、位置外推、串行解码和注意力选择误差。它没有内置事实验证、工具使用或偏好对齐。</p>
-<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
-<thead>
-<tr>
-<th>原有问题</th>
-<th>作者改动</th>
-<th>为什么可能有效</th>
-<th>实验证据</th>
-<th>代价与局限</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>循环结构限制训练并行，远距离信息需经过多步传播</td>
-<td>以多头注意力、位置表示和逐位置前馈构造编码器—解码器</td>
-<td>直接建立位置间交互，训练时可并行处理多个位置</td>
-<td>表1计算分析、表2翻译、表3组件变化</td>
-<td>全注意力随长度增加计算和存储；自回归生成仍逐步进行，性能依赖完整训练配方</td>
-</tr>
-</tbody></table></div>
+<p>限制包括长序列成本、位置外推、串行解码和注意力选择误差。它没有内置事实验证、工具使用或偏好对齐。</p>
+<h2 id="六把本篇机制再推进一步">六、把本篇机制再推进一步</h2>
+<details>
+<summary>1. 只增加头数而保持每头宽度，会得到公平的多头消融吗？</summary>
+
+<p><strong>参考答案</strong>：通常不会。这样同时扩大总隐藏宽度和相关投影预算，结果混入容量与计算变化。正文的维度检查要求联合说明总宽度、每头键值维度和头数；读表3也应先定位base共享配置，不能把所有变动都归给“更多头”。</p>
+</details>
+
+<h2 id="七分清精确注意力执行优化与键值头共享">七、分清精确注意力执行优化与键值头共享</h2>
+<p>同一骨干接下来分出<a href="017-gpt.html">GPT</a>的因果预训练与<a href="018-bert.html">BERT</a>的双向恢复。两者继承注意力模块，却给出不同可见性；可沿本篇三种矩阵尺寸继续检查各自的掩码与部署接口。</p>
 <h2 id="自测与参考答案">自测与参考答案</h2>
 <p><strong>1. 训练位置可以并行，为什么生成仍然逐 token？</strong></p>
 <p>训练真实前缀已知，多个条件预测可同时计算；生成时后续条件依赖刚采样出的 token。并行矩阵运算不能取消未知前缀的逻辑依赖，除非另用不同生成或验证机制。</p>
@@ -172,21 +193,19 @@ M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">�
 
 **论文**：Ashish Vaswani 等，*Attention Is All You Need*，NeurIPS 2017。[原文](https://arxiv.org/abs/1706.03762) · [PDF](https://arxiv.org/pdf/1706.03762)。本文讨论原始编码器—解码器 Transformer；后续 decoder-only、Pre-LN、旋转位置等变体应另行区分。
 
-## 一分钟理解
+### 先接住前作的问题
 
-循环模型训练一段序列时，后一步隐藏状态依赖前一步计算。Transformer 改为让位置之间通过注意力直接交换信息，配合逐位置前馈网络，使已知训练序列的多数位置可以并行处理。位置编码提供顺序信息，因果掩码阻止解码器看到未来答案。
+[Bahdanau注意力](007-attention.md)让解码器动态访问多个源位置，却仍依赖循环状态逐步计算。未解的问题是：能否把可微读取扩展为序列内部的主要交互，同时取消训练中的递归依赖？Transformer直接承接注意力思想，并组合[LayerNorm](012-layernorm.md)和[Adam](009-adam.md)；这些模块并非本篇重新发明。
 
-作者在翻译任务上报告了较强质量和训练效率。重要贡献是整体序列架构与计算路径，不是仅发明一个公式。训练可以并行不等于自回归生成可以一次输出所有 token；全注意力的序列交互仍有长度相关成本。
+## 一、问题设定：远距信息怎样直接交互，同时去掉训练中的递归依赖
 
-## 背景：路径长度与并行性是两个问题
-
-一个词需要引用很远的词时，循环网络要通过多步状态传递信息。注意力允许直接连接相关位置，缩短某些依赖路径。与此同时，取消递归使一层中的多个位置可以一起计算，改善训练设备利用率。这两个收益相关，但并不完全相同。
+循环模型让远处词通过多步状态传递，还要求后一步等待前一步。注意力可缩短相关位置之间的路径，取消递归又能让已知训练序列的多个位置并行；这两项收益相关但不同。顺序信息与解码因果性仍需由位置表示和掩码明确提供。
 
 原模型仍分编码器和解码器。编码器可以访问全部源句，解码器对目标前缀使用因果 self-attention，并通过 cross-attention 读取编码结果。后来的 GPT 主要保留因果解码路线；不能把所有 Transformer 都画成只有一种掩码的方块。
 
 模型优化条件翻译似然。所谓“attention is all you need”是论文标题，不应按字面理解为系统真的只有注意力：前馈层、残差、归一化、位置、嵌入和优化配方都是重要组成。
 
-## 核心运算：按查询读取值
+## 二、从查询键值、缩放和掩码推到多头交互
 
 $$
 \operatorname{Attention}(Q,K,V)
@@ -200,6 +219,22 @@ $Q$ 为查询，$K$ 为键，$V$ 为值，$d_k$ 是键维度，$M$ 为掩码。�
 位置编码打破不含位置时的排列对称性。原论文使用正弦余弦方案并比较可学习位置表示。位置编码提供辨别顺序的输入，不是自动证明模型能够外推到任意长序列。
 
 逐位置前馈网络通常包含两次线性变换与非线性；它对每个位置独立处理同一组参数。注意力负责位置交互，前馈负责局部特征变换，但整个功能不能完全分割，因为多层复合后两者共同塑造表示。
+
+### 从维度检查到缩放推导
+
+若本层输入 $X\in\mathbb R^{n\times d}$，单头 $Q,K\in\mathbb R^{n\times d_k}$、$V\in\mathbb R^{n\times d_v}$，其中 $n$ 是序列长度、$d$ 是模型宽度、$d_k,d_v$ 是键和值的单头宽度；$q,k$ 表示单个查询和键向量。权重矩阵为 $n\times n$，输出为 $n\times d_v$。假设各坐标独立、均值0、方差1，点积 $q^\top k$ 的方差为 $d_k$；除以 $\sqrt{d_k}$ 后恢复单位量级。它是控制初始尺度的统计动机，不是训练全过程都保持独立同分布的保证。多头把总宽度切到多个子空间，不能在比较时偷偷让每头都保留全宽。
+
+**教学数值例。** 两个缩放后分数为 $(0,\log3)$，softmax权重就是 $(1/4,3/4)$。若对应值为 $(2,0)$ 与 $(0,4)$，读取结果为 $(0.5,3)$。键决定配多少权重，值决定读出什么；把第二个值换掉而不改键，权重完全不变，输出却会改变。这也说明注意力热图不等于完整的因果解释。
+
+### 用同一套尺寸读懂图1的三种注意力
+
+取一个自构小模型：源句5个位置、目标前缀3个位置，模型宽度8，4个头，每头键和值宽度均为2。编码器自注意力的分数矩阵是 $5\times5$；解码器因果自注意力是 $3\times3$；交叉注意力的查询来自目标、键值来自源，因此是 $3\times5$。softmax沿每一行的键位置归一化，不沿查询行，也不沿特征通道。交叉读取后每头输出 $3\times2$，4头拼接回 $3\times8$，再经输出投影，才能和同形状的残差相加。
+
+沿原图1追箭头时，可以给左下、右下、右中三个注意力框分别写上这三个尺寸：右中框不会因读取5个源位置就产生5个目标输出，输出位置数始终由查询决定。若把所有位置当成同一种“注意力序列长度”，实现里很容易把掩码或归一化轴用错。
+
+教法参考：[Jay Alammar：The Illustrated Transformer](https://jalammar.github.io/illustrated-transformer/)；[Lilian Weng：The Transformer Family](https://lilianweng.github.io/posts/2020-04-07-the-transformer-family/)。上面的尺寸与诊断为本文自构，论文机制以本篇原文公式和图表为准。
+
+## 三、按原版残差顺序实现，并分开训练与生成
 
 ```text
 输入：源 token、移位后的真实目标 token
@@ -217,7 +252,17 @@ $Q$ 为查询，$K$ 为键，$V$ 为值，$d_k$ 是键维度，$M$ 为掩码。�
 
 上述是结构伪代码，原版归一化位置和残差顺序需依原图实现。把它无标注地换成现代 Pre-LN，会改变训练机制。训练使用 label smoothing 等配方时，损失也不完全等同于简单 one-hot 交叉熵。
 
-## 实验与证据
+构造目标句“猫坐在垫子上”。训练预测“垫子”时，如果注意力能直接读取当前位置真实“垫子”的输入表示，模型可以抄答案而不学习合法条件概率。右移目标输入与因果掩码共同防止这种泄露。
+
+编码器看到完整源句并不违反因果条件，因为源句是已知输入；解码器看到未来目标词才是问题。这个区别也解释了为什么 BERT 可以双向读取被破坏的输入，而 GPT 的标准下一词训练需要前缀限制。
+
+训练时所有真实前缀已知，可以一次计算多个位置的预测损失；推理时第一个新 token 未生成，就不知道第二个位置要读取的前缀。因此标准自回归生成仍逐步进行。缓存历史键值能减少重复计算，但不消除新 token 的依赖。
+
+全注意力还需要位置对交互，长序列下内存和计算成为瓶颈。后来的稀疏注意力、FlashAttention、GQA 等分别改变计算结构、内存访问或缓存组织，不能把这些后续优势全部归给 2017 原版。
+
+## 四、按结构图、翻译主结果和base消融逐层归因
+
+完整执行条件固定后，图1解释信息流，表2给系统结果，表3才靠近组件归因。
 
 | 项目 | 原文范围 |
 |---|---|
@@ -226,41 +271,51 @@ $Q$ 为查询，$K$ 为键，$V$ 为值，$d_k$ 是键维度，$M$ 为掩码。�
 | 预算 | big 英德结果对应 8 张 P100、约 3.5 天训练 |
 | 解码 | beam 4、长度惩罚等开发集选择；检查点平均另行说明 |
 | 指标 | BLEU、估算训练 FLOPs，以及架构变体实验 |
-| 消融 | 头数、维度、dropout、位置表示等，原文表 3 |
+| 消融 | 头数、维度、dropout、位置表示等，原文[表3](#llm-v6-015-table-3) |
 | 统计边界 | 检查点平均不是独立模型多种子置信区间 |
 
-**证据一，图 1、第 3 节与表 1。**结构图、公式与计算比较展示了取消循环后的路径和成本。表 1 的理论复杂度不能直接视为每种硬件上的速度排名。
+**证据一，[图1](#llm-v6-015-figure-1)、第 3 节与[表1](https://arxiv.org/html/1706.03762#S4.T1)。**结构图、公式与计算比较展示了取消循环后的路径和成本。[表1](https://arxiv.org/html/1706.03762#S4.T1) 的理论复杂度不能直接视为每种硬件上的速度排名。 左侧编码器生成可读取的表示，右侧解码器的交叉注意力再读取它；右侧最下层注意力带因果掩码。按这三种信息来源追箭头，比把所有方框统称为“注意力”更能看清架构。
 
-**证据二，表 2。**big 英德 BLEU 为 28.4，并列出其他系统和训练成本。跨论文对比包含数据与训练细节差异，支持系统级结果，不意味着每个组成模块都已被因果隔离。
+&lt;!-- figure-ref-v6:start:015-f1-1-anchor --&gt;
+&lt;a id=&quot;llm-v6-015-figure-1&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:015-f1-1-anchor --&gt;
 
-**证据三，表 3。**组件变化检验部分设计选择，说明性能依赖头数、规模与正则等组合。它提供比主结果更直接的机制证据，但并未覆盖所有配置组合和所有任务。
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/015-transformer-f1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/015-transformer-f1.png&quot; width=&quot;1520&quot; height=&quot;2239&quot; alt=&quot;Transformer编码器和解码器中的多头注意力、前馈层、残差连接及移位目标输入&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;方法结构图摘引：Ashish Vaswani 等，2017，图1；&lt;a href=&quot;https://arxiv.org/html/1706.03762#S3.F1&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+**证据二，[表2](https://arxiv.org/html/1706.03762#S6.T2)。**big 英德 BLEU 为 28.4，并列出其他系统和训练成本。跨论文对比包含数据与训练细节差异，支持系统级结果，不意味着每个组成模块都已被因果隔离。
+
+**证据三，[表3](#llm-v6-015-table-3)。**组件变化检验部分设计选择，说明性能依赖头数、规模与正则等组合。它提供比主结果更直接的机制证据，但并未覆盖所有配置组合和所有任务。
+
+**读表3先定位base行。** 空白配置格沿用base设置，A—E各组再改变头数、键宽度、模型规模、正则或位置表示。PPL(dev)越低越好，BLEU(dev)越高越好，二者是不同指标；big行还增加了训练步数，所以不能把它对base的差值归给头数或宽度中的单个改动。
+
+&lt;!-- figure-ref-v6:start:015-t3-3-anchor --&gt;
+&lt;a id=&quot;llm-v6-015-table-3&quot;&gt;&lt;/a&gt;
+&lt;!-- figure-ref-v6:end:015-t3-3-anchor --&gt;
+
+&lt;figure class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/llm/assets/papers/015-transformer-t3.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/llm/assets/papers/015-transformer-t3.png&quot; width=&quot;1701&quot; height=&quot;1157&quot; alt=&quot;Transformer结构变体的验证困惑度、BLEU与参数量消融&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;实验结果表摘引：Ashish Vaswani 等，2017，表3，PDF第9页；&lt;a href=&quot;https://arxiv.org/pdf/1706.03762#page=9&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt;。原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
 
 原文还讨论句法解析等任务，但不能据此直接推出后来的通用聊天能力。Transformer 提供了可扩展架构，数据、目标和训练规模的发展仍是后续论文的独立贡献。
 
-## 教学例子：因果掩码为何不可省略
-
-构造目标句“猫坐在垫子上”。训练预测“垫子”时，如果注意力能直接读取当前位置真实“垫子”的输入表示，模型可以抄答案而不学习合法条件概率。右移目标输入与因果掩码共同防止这种泄露。
-
-编码器看到完整源句并不违反因果条件，因为源句是已知输入；解码器看到未来目标词才是问题。这个区别也解释了为什么 BERT 可以双向读取被破坏的输入，而 GPT 的标准下一词训练需要前缀限制。
+## 五、短路径不保证有效读取，长度成本仍然存在
 
 再构造长序列中两个距离很远但有关的词。自注意力让它们在一层内发生交互，但模型仍要学会正确权重。直接连接只是可能的信息路径，不保证实际使用，也不保证在干扰项很多时稳定找到目标。
 
-## 并行训练与串行生成
-
-训练时所有真实前缀已知，可以一次计算多个位置的预测损失；推理时第一个新 token 未生成，就不知道第二个位置要读取的前缀。因此标准自回归生成仍逐步进行。缓存历史键值能减少重复计算，但不消除新 token 的依赖。
-
-全注意力还需要位置对交互，长序列下内存和计算成为瓶颈。后来的稀疏注意力、FlashAttention、GQA 等分别改变计算结构、内存访问或缓存组织，不能把这些后续优势全部归给 2017 原版。
-
-## 贡献与局限
-
-Transformer 把序列建模组织为可并行的注意力与前馈层堆叠，提供了后来预训练扩展的重要基础。限制包括长序列成本、位置外推、串行解码和注意力选择误差。它没有内置事实验证、工具使用或偏好对齐。
+限制包括长序列成本、位置外推、串行解码和注意力选择误差。它没有内置事实验证、工具使用或偏好对齐。
 
 五个前置概念是查询键值、因果掩码、多头投影、残差连接和条件生成。理解这些比死记层数更重要，因为后续论文通常是在这些接口上改变资源与信息路径。
 
+## 六、把本篇机制再推进一步
 
-| 原有问题 | 作者改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 循环结构限制训练并行，远距离信息需经过多步传播 | 以多头注意力、位置表示和逐位置前馈构造编码器—解码器 | 直接建立位置间交互，训练时可并行处理多个位置 | 表1计算分析、表2翻译、表3组件变化 | 全注意力随长度增加计算和存储；自回归生成仍逐步进行，性能依赖完整训练配方 |
+&lt;details&gt;
+&lt;summary&gt;1. 只增加头数而保持每头宽度，会得到公平的多头消融吗？&lt;/summary&gt;
+
+**参考答案**：通常不会。这样同时扩大总隐藏宽度和相关投影预算，结果混入容量与计算变化。正文的维度检查要求联合说明总宽度、每头键值维度和头数；读表3也应先定位base共享配置，不能把所有变动都归给“更多头”。
+
+&lt;/details&gt;
+
+## 七、分清精确注意力执行优化与键值头共享
+
+同一骨干接下来分出[GPT](017-gpt.md)的因果预训练与[BERT](018-bert.md)的双向恢复。两者继承注意力模块，却给出不同可见性；可沿本篇三种矩阵尺寸继续检查各自的掩码与部署接口。
 
 ## 自测与参考答案
 
