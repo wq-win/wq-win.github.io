@@ -4,19 +4,15 @@
 
 **论文**：Roger Y. Tsai，*A Versatile Camera Calibration Technique for High-Accuracy 3D Machine Vision Metrology Using Off-the-Shelf TV Cameras and Lenses*，1987，IEEE JRA 3(4):323–344。[DOI](https://doi.org/10.1109/JRA.1987.1087109) · [大学课程托管的原始全文](https://www.cs.auckland.ac.nz/courses/compsci773s1c/lectures/A%20versatile%20camera%20calibration%20technique%20for%20high-accuracy%203D%20machine%20vision%20metrology%20using%20off-the-shelf%20TV%20cameras%20and%20lenses.pdf)。
 
-**阅读范围**：22 页原文，核对相机模型、径向对齐约束、单平面与多平面流程、误差定义、实验及附录位置。本文讲解核心两阶段思想，不逐式复刻全部参数恢复分支。1986 CVPR 前身与这篇 1987 期刊版区分引用。
+### 先接住前作的问题
 
-## 一分钟理解：不必一开始就同时猜所有参数
+[Lucas–Kanade](008-lucas-kanade.md)在图像平面内估计配准，不会自动给出像素到三维空间的尺度与坐标关系。这是测量链上的教学联系。Tsai面对成像参数的耦合，利用径向方向不变性把求解分成两阶段。
+
+## 一、问题设定：焦距外参与径向畸变耦合时怎样分阶段标定
 
 像素坐标不是空间坐标。相机焦距、位置、姿态、镜头畸变和扫描尺度共同决定物体落在哪个像素。若把所有参数一次放入非线性优化，求解会依赖初始化，也容易被参数耦合困扰。
 
-Tsai 找到一个关键不变量：理想径向畸变改变点离图像中心的距离，却不改变其径向方向。焦距和深度的共同缩放也不改变这个方向。先利用方向关系恢复一部分参数，再处理剩余焦距、深度和畸变，就能降低非线性求解的维数。
-
-论文以实际标定与独立测试点检查三维测量误差。单平面实验报告平均歧义半径 0.7 mil，不能把这个值说成所有相机的通用精度。
-
-一句话：**在符合透视及主要径向畸变模型的相机标定中，通过径向对齐约束分阶段估计参数，减少高维非线性搜索，代价是成像假设、标定几何和部分预知参数必须满足要求。**
-
-## 标定究竟输出什么
+### 标定究竟输出什么
 
 输入是若干已知三维点 $P_w$ 及对应图像坐标。外参 $R,t$ 把点变到相机坐标 $P_c=RP_w+t$；内参决定焦距、像素尺度等；畸变描述实际镜头偏离理想投影的部分。
 
@@ -24,7 +20,9 @@ Tsai 找到一个关键不变量：理想径向畸变改变点离图像中心的
 
 本文不能与手眼标定混淆。相机内外参标定解决成像模型与参考坐标关系；手眼标定还要确定相机与机械臂末端之间的固定变换。前者误差会影响后者，但二者不是同一算法。
 
-## 两阶段方法的几何直觉
+## 二、利用径向方向不变量，先消去部分未知量
+
+### 两阶段方法的几何直觉
 
 令相机点为 $(X_c,Y_c,Z_c)$，理想成像 $x_u=fX_c/Z_c$、$y_u=fY_c/Z_c$。用适配原文方向约定的低阶径向模型写成
 
@@ -35,6 +33,25 @@ $$x_u=x_d(1+\kappa r_d^2),\quad y_u=y_d(1+\kappa r_d^2),\quad r_d^2=x_d^2+y_d^2.
 消去共同缩放，得到 $x_dY_c-y_dX_c=0$。把 $P_c=RP_w+t$ 代入，形成关于部分旋转、横向平移及尺度组合的线性关系。它不包含同样方式影响两轴的焦距与轴向深度，也不需要先知道径向畸变系数。
 
 第一阶段解这些方向约束，再利用旋转矩阵正交性和正确深度符号恢复相应外参。第二阶段使用完整投影关系估计剩余参数并处理径向畸变。这里“线性”针对中间未知组合，而不是说整个相机标定都变成无条件线性问题。
+
+优化层面需要区分线性中间残差与最终几何误差。线性方程拟合好，不代表每个三维测试点都准确。论文因此单独定义测量层的精度指标，避免只用参数方程内部残差评价效果。
+
+单平面版本还有重要限制：原文第 II-F 节说明它不标定横向尺度因子 $s_x$，需要相应先验条件；图像中心也未纳入当时基本求解参数。不能把该版本描述为“任意一张棋盘图就估计全部现代内参”。
+
+径向对齐如何变成真正能放进线性求解器的一行？以单平面 $P_w=(X,Y,0)$ 为例，令旋转矩阵前两行为 $(r_{11},r_{12},r_{13})$ 与 $(r_{21},r_{22},r_{23})$，横向平移为 $t_x,t_y$。在 $t_y\ne0$ 且像素尺度已处理的分支，对齐式除以 $t_y$ 得到
+
+$$
+[\,y_dX\quad y_dY\quad y_d\quad -x_dX\quad -x_dY\,]
+\begin{bmatrix}r_{11}/t_y\\r_{12}/t_y\\t_x/t_y\\r_{21}/t_y\\r_{22}/t_y\end{bmatrix}=x_d.
+$$
+
+五个未知量是外参的组合，不是五个可随意独立解释的物理参数。需要后续正交约束恢复尺度与合法旋转。原文第330页式（10）正是这种先求组合量的结构；点数超过五只是必要的计数提示，数值可靠性仍要检查列秩、几何分布与条件数。
+
+原创检查取 $R=I,t_x=0,t_y=0.5$，点 $(2,1,0)$ 成像为 $(0.4,0.3)$，行向量为 $(0.6,0.3,0.3,-0.8,-0.4)$，未知组合为 $(2,0,0,0,2)^\top$，内积确为0.4。这个正对平面的例子只检验一行约束，刻意不作为完整可解标定：当全部点深度相同，$f/Z$ 的比值保持不变便可保持投影，焦距与距离不易分开；原文明确排除了标定平面恰与像平面平行的基本情形。
+
+径向对齐先保留方向、消去部分耦合量，再恢复余下成像参数。下面用保持径向方向的点检查阶段分工，随后才用独立测试点评价测量精度。
+
+## 三、实现两阶段求解，用方向保持的点检验
 
 ```text
 输入：已知标定点三维坐标、检测到的像素坐标、相机扫描参数
@@ -50,27 +67,7 @@ $$x_u=x_d(1+\kappa r_d^2),\quad y_u=y_d(1+\kappa r_d^2),\quad r_d^2=x_d^2+y_d^2.
 输出：标定参数、适用条件及测试误差
 ```
 
-优化层面需要区分线性中间残差与最终几何误差。线性方程拟合好，不代表每个三维测试点都准确。论文因此单独定义测量层的精度指标，避免只用参数方程内部残差评价效果。
-
-单平面版本还有重要限制：原文第 II-F 节说明它不标定横向尺度因子 $s_x$，需要相应先验条件；图像中心也未纳入当时基本求解参数。不能把该版本描述为“任意一张棋盘图就估计全部现代内参”。
-
-## 五处关键证据
-
-| 原文位置 | 对比或验证 | 结论与范围 |
-|---|---|---|
-| 第 II-E 节，图 3；附录 I | 径向畸变前后方向 | 提供参数分离的几何约束 |
-| 第 II-F 节，图 4、式 (10) | 单平面约束与参数恢复 | 线性阶段有明确几何及先验条件 |
-| 第 III-A 节，图 5 | 反投影射线与已知测试平面的交点 | 歧义半径是空间误差，不是像素残差 |
-| 第 IV-A 节，图 10、11 | 实物点提取和畸变修正 | 成像误差需要显式建模 |
-| 第 IV-A2 节，第 337 页 | 60 标定点与 60 测试点 | 平均 0.7 mil、最大 1.3 mil 的 Type II 结果 |
-
-1 mil 为 0.001 英寸，因此上述两个值分别约 0.0178 毫米与 0.0330 毫米。这是单位换算，不是另外一次实验。测试点与标定点分开使用，比只报告拟合样本的重投影残差更有说服力。
-
-同页报告当时基于 68000 的 MASSCOMP 计算机完成两阶段约需 1.5 秒。后文还讨论其他点数与实现优化；这些条件不同的速度不能混合成单一算法加速比。原稿没有给出可直接映射到现代 CPU 或 GPU 的性能预测。
-
-实验依赖精密物体几何和亚像素提取，不是仅换一条求解公式就能复制精度。随机种子不适用于这里的实物标定流程；重复标定次数及完整不确定性区间在已核对段落中未确认。
-
-## 自构例子：为什么“方向”能绕开畸变
+### 自构例子：为什么“方向”能绕开畸变
 
 某理想图像点为 $(2,1)$，径向畸变把它放大到 $(2.2,1.1)$。它离中心的距离改变，但斜率仍为 $1/2$。焦距加倍同样改变两坐标的共同尺度，不改变这个比值。
 
@@ -78,7 +75,67 @@ $$x_u=x_d(1+\kappa r_d^2),\quad y_u=y_d(1+\kappa r_d^2),\quad r_d^2=x_d^2+y_d^2.
 
 再考虑所有标定点都集中在图像中心。它们可能足以拟合局部投影，却不足以可靠估计边缘径向畸变。一个应有的自构验证是：用中心区域标定、边缘区域测试，看误差是否明显增大。这个实验方案不是原文已有结果。
 
-## 贡献、成本与边界
+## 四、核对实际标定与独立测试点的误差口径
+
+
+<!-- figure-ref-v6:start:rc-20-figure-11-anchor -->
+<span id="rc-20-figure-11"></span>
+<!-- figure-ref-v6:end:rc-20-figure-11-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/020-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/020-evidence.png" width="1089" height="807" alt="Fig. 11：方格角点与畸变修正位置叠加在同一幅真实图像中" loading="lazy"></a><figcaption>原论文结果图／表摘引：Roger Y. Tsai（1987），Fig. 11，PDF 第 16 页；<a href="https://www.cs.auckland.ac.nz/courses/compsci773s1c/lectures/A%20versatile%20camera%20calibration%20technique%20for%20high-accuracy%203D%20machine%20vision%20metrology%20using%20off-the-shelf%20TV%20cameras%20and%20lenses.pdf#page=16" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+读图：方格角点与畸变修正位置叠加在同一幅真实图像中。沿画面边缘比较偏移更容易看出径向畸变，图像叠加展示修正行为，空间精度仍要看独立测试点。
+
+论文以实际标定与独立测试点检查三维测量误差。单平面实验报告平均歧义半径 0.7 mil，不能把这个值说成所有相机的通用精度。
+
+### 五处关键证据
+
+这篇 1987 年期刊版与 1986 年 CVPR 前身不同；径向对齐图解释分阶段求参，空间检验误差还要保留测试平面和长度单位。
+
+**第 II-E 节，[图 3](#rc-20-figure-3)；附录 I。** 径向畸变前后方向；提供参数分离的几何约束。
+
+<!-- figure-ref-v6:start:rc-20-figure-3 -->
+<figure class="reading-evidence-figure" id="rc-20-figure-3"><a href="/robot-classic/assets/figure-refs-v6/020-fig-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/020-fig-3.png" width="666" height="534" alt="图3：径向排列约束中的世界坐标、摄像机坐标和畸变前后像点" loading="lazy"></a><figcaption>Roger Y. Tsai（1987），图 3，PDF 第 8 页；<a href="https://www.cs.auckland.ac.nz/courses/compsci773s1c/lectures/A%20versatile%20camera%20calibration%20technique%20for%20high-accuracy%203D%20machine%20vision%20metrology%20using%20off-the-shelf%20TV%20cameras%20and%20lenses.pdf#page=8" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/020-fig-3.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：图中畸变前后像点沿同一径向方向；这条方向约束解释了为何能先求部分外参，再求焦距与畸变参数。
+<!-- figure-ref-v6:end:rc-20-figure-3 -->
+
+**第 II-F 节，[图 4](#rc-20-figure-4)、式 (10)。** 单平面约束与参数恢复；线性阶段有明确几何及先验条件。
+
+<!-- figure-ref-v6:start:rc-20-figure-4 -->
+<figure class="reading-evidence-figure" id="rc-20-figure-4"><a href="/robot-classic/assets/figure-refs-v6/020-fig-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/020-fig-4.png" width="661" height="545" alt="图4：单视图共面标定点、相机和采集计算硬件的连接" loading="lazy"></a><figcaption>Roger Y. Tsai（1987），图 4，PDF 第 8 页；<a href="https://www.cs.auckland.ac.nz/courses/compsci773s1c/lectures/A%20versatile%20camera%20calibration%20technique%20for%20high-accuracy%203D%20machine%20vision%20metrology%20using%20off-the-shelf%20TV%20cameras%20and%20lenses.pdf#page=8" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/020-fig-4.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：棋盘角点处于同一平面，相机通过采集系统进入计算机；注意共面条件是该配置的假设，并非任意三维点集。
+<!-- figure-ref-v6:end:rc-20-figure-4 -->
+
+**第 III-A 节，[图 5](#rc-20-figure-5)。** 反投影射线与已知测试平面的交点；歧义半径是空间误差，不是像素残差。
+
+<!-- figure-ref-v6:start:rc-20-figure-5 -->
+<figure class="reading-evidence-figure" id="rc-20-figure-5"><a href="/robot-classic/assets/figure-refs-v6/020-fig-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/020-fig-5.png" width="543" height="571" alt="图5：重投影射线与测试平面的交点偏差及歧义区域" loading="lazy"></a><figcaption>Roger Y. Tsai（1987），图 5，PDF 第 12 页；<a href="https://www.cs.auckland.ac.nz/courses/compsci773s1c/lectures/A%20versatile%20camera%20calibration%20technique%20for%20high-accuracy%203D%20machine%20vision%20metrology%20using%20off-the-shelf%20TV%20cameras%20and%20lenses.pdf#page=12" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/020-fig-5.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：从理想点P追踪反投影射线与平面的交点P′；歧义半径衡量三维重建偏差，与像平面重投影误差不是同一指标。
+<!-- figure-ref-v6:end:rc-20-figure-5 -->
+
+**第 IV-A 节，[图 10](#rc-20-figure-10)、11。** 实物点提取和畸变修正；成像误差需要显式建模。
+
+<!-- figure-ref-v6:start:rc-20-figure-10 -->
+<figure class="reading-evidence-figure" id="rc-20-figure-10"><a href="/robot-classic/assets/figure-refs-v6/020-fig-10.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/020-fig-10.png" width="672" height="574" alt="图10：棋盘灰度图及提取到的白色亚像素角点" loading="lazy"></a><figcaption>Roger Y. Tsai（1987），图 10，PDF 第 15 页；<a href="https://www.cs.auckland.ac.nz/courses/compsci773s1c/lectures/A%20versatile%20camera%20calibration%20technique%20for%20high-accuracy%203D%20machine%20vision%20metrology%20using%20off-the-shelf%20TV%20cameras%20and%20lenses.pdf#page=15" target="_blank" rel="noopener noreferrer">原文与图注</a>；<a href="/robot-classic/assets/figure-refs-v6/020-fig-10.png" target="_blank" rel="noopener noreferrer">放大查看</a>。原版权保留。</figcaption></figure>
+
+读图：白点位于黑方格边角；读图时把特征定位质量与后续相机参数估计分开，不能仅凭标定板图像断言整体三维精度。
+<!-- figure-ref-v6:end:rc-20-figure-10 -->
+
+<!-- figure-ref-v6:start:rc-20-links-96 -->
+本页定位：[图 11内嵌图](#rc-20-figure-11)。
+<!-- figure-ref-v6:end:rc-20-links-96 -->
+
+**第 IV-A2 节，第 337 页。** 60 标定点与 60 测试点；平均 0.7 mil、最大 1.3 mil 的 Type II 结果。
+
+1 mil 为 0.001 英寸，因此上述两个值分别约 0.0178 毫米与 0.0330 毫米。这是单位换算，不是另外一次实验。测试点与标定点分开使用，比只报告拟合样本的重投影残差更有说服力。
+
+同页报告当时基于 68000 的 MASSCOMP 计算机完成两阶段约需 1.5 秒。后文还讨论其他点数与实现优化；这些条件不同的速度不能混合成单一算法加速比。原稿没有给出可直接映射到现代 CPU 或 GPU 的性能预测。
+
+实验依赖精密物体几何和亚像素提取，不是仅换一条求解公式就能复制精度。随机种子不适用于这里的实物标定流程；重复标定次数及完整不确定性区间在已核对段落中未确认。
+
+## 五、检查成像假设、标定几何与预知参数
 
 新意是利用成像几何的不变量，先解决与若干未知参数无关的子问题，再完成低维非线性估计。它展示一种普遍研究思路：面对耦合参数，先找能够消去部分未知量的关系。
 
@@ -88,11 +145,21 @@ $$x_u=x_d(1+\kappa r_d^2),\quad y_u=y_d(1+\kappa r_d^2),\quad r_d^2=x_d^2+y_d^2.
 
 五个前置概念：**内参**描述相机内部成像尺度；**外参**描述相机与世界坐标关系；**径向畸变**沿图像中心射线改变距离；**可辨识性**讨论数据能否唯一约束参数；**独立测试**检验拟合以外的几何准确度。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 多参数耦合使全量非线性标定复杂 | 径向对齐与两阶段求解 | 先消去共同缩放和畸变影响 | 第 IV 节实物标定与测试点测量 | 几何、尺度先验、检测和成像模型限制 |
+## 六、追问：训练标定点的误差下降，为什么仍要保留独立测试点？
 
-## 自测与参考答案
+<details>
+<summary>训练标定点的误差下降，为什么仍要保留独立测试点？</summary>
+
+**参考答案**：参数可以吸收标定数据中的噪声或模型偏差，使用于求解的残差看起来更小，却不保证别处的三维测量同样准确。比较应固定成像与误差定义，在独立测试点上检验，并说明点的空间分布。原文的特定平均歧义半径不能直接迁移为所有相机或所有测量位置的精度。
+
+</details>
+
+## 七、接上手眼关系，再比较平面多视图标定
+
+- **模块组合**：[Tsai–Lenz 手眼标定：为什么换几个姿态，就能知道相机装在哪里](024-hand-eye.md)。把视觉外参作为手眼关系求解的输入，但新增机器人与相机坐标间的标定。
+- **平行路线**：[张正友标定：一块平板怎样提供三维相机的信息](042-zhang-calibration.md)。改用多视图平面与旋转正交约束，先验条件不同。
+
+## 八、自测与参考答案
 
 **1．径向畸变未知，为什么仍能先求一部分外参？**
 

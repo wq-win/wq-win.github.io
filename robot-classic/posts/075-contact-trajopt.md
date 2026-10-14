@@ -4,19 +4,15 @@
 
 **论文**：Michael Posa、Cecilia Cantu、Russ Tedrake，*A Direct Method for Trajectory Optimization of Rigid Bodies Through Contact*，IJRR 2014，33(1):69—81；2013 年在线发表，前身为 WAFR 2012 工作。[作者全文](https://dair.seas.upenn.edu/assets/pdf/Posa2014.pdf) · [出版记录](https://doi.org/10.1177/0278364913506757) · [2014 年勘误](https://doi.org/10.1177/0278364914533878)。
 
-**阅读范围**：22 页作者预印本的方法、四组应用、讨论及图注，并核对勘误关于先行工作的说明。页码按作者版，章节便于与期刊版对应。没有复现优化、仿真或硬件运行，以下高速运动数字均不作为真机纪录。
+### 先接住前作的问题
 
-## 一、一分钟理解
+[Stewart–Trinkle](036-impulse-contact.md)把接触化为区间冲量，本篇进一步联合优化状态、控制与接触作用。它与[CIO](072-contact-implicit.md)解决相近模式发现问题，但硬互补和有限罚项对应不同的可行性承诺。
+
+## 一、问题设定：状态控制与接触模式怎样在一个轨迹问题中共同决定
 
 让机器人走路，通常先决定左脚落地、右脚离地等顺序，再优化每一步怎么走。多指操作、柔性脚趾或带机械限位的腿却有大量接触组合，顺序可能本来就是需要发现的答案。
 
-本文把接触力也作为待优化变量，用互补约束表达“离开表面时不能获得表面支持”，把运动轨迹与接触模式放入同一个非线性优化问题。它不必先枚举完整模式序列，但仍然依赖候选接触、模型、目标和初始化。
-
-实验展示了从操作到步态规划的不同数值案例，并观察到优化后的接触顺序与初始猜测不同。这支持方法能够改变接触模式，不证明它能找到所有问题的全局最优动作。
-
-一句话：在已知刚体和接触模型的运动规划中，通过直接优化状态、控制和接触力，减少预设接触顺序的限制，代价是困难的非凸互补优化，以及离散模型和实际执行之间的差距。
-
-## 二、研究背景与问题定义
+### 研究背景与问题定义
 
 这是模型驱动的轨迹优化，不是强化学习。输入为刚体动力学、接触几何、摩擦、初终状态和任务成本；输出为一段状态、控制、接触力及时间轨迹。不存在训练好的策略网络或数据驱动价值函数。
 
@@ -24,7 +20,7 @@
 
 不过，“没有预设顺序”并不等于没有结构性先验。机器人可能碰到哪些表面、间隙如何计算、哪个关节可驱动、摩擦模型是什么，都必须给出。它适合已知任务几何的规划，不能直接解释成对未知环境的自主探索。
 
-## 三、方法：把接触也纳入决策
+## 二、把接触力和互补约束加入离散动力学
 
 ### 1. 接触互补的逻辑
 
@@ -58,6 +54,18 @@ $$M_{k+1}(v_{k+1}-v_k)=h_k(Bu_{k+1}-b_{k+1})+J_{k+1}^T p_{k+1},$$
 
 原文将这些条件组成 MPCC，即带互补约束的数学规划。SQP 用连续的二次近似子问题推进，但整体问题不是凸二次规划。作者利用松弛变量和求解器弹性机制改善数值表现；复杂问题还可以先容许小的互补误差，再逐步收紧。
 
+### 互补点为什么让普通非线性优化器格外难受
+
+单接触可行集合为 $\phi\ge0,\lambda\ge0,\phi\lambda=0$，其中 $\phi$是间隙，$\lambda$是支持力。它是两条非负坐标轴的并集，不是一个凸面：$(\phi,\lambda)=(1,0)$与$(0,1)$都可行，中点$(0.5,0.5)$却不行。在切换点 $(0,0)$，乘积约束的梯度 $(\lambda,\phi)$又为零，普通约束资格条件容易失效。
+
+**教学松弛检查**若改成 $\phi\lambda\le\varepsilon$，取 $\varepsilon=10^{-3}$米·牛、$\phi=0.01$米，仍允许0.1牛隔空作用。把容差从 $10^{-3}$减到 $10^{-5}$会将同间隙允许力降到0.001牛。容差有单位，换米为毫米必须同步缩放，否则实际物理允许量改变。
+
+本篇直接借助[Stewart–Trinkle](036-impulse-contact.md)的积分接触思想，与[CIO手操作](072-contact-implicit.md)的软罚项路线并行。[原文第2.2–2.3节](https://dair.seas.upenn.edu/assets/pdf/Posa2014.pdf)明确区分硬约束和允许远距离力的松弛；实验中未预指定模式不等于全局搜索所有模式，仍应检查初始化、最终残差和细步长验证。
+
+接触作用和运动状态需在同一离散模型中满足互补。下面检查模式变化是否伴随可行的力与位移，再解释数值案例的局部解。
+
+## 三、联合求解候选接触，检查模式与力的一致性
+
 ```text
 输入刚体模型、摩擦参数、候选接触对、起终约束
 建立各时刻的状态、控制、接触作用及时间变量
@@ -77,7 +85,30 @@ $$M_{k+1}(v_{k+1}-v_k)=h_k(Bu_{k+1}-b_{k+1})+J_{k+1}^T p_{k+1},$$
 
 伪代码最后的独立验证是教学性复现建议，不能据此声称作者每个动作都做过同等验证。数学目标是设计者给出的轨迹成本；机制变化是将接触隐式纳入优化；实验改善则是找到可行运动、改变模式或降低特定名义成本，三者不能混写。
 
-## 四、实验如何验证
+### 自构例子与前置知识
+
+**自构例子，未运行。** 一个 1 kg 物体静止在平面上。间隙大于零时，支持力只能为零，重力会让它下落；间隙为零时，约 9.81 N 的支持可以抵消重力。若允许间隙 0.01 m、支持力 9.81 N 同时存在，乘积为 0.0981 N·m，便出现悬空支持。这个量的单位也提醒我们：松弛阈值不能随意跨单位、跨机器人照搬。
+
+五个前置概念：
+
+1. 混合系统：连续运动与离散接触模式共同构成的系统。
+2. 互补约束：两个非负量不能同时严格为正。
+3. 直接转录：把连续轨迹问题离散成有限维约束优化。
+4. 冲量：力在时间上的积分，用于描述碰撞造成的动量变化。
+5. SQP：通过连续二次近似求解非线性约束问题的方法。
+
+## 四、读操作和步态案例中的接触顺序变化
+
+<!-- figure-ref-v6:start:rc-75-figure-7-anchor -->
+<span id="rc-75-figure-7"></span>
+<!-- figure-ref-v6:end:rc-75-figure-7-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/075-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/075-evidence.png" width="1130" height="255" alt="Fig. 7：从左到右读 FastRunner 的周期运动，细线还表示弹簧与肌腱" loading="lazy"></a><figcaption>原论文结果图／表摘引：Michael Posa、Cecilia Cantu、Russ Tedrake（2014），Fig. 7，PDF 第 16 页；<a href="https://dair.seas.upenn.edu/assets/pdf/Posa2014.pdf#page=16" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+读图：从左到右读 FastRunner 的周期运动，细线还表示弹簧与肌腱。它展示复杂模型上的优化轨迹，不是实机跑步录像帧，也不能由渲染姿态判断全部接触残差。
+
+### 实验如何验证
+
+四组应用使用作者预印本的 PDF 页序；高速步态数字是仿真结果，不能写成真机纪录，勘误中的先行工作归属也需保留。
 
 | 项目 | 论文设置与边界 |
 | --- | --- |
@@ -92,21 +123,63 @@ $$M_{k+1}(v_{k+1}-v_k)=h_k(Bu_{k+1}-b_{k+1})+J_{k+1}^T p_{k+1},$$
 
 中间姿态尤其重要。只要求球到达空中，优化器可能用手指把球弹起来；这在数学上满足目标，却不是人想要的“抓起”。论文主动讨论了这种目标与意图差异，是理解优化式机器人行为的重要例子。
 
-## 五、五处证据与读法
+### 五处证据与读法
 
-1. **图 3、§4.1：主动建立接触。** 无重力的示例仍能从无接触初始化发现接触，支持搜索不完全依赖自然动力学把身体推到一起。它不是对所有初始化成功的保证。
+1. **[图 3](#rc-75-figure-3)、§4.1：主动建立接触。** 无重力的示例仍能从无接触初始化发现接触，支持搜索不完全依赖自然动力学把身体推到一起。它不是对所有初始化成功的保证。
 
-2. **图 4、§4.2：抓取。** 运动同时处理手和物体动力学，但使用了中间抓握要求。不能概括成无需任务设计的自主灵巧操作。
+<!-- figure-ref-v6:start:rc-75-figure-3 -->
+<figure class="reading-evidence-figure" id="rc-75-figure-3"><a href="/robot-classic/assets/figure-refs-v6/075-fig-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/075-fig-3.png" width="360" height="523" alt="两连杆手指、被推动椭圆与关节角和间隙标注" loading="lazy"></a><figcaption>Michael Posa、Cecilia Cantu、Russ Tedrake（2014），图 3，PDF 第 12 页；<a href="https://dair.seas.upenn.edu/assets/pdf/Posa2014.pdf#page=12" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。 本图为裁切摘录，按<a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener noreferrer">CC-BY-NC-SA-4.0</a>提供；<a href="https://dspace.mit.edu/entities/publication/c55ff3f4-e533-4097-a23e-c34821e3ad96" target="_blank" rel="noopener noreferrer">版本与许可记录</a>。</figcaption></figure>
 
-3. **图 5、§4.3：成本下降及副作用。** Spring Flamingo 的名义成本由 0.18 降为 0.04；按这两个报告值计算，相对下降约 77.8%。这是指定名义轨迹成本，不是实际电池能耗下降；图注说明未要求足够抬脚高度，因此得到很低的离地间隙。
+读图：红色两连杆必须先改变姿态建立接触，绿色椭圆才会运动；图中间隙变量对应互补约束的几何距离。
+<!-- figure-ref-v6:end:rc-75-figure-3 -->
 
-4. **图 6、8：模式变化。** 初始和优化序列不同，支持互补形式能改变接触安排。超过四百万种可能组合是模型组合数量，不是求解器实际穷举并验证四百万条模式路径。
+2. **[图 4](#rc-75-figure-4)、§4.2：抓取。** 运动同时处理手和物体动力学，但使用了中间抓握要求。不能概括成无需任务设计的自主灵巧操作。
 
-5. **图 7、9、10：复杂模型应用。** 展示高速周期轨迹及已知台阶、落脚约束下的运动变化。它们说明任务约束可以注入优化，不能替代未知地形、扰动恢复或真实硬件的成功率证据。
+<!-- figure-ref-v6:start:rc-75-figure-4 -->
+<figure class="reading-evidence-figure" id="rc-75-figure-4"><a href="/robot-classic/assets/figure-refs-v6/075-fig-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/075-fig-4.png" width="331" height="305" alt="平面抓取器、球体和三处黑色接触点" loading="lazy"></a><figcaption>Michael Posa、Cecilia Cantu、Russ Tedrake（2014），图 4，PDF 第 13 页；<a href="https://dair.seas.upenn.edu/assets/pdf/Posa2014.pdf#page=13" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。 本图为裁切摘录，按<a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener noreferrer">CC-BY-NC-SA-4.0</a>提供；<a href="https://dspace.mit.edu/entities/publication/c55ff3f4-e533-4097-a23e-c34821e3ad96" target="_blank" rel="noopener noreferrer">版本与许可记录</a>。</figcaption></figure>
+
+读图：黑点是候选接触位置，手指关节与球体都参与动力学；中间抓握约束仍由任务设计者给定。
+<!-- figure-ref-v6:end:rc-75-figure-4 -->
+
+3. **[图 5](#rc-75-figure-5)、§4.3：成本下降及副作用。** Spring Flamingo 的名义成本由 0.18 降为 0.04；按这两个报告值计算，相对下降约 77.8%。这是指定名义轨迹成本，不是实际电池能耗下降；图注说明未要求足够抬脚高度，因此得到很低的离地间隙。
+
+<!-- figure-ref-v6:start:rc-75-figure-5 -->
+<figure class="reading-evidence-figure" id="rc-75-figure-5"><a href="/robot-classic/assets/figure-refs-v6/075-fig-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/075-fig-5.png" width="846" height="580" alt="Spring Flamingo步行序列及优化前后质心高度随时间曲线" loading="lazy"></a><figcaption>Michael Posa、Cecilia Cantu、Russ Tedrake（2014），图 5，PDF 第 14 页；<a href="https://dair.seas.upenn.edu/assets/pdf/Posa2014.pdf#page=14" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。 本图为裁切摘录，按<a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener noreferrer">CC-BY-NC-SA-4.0</a>提供；<a href="https://dspace.mit.edu/entities/publication/c55ff3f4-e533-4097-a23e-c34821e3ad96" target="_blank" rel="noopener noreferrer">版本与许可记录</a>。</figcaption></figure>
+
+读图：下图蓝线的质心高度变化较小，但上图脚部离地很低；这正对应成本下降与未显式约束足够抬脚高度的取舍。
+<!-- figure-ref-v6:end:rc-75-figure-5 -->
+
+4. **[图 6](#rc-75-figure-6)、8：模式变化。** 初始和优化序列不同，支持互补形式能改变接触安排。超过四百万种可能组合是模型组合数量，不是求解器实际穷举并验证四百万条模式路径。
+
+<!-- figure-ref-v6:start:rc-75-figure-6 -->
+<figure class="reading-evidence-figure" id="rc-75-figure-6"><a href="/robot-classic/assets/figure-refs-v6/075-fig-6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/075-fig-6.png" width="846" height="506" alt="左右脚接触模式随时间的优化前后对照" loading="lazy"></a><figcaption>Michael Posa、Cecilia Cantu、Russ Tedrake（2014），图 6，PDF 第 15 页；<a href="https://dair.seas.upenn.edu/assets/pdf/Posa2014.pdf#page=15" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。 本图为裁切摘录，按<a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener noreferrer">CC-BY-NC-SA-4.0</a>提供；<a href="https://dspace.mit.edu/entities/publication/c55ff3f4-e533-4097-a23e-c34821e3ad96" target="_blank" rel="noopener noreferrer">版本与许可记录</a>。</figcaption></figure>
+
+读图：蓝线与红虚线在左右脚接触切换的时刻明显不同，说明优化改变的是模式序列，不只是固定模式内的连续轨迹。
+<!-- figure-ref-v6:end:rc-75-figure-6 -->
+
+<!-- figure-ref-v6:start:rc-75-figure-8 -->
+<figure class="reading-evidence-figure" id="rc-75-figure-8"><a href="/robot-classic/assets/figure-refs-v6/075-fig-8.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/075-fig-8.png" width="846" height="381" alt="FastRunner初始及优化后的接触模式序列" loading="lazy"></a><figcaption>Michael Posa、Cecilia Cantu、Russ Tedrake（2014），图 8，PDF 第 17 页；<a href="https://dair.seas.upenn.edu/assets/pdf/Posa2014.pdf#page=17" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。 本图为裁切摘录，按<a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener noreferrer">CC-BY-NC-SA-4.0</a>提供；<a href="https://dspace.mit.edu/entities/publication/c55ff3f4-e533-4097-a23e-c34821e3ad96" target="_blank" rel="noopener noreferrer">版本与许可记录</a>。</figcaption></figure>
+
+读图：蓝色序列经历更多不同模式，不能把模式编号的高低解释成性能好坏；时间轴显示的是单个周期内的切换。
+<!-- figure-ref-v6:end:rc-75-figure-8 -->
+
+5. **[图 7](#rc-75-figure-7)、9、10：复杂模型应用。** 展示高速周期轨迹及已知台阶、落脚约束下的运动变化。它们说明任务约束可以注入优化，不能替代未知地形、扰动恢复或真实硬件的成功率证据。
+
+<!-- figure-ref-v6:start:rc-75-figure-9 -->
+<figure class="reading-evidence-figure" id="rc-75-figure-9"><a href="/robot-classic/assets/figure-refs-v6/075-fig-9.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/075-fig-9.png" width="809" height="181" alt="FastRunner在台阶上抬升和下降的姿态序列" loading="lazy"></a><figcaption>Michael Posa、Cecilia Cantu、Russ Tedrake（2014），图 9，PDF 第 17 页；<a href="https://dair.seas.upenn.edu/assets/pdf/Posa2014.pdf#page=17" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。 本图为裁切摘录，按<a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener noreferrer">CC-BY-NC-SA-4.0</a>提供；<a href="https://dspace.mit.edu/entities/publication/c55ff3f4-e533-4097-a23e-c34821e3ad96" target="_blank" rel="noopener noreferrer">版本与许可记录</a>。</figcaption></figure>
+
+读图：台阶任务改变了足端落点和躯干姿态；这些是已知几何约束下的规划结果，并非未知地形上的在线适应试验。
+<!-- figure-ref-v6:end:rc-75-figure-9 -->
+
+<!-- figure-ref-v6:start:rc-75-figure-10 -->
+<figure class="reading-evidence-figure" id="rc-75-figure-10"><a href="/robot-classic/assets/figure-refs-v6/075-fig-10.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/075-fig-10.png" width="853" height="210" alt="FastRunner跨越离散落脚平台的步态序列" loading="lazy"></a><figcaption>Michael Posa、Cecilia Cantu、Russ Tedrake（2014），图 10，PDF 第 18 页；<a href="https://dair.seas.upenn.edu/assets/pdf/Posa2014.pdf#page=18" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。 本图为裁切摘录，按<a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener noreferrer">CC-BY-NC-SA-4.0</a>提供；<a href="https://dspace.mit.edu/entities/publication/c55ff3f4-e533-4097-a23e-c34821e3ad96" target="_blank" rel="noopener noreferrer">版本与许可记录</a>。</figcaption></figure>
+
+读图：落脚平台之间的间隙迫使步幅调整，展示的是明确足端位置约束对原有周期步态的修改。
+<!-- figure-ref-v6:end:rc-75-figure-10 -->
 
 原文运输成本公式附近的叙述、负功处理和离散时间因子需要谨慎阅读：本文只引用报告的成本对比，不将印刷求和式直接包装为完整电能计算器。真正复现应明确时间积分、力矩单位、负功处理和执行器效率。
 
-## 六、贡献、代价与局限
+## 五、保留非凸性、初始化与离散执行差距
 
 贡献在于把接触互补、稀疏直接轨迹优化和适合的非线性求解技巧结合，推进到较复杂的机器人模型。**优先权必须结合勘误阅读**：2014 年勘误补充了更早、独立取得类似结果的 MPEC 相关工作，因此不能把本篇写成无人先行的绝对首次。[勘误原文](https://doi.org/10.1177/0278364914533878)
 
@@ -114,23 +187,23 @@ $$M_{k+1}(v_{k+1}-v_k)=h_k(Bu_{k+1}-b_{k+1})+J_{k+1}^T p_{k+1},$$
 
 若暂时松弛互补，迭代中的身体可以在小间隙处得到接触作用，这是数值过渡，不是可执行物理过程。最终容差必须记录；只看求解器返回成功不够。模型允许的低成本擦地步态，也可能在真实地形误差下很脆弱。
 
-## 七、自构例子与前置知识
+## 六、追问：两次求解得到不同接触顺序而代价相近，应先比较哪些可行性证据？
 
-**自构例子，未运行。** 一个 1 kg 物体静止在平面上。间隙大于零时，支持力只能为零，重力会让它下落；间隙为零时，约 9.81 N 的支持可以抵消重力。若允许间隙 0.01 m、支持力 9.81 N 同时存在，乘积为 0.0981 N·m，便出现悬空支持。这个量的单位也提醒我们：松弛阈值不能随意跨单位、跨机器人照搬。
+<details>
+<summary>两次求解得到不同接触顺序而代价相近，应先比较哪些可行性证据？</summary>
 
-五个前置概念：
+**参考答案**：检查各自的动力学残差、非穿透与互补关系，再核对离散时间和候选接触定义。不同顺序可能都是局部结果，目标值接近既不证明同一物理解，也不证明任何一个全局最优。真实执行能力仍需独立验证。
 
-1. 混合系统：连续运动与离散接触模式共同构成的系统。
-2. 互补约束：两个非负量不能同时严格为正。
-3. 直接转录：把连续轨迹问题离散成有限维约束优化。
-4. 冲量：力在时间上的积分，用于描述碰撞造成的动量变化。
-5. SQP：通过连续二次近似求解非线性约束问题的方法。
+教学参照：[Underactuated Robotics: Planning and Control through Contact](https://underactuated.mit.edu/contact.html)。这里借用其分开连续运动、接触事件与数值实现的讲法。
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-| --- | --- | --- | --- | --- |
-| 接触顺序预设限制运动搜索 | 同时优化状态、控制和接触作用，加入互补条件 | 在同一约束问题里允许接触模式改变 | 操作与步态案例、模式对比、名义成本变化 | 局部非凸求解、模型与时间离散误差、任务先验和执行验证仍不可少 |
+</details>
 
-## 八、自测问题与参考答案
+## 七、比较软接触与全身一致性模型
+
+- **平行路线**：[手部 CIO：把何时接触、在哪里施力一起优化](072-contact-implicit.md)。对照软物理约束的动作合成，不能混用可行性承诺。
+- **模块组合**：[质心动力学与全身运动学：怎样少算方程而不丢掉身体](080-wholebody-qp.md)。联合全身运动学与质心动力学时，也需明确接触约束的作用。
+
+## 八、自测与参考答案
 
 ### 问题 1：为何仅写“接触距离乘支持力等于零”不够？
 

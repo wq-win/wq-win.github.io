@@ -2,19 +2,17 @@
 
 [总览](00-发展时间线总览.md) · [目录](README.md) · [上一篇：ROS](058-ros.md) · [下一篇：ORB](060-orb.md)
 
-论文：Nathan Ratliff、Matt Zucker、J. Andrew Bagnell、Siddhartha Srinivasa，*CHOMP: Gradient Optimization Techniques for Efficient Motion Planning*，ICRA 2009，489–494。[作者实验室预印稿](https://personalrobotics.cs.washington.edu/publications/ratliff2009chomp.pdf)；[CMU 发表记录](https://publications.ri.cmu.edu/chomp-gradient-optimization-techniques-for-efficient-motion-planning)。以下依据八页作者预印稿的方法、实验与结论，图节定位针对这份稿；会议排版为六页，不能机械互换 PDF 页码。
+论文：Nathan Ratliff、Matt Zucker、J. Andrew Bagnell、Siddhartha Srinivasa，*CHOMP: Gradient Optimization Techniques for Efficient Motion Planning*，ICRA 2009，489–494。[作者实验室预印稿](https://personalrobotics-files.cs.washington.edu/ratliff2009chomp.pdf)；[CMU 发表记录](https://publications.ri.cmu.edu/chomp-gradient-optimization-techniques-for-efficient-motion-planning)。本轮从[作者实验室当前出版页](https://personalrobotics.cs.washington.edu/publications/ratliff2009chomp/)找到迁移后的八页原稿，补核第II-A/B节协变更新、第II-D/F节工作空间泛函与限位、第III节机械臂实验和第IV节LittleDog设置。关键实验数字已对照正文；未复现代码或逐像素复核所有曲线。图节定位采用八页预印稿，不能机械换成六页会议版页码。
 
-## 一分钟理解
+### 先接住前作的问题
+
+[RRT](040-rrt.md)擅长找通道，粗糙路径往往还需平滑。CHOMP直接在轨迹度量下联合改进平滑与避障。
+
+## 一、问题设定：碰撞路点的修正怎样沿整条轨迹平滑传播
 
 一条机械臂轨迹穿过桌面。如果只把碰撞的那个路点往外推，轨迹可能形成尖角，邻近路点还留在障碍里。CHOMP 让这次局部碰撞的影响沿轨迹平滑传播，整段运动一起调整。
 
-它先定义“接近障碍有多糟”和“运动有多不平滑”，再用符合轨迹平滑性的度量做梯度更新。初始轨迹可以有碰撞，因此很多任务能够从起终点直线插值开始，而不用先求一条无碰撞路径。
-
-实验支持该方法在选定机械臂任务和四足摆腿轨迹上有用，但它仍会陷入局部极小值，也不保证任何可行任务都能在有限时间内找到答案。
-
-一句话：在已知几何模型的运动规划中，通过距离场障碍代价和协变轨迹更新，从粗糙甚至碰撞的初值改善平滑性与避障，代价是非凸优化、几何离散误差和任务相关启发式。
-
-## 背景与问题定义
+### 背景与问题定义
 
 RRT、PRM 擅长探索构型空间的连通性，找到可行路径后通常还要做 shortcut 等处理去掉多余转折。CHOMP 将轨迹质量放进优化目标，希望在不少日常任务中把寻找与平滑统一起来。
 
@@ -22,7 +20,7 @@ RRT、PRM 擅长探索构型空间的连通性，找到可行路径后通常还�
 
 原文关心平滑、碰撞、关节限位，也在四足例子中加入可达性和 ZMP 相关惩罚。关节速度或加速度平方较小，不能自动证明电机力矩满足限制；软惩罚也不能替代所有动力学和接触约束。
 
-## 方法：两种几何都要选对
+## 二、选择轨迹度量与距离场，推导协变更新
 
 ### 第一种几何：怎样测量“轨迹改动很小”
 
@@ -74,6 +72,20 @@ $$\int_B J^T\|\dot x\|\big[(I-\hat v\hat v^T)\nabla c-c\kappa\big]du,$$
 
 硬把越界路点截到关节上下限可能形成平台或折角。作者先构造消除越界的修正量，再经 $A^{-1}$ 平滑扩散，缩放以消掉最大违反，必要时重复。这是近似投影步骤，不是一次解决全部碰撞、动力学和限位的联合可行性证明。
 
+最后的明确失败出口是教学实现的必要区分：优化停止不等于规划成功。用于实机前还需要按实际机器人几何与轨迹插值方式验证。
+
+### 协变更新如何把一个碰撞梯度扩散成整段弯曲
+
+轨迹离散向量记为 $q$，平滑度量矩阵为正定 $A$，总代价梯度为 $g$。局部步长通过最小化 $g^T\delta q+(1/2\eta)\delta q^TA\delta q$得到 $\delta q=-\eta A^{-1}g$，$\eta>0$是步长。这不是对每个时间点独立沿欧氏梯度走，而是按轨迹平滑结构衡量改动大小。
+
+**教学例**取 $A=\begin{bmatrix}2&-1\\-1&2\end{bmatrix}$、$g=(1,0)^T$、$\eta=1$，更新为 $(-2/3,-1/3)^T$。只有第一个路点直接收到梯度，第二个仍随它一起移动，避免形成尖折。若边界没有固定而 $A$有平移零空间，必须处理其零模态，不能盲目求逆。
+
+与[RRT](040-rrt.md)是局部优化与采样搜索的平行路线；后作[STOMP](061-stomp.md)用随机扰动估计改进方向。路径能否离开错误同伦类，以及离散路点间是否碰撞，都不是平滑更新自动保证的。[原稿第II-A/B节](https://personalrobotics-files.cs.washington.edu/ratliff2009chomp.pdf)给出局部正则化目标和逆度量更新；实验的初始轨迹和碰撞模型应与速度数字一起对照。
+
+协变更新把一处碰撞的梯度传播到邻近轨迹点。下面直接手算这个传播，检查平滑度量怎样改变更新，再读机械臂和摆腿结果。
+
+## 三、手算一次更新，检查局部梯度的传播
+
 ```text
 输入：起终点、初始离散轨迹、机器人几何、障碍模型
 建立有符号距离场；构建平滑矩阵 A 与边界项
@@ -89,9 +101,27 @@ $$\int_B J^T\|\dot x\|\big[(I-\hat v\hat v^T)\nabla c-c\kappa\big]du,$$
 否则：返回失败状态，或更换初值后重新优化
 ```
 
-最后的明确失败出口是教学实现的必要区分：优化停止不等于规划成功。用于实机前还需要按实际机器人几何与轨迹插值方式验证。
+### 手算一次协变更新
 
-## 实验设置
+以下为教学构造。三个内部路点只考虑一个方向，取
+
+$$A=\begin{bmatrix}2&-1&0\\-1&2&-1\\0&-1&2\end{bmatrix},\qquad
+g=\begin{bmatrix}0\\1\\0\end{bmatrix}.$$
+
+欧氏下降只移动中间点；解 $Av=g$ 得 $v=(0.5,1,0.5)^T$。协变下降 $\delta=-\eta v$ 会让相邻两个点各跟随一半，中间仍移动最多。这直观解释了“局部碰撞推动整段平滑变化”，也说明若步长过大，相邻点可能被推到另一障碍，所以仍要检查更新后可行性。
+
+五个前置概念：**构型空间**用关节变量描述机器人姿态；**距离场**提供每个空间位置到障碍的带符号距离；**泛函**把整条函数轨迹映射到代价；**度量**定义轨迹变化的大小；**非凸优化**允许多个局部极小值且通常依赖初值。
+
+## 四、读机械臂与摆腿实验，分开可行性和质量
+
+<!-- figure-ref-v6:start:rc-59-figure-5-anchor -->
+<span id="rc-59-figure-5"></span>
+<!-- figure-ref-v6:end:rc-59-figure-5-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/059-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/059-evidence.png" width="735" height="269" alt="Fig. 5：左图按迭代看目标下降，右图比较直线初始化（绿）与双向 RRT 初始化（红）" loading="lazy"></a><figcaption>原论文结果图／表摘引：Nathan Ratliff、Matt Zucker、J. Andrew Bagnell、Siddhartha Srinivasa（2009），Fig. 5，PDF 第 6 页；<a href="https://personalrobotics-files.cs.washington.edu/ratliff2009chomp.pdf#page=6" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+读图：左图按迭代看目标下降，右图比较直线初始化（绿）与双向 RRT 初始化（红）。初值改变可能进入不同局部极小；log-objective 差异不能直接解释为相同比例的路径长度改善。
+
+### 实验设置
 
 | 项目 | 原文设定与作用 |
 |---|---|
@@ -106,21 +136,37 @@ $$\int_B J^T\|\dot x\|\big[(I-\hat v\hat v^T)\nabla c-c\kappa\big]du,$$
 
 机械臂场景的薄障碍还有专用启发式：从基座沿手臂检查，首次碰撞之后的身体点梯度不再累计，避免穿过薄板两侧的梯度互相抵消。它是实际结果的一部分，不能只实现最简距离梯度就期待复现全部成功数。
 
-## 五组证据
+### 五组证据
 
-**图 3：泛函梯度与离散梯度的关系。** 示意二维轨迹说明，离散足够细时两者趋近，并展示轨迹方向的几何处理。它不是对任意分辨率都等价的数值保证。
+**[图 3](#rc-59-figure-3)：泛函梯度与离散梯度的关系。** 示意二维轨迹说明，离散足够细时两者趋近，并展示轨迹方向的几何处理。它不是对任意分辨率都等价的数值保证。
 
-**图 4：平滑限位投影。** 关节曲线在接近限位时保持平滑，支持相对逐点截断更合理的修正方式；没有单独报告力矩峰值或硬件磨损改善。
+<!-- figure-ref-v6:start:rc-59-figure-3 -->
+<figure class="reading-evidence-figure" id="rc-59-figure-3"><a href="/robot-classic/assets/figure-refs-v6/059-fig-3.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/059-fig-3.png" width="640" height="199" alt="原论文图3：CHOMP障碍代价场中的路径与一维代价梯度比较" loading="lazy"></a><figcaption>Nathan Ratliff、Matt Zucker、J. Andrew Bagnell、Siddhartha Srinivasa（2009），图 3，PDF 第 4 页；<a href="https://personalrobotics-files.cs.washington.edu/ratliff2009chomp.pdf#page=4" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+读图：左图解释避障代价的空间结构，右图对照其梯度关系。
+<!-- figure-ref-v6:end:rc-59-figure-3 -->
+
+**[图 4](#rc-59-figure-4)：平滑限位投影。** 关节曲线在接近限位时保持平滑，支持相对逐点截断更合理的修正方式；没有单独报告力矩峰值或硬件磨损改善。
+
+<!-- figure-ref-v6:start:rc-59-figure-4 -->
+<figure class="reading-evidence-figure" id="rc-59-figure-4"><a href="/robot-classic/assets/figure-refs-v6/059-fig-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/059-fig-4.png" width="1293" height="187" alt="原论文图4：CHOMP优化后的六个关节轨迹及关节限位" loading="lazy"></a><figcaption>Nathan Ratliff、Matt Zucker、J. Andrew Bagnell、Siddhartha Srinivasa（2009），图 4，PDF 第 6 页；<a href="https://personalrobotics-files.cs.washington.edu/ratliff2009chomp.pdf#page=6" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
+
+读图：每个面板对应一个关节，轨迹与红色边界的关系用于检查限位约束。
+<!-- figure-ref-v6:end:rc-59-figure-4 -->
 
 **第 III-B 节：99/105 个问题找到无碰撞轨迹。** 自行计算为约 94.3%，分母是同场景构型对，不是跨家庭随机任务，也不是 105 次独立真实抓取成功。剩余六个问题提醒我们，这不是完备规划器。
 
-**图 5：初值优劣和梯度度量。** 在排除未解问题后，直线初值的最终 log-objective 平均约低 0.5，原文用约 17–24 的变化范围解释。它不是“路径长度降低 3%”，也不能忽略被排除的失败例。欧氏梯度在这些实验中很差，支持平滑度量的重要性，不等于证明所有欧氏优化器都无效。
+**[图 5](#rc-59-figure-5)：初值优劣和梯度度量。** 在排除未解问题后，直线初值的最终 log-objective 平均约低 0.5，原文用约 17–24 的变化范围解释。它不是“路径长度降低 3%”，也不能忽略被排除的失败例。欧氏梯度在这些实验中很差，支持平滑度量的重要性，不等于证明所有欧氏优化器都无效。
 
-**图 7：LittleDog 75 步优化的示例。** 初始膝/胫轨迹碰撞，之后躯干前倾增加间隙并生成平滑摆腿。实际步时预先启发式选为约 0.6–1.2 s，轨迹按 100 Hz 离散；最坏优化时间约为执行时间 1.5 倍，因此先生成再执行。这不是每 10 ms 在线完成整个规划的 MPC 演示。
+**[图 7](#rc-59-figure-7)：LittleDog 75 步优化的示例。** 初始膝/胫轨迹碰撞，之后躯干前倾增加间隙并生成平滑摆腿。实际步时预先启发式选为约 0.6–1.2 s，轨迹按 100 Hz 离散；最坏优化时间约为执行时间 1.5 倍，因此先生成再执行。这不是每 10 ms 在线完成整个规划的 MPC 演示。
 
-## 贡献、代价与失败边界
+<!-- figure-ref-v6:start:rc-59-figure-7 -->
+<figure class="reading-evidence-figure" id="rc-59-figure-7"><a href="/robot-classic/assets/figure-refs-v6/059-fig-7.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/059-fig-7.png" width="1293" height="239" alt="原论文图7：四足机器人实物运动及相应规划姿态序列" loading="lazy"></a><figcaption>Nathan Ratliff、Matt Zucker、J. Andrew Bagnell、Siddhartha Srinivasa（2009），图 7，PDF 第 8 页；<a href="https://personalrobotics-files.cs.washington.edu/ratliff2009chomp.pdf#page=8" target="_blank" rel="noopener noreferrer">原文与图注</a>。原版权保留。</figcaption></figure>
 
-核心贡献是把轨迹更新的度量、工作空间弧长障碍代价和可从碰撞内部获取的距离梯度组合起来。它适合把局部连续优化用于原来常需先搜索再平滑的问题，但没有取代连通性搜索的全部价值。
+读图：左右图把实物执行与规划形态联系起来，但不能从单例推出普遍成功率。
+<!-- figure-ref-v6:end:rc-59-figure-7 -->
+
+## 五、保留非凸性、离散碰撞与初值敏感
 
 障碍项非凸，初始化决定可能到达的局部解。原文也讨论 Hamiltonian Monte Carlo 的随机化变体，结论仍承认实际有限时间内会被局部极小值困住；不能借其随机性直接声称实用预算下的完备性。
 
@@ -128,24 +174,21 @@ $$\int_B J^T\|\dot x\|\big[(I-\hat v\hat v^T)\nabla c-c\kappa\big]du,$$
 
 加速度平滑并非完整动力学约束；LittleDog 的支撑和落脚结构由其他组件参与提供。它改善的是系统中的轨迹模块，整机比赛表现不能全部归因于 CHOMP，作者的归因陈述也不是严格模块消融。
 
-## 手算一次协变更新
+## 六、追问：时间重参数化后沿弧长的障碍代价不变，为什么离散实现仍可能改变？
 
-以下为教学构造。三个内部路点只考虑一个方向，取
+<details>
+<summary>时间重参数化后沿弧长的障碍代价不变，为什么离散实现仍可能改变？</summary>
 
-$$A=\begin{bmatrix}2&-1&0\\-1&2&-1\\0&-1&2\end{bmatrix},\qquad
-g=\begin{bmatrix}0\\1\\0\end{bmatrix}.$$
+**参考答案**：连续弧长积分对同一几何路径的不同走法具有对应的不变性，但离散求和依赖采样位置与权重。若重参数化后仍用旧权重，密集区域可能被重复强调。应区分连续目标的性质与数值求积误差，再检查轨迹度量中的更新；不能用一句“参数化无关”跳过离散实现。
 
-欧氏下降只移动中间点；解 $Av=g$ 得 $v=(0.5,1,0.5)^T$。协变下降 $\delta=-\eta v$ 会让相邻两个点各跟随一半，中间仍移动最多。这直观解释了“局部碰撞推动整段平滑变化”，也说明若步长过大，相邻点可能被推到另一障碍，所以仍要检查更新后可行性。
+</details>
 
-五个前置概念：**构型空间**用关节变量描述机器人姿态；**距离场**提供每个空间位置到障碍的带符号距离；**泛函**把整条函数轨迹映射到代价；**度量**定义轨迹变化的大小；**非凸优化**允许多个局部极小值且通常依赖初值。
+## 七、改用随机试探或逐次凸化
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 逐点避障制造尖角 | 用平滑度量预条件梯度 | 沿时间协调相邻路点 | 图 3、5，欧氏更新比较 | 大步长和非凸障碍仍有风险 |
-| 初轨迹有碰撞无法修复 | 有符号距离场提供内部梯度 | 不要求预先获得无碰撞路径 | 99/105，图 6 | 体素/身体近似及薄障碍启发式 |
-| 摆腿只管脚尖忽视身体 | 优化躯干与摆腿并加入任务项 | 协调身体间隙、可达性和稳定性 | 图 7 | 落脚与时间预先决定，非完整闭环保证 |
+- **直接继承**：[STOMP：用平滑随机试探优化机器人轨迹](061-stomp.md)。用结构化随机试探降低对代价梯度的要求。
+- **平行路线**：[TrajOpt：用局部凸问题修复整条碰撞轨迹](073-trajopt.md)。采用逐次凸化和连续碰撞处理组织轨迹优化。
 
-## 自测与参考答案
+## 八、自测与参考答案
 
 ### 1．为什么不直接沿 $-\nabla U$ 改每个路点？
 

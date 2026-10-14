@@ -4,19 +4,15 @@
 
 **论文**：David Nistér，*An Efficient Solution to the Five-Point Relative Pose Problem*，IEEE TPAMI 26(6)，2004，756–770。[期刊原文](https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf) · [DOI](https://doi.org/10.1109/TPAMI.2004.17)。以下以十五页期刊版为准；早期会议稿的消元表达和编号不同。
 
-**阅读范围**：已核对期刊正文的问题定义、消元步骤、RANSAC 接口、数值及噪声实验、系统结果，并查阅附录的求根与三角化说明。这里的伪代码解释计算组织，不替代完整多项式系数实现；图中连续曲线只作方向性解读，不从低清曲线猜测精确数值。
+### 先接住前作的问题
 
-## 一分钟：五个匹配点为什么能帮助机器人判断自己怎么动了
+[相机标定](042-zhang-calibration.md)提供内参，[RANSAC](006-ransac.md)需要尽量小的假设样本。本篇在两者之间提供五点相对姿态求解器；[PTAM](056-ptam.md)等系统再处理初始化、跟踪和地图维护。
+
+## 一、问题设定：已标定的五组对应怎样产生相对运动候选
 
 机器人拍下前后两张照片，即使知道同一个角点在两张图里的位置，也不能直接知道它距离镜头多远。不过，多组对应射线必须服从同一个相机运动，这把问题约束得很紧。若相机内参已经标定，相对运动剩下三个旋转自由度和两个平移方向自由度；平移长度仍然缺少尺度。
 
-五点法把五组对应关系变成一个十次多项式，从实根恢复候选运动。它并不承诺五个点只产生一个答案，也不承诺五个点都匹配正确。论文把这个求解器放进随机采样、假设评分和迭代精化的系统，让更多观测决定哪个候选可信。
-
-作者的关键主张是：可以以适合数值实现的形式，直接求解与问题代数次数一致的多项式。实验支持它在特定小基线、横向运动、浅场景条件下，比所比较的非迭代方法更可靠；不支持它在所有方向、标定误差和数据配置下都最好。
-
-一句话：在已标定相机的多视图几何中，通过直接施加本质矩阵约束，改善运动候选生成及部分困难几何下的估计，代价是多解处理、较复杂的数值实现和对标定质量的依赖。
-
-## 问题定义：本质矩阵比任意秩二矩阵知道得更多
+### 问题定义：本质矩阵比任意秩二矩阵知道得更多
 
 令第一台相机为 $[I\mid0]$，第二台为 $[R\mid t]$。图像点先用内参矩阵 $K$ 的逆变换到归一化坐标，再写成齐次向量 $q,q'$。极线约束为
 
@@ -30,7 +26,9 @@ $$EE^TE-\tfrac12\operatorname{tr}(EE^T)E=0.$$
 
 机器人场景里的输入是跨帧匹配和内参，输出是旋转、平移方向以及可三角化的相对结构。没有奖励、策略或训练回合。前提包括图像观测符合所用相机模型、对应点来自同一静态刚体场景，以及几何没有落入无法辨识目标量的特殊情况。单目尺度不可观测不是求解器精度问题：把整个场景和相机平移同时乘同一个正数，图像仍一样。
 
-## 方法：先压缩线性自由度，再解非线性约束
+## 二、施加本质矩阵约束，再求多项式候选根
+
+### 方法：先压缩线性自由度，再解非线性约束
 
 每对点贡献关于 $E$ 九个元素的一条线性方程。五条方程通常留下四维零空间，因此第 3 节式（10）写成
 
@@ -45,6 +43,20 @@ $$\det B(z)=0.$$
 式（14）的行列式就是十次多项式。对每个实根回代 $x,y$，恢复一个候选 $E$。第 3.2 节讨论 QR 与 SVD 的零空间求法，以及 Sturm 序列定位实根、二分精化或伴随矩阵特征分解等实现选择。算法之“高效”包含这些工程设计，不能仅从多项式次数得出运行速度。
 
 每个合法本质矩阵还会产生两种旋转与两种平移符号组合。正深度检查要求场景点位于两台相机前面，可排除某些组合。注意这解决的是一个 $E$ 的分解歧义，不等于所有不同实根产生的 $E$ 都只剩一个。
+
+必须区分三个层次：内层解的是代数约束，外层选择的是观测支持更好的几何假设，最终实验衡量的是矩阵数值误差、位姿角误差或系统耗时。十次多项式的根很精确，并不自动使错误匹配变正确。
+
+### 本质矩阵的尺度自由度不能变成米制平移
+
+用 $x_2^TE x_1=0$ 表示已标定归一化像点的约束，$E=[t]_\times R$；$[t]_\times v=t\times v$。将平移 $t$乘任何非零常数，所有极线约束仍成立，所以五点解得到的是平移方向。三角化再选正深度可以排除部分候选，却不会创造尺度测量。
+
+**教学核验**取 $R=I,t=(1,0,0)$，则约束为 $y_1-y_2=0$，平移改为 $(2,0,0)$只是将同一等式乘2。已知焦距让两帧进入欧氏几何模型，却没有告诉我们基线是1米还是2米。纯旋转时 $t=0$更直接让本质矩阵失去平移信息。
+
+本篇将[相机标定](042-zhang-calibration.md)提供的内参作为输入，并作为[RANSAC](006-ransac.md)的最小假设模块；[ORB-SLAM](082-orbslam.md)仍需初始化和三角化条件。[原文引言](https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf)明确实际稳健估计使用多于五个点并后续精化，不能把“五点”理解为只用五个测量即可得到高精度里程计。
+
+多项式实根只是运动候选，更多观测的评分才决定其用途。下面把五点求解接回随机采样循环，再检查减少最小样本数带来的概率变化。
+
+## 三、接入采样评分与精化，检查候选数和尺度
 
 ```text
 输入：匹配点集合、两相机内参、随机采样与评分预算
@@ -65,9 +77,26 @@ $$\det B(z)=0.$$
 
 以上是教学重组。原文第 5 节具体采用 preemptive RANSAC，并在三视图情况下先利用首尾帧生成结构，再估计中间相机，最后比较多视图误差。约束残差检查属于便于理解的实现防护；完整第三视图评分还涉及附录 D 的三焦 Sampson 近似。
 
-必须区分三个层次：内层解的是代数约束，外层选择的是观测支持更好的几何假设，最终实验衡量的是矩阵数值误差、位姿角误差或系统耗时。十次多项式的根很精确，并不自动使错误匹配变正确。
+### 一个自构例子：少抽三个点能改变多少成功概率
 
-## 实验：不同图测量的不是同一种“准确率”
+假设匹配独立且内点率为 50%，随机五点全为内点的概率是 $0.5^5=1/32$，八点则是 $0.5^8=1/256$。单次抽样前者有八倍机会全部正确。这解释了最小求解器为什么值得投入复杂代数。
+
+但这只是自构概率例子：全为内点仍可能几何退化；五点会产生多个候选，每个需要验证；样本也未必独立。因此不能把八倍抽样概率直接说成整系统八倍加速。若内参错了，抽到再多真实匹配也无法修复错误模型。
+
+理解本篇最需要五个概念：**极线约束**连接两条观测射线；**零空间**表示线性方程剩余的自由方向；**本质矩阵**编码标定相机的相对运动；**正深度**排除点落在相机后面的几何配置；**最小求解器**用少量观测生成有限候选，再交给额外数据筛选。
+
+## 四、按小基线、运动方向与浅场景分别读实验
+
+<!-- figure-ref-v6:start:rc-49-figure-15-anchor -->
+<span id="rc-49-figure-15"></span>
+<!-- figure-ref-v6:end:rc-49-figure-15-anchor -->
+<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/049-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/049-evidence.png" width="799" height="379" alt="Fig. 15：两面板改变焦距误标定而观察平移方向误差；不同方法的排序会随标定偏差而改变" loading="lazy"></a><figcaption>原论文结果图／表摘引：David Nistér（2004），Fig. 15，PDF 第 10 页；<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=10" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+
+读图：两面板改变焦距误标定而观察平移方向误差；不同方法的排序会随标定偏差而改变。纵轴是方向误差，不能把它换算成未经尺度观测的平移距离误差。
+
+### 实验：不同图测量的不是同一种“准确率”
+
+无噪声代数残差、像素噪声下的位姿误差和系统重建图是三层证据；前者更小不自动意味着实际机器人估计更准。
 
 | 项目 | 设置与指标 | 实际检验的问题 |
 |---|---|---|
@@ -82,19 +111,104 @@ $$\det B(z)=0.$$
 
 另一个公平性边界是已知内参。论文把比较组织在标定坐标下，但 7、8 点求解本身没有像五点法一样完整施加约束；5R 与 7R 的精化约束也不同。这是研究问题的一部分，不是“所有算法知道完全一样的信息而只改变一行代码”的消融。
 
-## 五组证据：结果支持到哪里
+### 五组证据：结果支持到哪里
 
-**图 1–4，第 761 页：数值残差。** 图 1 的 QR 与 Sturm 实现，在一般场景中位残差为 $1.2\times10^{-10}$；图 4 的 SVD 与伴随矩阵实现对应 $1.7\times10^{-14}$。但指标先在多个候选中寻找最接近真值者，并消除尺度和符号差异。因此它证明候选集的数值求解能力，不证明实际系统知道应该选哪个候选，也不是厘米级轨迹误差。
+**[图 1–4](#rc-49-figure-1)，第 761 页：数值残差。** [图 1](#rc-49-figure-1) 的 QR 与 Sturm 实现，在一般场景中位残差为 $1.2\times10^{-10}$；[图 4](#rc-49-figure-4) 的 SVD 与伴随矩阵实现对应 $1.7\times10^{-14}$。但指标先在多个候选中寻找最接近真值者，并消除尺度和符号差异。因此它证明候选集的数值求解能力，不证明实际系统知道应该选哪个候选，也不是厘米级轨迹误差。
 
-**表 2、图 5–6，第 761–762 页：多解是真实结构。** 平均实根数为 4.55，加入正深度后的平均候选数为 2.74；论文给出十个物理可行解的构型。两个平均值来自不同规模的随机实验，不能据此宣称每个样本固定删掉 1.81 个解。这直接说明用更多观测判别的必要性。
+<!-- figure-ref-v6:start:rc-49-figure-3-reviewed -->
+<figure class="reading-evidence-figure" id="rc-49-figure-3"><a href="/robot-classic/assets/figure-refs-v6/049-fig-3-reviewed.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/049-fig-3-reviewed.png" width="573" height="228" alt="以伴随矩阵特征分解替代Sturm步骤后的误差分布" loading="lazy"></a><figcaption>原论文图摘引：David Nistér，An Efficient Solution to the Five-Point Relative Pose Problem，IEEE TPAMI 26(6)，2004，756–770，图 3，PDF 第 6 页；<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=6" target="_blank" rel="noopener noreferrer">原文与图注</a>。局部裁切；原版权保留。点击图片可放大。</figcaption></figure>
 
-**图 9、11–14，第 763–765 页：几何条件决定比较结果。** 横向运动和浅场景里五点法较强，但某些前向运动条件下其他方法表现改善，作者甚至讨论组合五点和八点方法。这里的“平移误差”是方向夹角，单目没有凭空恢复平移长度。某方向的优势不等于完整导航轨迹在任意序列中更准确。
+读图：两种场景的误差分布用于区分求根方法的数值行为，不能把接近真值的最佳候选残差等同于最终系统定位误差。
+<!-- figure-ref-v6:end:rc-49-figure-3-reviewed -->
 
-**图 15、17，第 765–766 页：标定也会伤害结果。** 焦距错误会改变射线，破坏所强制施加的几何关系；在部分简单场景下，错误标定反而让未标定方法更好。文中关于焦距误差约 10% 的讨论依赖其测试配置，不能变成所有相机通用的合格阈值。
 
-**表 3–4、图 20–22：求解器速度与系统演示。** 表 3 的高优化实现运行在 550 MHz 机器，表 4 则分解视频组件成本；第 6.3 节另报 2.4 GHz、3% 视差搜索范围下整系统平均 26 帧每秒。图 21 展示 160 米走廊序列整合，并未给出与独立真值对齐的全程误差统计。不能把三组条件揉成“五点法恒定实时且无漂移”。
+<!-- figure-ref-v6:start:rc-49-figure-2-reviewed -->
+<figure class="reading-evidence-figure" id="rc-49-figure-2"><a href="/robot-classic/assets/figure-refs-v6/049-fig-2-reviewed.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/049-fig-2-reviewed.png" width="573" height="226" alt="将QR换成SVD后的数值误差分布" loading="lazy"></a><figcaption>原论文图摘引：David Nistér，An Efficient Solution to the Five-Point Relative Pose Problem，IEEE TPAMI 26(6)，2004，756–770，图 2，PDF 第 6 页；<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=6" target="_blank" rel="noopener noreferrer">原文与图注</a>。局部裁切；原版权保留。点击图片可放大。</figcaption></figure>
 
-## 贡献、代价与边界
+读图：一般场景和平面场景分开统计，横轴是误差的对数；这张消融隔离了第一步数值分解选择的影响。
+<!-- figure-ref-v6:end:rc-49-figure-2-reviewed -->
+
+
+<!-- figure-ref-v6:start:rc-49-figure-1 -->
+<figure class="reading-evidence-figure" id="rc-49-figure-1"><a href="/robot-classic/assets/figure-refs-v6/049-figure-1.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/049-figure-1.png" width="527" height="218" alt="原论文 Figure 1：一般场景与平面场景的数值误差分布" loading="lazy"></a><figcaption>原论文图摘引：Nistér（2004），Figure 1，PDF 第 6 页；<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=6" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+读图：两幅直方图都用数值误差的十进对数作横轴；峰值位置说明这一求解组合的数值精度，不能当作像素噪声下的位姿误差。
+<!-- figure-ref-v6:end:rc-49-figure-1 -->
+
+<!-- figure-ref-v6:start:rc-49-figure-4 -->
+<figure class="reading-evidence-figure" id="rc-49-figure-4"><a href="/robot-classic/assets/figure-refs-v6/049-figure-4.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/049-figure-4.png" width="526" height="215" alt="原论文 Figure 4：SVD与伴随矩阵组合的数值误差分布" loading="lazy"></a><figcaption>原论文图摘引：Nistér（2004），Figure 4，PDF 第 6 页；<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=6" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+读图：与图1对照同类数值实验时，误差分布明显改变；应先区分求解器数值误差和随后真实图像中的测量噪声。
+<!-- figure-ref-v6:end:rc-49-figure-4 -->
+
+**[表 2](https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=6)、[图 5](#rc-49-figure-5)–[图 6](#rc-49-figure-6)，第 761–762 页：多解是真实结构。** 平均实根数为 4.55，加入正深度后的平均候选数为 2.74；论文给出十个物理可行解的构型。两个平均值来自不同规模的随机实验，不能据此宣称每个样本固定删掉 1.81 个解。这直接说明用更多观测判别的必要性。
+
+<!-- figure-ref-v6:start:rc-49-figure-5 -->
+<figure class="reading-evidence-figure" id="rc-49-figure-5"><a href="/robot-classic/assets/figure-refs-v6/049-figure-5.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/049-figure-5.png" width="523" height="194" alt="原论文 Figure 5：两个求解步骤产生的假设数量分布" loading="lazy"></a><figcaption>原论文图摘引：Nistér（2004），Figure 5，PDF 第 6 页；<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=6" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+读图：左右柱图对应表2中的两个步骤，横轴是假设数量；多项式产生多个候选，并不表示每个候选都满足物理可见性。
+<!-- figure-ref-v6:end:rc-49-figure-5 -->
+
+<!-- figure-ref-v6:start:rc-49-figure-6 -->
+<figure class="reading-evidence-figure" id="rc-49-figure-6"><a href="/robot-classic/assets/figure-refs-v6/049-figure-6.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/049-figure-6.png" width="572" height="184" alt="原论文 Figure 6：产生多个物理解的五组对应点" loading="lazy"></a><figcaption>原论文图摘引：Nistér（2004），Figure 6，PDF 第 7 页；<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=7" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+读图：左侧标出对应点，右侧给出五组归一化坐标；这是多解存在性的具体反例，不能把五点最小集误解成唯一位姿保证。
+<!-- figure-ref-v6:end:rc-49-figure-6 -->
+
+**[图 9](#rc-49-figure-9)、11–14，第 763–765 页：几何条件决定比较结果。** 横向运动和浅场景里五点法较强，但某些前向运动条件下其他方法表现改善，作者甚至讨论组合五点和八点方法。这里的“平移误差”是方向夹角，单目没有凭空恢复平移长度。某方向的优势不等于完整导航轨迹在任意序列中更准确。
+
+<!-- figure-ref-v6:start:rc-49-figure-14-reviewed -->
+<figure class="reading-evidence-figure" id="rc-49-figure-14"><a href="/robot-classic/assets/figure-refs-v6/049-fig-14-reviewed.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/049-fig-14-reviewed.png" width="1293" height="340" alt="浅场景深度变化下的平移方向误差三面板" loading="lazy"></a><figcaption>原论文图摘引：David Nistér，An Efficient Solution to the Five-Point Relative Pose Problem，IEEE TPAMI 26(6)，2004，756–770，图 14，PDF 第 10 页；<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=10" target="_blank" rel="noopener noreferrer">原文与图注</a>。局部裁切；原版权保留。点击图片可放大。</figcaption></figure>
+
+读图：横轴是深度而不是时间，前向和横向配置给出不同表现；这组结果说明几何退化条件必须随结论保留。
+<!-- figure-ref-v6:end:rc-49-figure-14-reviewed -->
+
+
+<!-- figure-ref-v6:start:rc-49-figure-13-reviewed -->
+<figure class="reading-evidence-figure" id="rc-49-figure-13"><a href="/robot-classic/assets/figure-refs-v6/049-fig-13-reviewed.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/049-fig-13-reviewed.png" width="1293" height="285" alt="不同平移幅度与运动设置下的误差四面板" loading="lazy"></a><figcaption>原论文图摘引：David Nistér，An Efficient Solution to the Five-Point Relative Pose Problem，IEEE TPAMI 26(6)，2004，756–770，图 13，PDF 第 9 页；<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=9" target="_blank" rel="noopener noreferrer">原文与图注</a>。局部裁切；原版权保留。点击图片可放大。</figcaption></figure>
+
+读图：四面板分别区分横向/前向和最小/过定约束条件，完整图例使五点与其它方法的比较保持可追溯。
+<!-- figure-ref-v6:end:rc-49-figure-13-reviewed -->
+
+
+<!-- figure-ref-v6:start:rc-49-figure-12-reviewed -->
+<figure class="reading-evidence-figure" id="rc-49-figure-12"><a href="/robot-classic/assets/figure-refs-v6/049-fig-12-reviewed.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/049-fig-12-reviewed.png" width="1293" height="361" alt="不同运动方向下的平移方向误差三面板" loading="lazy"></a><figcaption>原论文图摘引：David Nistér，An Efficient Solution to the Five-Point Relative Pose Problem，IEEE TPAMI 26(6)，2004，756–770，图 12，PDF 第 9 页；<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=9" target="_blank" rel="noopener noreferrer">原文与图注</a>。局部裁切；原版权保留。点击图片可放大。</figcaption></figure>
+
+读图：横轴是相对于前向运动的方向，三面板又改变点数和条件；优势取决于具体几何，不能只看某一方向的最低曲线。
+<!-- figure-ref-v6:end:rc-49-figure-12-reviewed -->
+
+
+<!-- figure-ref-v6:start:rc-49-figure-9 -->
+<figure class="reading-evidence-figure" id="rc-49-figure-9"><a href="/robot-classic/assets/figure-refs-v6/049-figure-9.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/049-figure-9.png" width="1117" height="268" alt="原论文 Figure 9：困难默认条件下噪声与平移角误差" loading="lazy"></a><figcaption>原论文图摘引：Nistér（2004），Figure 9，PDF 第 8 页；<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=8" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+读图：四个面板分开最小集、多点以及侧向、前向运动；各面板的曲线和误差尺度应独立读，不能把某一运动方向的优势外推到全部场景。
+<!-- figure-ref-v6:end:rc-49-figure-9 -->
+
+<!-- figure-ref-v6:start:rc-49-figure-11 -->
+<figure class="reading-evidence-figure" id="rc-49-figure-11"><a href="/robot-classic/assets/figure-refs-v6/049-figure-11.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/049-figure-11.png" width="556" height="263" alt="原论文 Figure 11：匹配点数增加时的平移角误差" loading="lazy"></a><figcaption>原论文图摘引：Nistér（2004），Figure 11，PDF 第 9 页；<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=9" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+读图：左右面板分别对应侧向和前向运动；多点迭代方法随点数增加改善，但最小求解器曲线的行为不能只按点数一项解释。
+<!-- figure-ref-v6:end:rc-49-figure-11 -->
+
+**[图 15](#rc-49-figure-15)、17，第 765–766 页：标定也会伤害结果。** 焦距错误会改变射线，破坏所强制施加的几何关系；在部分简单场景下，错误标定反而让未标定方法更好。文中关于焦距误差约 10% 的讨论依赖其测试配置，不能变成所有相机通用的合格阈值。
+
+<!-- figure-ref-v6:start:rc-49-final-source-gap-note -->
+<span id="rc-49-figure-17"></span><span id="rc-49-figure-20"></span><span id="rc-49-figure-22"></span><p class="figure-reference-note">尚未内嵌：<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=11" target="_blank" rel="noopener noreferrer">图 17</a>、<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=12" target="_blank" rel="noopener noreferrer">图 20</a>、<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=12" target="_blank" rel="noopener noreferrer">图 22</a>。已补不同数值分解、求根方法、运动方向/幅度/深度的必要定量对照；剩余三幅为额外的重建影像序列。当前已摘引走廊重建例证，不再扩展到各场景的整套图像展示。</p>
+<!-- figure-ref-v6:end:rc-49-final-source-gap-note -->
+
+
+
+
+
+**[表 3–4](https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=7)、[图 20–22](https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=12)：求解器速度与系统演示。** [表 3](https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=7) 的高优化实现运行在 550 MHz 机器，[表 4](https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=7) 则分解视频组件成本；第 6.3 节另报 2.4 GHz、3% 视差搜索范围下整系统平均 26 帧每秒。[图 21](#rc-49-figure-21) 展示 160 米走廊序列整合，并未给出与独立真值对齐的全程误差统计。不能把三组条件揉成“五点法恒定实时且无漂移”。
+
+<!-- figure-ref-v6:start:rc-49-figure-21 -->
+<figure class="reading-evidence-figure" id="rc-49-figure-21"><a href="/robot-classic/assets/figure-refs-v6/049-figure-21.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/figure-refs-v6/049-figure-21.png" width="1098" height="432" alt="原论文 Figure 21：长走廊手持相机运动重建" loading="lazy"></a><figcaption>原论文图摘引：Nistér（2004），Figure 21，PDF 第 12 页；<a href="https://engineering.purdue.edu/~jshan/publications/2023/An_efficient_solution_to_the_five-point_relative_pose_problem.pdf#page=12" target="_blank" rel="noopener noreferrer">核对原文</a>。点击图片可放大。原版权保留。</figcaption></figure>
+
+读图：左侧将相机姿态叠到视频场景中，右侧展示不同阶段累积的轨迹；这是长直运动重建实例，仍需结合噪声和标定条件理解。
+<!-- figure-ref-v6:end:rc-49-figure-21 -->
+
+## 五、保留多解、标定误差与退化几何
 
 真正重要的贡献是让精确的标定几何约束成为可反复调用的最小假设生成器，并系统比较了数值选择和困难几何。它没有发明 RANSAC、相机标定或所有本质矩阵性质，而是把一个经典代数问题变成适合视觉系统的计算部件。
 
@@ -102,30 +216,31 @@ $$\det B(z)=0.$$
 
 从机器人部署角度看，滚动快门、动态物体、畸变未校正、时间不同步都可能使同一个刚体 $E$ 无法解释数据，这是模型层面的分析。论文没有给出这些因素全覆盖的现代数据集评测。另一个复现障碍是退化判断、数值阈值、抽样预算和局部精化都会影响系统表现，教学伪代码并非完整生产实现。
 
-## 一个自构例子：少抽三个点能改变多少成功概率
+## 六、追问：五点求解器输出多个实根时，只保留第一个会怎样改变鲁棒采样流程？
 
-假设匹配独立且内点率为 50%，随机五点全为内点的概率是 $0.5^5=1/32$，八点则是 $0.5^8=1/256$。单次抽样前者有八倍机会全部正确。这解释了最小求解器为什么值得投入复杂代数。
+<details>
+<summary>五点求解器输出多个实根时，只保留第一个会怎样改变鲁棒采样流程？</summary>
 
-但这只是自构概率例子：全为内点仍可能几何退化；五点会产生多个候选，每个需要验证；样本也未必独立。因此不能把八倍抽样概率直接说成整系统八倍加速。若内参错了，抽到再多真实匹配也无法修复错误模型。
+**参考答案**：候选根对应不同代数解，顺序本身不是可信度排名。应把合格候选交给更多观测评分并检查几何条件，不能让任意输出顺序替代验证。较小最小样本数改善抽样概率，但不保证唯一运动，也不恢复未知平移尺度。
 
-理解本篇最需要五个概念：**极线约束**连接两条观测射线；**零空间**表示线性方程剩余的自由方向；**本质矩阵**编码标定相机的相对运动；**正深度**排除点落在相机后面的几何配置；**最小求解器**用少量观测生成有限候选，再交给额外数据筛选。
+</details>
 
-| 原有问题 | 作者的改动 | 为什么可能有效 | 实验证据 | 代价与局限 |
-|---|---|---|---|---|
-| 标定约束难以直接高效利用 | 消元为十次多项式 | 在候选生成时限制合法几何 | 第 3 节、图 1–4 | 数值与退化处理复杂 |
-| 错配使整体拟合不可靠 | 最小采样接入抢先评分 | 更多抽样机会遇到正确子集 | 第 5 节、系统案例 | 仍需预算及额外观测 |
-| 浅场景与横移估计脆弱 | 完整利用内参关系 | 减少不符合相机模型的解 | 图 9、11–15 | 错标定、弱视差仍会失败 |
+## 七、把运动候选接入关键帧系统
 
-## 自测：能解释清楚，才算真正理解
+- **模块组合**：[PTAM：跟踪要及时，建图可以慢慢想](056-ptam.md)。把相对运动候选用于初始化，系统还要负责跟踪和地图维护。
+
+## 八、自测与参考答案
 
 **1．五点对应五个运动自由度，为什么不是唯一解？**
 
-自由度计数说明一般情况下可能得到有限解，不说明非线性方程只有一个根。代数约束可产生多个离散本质矩阵，正深度也不总能全部消除；论文图 6 正是反例。额外对应或第三视图负责判别这些候选。
+自由度计数说明一般情况下可能得到有限解，不说明非线性方程只有一个根。代数约束可产生多个离散本质矩阵，正深度也不总能全部消除；论文[图 6](#rc-49-figure-6) 正是反例。额外对应或第三视图负责判别这些候选。
 
-**2．图 4 的残差远低于图 1，能否直接决定机器人应该使用图 4 的实现？**
+**2．[图 4](#rc-49-figure-4) 的残差远低于[图 1](#rc-49-figure-1)，能否直接决定机器人应该使用[图 4](#rc-49-figure-4) 的实现？**
 
 不能。那是理想数据下候选集中最接近真值的矩阵残差，两者都可能远小于实际像素噪声造成的误差。还要比较耗时、病态尾部、候选漏解和整个估计流程；更低中位数不自动提高含噪场景的位姿精度。
 
 **3．正确内点很多，但估计平移方向仍不稳，应该只增加 RANSAC 次数吗？**
 
 先检查视差、运动与场景几何、标定及成像模型。RANSAC 处理错配，不创造缺失的观测信息。对于弱视差，改变基线或融合其他传感信息可能比重复抽样更有价值；对于错误标定，应修正射线模型。这个判断属于由本篇机制推导的系统分析。
+
+
