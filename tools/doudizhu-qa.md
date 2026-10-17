@@ -4,7 +4,7 @@ Run the dependency-free Node suite from the repository root:
 
 ```sh
 node tools/doudizhu-ui-test.js
-node tools/paodekuai-ui-test.js
+node tools/doudizhu-layout-test.js
 node --check js/doudizhu.js
 node --check tools/doudizhu-ui-test.js
 git diff --check
@@ -12,9 +12,9 @@ git diff --check
 
 The suite loads the real HTML, unchanged rule engine, original levels and controller in an isolated Node VM with a minimal DOM and controllable timers. It injects lexical test access into the in-memory controller only; no test/debug API is published in the production controller. No package installation or browser is needed.
 
-Latest local verification (2026-10-12, after the portrait/card/table refresh): **49 Doudizhu scenario groups passed, 0 failed**, including complete hint-driven playthroughs of all 11 original levels. The separate **Paodekuai suite passed 30 groups, 0 failed**, including its original engine regressions. JavaScript syntax and `git diff --check` also passed. No production defect was found by these automated checks.
+Latest automated verification (2026-10-17): **61 scenario groups passed, 0 failed**, including hint-driven playthroughs of all 16 existing levels. A separate source-derived layout check covers **68 viewport/view/hand-size combinations**. JavaScript syntax and `git diff --check` also pass.
 
-The previous 37 Doudizhu groups remain intact. Twelve new groups cover the richer face-up presentation, resource references, decorated input targets, seat state and progress. The same committed engine and level-file SHA-256 expectations still pass.
+The rule engine and existing levels are unchanged. The presentation changes cover wider tables, shared fullscreen/page-fill controls, readable portrait cards, compact two-column landscape hands, lining numerals, and artwork centered on the complete card. Test fixtures for 17/20-card hands do not add playable levels.
 
 ## Visual structure and asset coverage
 
@@ -31,7 +31,7 @@ The previous 37 Doudizhu groups remain intact. Twelve new groups cover the riche
 
 ## Automated coverage
 
-- Original engine and all 11 original levels match the pre-refresh SHA-256 snapshots.
+- Original engine and all 16 existing levels match the pre-refresh SHA-256 snapshots.
 - Every original level loads its original hands and remains solvable via the real hint, play and pass event handlers.
 - Small joker, big joker and rocket remain distinct, selectable and legal under the original rules.
 - Passing remains available when a higher legal card exists; passing cannot start a trick.
@@ -41,7 +41,7 @@ The previous 37 Doudizhu groups remain intact. Twelve new groups cover the riche
 - Hints handle positions without a legal response without auto-passing.
 - Asynchronous hints disable action submission while computing, cannot be queued twice, pause/resume safely and reject stale callbacks after navigation or restart. Search-budget fallback is clearly labeled as a legal reference rather than a winning guarantee.
 - Wins and losses display explicit in-table actions. No timer advances to the next level; replay resets the same level; the final level has no next action.
-- Winning only the final level does not falsely claim all levels are cleared. The all-cleared message appears after all 11 levels have been won.
+- Winning only the final level does not falsely claim all levels are cleared. The all-cleared message appears after all 16 levels have been won.
 - Navigation and restart reject already-queued stale AI callbacks, not only canceled timeout IDs.
 - Restart confirmation pauses AI; cancel, native Escape/cancel and native close resume exactly one turn. Human selection survives cancellation.
 - Repeated opponent scheduling cannot duplicate turns.
@@ -49,15 +49,21 @@ The previous 37 Doudizhu groups remain intact. Twelve new groups cover the riche
 - Card labels and pressed state update correctly; the controller retains keyboard selection focus and restores top-restart focus on cancellation in the simulated DOM. Required IDs are unique and referenced local assets exist.
 - Blocked storage reads, blocked writes, malformed JSON and non-object stored data do not interrupt initialization or completion; prior progress is retained.
 
+## Responsive and fullscreen coverage
+
+- A fixed proportional rank box, Arial lining/tabular figures and unit line-height are shared by 2–10 and J/Q/K/A. The rank 10 never uses a smaller font.
+- Pips have symmetric insets, while ace, court and joker artwork use the complete card's 50% center. Court artwork retains its natural aspect ratio. The ten-pip arrangement preserves corner clearance without moving the whole illustration rightward.
+- Portrait hands wrap at readable 60–68px card widths. The selected-card lift and outline leave a gap between rows.
+- Short landscapes show both hands side by side, retain player profiles and place actions next to the played-card area. Long hands scroll horizontally with an exposed strip wider than the rank corner (and extra room for both characters of each joker title) instead of making the cards microscopic.
+- Unsupported, disabled, synchronously rejected and asynchronously rejected Fullscreen API requests retain an operable page-fill view. Native exit, Escape, pending requests and exit failures are covered without resetting selected cards, hints or opponent timers.
+
 ## Verification limits
 
-This report covers static/VM QA and offline asset decoding only. An earlier local Chromium attempt in this task environment was blocked with `socket() failed: Operation not permitted`; it was not retried for this refresh and sandbox restrictions were not weakened. The cloud browser reaches the owner-login screen for the private preview, so authenticated real-browser gameplay and layout QA remain unverified. The refresh does not change access permissions or claim browser acceptance.
-
-The minimal DOM does not implement CSS layout, real image decoding/loading, the browser accessibility tree, native focus management, pointer hit testing, touch scrolling or asynchronous native dialog event timing. A passing VM suite does not prove those browser behaviors.
+The VM and source-arithmetic tests do not implement CSS layout, image decoding, browser focus management, pointer hit testing, touch scrolling or native fullscreen. Real-browser checks are recorded separately; they must not be inferred from these passing tests. CSS-viewport tests in desktop Chromium are not physical iOS/Android touch-device or safe-area tests.
 
 ## Browser checklist
 
-1. Test desktop and 520px, 390px, 360px and 320px widths: both visible hands, central hint/play/pass actions, top restart button, status and level navigation should fit without horizontal page overflow. Cards should wrap without covering indices or neighboring rows.
+1. Test desktop and 520px, 390px, 360px and 320px widths: both visible hands, central hint/play/pass actions, top restart button, status and level navigation should fit without horizontal page overflow. Portrait cards should wrap without covering indices or neighboring rows; short-landscape hands should scroll sideways with complete rank corners and a reachable final card.
 2. Select and deselect cards with mouse, touch and keyboard. Raised cards and selected styling should be clear; the play button should accurately reflect legality.
 3. Check the two portraits and frames load sharply. Verify ordinary 10s, ace symbols, all J/Q/K art, both corner indices, both joker labels and the two-card rocket remain legible at each size, especially in the smaller played-card area.
 4. Request a hint in an opening position and a response position. The hinted cards should be selected without being played. A pass hint should clear selection, explain the pass and leave the pass action available.
@@ -67,3 +73,5 @@ The minimal DOM does not implement CSS layout, real image decoding/loading, the 
 8. Finish a level: ordinary central actions should disappear, clear next/replay actions should appear inside the table, and the level should remain unchanged until an action is chosen.
 9. Lose a level and retry it. Win the final level and replay it. Each flow should restore a usable initial state.
 10. Check screen-reader card names, pressed selection state, disabled controls, hint announcements, result announcements and reduced-motion behavior.
+
+Actual Chromium viewport and fullscreen results: [four-game responsive QA](game-responsive-qa.md).
