@@ -84,6 +84,7 @@
         if (mine) face.type = 'button';
         face.className = 'pcard' + (card.s === 1 || card.s === 2 ? ' red' : '') + (mine && selected[key] ? ' is-selected' : '');
         face.dataset.key = key;
+        face.dataset.rank = rank;
         face.setAttribute('aria-label', SUIT_NAMES[card.s] + rank);
         if (mine) {
             face.setAttribute('aria-pressed', String(!!selected[key]));
@@ -193,21 +194,39 @@
         paintControls();
     }
 
+    // Keep a readable corner strip rather than shrinking ranks to fit the hand.
+    // Balanced grid rows leave enough room above every row for lifted selections.
+    function fitRow(host, faces) {
+        if (!host) return;
+        if (!faces.length) { host.style.gridTemplateColumns = 'none'; host.dataset.cardColumns = '0'; return; }
+        var width = faces[0].getBoundingClientRect().width;
+        var available = host.clientWidth - 12;
+        if (width <= 0 || available <= 0) return;
+        var minimumStep = Math.max(24, width * .40);
+        var capacity = Math.max(1, Math.floor((available - width) / minimumStep) + 1);
+        var rows = Math.ceil(faces.length / capacity);
+        var columns = Math.ceil(faces.length / rows);
+        var step = columns > 1 ? Math.min(width * .64, (available - width) / (columns - 1)) : width;
+        host.style.gridTemplateColumns = (columns > 1 ? 'repeat(' + (columns - 1) + ', ' + step + 'px) ' : '') + width + 'px';
+        host.dataset.cardColumns = String(columns);
+    }
+
     function fitCards() {
-        var faces = hand.querySelectorAll('.pcard');
-        if (faces.length > 1) {
-            var width = faces[0].getBoundingClientRect().width;
-            var step = Math.min(width * .62, (hand.clientWidth - width - 6) / (faces.length - 1));
-            hand.style.setProperty('--card-overlap', (Math.max(8, step) - width) + 'px');
-            hand.style.setProperty('--hand-rank-size', Math.max(11, Math.min(21, step * 1.02)) + 'px');
-            hand.style.setProperty('--hand-suit-size', Math.max(10, Math.min(17, step)) + 'px');
-        }
+        fitRow(hand, hand.querySelectorAll('.pcard'));
         var trick = document.querySelector('.pdk-trick-cards');
-        if (trick && trick.children.length > 1) {
-            var cardWidth = trick.children[0].getBoundingClientRect().width;
-            var gap = Math.min(cardWidth - 10, (trick.clientWidth - cardWidth - 6) / (trick.children.length - 1));
-            Array.prototype.forEach.call(trick.children, function (face, index) { face.style.marginLeft = index ? (gap - cardWidth) + 'px' : '0'; });
+        if (trick) fitRow(trick, trick.children);
+    }
+
+    function resizeCards() { cancelGesture(); fitCards(); }
+
+    // A horizontal gesture belongs to the row where it started. Locking that
+    // row also handles selected cards whose raised top edge is above neighbors.
+    function rangeIndex(rects, x, first, last) {
+        var index = first;
+        for (var i = first; i <= last; i += 1) {
+            if (x >= rects[i].left) index = i;
         }
+        return index;
     }
 
     function render() {
@@ -366,7 +385,10 @@
         if (!face || !hand.contains(face)) return;
         var faces = Array.prototype.slice.call(hand.querySelectorAll('.pcard'));
         var keys = faces.map(function (item) { return item.dataset.key; });
-        gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, before: Object.assign({}, selected), index: keys.indexOf(face.dataset.key), keys: keys, rects: faces.map(function (item) { return item.getBoundingClientRect(); }), select: !selected[face.dataset.key], moved: false };
+        var index = keys.indexOf(face.dataset.key);
+        var columns = Math.max(1, Number(hand.dataset.cardColumns) || faces.length);
+        var rowFirst = Math.floor(index / columns) * columns;
+        gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, before: Object.assign({}, selected), index: index, rowFirst: rowFirst, rowLast: Math.min(rowFirst + columns, faces.length) - 1, keys: keys, rects: faces.map(function (item) { return item.getBoundingClientRect(); }), select: !selected[face.dataset.key], moved: false };
         hintMessage = '';
         hintIndex = -1;
         hand.setPointerCapture(event.pointerId);
@@ -382,9 +404,7 @@
         if (Math.abs(dx) < 5 && !gesture.moved) return;
         gesture.moved = true;
         hand.classList.add('is-dragging');
-        var index = 0;
-        gesture.rects.forEach(function (rect, i) { if (event.clientX >= rect.left) index = i; });
-        applyRange(index);
+        applyRange(rangeIndex(gesture.rects, event.clientX, gesture.rowFirst, gesture.rowLast));
     });
 
     hand.addEventListener('pointerup', function (event) {
@@ -409,7 +429,17 @@
         paintSelection();
     });
     hand.addEventListener('dragstart', function (event) { event.preventDefault(); });
-    window.addEventListener('resize', function () { cancelGesture(); fitCards(); });
+    window.addEventListener('resize', resizeCards);
+    window.addEventListener('orientationchange', function () { window.requestAnimationFrame(resizeCards); });
+    document.addEventListener('gameviewchange', function () { window.requestAnimationFrame(resizeCards); });
+    if (typeof ResizeObserver !== 'undefined') {
+        var measuredWidth = hand.clientWidth;
+        new ResizeObserver(function () {
+            if (hand.clientWidth === measuredWidth) return;
+            measuredWidth = hand.clientWidth;
+            resizeCards();
+        }).observe(hand);
+    }
     document.getElementById('pdk-play').addEventListener('click', function () {
         if (!isMyTurn()) return;
         var move = playable();
