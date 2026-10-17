@@ -14,6 +14,8 @@ const root = path.resolve(__dirname, '..');
 const page = fs.readFileSync(path.join(root, 'game/paodekuai.html'), 'utf8');
 const engineSource = fs.readFileSync(path.join(root, 'js/paodekuai-engine.js'), 'utf8');
 const uiSource = fs.readFileSync(path.join(root, 'js/paodekuai.js'), 'utf8');
+const themeSource = fs.readFileSync(path.join(root, 'css/paodekuai.css'), 'utf8');
+const viewSource = fs.readFileSync(path.join(root, 'js/game-view.js'), 'utf8');
 let passed = 0;
 let failed = 0;
 
@@ -202,6 +204,7 @@ function createGame(options = {}) {
     const sandbox = {
         document,
         console,
+        CustomEvent: class CustomEvent { constructor(type, init = {}) { this.type = type; Object.assign(this, init); } },
         innerWidth: 1024,
         innerHeight: 768,
         navigator: { maxTouchPoints: 0 },
@@ -251,11 +254,13 @@ function createGame(options = {}) {
         get thinking() { return thinking; },
         set thinking(value) { thinking = value; },
         render: render, start: start, commit: commit, poke: poke,
-        playable: playable, selectedCards: selectedCards
+        playable: playable, selectedCards: selectedCards,
+        fitCards: fitCards, fitRow: fitRow, pips: PIPS, rangeIndex: rangeIndex
     };
 `;
     assert.match(uiSource, /\}\(\)\);\s*$/, 'The UI should retain an isolated IIFE; update test instrumentation if its module format changes.');
     vm.runInContext(uiSource.replace(/\}\(\)\);\s*$/, instrumentation + '}());'), context, { filename: 'paodekuai.js' });
+    if (options.gameView) vm.runInContext(viewSource, context, { filename: 'game-view.js' });
     const api = sandbox.__uiTest;
     return {
         api, PK: sandbox.Paodekuai, document, sandbox, timers, allTimers, storage,
@@ -691,6 +696,7 @@ test('all local page, CSS and dynamically rendered card image references resolve
 function pointerHand(game) {
     const hand = game.el('pdk-you');
     const faces = hand.querySelectorAll('.pcard');
+    hand.dataset.cardColumns = String(faces.length);
     faces.forEach((face, index) => {
         face.getBoundingClientRect = () => ({ left: index * 30, top: 0, right: index * 30 + 60, bottom: 90, width: 60, height: 90 });
     });
@@ -778,6 +784,286 @@ test('blur or resize cancels an unfinished drag and off-turn input is ignored', 
     offTurn.dispatch('pointerdown', 0);
     offTurn.faces[0].dispatchEvent({ type: 'click', detail: 0, bubbles: true });
     assert.equal(game.api.selectedCards().length, 0);
+});
+
+test('shared full-screen wrapper contains all controls and has no capped main width', () => {
+    const game = createGame();
+    const main = game.document.querySelector('main');
+    const view = game.document.querySelector('[data-game-view]');
+    assert.ok(game.document.body.classList.contains('game-page-body'));
+    assert.ok(main.classList.contains('game-page'));
+    assert.doesNotMatch(main.className, /container|max-w-/);
+    assert.equal(view.parentNode, main);
+    assert.ok(view.classList.contains('game-view'));
+    for (const id of ['pdk-you', 'pdk-trick', 'pdk-actions', 'pdk-restart-dialog', 'pdk-again']) assert.ok(view.contains(game.el(id)));
+    assert.equal(view.querySelector('[data-game-fullscreen]').getAttribute('aria-pressed'), 'false');
+    assert.ok(view.querySelector('.game-view-toolbar'));
+    assert.ok(page.indexOf('../css/game-view.css') < page.indexOf('../css/paodekuai.css'));
+    assert.match(themeSource, /@media \(orientation: landscape\) and \(max-height: 540px\)/);
+});
+
+test('short landscape keeps 44px controls, every avatar and counter information', () => {
+    // Source contracts only; real hit-target sizes are checked in browser QA.
+    const landscape = themeSource.slice(themeSource.indexOf('@media (orientation: landscape) and (max-height: 540px)'));
+    assert.match(landscape, /\.pdk-table \.game-fullscreen, \.pdk-table \.pdk-restart \{[^}]*min-height: 44px/);
+    assert.match(landscape, /\.pdk-table \.dd-actions button, \.pdk-replay \{[^}]*min-height: 44px/);
+    assert.match(landscape, /\.pdk-avatar-you \{[^}]*width: 36px; height: 36px; flex: 0 0 36px/);
+    assert.doesNotMatch(landscape, /(?:\.pdk-avatar-you|\.pdk-avatar-badge|\.pdk-counter[^{}]*|\.pdk-room small)[^{}]*\{[^}]*display: none/);
+    assert.match(landscape, /\.pdk-player-line > div:not\(\.pdk-avatar-you\)/);
+});
+
+test('card-width typography has fixed equal rank boxes without overlap-driven font shrinking', () => {
+    const rule = themeSource.match(/\.pdk-table \.pcard \.pdk-corner b \{([^}]+)\}/)[1];
+    assert.match(rule, /font-family: Arial, Helvetica, sans-serif/);
+    assert.match(rule, /font-variant-numeric: lining-nums tabular-nums/);
+    assert.match(rule, /font-size: calc\(var\(--card-width\) \* \.27\)/);
+    assert.match(rule, /height: calc\(var\(--card-width\) \* \.31\)/);
+    assert.match(rule, /line-height: calc\(var\(--card-width\) \* \.31\)/);
+    assert.match(rule, /letter-spacing: 0/);
+    assert.doesNotMatch(themeSource + uiSource, /hand-rank-size|hand-suit-size|data-rank[^\n]*10[^\n]*font-size/);
+    const game = createGame();
+    for (const rank of [3, 5, 6, 7, 8, 9, 10, 11, 12]) {
+        game.fixture({ hands: [[card(rank, rank === 11 ? 1 : 0)], [card(0, 1)], [card(1, 1)]] });
+        const face = game.el('pdk-you').querySelector('.pcard');
+        assert.equal(face.dataset.rank, game.PK.RANK_NAME[rank]);
+        const boxes = face.querySelectorAll('b');
+        assert.equal(boxes.length, 2);
+        assert.equal(boxes[0].textContent, boxes[1].textContent);
+    }
+});
+
+test('every pip box clears both corner boxes and other pips at all card sizes', () => {
+    // Arithmetic checks explicit CSS geometry, including the 1px borders.
+    // Browser glyph rasterization remains a separate visual QA requirement.
+    assert.match(themeSource, /\.pdk-pips \{[^}]*\.22\)[^}]*\.36\)/);
+    assert.match(themeSource, /\.pdk-pip \{[^}]*width: calc\(var\(--card-width\) \* \.12\)[^}]*height: calc\(var\(--card-width\) \* \.13\)/);
+    const game = createGame();
+    const intersects = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    for (const width of [44, 48, 54, 56, 68, 72, 80, 96, 112]) {
+        const innerWidth = width - 2;
+        const innerHeight = width * 1.43 - 2;
+        const corner = { x: width * .03, y: width * .03, w: width * .31, h: width * .53 };
+        const opposite = { x: innerWidth - corner.x - corner.w, y: innerHeight - corner.y - corner.h, w: corner.w, h: corner.h };
+        for (const [rank, points] of Object.entries(game.api.pips)) {
+            const pips = points.map(([x, y]) => ({
+                x: width * .36 + (innerWidth - width * .72) * x / 100 - width * .06,
+                y: width * .22 + (innerHeight - width * .44) * y / 100 - width * .065,
+                w: width * .12, h: width * .13
+            }));
+            pips.forEach((pip, index) => {
+                assert.equal(intersects(pip, corner), false, `${width}px ${rank}: top corner`);
+                assert.equal(intersects(pip, opposite), false, `${width}px ${rank}: bottom corner`);
+                pips.slice(index + 1).forEach(other => assert.equal(intersects(pip, other), false, `${width}px ${rank}: separate pip boxes`));
+            });
+        }
+    }
+});
+
+test('counter ranks and counts share lining/tabular typography without rank-specific offsets', () => {
+    const rule = themeSource.match(/\.pdk-counter-cell span, \.pdk-counter-cell b \{([^}]+)\}/)[1];
+    assert.match(rule, /font: 700 15px\/1\.2 Arial, Helvetica, sans-serif/);
+    assert.match(rule, /font-variant-numeric: lining-nums tabular-nums/);
+    const game = createGame();
+    const cells = game.el('pdk-counter-ranks').children;
+    assert.equal(cells.length, 13);
+    assert.deepEqual(cells.map(cell => cell.querySelector('span').textContent), ['2', 'A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3']);
+    cells.forEach(cell => {
+        assert.ok(cell.querySelector('b'));
+        assert.equal(cell.querySelector('span').getAttribute('style'), null);
+    });
+});
+
+test('complete court artwork is centered, uncropped and clear of the rank and suit boxes', () => {
+    const rule = themeSource.match(/\.pdk-court \{([^}]+)\}/)[1];
+    assert.match(rule, /left: 50%; top: 50%; width: 38%; height: auto/);
+    assert.match(rule, /aspect-ratio: 98 \/ 166/);
+    assert.match(rule, /transform: translate\(-50%, -50%\)/);
+    assert.match(rule, /object-fit: contain/);
+    assert.match(themeSource, /\.pdk-table \.pcard \.pdk-corner i \{[^}]*width: calc\(var\(--card-width\) \* \.20\)/);
+    for (const rank of ['jack', 'queen', 'king']) {
+        const svg = fs.readFileSync(path.join(root, 'game/assets/paodekuai/court-' + rank + '.svg'), 'utf8');
+        assert.match(svg, /viewBox="0 0 98 166"/);
+    }
+    const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    for (const width of [44, 48, 54, 56, 68, 72, 80, 96, 112]) {
+        const innerWidth = width - 2;
+        const innerHeight = width * 1.43 - 2;
+        const court = { x: innerWidth * .31, y: (innerHeight - innerWidth * .38 * 166 / 98) / 2, w: innerWidth * .38, h: innerWidth * .38 * 166 / 98 };
+        const rank = { x: width * .03, y: width * .03, w: width * .31, h: width * .31 };
+        const suit = { x: width * .085, y: width * .34, w: width * .20, h: width * .22 };
+        for (const box of [rank, suit]) {
+            const opposite = { x: innerWidth - box.x - box.w, y: innerHeight - box.y - box.h, w: box.w, h: box.h };
+            assert.equal(overlaps(court, box), false, width + 'px: top corner');
+            assert.equal(overlaps(court, opposite), false, width + 'px: bottom corner');
+        }
+        assert.ok(Math.abs(court.x + court.w / 2 - innerWidth / 2) < 1e-9);
+        assert.ok(Math.abs(court.y + court.h / 2 - innerHeight / 2) < 1e-9);
+    }
+});
+
+test('16-card hands and 17/20-card stress fixtures retain readable strips and fit balanced rows', () => {
+    const game = createGame();
+    // Explicit sizes model typical phone, landscape and desktop content widths.
+    // They test the real layout algorithm, not CSS rendering or native hit tests.
+    for (const [hostWidth, width] of [[276, 68], [316, 68], [378, 68], [520, 56], [704, 64], [920, 80], [1300, 96], [1760, 112]]) {
+        for (const count of [1, 16, 17, 20]) {
+            const host = new Element();
+            host.clientWidth = hostWidth;
+            const faces = Array.from({ length: count }, () => {
+                const face = new Element('button');
+                face.getBoundingClientRect = () => ({ width });
+                return face;
+            });
+            game.api.fitRow(host, faces);
+            const columns = Number(host.dataset.cardColumns);
+            const match = host.style.gridTemplateColumns.match(/^repeat\((\d+), ([\d.]+)px\) ([\d.]+)px$/);
+            if (count === 1) { assert.equal(columns, 1); assert.equal(host.style.gridTemplateColumns, width + 'px'); continue; }
+            assert.ok(match, host.style.gridTemplateColumns);
+            const step = Number(match[2]);
+            assert.ok(step >= Math.max(24, width * .40) - 1e-9, 'Do not obscure the rank to avoid wrapping.');
+            assert.ok(width + (columns - 1) * step <= hostWidth - 12 + 1e-9, 'Every row stays inside the host.');
+            assert.ok(columns <= count);
+            assert.equal(Number(match[1]) + 1, columns);
+            assert.equal(Number(match[3]), width, 'Card width is never changed by overlap.');
+        }
+    }
+    const host = new Element();
+    host.clientWidth = 316;
+    game.api.fitRow(host, Array.from({ length: 16 }, () => ({ getBoundingClientRect: () => ({ width: 68 }) })));
+    assert.equal(host.dataset.cardColumns, '8');
+    host.clientWidth = 278;
+    game.api.fitRow(host, Array.from({ length: 16 }, () => ({ getBoundingClientRect: () => ({ width: 68 }) })));
+    assert.equal(host.dataset.cardColumns, '8', 'A 320px phone should retain two eight-card rows.');
+    game.api.fitRow(host, []);
+    assert.equal(host.style.gridTemplateColumns, 'none');
+    assert.equal(host.dataset.cardColumns, '0');
+});
+
+test('two-row horizontal selection stays in its row and cancellation restores selection', () => {
+    const game = createGame();
+    const input = gestureFixture(game);
+    input.hand.dataset.cardColumns = '3';
+    input.faces.forEach((face, index) => {
+        const left = (index % 3) * 30;
+        const top = Math.floor(index / 3) * 115;
+        face.getBoundingClientRect = () => ({ left, top, right: left + 60, bottom: top + 90, width: 60, height: 90 });
+    });
+    input.dispatch('pointerdown', 0, { clientX: 5, clientY: 20 });
+    input.dispatch('pointermove', 2, { clientX: 65, clientY: 20 });
+    input.dispatch('pointerup', 2, { clientX: 65, clientY: 20 });
+    assert.deepEqual(input.selectedIndices(), [0, 1, 2]);
+    input.dispatch('pointerdown', 3, { clientX: 5, clientY: 135 });
+    input.dispatch('pointermove', 5, { clientX: 65, clientY: 135 });
+    assert.deepEqual(input.selectedIndices(), [0, 1, 2, 3, 4, 5]);
+    input.dispatch('pointercancel', 5, { clientX: 65, clientY: 135 });
+    assert.deepEqual(input.selectedIndices(), [0, 1, 2]);
+    input.dispatch('pointerdown', 4, { clientX: 35, clientY: 135 });
+    input.dispatch('pointerup', 4, { clientX: 35, clientY: 135 });
+    assert.deepEqual(input.selectedIndices(), [0, 1, 2, 4]);
+});
+
+test('16/17/20-card hands keep tap, drag and reverse-drag selection inside every grid row', () => {
+    for (const count of [16, 17, 20]) {
+        const game = createGame();
+        game.fixture({ hands: [clone(game.PK.freshDeck()).slice(0, count), [card(11, 1), card(11, 2)], [card(10, 1), card(10, 2)]] });
+        const input = pointerHand(game);
+        const width = 68;
+        input.hand.clientWidth = 316;
+        input.faces.forEach(face => { face.getBoundingClientRect = () => ({ width }); });
+        game.api.fitRow(input.hand, input.faces);
+        const columns = Number(input.hand.dataset.cardColumns);
+        const step = Number(input.hand.style.gridTemplateColumns.match(/repeat\(\d+, ([\d.]+)px\)/)[1]);
+        const point = (index, lift = false) => ({
+            clientX: (index % columns) * step + 8,
+            clientY: Math.floor(index / columns) * (width * 1.43 + 25) + (lift ? -8 : 20)
+        });
+        input.faces.forEach((face, index) => {
+            face.getBoundingClientRect = () => {
+                const left = (index % columns) * step;
+                const top = Math.floor(index / columns) * (width * 1.43 + 25) - (face.classList.contains('is-selected') ? 17 : 0);
+                return { left, top, right: left + width, bottom: top + width * 1.43, width, height: width * 1.43 };
+            };
+        });
+        for (let first = 0; first < count; first += columns) {
+            const last = Math.min(first + columns, count) - 1;
+            const row = Array.from({ length: last - first + 1 }, (_, index) => first + index);
+            input.dispatch('pointerdown', first, point(first));
+            input.dispatch('pointermove', last, point(last));
+            input.dispatch('pointerup', last, point(last));
+            assert.deepEqual(input.selectedIndices(), row, count + ' cards: forward row ' + first);
+            // The raised edge is above unselected neighbors. A reverse drag
+            // from it must still traverse this row, without jumping to another.
+            input.dispatch('pointerdown', last, point(last, true));
+            input.dispatch('pointermove', first, point(first, true));
+            input.dispatch('pointerup', first, point(first, true));
+            assert.deepEqual(input.selectedIndices(), [], count + ' cards: reverse row ' + first);
+            input.dispatch('pointerdown', last, point(last));
+            input.dispatch('pointerup', last, point(last));
+            assert.deepEqual(input.selectedIndices(), [last], count + ' cards: tap row end');
+            input.dispatch('pointerdown', first, point(first));
+            input.dispatch('pointermove', last, point(last));
+            input.dispatch('pointercancel', last, point(last));
+            assert.deepEqual(input.selectedIndices(), [last], 'Cancellation restores row selection.');
+            input.dispatch('pointerdown', last, point(last));
+            input.dispatch('pointerup', last, point(last));
+            assert.deepEqual(input.selectedIndices(), []);
+        }
+    }
+});
+
+test('dragging from a lifted card reaches unselected neighbors and stays in its original row', () => {
+    const game = createGame();
+    const input = gestureFixture(game);
+    input.hand.dataset.cardColumns = '3';
+    input.faces.forEach((face, index) => {
+        face.getBoundingClientRect = () => {
+            const left = (index % 3) * 30;
+            const top = Math.floor(index / 3) * 115 - (face.classList.contains('is-selected') ? 17 : 0);
+            return { left, top, right: left + 60, bottom: top + 90, width: 60, height: 90 };
+        };
+    });
+    input.dispatch('pointerdown', 1, { clientX: 35, clientY: 20 });
+    input.dispatch('pointerup', 1, { clientX: 35, clientY: 20 });
+    input.dispatch('pointerdown', 1, { clientX: 35, clientY: -8 });
+    input.dispatch('pointermove', 2, { clientX: 65, clientY: -8 });
+    input.dispatch('pointerup', 2, { clientX: 65, clientY: -8 });
+    assert.deepEqual(input.selectedIndices(), []);
+    input.dispatch('pointerdown', 0, { clientX: 5, clientY: 20 });
+    // Large horizontal movement with some vertical drift must remain in row 1.
+    input.dispatch('pointermove', 5, { clientX: 250, clientY: 135 });
+    assert.deepEqual(input.selectedIndices(), [0, 1, 2]);
+    input.dispatch('pointercancel', 5, { clientX: 250, clientY: 135 });
+    assert.deepEqual(input.selectedIndices(), []);
+});
+
+test('expanded view and orientation changes preserve state and selection; modal Escape stays modal', () => {
+    const game = createGame({ gameView: true });
+    gestureFixture(game);
+    game.select([card(5), card(3)]);
+    const state = JSON.stringify(game.api.state);
+    const selection = key(game.api.selectedCards());
+    const view = game.document.querySelector('[data-game-view]');
+    const fullscreen = view.querySelector('[data-game-fullscreen]');
+    fullscreen.click();
+    assert.ok(view.classList.contains('is-expanded'));
+    assert.equal(fullscreen.getAttribute('aria-pressed'), 'true');
+    while (game.timers.size) game.drainOne();
+    assert.equal(JSON.stringify(game.api.state), state);
+    assert.equal(key(game.api.selectedCards()), selection);
+    game.document.dispatchEvent({ type: 'orientationchange' });
+    while (game.timers.size) game.drainOne();
+    assert.equal(key(game.api.selectedCards()), selection);
+    game.click('pdk-restart');
+    game.document.dispatchEvent({ type: 'keydown', key: 'Escape' });
+    assert.ok(view.classList.contains('is-expanded'));
+    game.click('pdk-restart-cancel');
+    assert.equal(JSON.stringify(game.api.state), state);
+    assert.equal(key(game.api.selectedCards()), selection);
+    game.document.dispatchEvent({ type: 'keydown', key: 'Escape' });
+    assert.equal(view.classList.contains('is-expanded'), false);
+    assert.equal(fullscreen.getAttribute('aria-pressed'), 'false');
+    assert.equal(JSON.stringify(game.api.state), state);
+    assert.equal(key(game.api.selectedCards()), selection);
 });
 
 test('12 complete UI games conserve every card and update public counts every turn', () => {

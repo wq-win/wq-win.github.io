@@ -15,6 +15,8 @@ const root = path.resolve(__dirname, '..');
 const page = fs.readFileSync(path.join(root, 'game/doudizhu.html'), 'utf8');
 const engineSource = fs.readFileSync(path.join(root, 'js/doudizhu-engine.js'), 'utf8');
 const uiSource = fs.readFileSync(path.join(root, 'js/doudizhu.js'), 'utf8');
+const viewSource = fs.readFileSync(path.join(root, 'js/game-view.js'), 'utf8');
+const viewCss = fs.readFileSync(path.join(root, 'css/game-view.css'), 'utf8');
 const levelsSource = fs.readFileSync(path.join(root, 'js/doudizhu-levels.js'), 'utf8');
 const cssSource = fs.readFileSync(path.join(root, 'css/doudizhu.css'), 'utf8');
 let passed = 0;
@@ -159,7 +161,7 @@ class Element {
         return !event.defaultPrevented;
     }
     click() { if (!this.disabled) this.dispatchEvent({ type: 'click', bubbles: true, detail: 1 }); }
-    focus() { this.focused = true; if (this.ownerDocument) this.ownerDocument.activeElement = this; }
+    focus() { if (this.disabled) return; this.focused = true; if (this.ownerDocument) this.ownerDocument.activeElement = this; }
     remove() { if (this.parentNode) this.parentNode.removeChild(this); }
     showModal() { this.open = true; this.setAttribute("open", ""); }
     close() { this.open = false; this.removeAttribute("open"); this.dispatchEvent({ type: "close" }); }
@@ -206,6 +208,7 @@ function createGame(options = {}) {
     let timerId = 0;
     const storage = Object.assign({}, options.storage);
     const sandbox = {
+        CustomEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
         document, console, innerWidth: 1024, innerHeight: 768,
         navigator: { maxTouchPoints: 0 },
         performance: { now: () => 1000 },
@@ -258,6 +261,7 @@ function createGame(options = {}) {
 `;
     assert.match(uiSource, /\}\(\)\);\s*$/, 'The UI should retain an isolated IIFE; update test instrumentation if its module format changes.');
     vm.runInContext(uiSource.replace(/\}\(\)\);\s*$/, instrumentation + '}());'), context, { filename: 'doudizhu.js' });
+    vm.runInContext(viewSource, context, { filename: 'game-view.js' });
     const api = sandbox.__uiTest;
     return {
         api, DD: sandbox.Doudizhu, levels: sandbox.DOUDIZHU_LEVELS, document, sandbox, timers, allTimers, storage,
@@ -412,7 +416,7 @@ test('theme selectors stay scoped and load after shared card styles', () => {
     const rules = Array.from(uncommented.matchAll(/([^{}]+)\{([^{}]*)\}/g));
     assert.ok(rules.length > 0);
     rules.forEach(rule => rule[1].trim().split(',').forEach(selector => {
-        assert.ok(selector.trim().startsWith('.dd-table'), 'Theme selector escapes the puzzle table: ' + selector.trim());
+        assert.match(selector.trim(), /^\.dd-(?:table|page(?:-body)?)(?:[\s.:#>]|$)/, 'Theme selector escapes the Dou Dizhu page: ' + selector.trim());
     }));
     assert.match(cssSource, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
     assert.match(cssSource, /@media\s*\(max-width:\s*520px\)/);
@@ -1172,6 +1176,222 @@ test('existing cleared progress is retained when another level is won', () => {
     assert.equal(progress[1], 1);
     assert.equal(progress[2], 1);
     assert.equal(progress[7], 1);
+});
+
+
+test('wide page and safe-area fullscreen remain scoped to Dou Dizhu', () => {
+    assert.doesNotMatch(page, /max-w-5xl/);
+    assert.match(page, /viewport-fit=cover/);
+    assert.match(cssSource, /\.dd-page\s*\{[^}]*width:\s*100%[^}]*max-width:\s*none/);
+    assert.match(viewCss, /\.game-page \.game-view\.is-expanded\s*\{[^}]*100dvh[^}]*overflow:\s*auto[^}]*safe-area-inset-top[^}]*safe-area-inset-bottom/);
+    assert.doesNotMatch(viewCss, /\.is-expanded,\s*[^{}]*:fullscreen/);
+    assert.match(cssSource, /\.dd-table \.dd-levels\s*\{[^}]*overflow-x:\s*auto/);
+    assert.match(cssSource, /@media\s*\(orientation:\s*landscape\)\s*and\s*\(max-height:\s*560px\)/);
+});
+
+test('all ordinary ranks use one proportional fixed-size lining-numeral box, including 10', () => {
+    const game = createGame();
+    const deck = fullDeck(game);
+    deck.filter(item => item.card.r < 13).forEach(({ face }) => {
+        face.querySelectorAll('.dd-corner b').forEach(rank => {
+            assert.equal(rank.getAttribute('style'), null, 'No rank-specific shrinking.');
+        });
+    });
+    const rankRules = Array.from(cssSource.matchAll(/([^{}]+)\{([^{}]*)\}/g)).filter(rule => /\.dd-corner b/.test(rule[1]));
+    assert.equal(rankRules.length, 1, 'No breakpoint or trick overrides may disconnect rank size from card size.');
+    assert.match(rankRules[0][2], /height:\s*calc\(var\(--dd-card-width\)\s*\*\s*\.31\)/);
+    assert.match(rankRules[0][2], /font:\s*700 calc\(var\(--dd-card-width\)\s*\*\s*\.27\)\s*\/\s*1 Arial/);
+    assert.match(rankRules[0][2], /font-variant-numeric:\s*lining-nums tabular-nums/);
+    assert.match(cssSource, /\.dd-table \.dd-joker-name\s*\{[^}]*height:\s*calc\(var\(--dd-card-width\)\s*\*\s*\.31\)[^}]*font:\s*700 calc\(var\(--dd-card-width\)\s*\*\s*\.27\)/);
+    const selectedRanks = new Set(deck.map(item => item.face.getAttribute('aria-label').replace(/[♣♦♥♠]/, '')));
+    for (const rank of ['10', 'J', 'Q', 'K', 'A', '小王', '大王']) assert.ok(selectedRanks.has(rank));
+});
+
+test('17- and 20-card fixtures keep every card selectable after view changes', () => {
+    for (const total of [17, 20]) {
+        const game = createGame();
+        const hand = Array(15).fill(0);
+        for (let index = 0; index < total; index += 1) hand[index % 13] += 1;
+        game.fixture({ you: hand, opp: counts(12, 13, 14) });
+        game.click('dd-fullscreen');
+        assert.equal(game.el('dd-you').querySelectorAll('.pcard').length, total);
+        game.el('dd-you').querySelectorAll('.pcard').forEach(face => {
+            assert.equal(face.disabled, false);
+            face.click();
+        });
+        assert.equal(game.DD.sum(game.api.selectedCounts()), total);
+        game.click('dd-fullscreen');
+        assert.equal(game.DD.sum(game.api.selectedCounts()), total);
+    }
+});
+
+test('unsupported fullscreen falls back to an accessible page-fill toggle without resetting state', () => {
+    const game = createGame();
+    game.select([8]);
+    const state = gameState(game);
+    const selection = JSON.stringify(game.api.selected);
+    const button = game.el('dd-fullscreen');
+    assert.equal(button.getAttribute('aria-pressed'), 'false');
+    game.click('dd-fullscreen');
+    assert.equal(game.el('dd-table').classList.contains('is-expanded'), true);
+    assert.equal(game.document.body.classList.contains('game-view-open'), true);
+    assert.equal(button.getAttribute('aria-pressed'), 'true');
+    assert.match(button.textContent, /退出铺满/);
+    game.click('dd-fullscreen');
+    assert.equal(game.el('dd-table').classList.contains('is-expanded'), false);
+    assert.equal(game.document.body.classList.contains('game-view-open'), false);
+    assert.equal(gameState(game), state);
+    assert.equal(JSON.stringify(game.api.selected), selection);
+    assert.equal(game.document.activeElement, button);
+});
+
+test('a disabled Fullscreen API or synchronous rejection retains the usable fallback', () => {
+    for (const mode of ['disabled', 'throw']) {
+        const game = createGame();
+        let calls = 0;
+        game.el('dd-table').requestFullscreen = () => { calls += 1; throw Error('Denied'); };
+        if (mode === 'disabled') game.document.fullscreenEnabled = false;
+        game.click('dd-fullscreen');
+        assert.equal(calls, mode === 'disabled' ? 0 : 1);
+        assert.equal(game.el('dd-table').classList.contains('is-expanded'), true);
+        assert.equal(game.el('dd-fullscreen').disabled, false);
+        assert.match(game.el('dd-fullscreen').textContent, /退出铺满/);
+        game.click('dd-fullscreen');
+        assert.equal(game.document.body.classList.contains('game-view-open'), false);
+    }
+});
+
+test('pending fullscreen requests are not duplicated, and rejection keeps page-fill usable', () => {
+    const game = createGame();
+    let calls = 0;
+    let reject;
+    game.el('dd-table').requestFullscreen = () => { calls += 1; return { then(resolve, failure) { reject = failure; } }; };
+    game.click('dd-fullscreen');
+    game.click('dd-fullscreen');
+    assert.equal(calls, 1);
+    assert.equal(game.el('dd-fullscreen').disabled, true);
+    reject(Error('Permission denied'));
+    assert.equal(game.el('dd-fullscreen').disabled, false);
+    assert.equal(game.el('dd-table').classList.contains('is-expanded'), true);
+    game.click('dd-fullscreen');
+    assert.equal(game.el('dd-table').classList.contains('is-expanded'), false);
+});
+
+test('Escape during a pending request restores focus after rejection reenables the button', () => {
+    const game = createGame();
+    const table = game.el('dd-table');
+    const button = game.el('dd-fullscreen');
+    let reject;
+    table.requestFullscreen = () => ({ then(resolve, failure) { reject = failure; } });
+    button.focus();
+    game.click('dd-fullscreen');
+    assert.equal(button.disabled, true);
+    // Real browsers can drop focus when the invoking button becomes disabled.
+    game.document.body.focus();
+    button.focus();
+    assert.equal(game.document.activeElement, game.document.body, 'Disabled controls cannot receive focus.');
+    game.document.dispatchEvent({ type: 'keydown', key: 'Escape' });
+    assert.equal(table.classList.contains('is-expanded'), false);
+    assert.equal(game.document.activeElement, game.document.body);
+    reject(Error('Permission denied'));
+    assert.equal(button.disabled, false);
+    assert.equal(game.document.activeElement, button, 'Restore the exit focus after the pending request settles.');
+    assert.equal(game.document.body.classList.contains('game-view-open'), false);
+});
+
+test('native fullscreen entry and browser Escape restore button, body and selected cards', () => {
+    const game = createGame();
+    const table = game.el('dd-table');
+    let resolve;
+    table.requestFullscreen = () => ({ then(success) { resolve = success; } });
+    game.select([8]);
+    const selection = JSON.stringify(game.api.selected);
+    game.click('dd-fullscreen');
+    game.document.fullscreenElement = table;
+    game.document.dispatchEvent({ type: 'fullscreenchange' });
+    resolve();
+    assert.match(game.el('dd-fullscreen').textContent, /退出全屏/);
+    game.document.fullscreenElement = null;
+    game.document.dispatchEvent({ type: 'fullscreenchange' });
+    assert.equal(table.classList.contains('is-expanded'), false);
+    assert.equal(game.document.body.classList.contains('game-view-open'), false);
+    assert.equal(game.el('dd-fullscreen').getAttribute('aria-pressed'), 'false');
+    assert.equal(JSON.stringify(game.api.selected), selection);
+});
+
+test('native exit failures remain recoverable, then a successful exit restores the page', () => {
+    const game = createGame();
+    const table = game.el('dd-table');
+    table.requestFullscreen = () => {
+        game.document.fullscreenElement = table;
+        game.document.dispatchEvent({ type: 'fullscreenchange' });
+    };
+    game.click('dd-fullscreen');
+    game.document.exitFullscreen = () => { throw Error('Exit denied'); };
+    game.click('dd-fullscreen');
+    assert.equal(game.el('dd-fullscreen').disabled, false);
+    assert.equal(table.classList.contains('is-expanded'), true);
+    assert.match(game.el('dd-view-status').textContent, /请按 Esc/);
+    game.document.exitFullscreen = () => {
+        game.document.fullscreenElement = null;
+        game.document.dispatchEvent({ type: 'fullscreenchange' });
+    };
+    game.click('dd-fullscreen');
+    assert.equal(table.classList.contains('is-expanded'), false);
+    assert.equal(game.el('dd-fullscreen').disabled, false);
+});
+
+test('fallback Escape closes only the view, leaving an open restart dialog to handle Escape first', () => {
+    const game = createGame();
+    game.fixture();
+    game.click('dd-fullscreen');
+    game.click('dd-retry');
+    assert.equal(game.el('dd-restart-dialog').open, true);
+    game.document.dispatchEvent({ type: 'keydown', key: 'Escape' });
+    assert.equal(game.el('dd-table').classList.contains('is-expanded'), true);
+    game.el('dd-restart-dialog').dispatchEvent({ type: 'cancel' });
+    assert.equal(game.api.paused, false);
+    assert.equal(game.el('dd-table').classList.contains('is-expanded'), true);
+    game.document.dispatchEvent({ type: 'keydown', key: 'Escape' });
+    assert.equal(game.el('dd-table').classList.contains('is-expanded'), false);
+});
+
+test('Escape during a pending request also exits a late native fullscreen entry', () => {
+    const game = createGame();
+    const table = game.el('dd-table');
+    let resolve;
+    let exits = 0;
+    table.requestFullscreen = () => ({ then(success) { resolve = success; } });
+    game.document.exitFullscreen = () => {
+        exits += 1;
+        game.document.fullscreenElement = null;
+        game.document.dispatchEvent({ type: 'fullscreenchange' });
+    };
+    game.click('dd-fullscreen');
+    game.document.dispatchEvent({ type: 'keydown', key: 'Escape' });
+    game.document.fullscreenElement = table;
+    game.document.dispatchEvent({ type: 'fullscreenchange' });
+    resolve();
+    assert.equal(exits, 1);
+    assert.equal(table.classList.contains('is-expanded'), false);
+    assert.equal(game.document.body.classList.contains('game-view-open'), false);
+    assert.equal(game.el('dd-fullscreen').disabled, false);
+});
+
+test('view changes preserve pending hints and opponent timers', () => {
+    for (const kind of ['hint', 'opponent']) {
+        const game = createGame();
+        if (kind === 'hint') game.click('dd-hint');
+        else pendingOpponent(game);
+        const timerIds = Array.from(game.timers.keys());
+        const state = gameState(game);
+        game.click('dd-fullscreen');
+        game.click('dd-fullscreen');
+        assert.deepEqual(Array.from(game.timers.keys()), timerIds);
+        assert.equal(gameState(game), state);
+        game.drainOne();
+        assert.equal(game.timers.size, 0);
+    }
 });
 
 console.log('\n' + passed + ' passed; ' + failed + ' failed');

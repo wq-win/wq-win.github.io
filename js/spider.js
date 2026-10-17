@@ -167,7 +167,6 @@
         state.columns.forEach(function (col, index) {
             var pile = document.createElement('div');
             pile.className = 'spider-col' + (col.length ? '' : ' is-empty');
-            pile.style.height = (col.length ? (86 + (col.length - 1) * 22) : 96) + 'px';
             pile.addEventListener('click', function () {
                 if (selected && selected.col !== index) moveTo(index);
             });
@@ -176,7 +175,6 @@
                 var picked = selected && selected.col === index && cardIndex >= selected.index;
                 el.type = 'button';
                 el.className = 'pcard' + (card.up ? (RED[card.s] ? ' red' : '') : ' back') + (picked ? ' is-selected' : '');
-                el.style.top = (cardIndex * 22) + 'px';
                 el.style.zIndex = String(picked ? 40 + cardIndex : cardIndex + 1);
                 if (card.up) {
                     el.innerHTML = cardArtwork(card);
