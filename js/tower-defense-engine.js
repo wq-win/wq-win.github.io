@@ -3,6 +3,7 @@
     else root.ForestDefense=factory();
 })(typeof globalThis!=='undefined'?globalThis:this,function() {
     'use strict';
+    const WAVES_PER_LEVEL=15,LEVEL_COUNT=5;
     const PATH=[[ -35,175],[175,175],[310,290],[510,290],[655,447],[815,447],[925,330],[1035,330]];
     const SLOTS=[[145,265],[300,190],[435,385],[525,190],[655,325],[785,350],[870,520],[915,230]];
     const TYPES= {
@@ -30,9 +31,10 @@
             x:1035,y:330
         };
     }
-    function create() {
+    function create(level=1) {
+        if(!Number.isInteger(level)||level<1||level>LEVEL_COUNT)throw new RangeError('Invalid level');
         return {
-            gold:300,health:20,wave:0,state:'ready',towers:SLOTS.map(()=>null),enemies:[],effects:[],queue:[],spawn:0,kills:0,id:0,time:0
+            level,gold:300,health:20,wave:0,state:'ready',towers:SLOTS.map(()=>null),enemies:[],effects:[],queue:[],spawn:0,kills:0,id:0,time:0
         };
     }
     function stats(t) {
@@ -42,7 +44,7 @@
         };
     }
     function build(s,index,type) {
-        if(!Number.isInteger(index)||index<0||index>=SLOTS.length||!TYPES[type]||s.towers[index]||s.gold<TYPES[type].cost||['won','lost'].includes(s.state))return false;
+        if(!Number.isInteger(index)||index<0||index>=SLOTS.length||!TYPES[type]||s.towers[index]||s.gold<TYPES[type].cost||['cleared','won','lost'].includes(s.state))return false;
         s.gold-=TYPES[type].cost;
         s.towers[index]= {
             type,level:1,cooldown:0,angle:-Math.PI/2
@@ -54,29 +56,29 @@
     }
     function upgrade(s,index) {
         const t=s.towers[index];
-        if(!t||t.level>=3||s.gold<upgradeCost(t)||['won','lost'].includes(s.state))return false;
+        if(!t||t.level>=3||s.gold<upgradeCost(t)||['cleared','won','lost'].includes(s.state))return false;
         s.gold-=upgradeCost(t);
         t.level++;
         return true;
     }
     function startWave(s) {
-        if(s.state!=='ready'||s.wave>=10)return false;
+        if(s.state!=='ready'||s.wave>=WAVES_PER_LEVEL)return false;
         s.wave++;
         s.state='running';
         s.spawn=.4;
         s.queue=Array.from( {
-            length:7+s.wave*2
+            length:7+s.wave*2+(s.level-1)*2
         },(_,i)=>s.wave>=3&&i%5===4?'brute':s.wave>=2&&i%3===2?'runner':'goblin');
-        if(s.wave===10)s.queue.push('boss');
+        if(s.wave===WAVES_PER_LEVEL)s.queue.push('boss');
         return true;
     }
     function spawn(s,type) {
         const data= {
             goblin:[54,43,12,0],runner:[38,77,13,0],brute:[160,29,24,.42],boss:[1300,22,100,.3]
         }
-        [type],scale=1+(s.wave-1)*.19;
+        [type],scale=(1+(s.wave-1)*.19)*(1+(s.level-1)*.12);
         const e= {
-            id:++s.id,type,hp:data[0]*scale,maxHp:data[0]*scale,speed:data[1],reward:data[2],armor:data[3],distance:0,slow:0,...position(0)
+            id:++s.id,type,hp:data[0]*scale,maxHp:data[0]*scale,speed:data[1]*(1+(s.level-1)*.03),reward:data[2],armor:data[3],distance:0,slow:0,...position(0)
         };
         s.enemies.push(e);
         return e;
@@ -89,7 +91,7 @@
         s.spawn-=dt;
         if(s.queue.length&&s.spawn<=0) {
             spawn(s,s.queue.shift());
-            s.spawn=.76-Math.min(.22,s.wave*.02);
+            s.spawn=(.76-Math.min(.22,s.wave*.02))/(1+(s.level-1)*.04);
         }
         for(const e of s.enemies) {
             e.slow=Math.max(0,e.slow-dt);
@@ -136,14 +138,19 @@
         });
         if(!s.enemies.length&&!s.queue.length) {
             s.effects=[];
-            if(s.wave===10)s.state='won';
+            if(s.wave===WAVES_PER_LEVEL)s.state=s.level===LEVEL_COUNT?'won':'cleared';
             else {
                 s.state='ready';
                 s.gold+=35+s.wave*4;
             }
         }
     }
+    function nextLevel(s) {
+        if(s.state!=='cleared'||s.level>=LEVEL_COUNT)return false;
+        Object.assign(s,create(s.level+1));
+        return true;
+    }
     return {
-        PATH,SLOTS,TYPES,total,position,create,stats,build,upgrade,upgradeCost,startWave,spawn,tick
+        WAVES_PER_LEVEL,LEVEL_COUNT,nextLevel,PATH,SLOTS,TYPES,total,position,create,stats,build,upgrade,upgradeCost,startWave,spawn,tick
     };
 });

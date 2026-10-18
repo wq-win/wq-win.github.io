@@ -40,7 +40,7 @@
 
 ### 浏览器小游戏
 
-- [迷你塔防](https://wq-win.github.io/game/tower-defense.html)：建造、升级箭塔、魔法塔和炮塔，守住森林道路的十波进攻，支持暂停与加速。
+- [迷你塔防](https://wq-win.github.io/game/tower-defense.html)：建造、升级箭塔、魔法塔和炮塔，挑战五个难度递增的关卡，每关十五波进攻，支持暂停与加速。
 - [接线谜题](https://wq-win.github.io/game/net.html)：旋转线路连接电源与终点，提供可解的随机棋盘、重置、提示与键盘操作。
 
 - [跑得快](https://wq-win.github.io/game/paodekuai.html)：与两位电脑牌友对局，每人十六张。支持点选／横滑选牌、合法出牌提示轮换、无牌可压时自动不出，以及基于公开信息的记牌器。记牌器扣除自己的手牌和已出牌，不展示任何一位对手的具体手牌。

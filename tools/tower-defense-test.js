@@ -31,7 +31,7 @@ function finishWave(s) {
 {
     const s = E.create();
     while (s.state !== 'lost') {
-        assert.ok(s.wave < 10);
+        assert.ok(s.wave < E.WAVES_PER_LEVEL);
         E.startWave(s);
         finishWave(s);
     }
@@ -45,10 +45,11 @@ function finishWave(s) {
 // An understandable strategy wins: arrow + magic first, add towers between waves,
 // then upgrade around the central bends. No cheats or mid-wave auto-building.
 {
-    const s = E.create();
+    for(let level=1;level<=E.LEVEL_COUNT;level++) {
+    const s = E.create(level);
     E.build(s, 1, 'arrow');
     E.build(s, 4, 'magic');
-    for (let wave = 1; wave <= 10; wave++) {
+    for (let wave = 1; wave <= E.WAVES_PER_LEVEL; wave++) {
         for (const [i, type] of [[2,'cannon'],[3,'magic'],[5,'arrow'],[0,'arrow'],[6,'cannon'],[7,'magic']]) {
             if (!s.towers[i]) E.build(s, i, type);
         }
@@ -57,12 +58,13 @@ function finishWave(s) {
         finishWave(s);
         assert.notEqual(s.state, 'lost', `Sensible build loses on wave ${wave}`);
     }
-    assert.equal(s.state, 'won');
+    assert.equal(s.state, level===E.LEVEL_COUNT?'won':'cleared');
     assert.ok(s.health > 0);
     assert.ok(s.kills > 150);
     assert.equal(E.startWave(s), false);
     assert.equal(E.upgrade(s, 1), false);
-    console.log(`Victory verified: ${s.health}/20 health, ${s.kills} enemies defeated.`);
+    console.log(`Level ${level} victory verified: ${s.health}/20 health, ${s.kills} enemies defeated.`);
+    }
 }
 // Ready state freezes simulation; slow, armor and splash behavior are real.
 {
@@ -90,3 +92,29 @@ function finishWave(s) {
 assert.deepEqual(E.position(0), {x:-35,y:175});
 assert.deepEqual(E.position(E.total), {x:1035,y:330});
 console.log('Tower defense: economy, caps, wave guards, defeat, victory, armor, slow, splash and path tests passed.');
+
+// Every corresponding wave gets strictly stronger; only wave 15 contains a boss.
+assert.equal(E.WAVES_PER_LEVEL,15);
+assert.equal(E.LEVEL_COUNT,5);
+for(let wave=1;wave<=15;wave++) {
+    let previous;
+    for(let level=1;level<=5;level++) {
+        const s=E.create(level); s.wave=wave-1; E.startWave(s);
+        assert.equal(s.queue.filter(t=>t==='boss').length,wave===15?1:0);
+        const e=E.spawn(s,'goblin');
+        if(previous) {
+            assert.ok(e.hp>previous.hp); assert.ok(e.speed>previous.speed);
+            assert.ok(s.queue.length>previous.count);
+        }
+        previous={hp:e.hp,speed:e.speed,count:s.queue.length};
+    }
+}
+{
+    const s=E.create(); assert.equal(E.nextLevel(s),false);
+    s.state='cleared'; s.wave=15;s.gold=999;s.health=3;s.towers[0]={type:'arrow',level:3};
+    assert.equal(E.nextLevel(s),true); assert.deepEqual(s,E.create(2));
+    assert.equal(E.nextLevel(s),false);
+    s.level=5;s.state='won';assert.equal(E.nextLevel(s),false);
+    for(const level of [0,6,-1,1.5,NaN])assert.throws(()=>E.create(level),RangeError);
+}
+console.log('Five-level progression, reset guards, 15-wave boundaries and increasing difficulty passed.');

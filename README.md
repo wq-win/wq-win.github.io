@@ -40,7 +40,7 @@ The [demo hub](https://wq-win.github.io/game/) includes 17 algorithm demos:
 
 ### Browser games
 
-- [Mini Tower Defense / 迷你塔防](https://wq-win.github.io/game/tower-defense.html): defend a forest path through ten waves with arrow, magic, and cannon towers. Build, upgrade, pause, or speed up the battle.
+- [Mini Tower Defense / 迷你塔防](https://wq-win.github.io/game/tower-defense.html): defend a forest path through five increasingly difficult levels of fifteen waves each with arrow, magic, and cannon towers. Build, upgrade, pause, or speed up the battle.
 - [Net / 接线谜题](https://wq-win.github.io/game/net.html): rotate wire tiles to connect the source and light the terminals. Solvable generated boards, reset, hints, and keyboard controls.
 
 - [Paodekuai / 跑得快](https://wq-win.github.io/game/paodekuai.html): play against two computer opponents with 16 cards each. Includes tap/drag selection, cycling legal-move hints, automatic passes when no response is possible, and a public-information card counter. The counter subtracts your hand and played cards without revealing either opponent's hand.
