@@ -1,22 +1,22 @@
-# Tower-defense levels QA
+# Tower-defense 20-level QA
 
-2026-10-18. Baseline: main de0e8bc (previously 10 waves).
+2026-10-18. Baseline: main 42bb767 (five 15-wave levels).
 
-## Scope
-- Five sequential levels, each 15 waves, with a boss on wave 15.
+## Scope and balance
+- Twenty sequential levels, each 15 waves, with a boss on wave 15.
 - Each level starts with 20 health, 300 gold and no towers. Retry stays on the current level; final replay returns to level 1. Refresh starts a new campaign.
-- Relative to level 1, enemy HP scales by 1 + 0.12 × (level − 1), speed by 1 + 0.03 × (level − 1), and each wave adds 2 × (level − 1) enemies. Spawn intervals are divided by 1 + 0.04 × (level − 1).
-- Existing map, towers and rewards retained. No persistent unlocks or new game systems.
+- Let p = (level − 1) / 19. Enemy HP multiplier is 1 + 0.48p, speed multiplier 1 + 0.12p, additional enemies per wave floor(8p), and spawn interval divisor 1 + 0.16p.
+- Every corresponding wave gains HP and speed each level; counts never decrease. This spreads the previously proven difficulty range across twenty steps rather than extrapolating against unchanged level-three tower caps.
+- Existing map, towers, rewards and controls retained.
 
 ## Automated
-- `npm run test:games` passes all existing games plus expanded engine and new controller tests.
-- Engine: complete all 75 waves with a legitimate between-wave building strategy; 15-wave boundary, bosses, increasing HP/speed/count, terminal guards, reset, invalid level, defeat, economy and tower mechanics.
-- Controller: levels 1–4 clear/advance, reset economy/towers, failure retry same level, final victory/restart, repeated clicks, pause/resume, final-wave hint. State setup is test-only, with no shipped debug API.
-- `git diff --check` and JavaScript syntax checks pass.
-- `npm run test:reading` still fails the historical `game page unchanged doudizhu.html` hash assertion. That file is unchanged from baseline; reading baselines were not modified.
+- All 300 waves completed with legal between-wave building/upgrades, with no extra resources or mid-wave automation. Levels 1–17: 20 health; levels 18–19: 15 health; level 20: 14 health.
+- Every corresponding wave checked for stronger HP/speed and nondecreasing count, plus boss boundaries, terminal guards, resets, invalid levels, economy and tower mechanics.
+- Real controller test exercises all 19 advances, level-20 retry, final victory/restart, repeated clicks, pause/resume and final-wave hint. State injection exists only in test copies.
+- Full `npm run test:games` passes. `git diff --check` and JavaScript syntax checks pass.
+- Reading suite retains the pre-existing `game page unchanged doudizhu.html` hash failure; doudizhu.html is unchanged from baseline and unrelated baselines were not edited.
 
 ## Cloud Chromium
-- Real clicks: initial arrow/magic construction, first-wave combat, speed toggle.
-- Local-only scenario fixtures verify rendered clear-to-next-level, failure-to-same-level retry, and final victory-to-level-1 flows using the production controller with test-only initial state setup. Full campaigns are engine simulations, not manually played browser runs.
-- Narrow 320px CSS viewport caught clipped counters; responsive counter grid fixed and visually rechecked. Also checked 390×844, 741×700 and 844×390 CSS viewports.
-- Browser checks use desktop Chromium and simulated CSS viewports, not physical mobile devices or Safari.
+- 320px simulated mobile viewport visually checked: 1/20 counter, all four stat cells and controls fit; arrow tower built through real UI click.
+- Local-only scenarios verify level 19 clear → level 20 reset, level 20 defeat → retry level 20, and final victory → level 1 restart.
+- Browser runs are desktop Chromium with CSS-sized iframe viewports, not physical devices or Safari. Full campaigns were engine simulations, not manually played browser runs.
