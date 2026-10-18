@@ -18,8 +18,13 @@
         return `<svg viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path class="pipe-shadow" d="${path}"/><path class="pipe-metal" d="${path}"/><path class="pipe-inner" d="${path}"/><path class="pipe-light" d="${path}"/>${collars}${orb || '<circle class="joint" cx="50" cy="50" r="3.5"/>'}</svg>`;
     }
     function render(message) {
-        const state = engine.inspect(board.masks, board.size, board.source);
-        boardElement.style.setProperty('--size', board.size);
+        const state = engine.inspect(board.masks, board, board.source);
+        boardElement.style.setProperty('--columns', board.width);
+        boardElement.style.setProperty('--rows', board.height);
+        $('level-number').textContent = board.level;
+        $('level-dimensions').textContent = `${board.width} × ${board.height} · ${board.masks.length} 格`;
+        $('board-level').value = String(board.level);
+        boardElement.setAttribute('aria-label', `第 ${board.level} 关接线棋盘，${board.height} 行 ${board.width} 列`);
         if (boardElement.children.length !== board.masks.length) {
             boardElement.replaceChildren();
             board.masks.forEach((_, index) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'net-tile'; button.dataset.index = index; boardElement.appendChild(button); });
@@ -28,7 +33,7 @@
             const cell = boardElement.children[i], powered = state.powered.has(i), isSource = i === board.source, terminal = state.terminals.includes(i);
             cell.className = 'net-tile' + (powered ? ' powered' : '') + (isSource ? ' source' : '') + (terminal ? ' terminal' : '') + (i === hinted ? ' hinted' : '');
             cell.tabIndex = selected === i ? 0 : -1;
-            cell.setAttribute('aria-label', `第 ${Math.floor(i / board.size) + 1} 行第 ${i % board.size + 1} 列，${isSource ? '光源' : terminal ? '终点' : '线路'}，管口朝${engine.DIRS.map((d, n) => mask & d.bit ? directionNames[n] : '').filter(Boolean).join('、')}，${powered ? '已通电' : '未通电'}${state.solved ? '，已完成' : '，点击旋转'}`);
+            cell.setAttribute('aria-label', `第 ${Math.floor(i / board.width) + 1} 行第 ${i % board.width + 1} 列，${isSource ? '光源' : terminal ? '终点' : '线路'}，管口朝${engine.DIRS.map((d, n) => mask & d.bit ? directionNames[n] : '').filter(Boolean).join('、')}，${powered ? '已通电' : '未通电'}${state.solved ? '，已完成' : '，点击旋转'}`);
             // Keep solved cells focusable, but guard mutations in both model and UI.
             cell.setAttribute('aria-disabled', state.solved ? 'true' : 'false');
             cell.innerHTML = tileSVG(mask, i, powered);
@@ -42,27 +47,33 @@
         $('hint-board').disabled = board.hintsLeft === 0 || state.solved;
         $('hint-board').setAttribute('aria-label', `提示：校准一格，剩余 ${board.hintsLeft} 次`);
         $('victory').hidden = !state.solved;
+        $('next-level').hidden = !state.solved || board.level === engine.LEVELS.length;
+        $('victory-title').textContent = board.level === engine.LEVELS.length ? '第二十关完成' : '万灯俱明';
         if (state.solved) {
             $('victory-detail').textContent = `${state.terminals.length} 个终点全部点亮，${board.masks.length} 格线路已连通。共操作 ${board.moves} 次，使用 ${3 - board.hintsLeft} 次提示。`;
-            if (!hasWon) { message = '万灯俱明！所有线路已连通。可以选择再解一阵，或重置重玩。'; hasWon = true; }
+            if (!hasWon) { message = board.level === engine.LEVELS.length ? '第二十关完成！已到达最后一关，可以重玩本关或选择其他关卡。' : `万灯俱明！第 ${board.level} 关完成，可以进入下一关。`; hasWon = true; }
         } else hasWon = false;
         if (message) status.textContent = message;
     }
-    function newBoard() { board = engine.generate(Number($('board-size').value), seed()); selected = board.source; hinted = -1; hasWon = false; render('新谜题已就位。从金色光源开始，连通每一格与所有终点。'); }
-    function rotateAt(index, direction = 1) { if (engine.turn(board, index, direction)) { hinted = -1; selected = index; const state = engine.inspect(board.masks, board.size, board.source); render(`已${direction === 1 ? '顺' : '逆'}时针旋转。已点亮 ${state.litTerminals} / ${state.terminals.length} 个终点，${state.powered.size} / ${board.masks.length} 格通电。`); } }
+    function startBoard(next) { board = next; selected = board.source; hinted = -1; hasWon = false; $('board-scroll').scrollLeft = 0; $('board-scroll').scrollTop = 0; render(`第 ${board.level} / ${engine.LEVELS.length} 关，${board.width} × ${board.height}，共 ${board.masks.length} 格。从金色光源开始，连通所有线路。`); }
+    function newBoard() { startBoard(engine.generateLevel(Number($('board-level').value), seed())); }
+    function rotateAt(index, direction = 1) { if (engine.turn(board, index, direction)) { hinted = -1; selected = index; const state = engine.inspect(board.masks, board, board.source); render(`已${direction === 1 ? '顺' : '逆'}时针旋转。已点亮 ${state.litTerminals} / ${state.terminals.length} 个终点，${state.powered.size} / ${board.masks.length} 格通电。`); } }
     boardElement.addEventListener('click', event => { const cell = event.target.closest('[data-index]'); if (cell && boardElement.contains(cell)) rotateAt(Number(cell.dataset.index)); });
     boardElement.addEventListener('focusin', event => { const cell = event.target.closest('[data-index]'); if (!cell) return; selected = Number(cell.dataset.index); Array.from(boardElement.children).forEach((el, n) => { el.tabIndex = n === selected ? 0 : -1; }); });
     boardElement.addEventListener('keydown', event => {
         const cell = event.target.closest('[data-index]'); if (!cell) return;
         const i = Number(cell.dataset.index), dirs = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 };
-        if (Object.prototype.hasOwnProperty.call(dirs, event.key)) { event.preventDefault(); const next = engine.neighbor(i, engine.DIRS[dirs[event.key]], board.size); if (next >= 0) { selected = next; boardElement.children[next].focus(); } }
+        if (Object.prototype.hasOwnProperty.call(dirs, event.key)) { event.preventDefault(); const next = engine.neighbor(i, engine.DIRS[dirs[event.key]], board); if (next >= 0) { selected = next; boardElement.children[next].focus(); } }
         else if (event.key.toLowerCase() === 'r') { event.preventDefault(); rotateAt(i, -1); }
         // Enter and Space use the native button's click, avoiding double rotations.
     });
     $('reset-board').addEventListener('click', () => { engine.reset(board); hinted = -1; hasWon = false; render(`已恢复本局开局。还剩 ${board.hintsLeft} 次提示。`); });
-    $('hint-board').addEventListener('click', () => { const i = engine.hint(board); if (i < 0) return; hinted = i; selected = i; render(`已校准第 ${Math.floor(i / board.size) + 1} 行第 ${i % board.size + 1} 列，以金色虚线标记。还剩 ${board.hintsLeft} 次提示。`); boardElement.children[i].focus(); });
+    $('hint-board').addEventListener('click', () => { const i = engine.hint(board); if (i < 0) return; hinted = i; selected = i; render(`已校准第 ${Math.floor(i / board.width) + 1} 行第 ${i % board.width + 1} 列，以金色虚线标记。还剩 ${board.hintsLeft} 次提示。`); boardElement.children[i].focus(); });
     $('new-board').addEventListener('click', newBoard);
     $('play-again').addEventListener('click', () => { newBoard(); boardElement.children[selected].focus(); });
-    $('board-size').addEventListener('change', newBoard);
+    $('next-level').addEventListener('click', () => { const next = engine.nextLevel(board, seed()); if (!next) return; startBoard(next); boardElement.children[selected].focus(); });
+    engine.LEVELS.forEach(level => { const option = document.createElement('option'); option.value = String(level.level); option.textContent = `第 ${level.level} 关 · ${level.width} × ${level.height} · ${level.width * level.height} 格`; $('board-level').appendChild(option); });
+    $('board-level').value = '1';
+    $('board-level').addEventListener('change', newBoard);
     newBoard();
 }());

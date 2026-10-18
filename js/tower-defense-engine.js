@@ -3,7 +3,7 @@
     else root.ForestDefense=factory();
 })(typeof globalThis!=='undefined'?globalThis:this,function() {
     'use strict';
-    const WAVES_PER_LEVEL=15,LEVEL_COUNT=5;
+    const WAVES_PER_LEVEL=15,LEVEL_COUNT=20;
     const PATH=[[ -35,175],[175,175],[310,290],[510,290],[655,447],[815,447],[925,330],[1035,330]];
     const SLOTS=[[145,265],[300,190],[435,385],[525,190],[655,325],[785,350],[870,520],[915,230]];
     const TYPES= {
@@ -61,13 +61,16 @@
         t.level++;
         return true;
     }
+    // Spread the proven difficulty range over 20 steps: tower caps and starting
+    // resources stay unchanged, so the final level remains beatable.
+    const difficulty = level => (level-1)/(LEVEL_COUNT-1);
     function startWave(s) {
         if(s.state!=='ready'||s.wave>=WAVES_PER_LEVEL)return false;
         s.wave++;
         s.state='running';
         s.spawn=.4;
         s.queue=Array.from( {
-            length:7+s.wave*2+(s.level-1)*2
+            length:7+s.wave*2+Math.floor(difficulty(s.level)*8)
         },(_,i)=>s.wave>=3&&i%5===4?'brute':s.wave>=2&&i%3===2?'runner':'goblin');
         if(s.wave===WAVES_PER_LEVEL)s.queue.push('boss');
         return true;
@@ -76,9 +79,9 @@
         const data= {
             goblin:[54,43,12,0],runner:[38,77,13,0],brute:[160,29,24,.42],boss:[1300,22,100,.3]
         }
-        [type],scale=(1+(s.wave-1)*.19)*(1+(s.level-1)*.12);
+        [type],scale=(1+(s.wave-1)*.19)*(1+difficulty(s.level)*.48);
         const e= {
-            id:++s.id,type,hp:data[0]*scale,maxHp:data[0]*scale,speed:data[1]*(1+(s.level-1)*.03),reward:data[2],armor:data[3],distance:0,slow:0,...position(0)
+            id:++s.id,type,hp:data[0]*scale,maxHp:data[0]*scale,speed:data[1]*(1+difficulty(s.level)*.12),reward:data[2],armor:data[3],distance:0,slow:0,...position(0)
         };
         s.enemies.push(e);
         return e;
@@ -91,7 +94,7 @@
         s.spawn-=dt;
         if(s.queue.length&&s.spawn<=0) {
             spawn(s,s.queue.shift());
-            s.spawn=(.76-Math.min(.22,s.wave*.02))/(1+(s.level-1)*.04);
+            s.spawn=(.76-Math.min(.22,s.wave*.02))/(1+difficulty(s.level)*.16);
         }
         for(const e of s.enemies) {
             e.slow=Math.max(0,e.slow-dt);
