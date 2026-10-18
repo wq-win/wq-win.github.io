@@ -14,11 +14,11 @@ test('All 16 tile masks rotate correctly in either direction', () => {
     for (let m = 0; m < 16; m++) { assert.equal(E.rotate(m, 4), m); assert.equal(E.rotate(E.rotate(m), -1), m); assert.equal(E.degree(E.rotate(m)), E.degree(m)); }
     assert.equal(E.rotate(1), 2); assert.equal(E.rotate(8), 1); assert.equal(E.rotate(3), 6); assert.equal(E.rotate(5), 10);
 });
-test('6,000 generated puzzles are connected trees, solvable, and initially unsolved', () => {
-    for (const size of [5, 6, 7]) for (let seed = 0; seed < 2000; seed++) {
-        const b = E.generate(size, seed), solved = E.inspect(b.solution, size, b.source);
-        assert(solved.solved, `${size}/${seed}`); assert.equal(solved.openEnds, 0); assert.equal(solved.powered.size, size * size);
-        assert.equal(b.solution.reduce((sum, m) => sum + E.degree(m), 0), 2 * (size * size - 1));
+test('6,000 generated puzzles across all 20 levels are connected trees, solvable, and initially unsolved', () => {
+    for (const size of E.LEVELS) for (let seed = 0; seed < 300; seed++) {
+        const b = E.generateLevel(size.level, seed), solved = E.inspect(b.solution, size, b.source);
+        assert(solved.solved, `${size}/${seed}`); assert.equal(solved.openEnds, 0); assert.equal(solved.powered.size, size.width * size.height);
+        assert.equal(b.solution.reduce((sum, m) => sum + E.degree(m), 0), 2 * (size.width * size.height - 1));
         assert(b.solution.every(m => m > 0 && m < 16)); assert(solved.terminals.length > 0);
         assert(!E.inspect(b.initial, size, b.source).solved);
         b.initial.forEach((m, i) => assert([0, 1, 2, 3].some(t => E.rotate(m, t) === b.solution[i])));
@@ -47,6 +47,44 @@ test('Win detection, solved-state guard, and replay lifecycle', () => {
     for (let i = 0; i < b.masks.length; i++) for (let j = 0; b.masks[i] !== b.solution[i] && j < 4; j++) E.turn(b, i);
     assert(E.inspect(b.masks, 5, b.source).solved); const moves = b.moves; assert.equal(E.turn(b, 0), false); assert.equal(E.hint(b), -1); assert.equal(b.moves, moves);
     E.reset(b); assert(!E.inspect(b.masks, 5, b.source).solved); assert(E.turn(b, 0));
+});
+
+test('20 level sizes strictly increase, are immutable, deterministic, and validate level input', () => {
+    assert.equal(E.LEVELS.length, 20);
+    let previous = 0;
+    for (const config of E.LEVELS) {
+        const cells = config.width * config.height;
+        assert(cells > previous); previous = cells;
+        assert(Object.isFrozen(config));
+        same(E.generateLevel(config.level, 42).initial, E.generateLevel(config.level, 42).initial);
+    }
+    assert.equal(previous, 210);
+    for (const invalid of [0, 21, -1, 1.5, NaN, '1']) assert.throws(() => E.generateLevel(invalid));
+});
+test('Every level resets correctly and advances only after solving; final level never overflows', () => {
+    let board = E.generateLevel(1, 99);
+    for (let level = 1; level <= 20; level++) {
+        assert.equal(board.level, level);
+        assert.equal(E.nextLevel(board, 100), null);
+        const initial = board.initial.slice();
+        E.hint(board); E.turn(board, 0); E.reset(board);
+        same(board.masks, initial); assert.equal(board.moves, 0); assert.equal(board.hintsLeft, 2);
+        board.masks = board.solution.slice();
+        assert(E.inspect(board.masks, board, board.source).solved);
+        assert.equal(E.turn(board, 0), false); assert.equal(E.hint(board), -1);
+        const next = E.nextLevel(board, 99 + level);
+        if (level === 20) assert.equal(next, null);
+        else { assert(next.masks.length > board.masks.length); board = next; }
+    }
+});
+test('Rectangular boundaries do not wrap and source is centrally placed', () => {
+    for (const config of E.LEVELS) {
+        const board = E.generateLevel(config.level, 1), { width, height } = board;
+        assert.equal(board.source, Math.floor(height / 2) * width + Math.floor(width / 2));
+        assert.equal(E.neighbor(width - 1, E.DIRS[1], board), -1);
+        assert.equal(E.neighbor(width * (height - 1), E.DIRS[2], board), -1);
+        assert.equal(E.neighbor(width * (height - 1), E.DIRS[0], board), width * (height - 2));
+    }
 });
 
 class Element {
@@ -96,8 +134,42 @@ test('Repeated completion, replay, and difficulty change have no stale victory o
         const before = ui.getBoard().masks.slice(); clickCell(0); same(ui.getBoard().masks, before);
         els['play-again'].dispatch('click'); assert.equal(els.victory.hidden, true); assert.equal(ui.getBoard().hintsLeft, 3); assert.equal(document.activeElement, grid.children[ui.getBoard().source]);
     }
-    els['board-size'].value = '7'; els['board-size'].dispatch('change'); assert.equal(grid.children.length, 49); assert.equal(grid.children.filter(el => el.tabIndex === 0).length, 1); assert.equal(els['cell-total'].textContent, 49);
+    els['board-level'].value = '5'; els['board-level'].dispatch('change'); assert.equal(grid.children.length, 49); assert.equal(grid.children.filter(el => el.tabIndex === 0).length, 1); assert.equal(els['cell-total'].textContent, 49);
     const oldSeed = ui.getBoard().seed; els['new-board'].dispatch('click'); assert.notEqual(ui.getBoard().seed, oldSeed); assert.equal(grid.children.length, 49);
+});
+test('UI progresses through all 20 levels, reveals next only on victory, and handles final completion', () => {
+    els['board-level'].value = '1'; els['board-level'].dispatch('change');
+    assert.equal(els['board-level'].children.length, 20);
+    for (let level = 1; level <= 20; level++) {
+        const board = ui.getBoard(), config = E.LEVELS[level - 1];
+        assert.equal(board.level, level); assert.equal(grid.children.length, config.width * config.height);
+        assert.equal(els['level-number'].textContent, level); assert.equal(els['board-level'].value, String(level));
+        assert.equal(els['next-level'].hidden, true);
+        els['next-level'].dispatch('click'); assert.equal(ui.getBoard(), board);
+        grid.children[config.width - 1].focus(); keyCell(config.width - 1, 'ArrowRight');
+        assert.equal(document.activeElement, grid.children[config.width - 1]);
+        grid.children[0].focus(); keyCell(0, 'ArrowDown'); assert.equal(document.activeElement, grid.children[config.width]);
+        board.masks = board.solution.slice(); ui.render();
+        assert.equal(els['next-level'].hidden, level === 20);
+        els['next-level'].dispatch('click');
+        if (level < 20) { assert.equal(document.activeElement, grid.children[ui.getBoard().source]); assert.equal(els.victory.hidden, true); }
+        else { assert.equal(ui.getBoard(), board); assert.match(els['victory-title'].textContent, /第二十关完成/); assert.match(els['net-status'].textContent, /最后一关/); }
+    }
+    els['play-again'].dispatch('click'); assert.equal(ui.getBoard().level, 20); assert.equal(els.victory.hidden, true);
+    els['board-level'].value = '2'; els['board-level'].dispatch('change'); assert.equal(grid.children.length, 30);
+    assert.match(grid.children[29].attributes['aria-label'], /第 6 行第 5 列/);
+});
+test('Large boards retain 44px touch targets and have a contained two-axis scroll region', () => {
+    const css = fs.readFileSync(path.join(root, 'css/net.css'), 'utf8');
+    assert(css.includes('minmax(44px,1fr)') && css.includes('min-height:44px'));
+    assert(css.includes('overflow:auto') && css.includes('touch-action:pan-x pan-y'));
+    assert(html.includes('id="board-scroll"') && html.includes('id="scroll-help"'));
+    // Minimum board widths include tile, gap and padding on desktop and mobile.
+    for (const level of E.LEVELS) for (const gap of [3, 5]) {
+        const padding = gap === 3 ? 6 : 8;
+        const width = level.width * (44 + gap) + 3;
+        assert((width - padding - (level.width - 1) * gap) / level.width >= 44);
+    }
 });
 test('Page uses only local assets and unchanged shared fullscreen contract', () => {
     assert(html.includes('data-game-view') && html.includes('data-game-fullscreen') && html.includes('data-game-view-status'));

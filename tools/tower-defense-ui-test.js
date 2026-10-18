@@ -85,17 +85,17 @@ async function main() {
             assert.equal(api.state, stateAfterFirstClick);
             assertReset(level + 1);
         }
-        seed(4, 'lost', 8);
+        seed(20, 'lost', 8);
         api.state.health = 0;
         api.sync();
         assert.equal(find('result-action').textContent, '重试本关');
         find('result-action').click();
-        assertReset(4);
+        assertReset(20);
         const retried = api.state;
         find('result-action').click();
         assert.equal(api.state, retried);
 
-        seed(5, 'running', 15);
+        seed(20, 'running', 15);
         frame();
         assert.equal(api.state.state, 'won');
         assert.equal(find('result-title').textContent, '全部关卡通关！');
