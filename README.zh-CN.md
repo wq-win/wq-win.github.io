@@ -46,7 +46,7 @@
 
 - [跑得快](https://wq-win.github.io/game/paodekuai.html)：与两位电脑牌友对局，每人十六张。支持点选／横滑选牌、合法出牌提示轮换、无牌可压时自动不出，以及基于公开信息的记牌器。记牌器扣除自己的手牌和已出牌，不展示任何一位对手的具体手牌。
 - [斗地主残局](https://wq-win.github.io/game/doudizhu.html)：11 关一对一明牌残局，提供策略提示、重开确认、通关进度保存，以及明确的重试／下一关操作。提示只选牌，不自动出牌；搜索达到上限时，会标明提示仅为合法参考，不保证获胜。
-- [蜘蛛纸牌](https://wq-win.github.io/game/spider.html)、[数独](https://wq-win.github.io/game/sudoku.html)、[江湖 Slay](https://wq-win.github.io/game/jianghu-slay.html)
+- [蜘蛛纸牌](https://wq-win.github.io/game/spider.html)、[数独](https://wq-win.github.io/game/sudoku.html)、[江湖 Slay](https://wq-win.github.io/game/jianghu-slay/)
 
 跑得快与斗地主残局使用统一的蓝金牌桌风格、原创人物画像和 J／Q／K 宫廷牌面。素材来源见[素材说明](game/assets/paodekuai/README.md)。
 

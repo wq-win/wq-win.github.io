@@ -46,7 +46,7 @@ The [demo hub](https://wq-win.github.io/game/) includes 17 algorithm demos:
 
 - [Paodekuai / 跑得快](https://wq-win.github.io/game/paodekuai.html): play against two computer opponents with 16 cards each. Includes tap/drag selection, cycling legal-move hints, automatic passes when no response is possible, and a public-information card counter. The counter subtracts your hand and played cards without revealing either opponent's hand.
 - [Doudizhu endgames / 斗地主残局](https://wq-win.github.io/game/doudizhu.html): 11 one-on-one, face-up puzzles with strategic hints, restart confirmation, saved completion progress, and explicit replay/next-level controls. Hints select a move without playing it; a search-limit fallback is labeled as a legal suggestion rather than a guaranteed win.
-- [Spider Solitaire](https://wq-win.github.io/game/spider.html), [Sudoku](https://wq-win.github.io/game/sudoku.html), and [Jianghu Slay](https://wq-win.github.io/game/jianghu-slay.html)
+- [Spider Solitaire](https://wq-win.github.io/game/spider.html), [Sudoku](https://wq-win.github.io/game/sudoku.html), and [Jianghu Slay](https://wq-win.github.io/game/jianghu-slay/)
 
 Paodekuai and Doudizhu share blue-and-gold table styling, original character portraits, and illustrated court cards. See the [asset notes](game/assets/paodekuai/README.md) for their provenance.
 
