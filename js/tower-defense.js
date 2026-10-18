@@ -388,7 +388,7 @@
         b.style.top=y/6+'%';
         b.textContent='+';
         b.addEventListener('click',()=> {
-            if(paused||['won','lost'].includes(state.state))return;
+            if(paused||['cleared','won','lost'].includes(state.state))return;
             selectedSlot=i;
             if(!state.towers[i]) {
                 if(E.build(state,i,selectedType))announce(`${i+1} 号位建成${E.TYPES[selectedType].name}。`);
@@ -408,7 +408,8 @@
         sync();
     }
     function sync() {
-        const ended=['won','lost'].includes(state.state);
+        const ended=['cleared','won','lost'].includes(state.state);
+        $('level').textContent=state.level;
         $('health').textContent=state.health;
         $('gold').textContent=state.gold;
         $('wave').textContent=state.wave;
@@ -432,7 +433,7 @@
         $('upgrade').textContent=t?(t.level>=3?'已满级':`升级 ◈ ${E.upgradeCost(t)} [U]`):'升级';
         $('next-wave').disabled=state.state!=='ready'||paused;
         $('next-wave').textContent=state.state==='running'?`第 ${state.wave} 波 · 防守中`:(ended?'战斗结束':`第 ${state.wave+1} 波 · 开始防守 →`);
-        $('wave-hint').textContent=state.state==='running'?`剩余 ${state.queue.length+state.enemies.length} 个敌人`:state.wave===9?'最终波：首领即将出现':'准备时间不限 · 建好再出发';
+        $('wave-hint').textContent=state.state==='running'?`剩余 ${state.queue.length+state.enemies.length} 个敌人`:state.wave===E.WAVES_PER_LEVEL-1?'最终波：首领即将出现':'准备时间不限 · 建好再出发';
         $('pause').disabled=ended;
         $('pause').textContent=paused?'继续':'暂停';
         $('pause').setAttribute('aria-pressed',paused);
@@ -440,25 +441,25 @@
         $('speed').setAttribute('aria-label',`当前${speed}倍速，切换到${speed===1?2:1}倍速`);
         $('overlay').hidden=!paused&&!ended;
         if(paused||ended) {
-            $('result-icon').textContent=ended?(state.state==='won'?'✦':'♜'):'Ⅱ';
-            $('result-title').textContent=paused?'林地暂时宁静':state.state==='won'?'守卫成功！':'防线失守';
-            $('result-text').textContent=paused?'准备好后，继续守护翡翠林地。':state.state==='won'?`你守住了全部 10 波，剩余 ${state.health} 点生命。`:`守到了第 ${state.wave} 波。试试在弯道集中火力，再搭配魔法塔减速。`;
-            $('result-action').textContent=paused?'继续守卫':'再战一次';
+            $('result-icon').textContent=ended?(state.state==='lost'?'♜':'✦'):'Ⅱ';
+            $('result-title').textContent=paused?'林地暂时宁静':state.state==='won'?'全部关卡通关！':state.state==='cleared'?`第 ${state.level} 关守卫成功！`:'防线失守';
+            $('result-text').textContent=paused?'准备好后，继续守护翡翠林地。':state.state==='won'?`你守住了全部 ${E.LEVEL_COUNT} 关！本关剩余 ${state.health} 点生命。`:state.state==='cleared'?`已守住本关 ${E.WAVES_PER_LEVEL} 波，剩余 ${state.health} 点生命。下一关敌人更强；生命、金币和建筑将重置。`:`第 ${state.level} 关 · 守到了第 ${state.wave} 波。试试在弯道集中火力，再搭配魔法塔减速。`;
+            $('result-action').textContent=paused?'继续守卫':state.state==='cleared'?`进入第 ${state.level+1} 关 →`:state.state==='won'?'从第 1 关再挑战':'重试本关';
         }
     }
     function togglePause() {
-        if(['won','lost'].includes(state.state))return;
+        if(['cleared','won','lost'].includes(state.state))return;
         paused=!paused;
         accumulator=0;
         sync();
     }
-    function restart() {
-        state=E.create();
+    function restart(level=state.level) {
+        state=E.create(level);
         paused=false;
         selectedSlot=-1;
         wasState='ready';
         accumulator=0;
-        announce('新的防线已准备好。初始 300 金币，选择空地建造。');
+        announce(`第 ${state.level} 关已准备好。每关 ${E.WAVES_PER_LEVEL} 波，初始 300 金币，选择空地建造。`);
         sync();
     }
     document.querySelectorAll('[data-tower]').forEach(b=>b.addEventListener('click',()=>select(b.dataset.tower)));
@@ -470,7 +471,7 @@
     });
     $('next-wave').addEventListener('click',()=> {
         if(!paused&&E.startWave(state)) {
-            announce(`第 ${state.wave} 波来袭！战斗中也可以建造和升级。`);
+            announce(`第 ${state.level} 关 · 第 ${state.wave} 波来袭！战斗中也可以建造和升级。`);
             sync();
         }
     });
@@ -480,9 +481,14 @@
         sync();
     });
     $('restart').addEventListener('click',()=> {
-        if(state.wave===0&&!state.towers.some(Boolean)||window.confirm('重新开局会清除本局进度，确定吗？'))restart();
+        if(state.wave===0&&!state.towers.some(Boolean)||window.confirm('重试本关会清除本关进度，确定吗？'))restart();
     });
-    $('result-action').addEventListener('click',()=>paused?togglePause():restart());
+    $('result-action').addEventListener('click',()=> {
+        if(paused)togglePause();
+        else if(state.state==='cleared')restart(state.level+1);
+        else if(state.state==='won')restart(1);
+        else if(state.state==='lost')restart();
+    });
     document.addEventListener('visibilitychange',()=> {
         if(document.hidden&&!paused&&state.state==='running')togglePause();
         last=0;
@@ -513,8 +519,9 @@
         }
         if(state.state!==wasState) {
             if(state.state==='ready'&&state.wave>0)announce(`第 ${state.wave} 波守住了！获得补给金币，准备好了再开始下一波。`);
-            if(state.state==='won')announce('守卫成功！全部 10 波已完成。');
-            if(state.state==='lost')announce('防线失守。可重新开局挑战。');
+            if(state.state==='cleared')announce(`第 ${state.level} 关的 ${E.WAVES_PER_LEVEL} 波已完成，可以进入下一关。`);
+            if(state.state==='won')announce(`守卫成功！全部 ${E.LEVEL_COUNT} 关已完成。`);
+            if(state.state==='lost')announce('防线失守。可重试当前关卡。');
             wasState=state.state;
             sync();
         }
