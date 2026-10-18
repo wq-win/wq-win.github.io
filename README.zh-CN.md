@@ -40,6 +40,7 @@
 
 ### 浏览器小游戏
 
+- [雪境营地](https://wq-win.github.io/game/snow-camp.html)：原创单机雪镇生存初版，分配八位居民采集、烹饪和建造，维持暖炉并挺过五日寒潮；支持浏览器本地续玩，无账号或后端。
 - [迷你塔防](https://wq-win.github.io/game/tower-defense.html)：建造、升级箭塔、魔法塔和炮塔，挑战二十个难度递增的关卡，每关十五波进攻，支持暂停与加速。
 - [接线谜题](https://wq-win.github.io/game/net.html)：旋转线路连接电源与终点；共 20 关，棋盘从 5×5 逐步扩大至 14×15，支持重置、提示与键盘操作。
 
