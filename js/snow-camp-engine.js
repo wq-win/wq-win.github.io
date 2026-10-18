@@ -3,24 +3,38 @@
     else root.SnowCamp=factory();
 })(typeof globalThis!=='undefined'?globalThis:this,function(){
     'use strict';
-    const VERSION=1,DAY_SECONDS=96,DURATION=480;
-    const JOBS={wood:{name:'伐木',description:'每人每秒采集 0.13 木材'},hunt:{name:'狩猎',description:'每人每秒采集 0.16 生食，暴风雪中减半'},coal:{name:'采煤',description:'每人每秒采集 0.08 煤炭'},cook:{name:'烹饪',description:'每人每秒将 0.20 生食加工成口粮'},build:{name:'建造',description:'每人每秒完成 0.8 建造进度'},medic:{name:'医疗',description:'建成医务站后照顾伤员'}};
+    const VERSION=2,DAY_SECONDS=96,DURATION=480;
+    const JOBS={wood:{name:'伐木',description:'每人每秒采集 0.22 木材'},hunt:{name:'狩猎',description:'每人每秒采集 0.18 生食，暴风雪中减半'},coal:{name:'采煤',description:'每人每秒采集 0.10 煤炭'},cook:{name:'烹饪',description:'每人每秒将 0.24 生食加工成口粮'},build:{name:'建造',description:'每人每秒完成 1 建造进度'},medic:{name:'医疗',description:'建成医务站后照顾伤员'}};
     const BUILDINGS={housing:{name:'保温住所',description:'每级为全体居民增加 6°C 保温',costs:[20,32],work:[18,30]},sawmill:{name:'锯木场',description:'每级增加 50% 伐木产量',costs:[18,28],work:[16,26]},kitchen:{name:'厨房',description:'每级提高烹饪速度与食材利用率',costs:[16,26],work:[16,26]},clinic:{name:'医务站',description:'让医护人员持续恢复全体居民健康',costs:[18,28],work:[18,28]}};
     const HEAT=[0,14,26,38],FUEL=[0,.08,.20,.34];
+    const MILESTONES=[
+        {id:'furnace_ready',name:'炉火就绪',description:'将炉火升至 2 级，并储备 12 煤炭',reward:{wood:8},progress:s=>Math.min(s.furnace.level/2,s.resources.coal/12)},
+        {id:'warm_home',name:'温暖的家',description:'完成第一座保温住所',reward:{food:6},progress:s=>s.buildings.housing>=1?1:(s.queue.find(q=>q.building==='housing')?.progress/BUILDINGS.housing.work[0]||0)},
+        {id:'first_night_food',name:'首夜口粮',description:'储备 20 份口粮',reward:{coal:8},progress:s=>s.resources.food/20}
+    ];
     const clamp=(n,a,b)=>Math.min(b,Math.max(a,n));
     function note(s,text){s.log.push({at:s.elapsed,text});if(s.log.length>24)s.log.shift();}
-    function create(){return {version:VERSION,status:'ready',elapsed:0,remainder:0,resources:{wood:16,rawFood:8,food:12,coal:20},jobs:{wood:2,hunt:1,coal:2,cook:1,build:1,medic:1},buildings:{housing:0,sawmill:0,kitchen:0,clinic:0},queue:[],residents:Array.from({length:8},(_,i)=>({id:i+1,health:100,hunger:0,cold:0,alive:true})),furnace:{level:1},log:[{at:0,text:'八名居民抵达雪境。维持供暖与口粮，至少让五人撑过五天。'}],reason:''};}
+    function milestones(s){return MILESTONES.map(m=>({id:m.id,name:m.name,description:m.description,done:s.claimed[m.id],progress:s.claimed[m.id]?1:clamp(m.progress(s),0,1),reward:{...m.reward}}));}
+    function claimMilestones(s){
+        for(const m of MILESTONES)if(!s.claimed[m.id]&&m.progress(s)>=1){
+            s.claimed[m.id]=true;
+            for(const [key,amount] of Object.entries(m.reward))s.resources[key]=clamp(s.resources[key]+amount,0,9999);
+            const labels={wood:'木材',food:'口粮',coal:'煤炭'};
+            note(s,'里程碑：'+m.name+'，奖励 '+Object.entries(m.reward).map(([key,amount])=>amount+' '+labels[key]).join('、'));
+        }
+    }
+    function create(){return {version:VERSION,claimed:Object.fromEntries(MILESTONES.map(m=>[m.id,false])),status:'ready',elapsed:0,remainder:0,resources:{wood:16,rawFood:8,food:12,coal:20},jobs:{wood:2,hunt:1,coal:2,cook:1,build:1,medic:1},buildings:{housing:0,sawmill:0,kitchen:0,clinic:0},queue:[],residents:Array.from({length:8},(_,i)=>({id:i+1,health:100,hunger:0,cold:0,alive:true})),furnace:{level:1},log:[{at:0,text:'八名居民抵达雪境。维持供暖与口粮，至少让五人撑过五天。'}],reason:''};}
     function view(s){
         const day=Math.min(5,Math.floor(s.elapsed/DAY_SECONDS)+1),hour=(8+s.elapsed/4)%24,phase=hour>=7&&hour<19?'day':'night';
         const storm=(s.elapsed>=216&&s.elapsed<300)||s.elapsed>=408;
         const stormSoon=(s.elapsed>=168&&s.elapsed<216)||(s.elapsed>=360&&s.elapsed<408);
         const temperature=-14-(day-1)*2-(phase==='night'?8:0)-(storm?12:0);
-        const furnaceActive=s.furnace.level>0&&s.resources.coal+s.jobs.coal*.08>=FUEL[s.furnace.level];
+        const furnaceActive=s.furnace.level>0&&s.resources.coal+s.jobs.coal*.10>=FUEL[s.furnace.level];
         const heat=furnaceActive?HEAT[s.furnace.level]:0;
         const population=s.residents.filter(r=>r.alive).length,workers=Object.values(s.jobs).reduce((a,b)=>a+b,0);
-        const hunting=s.jobs.hunt*.16*(storm?.5:1);
-        const cooking=Math.min(s.jobs.cook*.20*(1+s.buildings.kitchen*.5),(s.resources.rawFood+hunting)*(1+s.buildings.kitchen*.25)),rawNeeded=cooking/(1+s.buildings.kitchen*.25);
-        return {day,hour,phase,temperature,stormSoon,storm,workers,freeWorkers:population-workers,population,heat,furnaceActive,effectiveTemperature:temperature+heat+10+s.buildings.housing*6,foodPerDay:population*.02*DAY_SECONDS,progress:s.elapsed/DURATION,forecast:storm?'暴风雪正在肆虐':stormSoon?'暴风雪将在 '+Math.ceil(((s.elapsed<216?216:408)-s.elapsed)/4)+' 小时后抵达':'第 3 天与第 5 天将有暴风雪',rates:{wood:s.jobs.wood*.13*(1+s.buildings.sawmill*.5),rawFood:s.jobs.hunt*.16*(storm?.5:1)-rawNeeded,food:cooking-population*.02,coal:s.jobs.coal*.08-(furnaceActive?FUEL[s.furnace.level]:0)}};
+        const hunting=s.jobs.hunt*.18*(storm?.5:1);
+        const cooking=Math.min(s.jobs.cook*.24*(1+s.buildings.kitchen*.5),(s.resources.rawFood+hunting)*(1+s.buildings.kitchen*.25)),rawNeeded=cooking/(1+s.buildings.kitchen*.25);
+        return {day,hour,phase,temperature,stormSoon,storm,workers,freeWorkers:population-workers,population,heat,furnaceActive,effectiveTemperature:temperature+heat+10+s.buildings.housing*6,foodPerDay:population*.02*DAY_SECONDS,progress:s.elapsed/DURATION,forecast:storm?'暴风雪正在肆虐':stormSoon?'暴风雪将在 '+Math.ceil(((s.elapsed<216?216:408)-s.elapsed)/4)+' 小时后抵达':'第 3 天与第 5 天将有暴风雪',rates:{wood:s.jobs.wood*.22*(1+s.buildings.sawmill*.5),rawFood:s.jobs.hunt*.18*(storm?.5:1)-rawNeeded,food:cooking-population*.02,coal:s.jobs.coal*.10-(furnaceActive?FUEL[s.furnace.level]:0)}};
     }
     function act(s,a){
         const fail=message=>({ok:false,message});
@@ -31,15 +45,28 @@
         }
         if(a.type==='pause'){if(s.status!=='running')return fail('当前没有运行');s.status='paused';return {ok:true,message:'已暂停'};}
         if(!['ready','running','paused'].includes(s.status))return fail('本局已经结束');
+        if(a.type==='dispatch'){
+            if(!Object.hasOwn(JOBS,a.job))return fail('无效岗位');
+            let source=null;
+            if(view(s).freeWorkers<=0){
+                const order=s.buildings.clinic===0?['medic','build','wood','hunt','cook','coal']:['build','wood','hunt','cook','coal','medic'];
+                // Prefer idle builders, then surplus assignments, before moving a sole essential worker.
+                source=order.find(job=>job!==a.job&&s.jobs[job]>0&&((job==='medic'&&!s.buildings.clinic)||(job==='build'&&!s.queue.length)))||order.find(job=>job!==a.job&&s.jobs[job]>1)||order.find(job=>job!==a.job&&s.jobs[job]>0);
+                if(!source)return fail('没有可调派的居民');
+                s.jobs[source]--;
+            }
+            s.jobs[a.job]++;claimMilestones(s);
+            return {ok:true,message:'已从'+(source?JOBS[source].name+'岗位':'空闲居民')+'调派 1 人至'+JOBS[a.job].name,source};
+        }
         if(a.type==='assign'){
             if(!Object.hasOwn(JOBS,a.job)||![-1,1].includes(a.delta))return fail('无效岗位');
             if(a.delta<0&&s.jobs[a.job]===0)return fail('该岗位没有居民');
             if(a.delta>0&&view(s).freeWorkers===0)return fail('请先从其他岗位调出一人');
-            s.jobs[a.job]+=a.delta;return {ok:true,message:'岗位已调整'};
+            s.jobs[a.job]+=a.delta;claimMilestones(s);return {ok:true,message:'岗位已调整'};
         }
         if(a.type==='heat'){
             if(!Number.isInteger(a.level)||a.level<0||a.level>3)return fail('炉火仅支持 0 至 3 级');
-            s.furnace.level=a.level;return {ok:true,message:a.level?'炉火已调整':'炉火已关闭'};
+            s.furnace.level=a.level;claimMilestones(s);return {ok:true,message:a.level?'炉火已调整':'炉火已关闭'};
         }
         if(a.type==='build'){
             if(!Object.hasOwn(BUILDINGS,a.building))return fail('未知建筑');
@@ -58,13 +85,13 @@
         if(v.stormSoon&&!before.stormSoon)note(s,'风暴预警：12 小时后暴风雪抵达，请储备煤炭与口粮。');
         if(v.storm&&!before.storm)note(s,'暴风雪抵达：气温骤降，猎人产量减半。');
         if(!v.storm&&before.storm)note(s,'第一场暴风雪已经过去。');
-        r.wood+=v.rates.wood;r.rawFood+=j.hunt*.16*(v.storm?.5:1);r.coal+=j.coal*.08;
+        r.wood+=v.rates.wood;r.rawFood+=j.hunt*.18*(v.storm?.5:1);r.coal+=j.coal*.10;
         const fuel=FUEL[s.furnace.level],active=s.furnace.level>0&&r.coal>=fuel;
         if(active)r.coal-=fuel;
         const warmth=v.temperature+(active?HEAT[s.furnace.level]:0)+10+s.buildings.housing*6;
-        const efficiency=1+s.buildings.kitchen*.25,cooked=Math.min(j.cook*.20*(1+s.buildings.kitchen*.5),r.rawFood*efficiency);
+        const efficiency=1+s.buildings.kitchen*.25,cooked=Math.min(j.cook*.24*(1+s.buildings.kitchen*.5),r.rawFood*efficiency);
         r.rawFood-=cooked/efficiency;r.food+=cooked;
-        if(s.queue.length&&j.build){const q=s.queue[0];q.progress+=j.build*.8;if(q.progress+1e-8>=q.required){s.buildings[q.building]=q.target;s.queue.shift();note(s,BUILDINGS[q.building].name+' '+q.target+' 级已建成');}}
+        if(s.queue.length&&j.build){const q=s.queue[0];q.progress+=j.build*1;if(q.progress+1e-8>=q.required){s.buildings[q.building]=q.target;s.queue.shift();note(s,BUILDINGS[q.building].name+' '+q.target+' 级已建成');}}
         // Rotate ration order each second so shortages do not always hurt the last resident.
         for(let n=0;n<8;n++){
             const resident=s.residents[(n+s.elapsed)%8];if(!resident.alive)continue;
@@ -80,6 +107,7 @@
         for(const job of ['medic','build','wood','hunt','cook','coal'])while(excess>0&&j[job]>0){j[job]--;excess--;}
         if(s.residents.filter(p=>p.alive).length<5){s.status='lost';s.reason='不足五名居民存活，营地无法继续维持。';note(s,s.reason);}
         else if(s.elapsed>=DURATION){s.status='won';s.reason='救援队抵达！你让 '+view(s).population+' 名居民撑过了五天。';note(s,s.reason);}
+        claimMilestones(s);
         for(const key of Object.keys(r))r[key]=clamp(r[key],0,9999);
     }
     function tick(s,seconds=1){
@@ -89,11 +117,12 @@
         if(s.status!=='running')s.remainder=0;
         return s;
     }
-    function validate(s){
+    function validate(s,legacy=false){
         const num=(v,min,max)=>typeof v==='number'&&Number.isFinite(v)&&v>=min&&v<=max;
         const int=(v,min,max)=>Number.isInteger(v)&&num(v,min,max);
         const exact=(o,keys)=>o&&typeof o==='object'&&!Array.isArray(o)&&Object.keys(o).sort().join('|')===keys.slice().sort().join('|');
-        if(!exact(s,['version','status','elapsed','remainder','resources','jobs','buildings','queue','residents','furnace','log','reason'])||s.version!==VERSION||!['ready','running','paused','won','lost'].includes(s.status)||!int(s.elapsed,0,DURATION)||!num(s.remainder,0,.9999999999999999))throw Error('存档版本或时间无效');
+        if(!exact(s,['version',...(legacy?[]:['claimed']),'status','elapsed','remainder','resources','jobs','buildings','queue','residents','furnace','log','reason'])||s.version!==(legacy?1:VERSION)||!['ready','running','paused','won','lost'].includes(s.status)||!int(s.elapsed,0,DURATION)||!num(s.remainder,0,.9999999999999999))throw Error('存档版本或时间无效');
+        if(!legacy&&(!exact(s.claimed,MILESTONES.map(m=>m.id))||!Object.values(s.claimed).every(v=>typeof v==='boolean')))throw Error('存档里程碑无效');
         if(!exact(s.resources,['wood','rawFood','food','coal'])||!Object.values(s.resources).every(v=>num(v,0,9999))||!exact(s.jobs,Object.keys(JOBS))||!Object.values(s.jobs).every(v=>int(v,0,8))||!exact(s.buildings,Object.keys(BUILDINGS))||!Object.values(s.buildings).every(v=>int(v,0,2))||!exact(s.furnace,['level'])||!int(s.furnace.level,0,3))throw Error('存档资源或岗位无效');
         if(!Array.isArray(s.residents)||s.residents.length!==8||!s.residents.every((p,i)=>exact(p,['id','health','hunger','cold','alive'])&&p.id===i+1&&num(p.health,0,100)&&num(p.hunger,0,100)&&num(p.cold,0,100)&&typeof p.alive==='boolean'&&p.alive===(p.health>0)))throw Error('存档居民无效');
         const population=s.residents.filter(p=>p.alive).length;
@@ -104,6 +133,6 @@
         return s;
     }
     function save(s){validate(s);return JSON.stringify(s);}
-    function restore(text){if(typeof text!=='string'||text.length>16000)throw Error('存档无效');let s;try{s=JSON.parse(text);}catch(e){throw Error('无法读取存档');}validate(s);if(s.status==='running')s.status='paused';return s;}
-    return {VERSION,DAY_SECONDS,DURATION,JOBS,BUILDINGS,HEAT,FUEL,create,view,act,tick,save,restore};
+    function restore(text){if(typeof text!=='string'||text.length>16000)throw Error('存档无效');let s;try{s=JSON.parse(text);}catch(e){throw Error('无法读取存档');}if(s&&s.version===1){validate(s,true);s.version=VERSION;s.claimed=Object.fromEntries(MILESTONES.map(m=>[m.id,m.progress(s)>=1]));}validate(s);if(s.status==='running')s.status='paused';return s;}
+    return {VERSION,DAY_SECONDS,DURATION,JOBS,BUILDINGS,HEAT,FUEL,create,view,milestones,act,tick,save,restore};
 });
