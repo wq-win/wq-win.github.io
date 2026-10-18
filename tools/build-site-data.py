@@ -220,11 +220,11 @@ STATIC_PAGES = [
         "year": 2026,
     },
     {
-        "url": "game/jianghu-slay.html",
+        "url": "game/jianghu-slay/",
         "title": "江湖 Slay",
         "cardTitle": "江湖 Slay",
         "question": "卡牌对战",
-        "excerpt": "可在线游玩的江湖 Slay，支持人机和房间对战。",
+        "excerpt": "浏览器单机江湖 Slay，支持 1v1 / 1v2 人机对战与本地续玩。",
         "series": "game",
         "seriesLabel": "演示",
         "year": 2026,
