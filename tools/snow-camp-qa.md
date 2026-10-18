@@ -24,3 +24,12 @@ Original single-player HTML/Canvas game, tested 2026-10-18.
 ## Scope
 
 Five-day / roughly eight-minute single-player scenario, eight initial residents, minimum five survivors. Four upgradeable facilities, six jobs, four heat settings, two storm periods. No accounts, payments, backend, multiplayer, hero collection or copied commercial assets. All game assets are local; scene is original Canvas artwork.
+
+## Direct-action and visual progression update (2026-10-18)
+
+- Map buttons and the actual tree/building canvas areas dispatch workers, change furnace heat, and start paid construction directly. Worker reassignment conserves residents and reports its source.
+- Starting tents, cooking camp and snowy plots visibly become buildings. Furnaces, warm clearings, lanterns and scaffolding reflect engine state; assigned workers commute/work/carry supplies and freeze on pause.
+- Gathering and construction are faster: first home is available after 10 seconds of default gathering and 18 seconds of construction. Three milestones award resources once; valid old saves migrate without regranting earned rewards.
+- Expanded engine/controller/renderer regression tests cover migration, reward replay prevention, raw canvas actions, 100% real draw calls, assigned routes, pause/restart, save/load, and frozen simulation animation.
+- Cloud Chromium verified map staffing, furnace reward, paid housing queue and completed wooden house, all milestones, pause and reload/resume. CSS-width 320 and 390 checks have no horizontal overflow or overlapping map buttons; all eight map action targets are 44px high.
+- Physical iOS/Safari and real-device touch were not available. Browser checks use desktop Chromium responsive frames.
