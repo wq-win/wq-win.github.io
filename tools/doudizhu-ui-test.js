@@ -389,7 +389,8 @@ test('required controls are unique and local page assets exist', () => {
     for (const match of page.matchAll(/(?:src|href)="([^"#]+)"/g)) {
         const url = match[1];
         if (/^(?:https?:|data:|mailto:)/.test(url)) continue;
-        const local = url.startsWith('/') ? path.join(root, url) : path.resolve(root, 'game', url);
+        const assetPath = url.split(/[?#]/)[0];
+        const local = assetPath.startsWith('/') ? path.join(root, assetPath) : path.resolve(root, 'game', assetPath);
         assert.ok(fs.existsSync(local), 'Missing page asset or link: ' + url);
     }
     assert.doesNotMatch(page, /id="dd-win"/, 'The old fullscreen auto-advance result layer should be gone.');
