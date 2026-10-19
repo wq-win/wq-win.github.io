@@ -1,0 +1,8 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const root=path.resolve(__dirname,'..'),css=fs.readFileSync(path.join(root,'game/assets/parking.css'),'utf8'),ui=fs.readFileSync(path.join(root,'game/js/parking.js'),'utf8');
+function luminance(hex){const v=hex.replace('#','').match(/../g).map(x=>parseInt(x,16)/255).map(x=>x<=.04045?x/12.92:Math.pow((x+.055)/1.055,2.4));return v[0]*.2126+v[1]*.7152+v[2]*.0722;}
+function contrast(a,b){const x=luminance(a),y=luminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);}
+const pairs=[['main text','#29493c','#e9f2e8'],['secondary/instruction text','#4e6550','#e9f2e8'],['secondary on board','#4e6550','#dce5d5'],['blocked instruction','#964427','#e9f2e8'],['accent title','#a74c24','#e9f2e8'],['next-level button','#ffffff','#335f49'],['select/restart','#29493c','#f8f9f0']];
+const paints=[...ui.matchAll(/\['(#[a-f0-9]{6})','#[a-f0-9]{6}'\]/g)].map(m=>m[1]);assert.equal(paints.length,9);for(const paint of paints)pairs.push(['car arrow/number '+paint,'#172a20',paint]);for(const [name,ink,bg] of pairs){const ratio=contrast(ink,bg);assert(ratio>=4.5,`${name}: ${ratio.toFixed(2)} fails 4.5:1`);console.log(`${name}: ${ratio.toFixed(2)}:1`);}
+assert(css.includes('.car-arrow,.car-number{color:#172a20;text-shadow:none;opacity:1}'));assert(css.includes('.feedback.error{color:#964427}'));assert(css.includes('.wordmark,.eyebrow,.level-tag small,.remaining,.feedback,.guide-number,.guide p,.guide-foot,.guide .saved,.scene-label,.street-mark{color:#4e6550}'));console.log('parking contrast: essential text color contracts pass');
