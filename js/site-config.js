@@ -13,6 +13,7 @@
             { id: 'robot-classic', href: 'robot-classic/index.html', label: '机器人经典基础 100 篇', short: '机器人经典' }
         ],
         demos: [
+            { group: '游戏', href: 'game/yarn.html', title: '拆毛线' },
             { group: '游戏', href: 'game/sudoku.html', title: 'Sudoku' },
             { group: '游戏', href: 'game/spider.html', title: '蜘蛛纸牌' },
             { group: '游戏', href: 'game/doudizhu.html', title: '斗地主残局' },
