@@ -1,0 +1,20 @@
+(function(){
+'use strict';
+const E=window.ParkingEngine,$=id=>document.getElementById(id),KEY='cozy-parking-v1';
+const colors=[['#ec9b64','#bd7246'],['#80b5b3','#588c8b'],['#e4c767','#b29b49'],['#b4a5c9','#8f7fa6'],['#c48378','#9f625b'],['#9cb976','#768e56'],['#83a5c8','#5e7fa0'],['#dba6ba','#b47e92'],['#c2b291','#98886a']];
+const directionNames={E:'右',W:'左',N:'上',S:'下'},angles={E:0,S:90,W:180,N:270};
+let state;try{state=E.restore(localStorage.getItem(KEY));}catch(e){state=E.create();}
+let busy=false,epoch=0;
+function persist(){try{localStorage.setItem(KEY,E.save(state));$('saved').textContent='进度自动保存在此浏览器';}catch(e){$('saved').textContent='此浏览器无法保存；本次仍可游玩';}}
+function feedback(text,error=false){$('feedback').textContent=text;$('feedback').classList.toggle('error',error);}
+function render(){busy=false;epoch++;const board=$('parking-board'),level=E.LEVELS[state.level];board.replaceChildren();$('level-number').textContent=String(state.level+1).padStart(2,'0');$('remaining').textContent=String(state.remaining.length);$('level-select').value=String(state.level);document.querySelector('.level-picker').dataset.label=String(state.level+1).padStart(2,'0');$('win-card').hidden=!!state.remaining.length;$('win-title').textContent=state.level===15?(state.completed.length===16?'十六站，全部走过！':'最后一站，顺利出发！'):'小车都出发啦！';$('next-level').textContent=state.level===15?'再兜一圈 ↶':'下一站 →';
+for(const c of level.cars){if(!state.remaining.includes(c.id))continue;const cells=E.cells(c),midX=(cells[0][0]+cells[1][0])/2+.5,midY=(cells[0][1]+cells[1][1])/2+.5,d=E.DIRS[c.dir],button=document.createElement('button');button.type='button';button.className='car';button.dataset.car=String(c.id);button.setAttribute('aria-label',`${c.id+1}号小车，车头朝${directionNames[c.dir]}，点击直行离开`);button.style.cssText=`left:calc(var(--cell)*${midX});top:calc(var(--cell)*${midY});width:calc(var(--cell)*2);height:var(--cell);transform:translate(-50%,-50%) rotate(${angles[c.dir]}deg);--paint:${colors[c.id%colors.length][0]};--dark:${colors[c.id%colors.length][1]};--exit-x:${d[0]*500}px;--exit-y:${d[1]*500}px;--bump-x:${d[0]*4}px;--bump-y:${d[1]*4}px;`;
+button.innerHTML='<span class="car-body"><span class="car-wheel"></span><span class="car-arrow">›</span><span class="car-number">'+(c.id+1)+'</span></span>';button.addEventListener('click',()=>depart(c.id,button));board.append(button);}
+}
+function depart(id,button){if(busy||!state.remaining.includes(id))return;document.querySelectorAll('.obstacle,.blocked').forEach(el=>el.classList.remove('obstacle','blocked'));const result=E.act(state,id);if(!result.ok){button.classList.add('blocked');result.blockers.forEach(id=>document.querySelector(`[data-car="${id}"]`)?.classList.add('obstacle'));feedback('前方还有车，先让红框小车出发吧',true);const ticket=epoch;setTimeout(()=>{if(ticket===epoch)document.querySelectorAll('.obstacle,.blocked').forEach(el=>el.classList.remove('obstacle','blocked'));},900);return;}
+busy=true;button.classList.add('leaving');button.disabled=true;$('remaining').textContent=String(state.remaining.length);feedback(result.won?'停车场清空了，出发去下一站！':'顺利出发！再看看哪辆车前方空了');persist();const ticket=epoch;const reduced=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;setTimeout(()=>{if(ticket!==epoch)return;button.remove();busy=false;if(result.won){$('win-title').textContent=state.level===15?(state.completed.length===16?'十六站，全部走过！':'最后一站，顺利出发！'):'小车都出发啦！';$('win-card').hidden=false;$('next-level').focus();}else{const next=document.querySelector('.car');if(next)next.focus({preventScroll:true});}},reduced?0:580);
+}
+function go(index){const completed=state.completed.slice();state=E.create(index);state.completed=completed;render();feedback('箭头是车头方向，前方空了就能走');persist();}
+for(let i=0;i<16;i++){const option=document.createElement('option');option.value=String(i);option.textContent=`第 ${i+1} 关 · ${E.LEVELS[i].cars.length} 辆车`;$('level-select').append(option);}
+$('restart').addEventListener('click',()=>go(state.level));$('next-level').addEventListener('click',()=>go((state.level+1)%16));$('level-select').addEventListener('change',e=>go(Number(e.target.value)));render();persist();
+})();
