@@ -13,6 +13,9 @@
             { id: 'robot-classic', href: 'robot-classic/index.html', label: '机器人经典基础 100 篇', short: '机器人经典' }
         ],
         demos: [
+            { group: '游戏', href: 'game/grocery-triple.html', title: '杂货找三消' },
+            { group: '游戏', href: 'game/water-sort.html', title: '倒水分色' },
+            { group: '游戏', href: 'game/sum-ten.html', title: '框选凑十' },
             { group: '游戏', href: 'game/tile-frontier.html', title: '翻格筑城' },
             { group: '游戏', href: 'game/hanzi-battle.html', title: '字阵出征' },
             { group: '游戏', href: 'game/screws.html', title: '拧螺丝' },
