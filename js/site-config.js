@@ -13,6 +13,8 @@
             { id: 'robot-classic', href: 'robot-classic/index.html', label: '机器人经典基础 100 篇', short: '机器人经典' }
         ],
         demos: [
+            { group: '游戏', href: 'game/tile-frontier.html', title: '翻格筑城' },
+            { group: '游戏', href: 'game/hanzi-battle.html', title: '字阵出征' },
             { group: '游戏', href: 'game/screws.html', title: '拧螺丝' },
             { group: '游戏', href: 'game/parking.html', title: '挪车出库' },
             { group: '游戏', href: 'game/yarn.html', title: '拆毛线' },
