@@ -46,3 +46,7 @@ No existing file, entry point or package script was changed. The local `node_mod
 
 ## Final integration browser verification — 2026-10-19
 Cloud Chromium: seven requested viewports fit without scrolling and controls meet 44px. Real source/target clicks completed level 1 (4 pours) and level 8 (29 pours); victory and restart were verified. At 320×568 all nine bottles fit, each target 49×120px. Screenshots and measurements are in the separate release evidence bundle. These are Chromium viewport tests, not physical-device tests.
+
+## 2026-10-21 polish
+- Undo restores one prior legal move by replaying recorded history; completed-level awards remain earned. Disabled at initial board and during pour animation.
+- Shared opt-in sound/mute is locally persisted. Compact landscape controls use two rows to retain 44px buttons.

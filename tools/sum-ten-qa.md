@@ -3,7 +3,7 @@
 ## Scope
 
 - One 90-second mode. Canonical logical board: 8 rows × 6 columns, integers 1–9. Portrait renders 8 rows × 6 columns; landscape transposes to 6 rows × 8 columns without replacing the state.
-- A rectangle totaling exactly 10 removes every nonzero cell inside. Each removed cell earns 1 point. Empty cells count as 0; no refill, bonus, multiplier, rankings, storage, power-ups, or shuffle controls.
+- A rectangle totaling exactly 10 removes every nonzero cell inside. Each removed cell earns 1 point. Empty cells count as 0; no refill, bonus, multiplier, rankings, power-ups, or shuffle controls.
 - Explicit Start begins the timer. Restart begins a fresh board and cancels prior animation callbacks. The initial random board guarantees at least 24 disjoint legal rectangles using randomly oriented, randomly valued domino pairs; no visible grouping is rendered.
 - The timer uses an absolute performance-clock deadline. A release at or after the deadline earns no points. Visibility changes, rules, resizing, orientation, and fullscreen never pause or reset it. An unsolvable board or cleared board ends immediately.
 - All fruit, basket, leaf, effects and typography are local CSS/system fonts. No external assets, APIs or packages added.
@@ -26,7 +26,7 @@ All passed on 2026-10-19.
 
 ### DOM interaction
 
-Happy DOM dispatches real PointerEvent objects through the installed pointerdown → pointermove → pointerup handlers. Tests check touch and mouse paths, capture and release, four corner directions, live selection sum and highlight, multiple pointers, cancellation, lost capture, out-of-board release, re-entry, keyboard anchoring/arrows/confirmation/cancel/repeat, transposed keyboard and pointer paths, resize cancellation with board/time preservation, fullscreen, rules, exact-deadline release, background expiration, restart, end-state focus, no-moves and full-clear feedback, reduced motion, old callback cleanup and one active animation frame.
+Happy DOM dispatches real PointerEvent objects through the installed pointerdown → pointermove → pointerup handlers. Tests check touch and mouse paths, capture and release, four corner directions, live selection sum and highlight, multiple pointers, cancellation, lost capture, out-of-board release, re-entry, keyboard anchoring/arrows/confirmation/cancel/repeat, transposed keyboard and pointer paths, resize cancellation with board/time preservation, fullscreen, rules, exact-deadline release, background pause/resume, restart, end-state focus, no-moves and full-clear feedback, reduced motion, old callback cleanup and one active animation frame.
 
 The DOM test uses mocked geometry and media queries. It does not establish rendered layout or real browser capture behavior; those require the separate browser pass.
 
@@ -77,3 +77,8 @@ The local node_modules symlink is only for test execution and is not a deliverab
 ## Final integration browser verification — 2026-10-19
 Cloud Chromium: seven requested viewports fit without page scrolling. All 48 cells meet 44px, including 640×360 and 667×375. Native browser pointer drags removed a valid pair (+2), a reverse-direction drag in transposed landscape removed another pair (+2), and an invalid rectangle left score and cells unchanged. Canonical cell-ID/value mapping, score and deadline survived orientation changes and fullscreen fallback/Escape. Screenshots and geometry evidence are in the separate release bundle. These are actual Chromium pointer interactions, not physical touch hardware tests.
 Natural 90-second expiry was observed without clock injection: phase finished, reason time, time 0, score 4. Result restart returned playing with 90 seconds and score 0. Final integrated pages loaded successfully with no local-origin console errors.
+
+## 2026-10-21 polish
+- Highest finished score is stored locally (storage denial is harmless); opt-in short audio shares a persisted mute preference with the other two games.
+- Rules and document visibility pauses freeze remaining time. Resume extends the deadline by actual paused duration; rotating/fullscreen does not restart a game.
+- Existing live sum, valid rectangle highlighting, keyboard control and reduced-motion effects are retained.

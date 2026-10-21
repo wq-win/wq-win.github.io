@@ -53,6 +53,17 @@ const { pathToFileURL } = require('node:url');
         await new Promise(resolve => setTimeout(resolve, 900)); assert.equal(aa.state.index, 1); assert.equal(aa.state.wood, 7); assert.equal(aa.state.actions, 0); assert.equal(ad.querySelector('.flying-wood'), null);
         const quiet = boot(); play(quiet, { type: 'reveal', id: 17 }); assert.equal(quiet.document.querySelector('.flip'), null); assert.equal(quiet.document.querySelector('.flying-wood'), null); assert.equal(quiet.__frontierTest.timers.size, 0);
         assert.match(css, /prefers-reduced-motion:reduce/); assert.doesNotMatch(css, /@import|https?:\/\//); assert.match(css, /min-width:44px;min-height:44px/); assert.match(css, /max-height:375px/);
+        { const resume = boot(); play(resume, {type:'reveal',id:17});
+        const resumeState = JSON.stringify(resume.__frontierTest.state);
+        resume.document.getElementById('sound-toggle').click();
+        const savedResume = resume.localStorage.getItem(key), restored = boot(savedResume);
+        assert.equal(JSON.stringify(restored.__frontierTest.state), resumeState);
+        assert.equal(restored.document.getElementById('sound-toggle').getAttribute('aria-pressed'), 'true');
+        assert.match(restored.document.getElementById('feedback').textContent, /已恢复/);
+        restored.document.querySelector('[data-tile="21"]').click();
+        assert.match(restored.document.getElementById('selected-copy').textContent, /6 次后续行动回本/);
+        assert.match(restored.document.getElementById('strategy-note').textContent, /最多产/);
+        restored.document.getElementById('restart').click(); assert.equal(restored.__frontierTest.state.actions, 0); }
         console.log('tile-frontier UI: six actual click-through wins, next/retry, selection/invalid actions, failure, jump-to-final copy, keyboard focus, rules, fullscreen/Escape, persistence, malformed saves, storage failure, animation cancellation and reduced motion passed');
         console.log('Layout contracts present for 390x844, 844x390, 360x640, 640x360, 320x568, 1366x768. Browser geometry and screenshots require the separate real-browser QA pass.');
     } finally { windows.forEach(w => w.happyDOM.abort()); }

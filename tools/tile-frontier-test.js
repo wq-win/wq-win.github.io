@@ -57,4 +57,14 @@ check('deterministic random legal play cannot trivialize the maps', () => {
     let seed = 0x41ab; const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
     for (let i = 0; i < levels.length; i++) { let wins = 0; for (let run = 0; run < 250; run++) { const state = E.create(i); while (state.status === 'playing') { const choices = E.available(state); assert.ok(choices.length); E.act(state, choices[Math.floor(random() * choices.length)]); } if (state.status === 'won') wins++; } assert.ok(wins < 25, 'Random legal actions should rarely win'); console.log(`  level ${i + 1}: ${wins}/250 random wins`); }
 });
+check('current-run save replays legal actions, rejects corruption and never trusts fabricated resources', () => {
+    for (let i = 0; i < levels.length; i++) {
+        const state = E.replay(i, E.solution(i).slice(0, 4)).state;
+        assert.deepEqual(E.restore(JSON.stringify(E.save(state))), state);
+        const data = E.save(state); data.wood = 999; assert.equal(E.restore(data).wood, state.wood);
+        data.history = data.history.concat({type:'recruit',id:0}); assert.equal(E.restore(data), null);
+        assert.deepEqual(E.restore(E.save(E.replay(i).state)), E.replay(i).state);
+    }
+    ['{}','{bad',null,{v:1,index:99,history:[]},{v:1,index:0,history:Array(50).fill({type:'reveal',id:1})}].forEach(raw=>assert.equal(E.restore(raw),null));
+});
 console.log(`tile-frontier engine: ${checks} groups passed`);
