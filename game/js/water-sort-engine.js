@@ -45,6 +45,12 @@ function act(state, from, to) {
   if (result.won && !completed.includes(state.level)) completed.push(state.level);
   return {...result,state:{...state,bottles:result.bottles,moves:state.moves+1,history:[...state.history,[from,to]],completed}};
 }
+function undo(state) {
+  if (!state.history.length) return state;
+  let previous = create(state.level,state.completed);
+  for (const [from,to] of state.history.slice(0,-1)) previous = act(previous,from,to).state;
+  return previous;
+}
 function key(bottles) { return bottles.map(b=>b.join('')).sort().join('|'); }
 /* Symmetric bottles share a search key. Moving a uniform bottle into an empty one
    is a label swap, so the solver skips it; the player is still allowed to do it. */
@@ -88,6 +94,6 @@ function restore(raw) {
     return state;
   } catch (_) { return create(); }
 }
-const api = {CAPACITY,LEVELS,top,same,won,inspect,pour,legalMoves,create,act,solve,save,restore};
+const api = {CAPACITY,LEVELS,top,same,won,inspect,pour,legalMoves,create,act,undo,solve,save,restore};
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.WaterSortEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

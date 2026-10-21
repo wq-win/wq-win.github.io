@@ -118,6 +118,15 @@
     return target;
   }
 
+  function damage(unit, target) { return Math.max(1, unit.attack - target.armor); }
+  // Read-only first-round forecast, not an automatic solver or guaranteed outcome.
+  function preview(state, char, lane) {
+    if (!OWN(UNITS, char) || !validIndex(lane, 3)) return null;
+    const unit = UNITS[char], targetLane = nearestEnemy(state.enemies, lane);
+    const enemy = state.enemies[lane];
+    return { targetLane, attack: targetLane < 0 ? 0 : damage(unit, state.enemies[targetLane]), incoming: enemy ? damage(enemy, unit) : 0, splashTargets: unit.splash > 0 && targetLane >= 0 ? state.enemies.map((e,i) => e && Math.abs(i-targetLane) === 1 ? i : -1).filter(i => i >= 0) : [] };
+  }
+
   // Queue every attack against the old state. Only then apply all damage and deaths.
   // A unit killed this round still lands its already queued attack.
   function step(state) {
@@ -130,7 +139,7 @@
       const targetLane = nearestEnemy(state.enemies, lane);
       if (targetLane < 0) return;
       const target = state.enemies[targetLane];
-      const amount = Math.max(1, unit.attack - target.armor);
+      const amount = damage(unit, target);
       enemyDamage[targetLane] += amount;
       events.push({ type: 'attack', side: 'army', lane, targetLane, amount, char: unit.char, support: lane !== targetLane });
       if (unit.splash > 0) {
@@ -249,7 +258,7 @@
     return best;
   }
 
-  const api = { UNITS, RECIPES, LEVELS, create, combine, deploy, recall, start, step, run, save, restore, solve };
+  const api = { damage, preview, UNITS, RECIPES, LEVELS, create, combine, deploy, recall, start, step, run, save, restore, solve };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.HanziBattleEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
