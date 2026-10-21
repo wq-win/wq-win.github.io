@@ -1,11 +1,14 @@
 (function () {
     'use strict';
     const E = window.TileFrontier, $ = id => document.getElementById(id), KEY = 'tiny-frontier-progress-v1';
-    let completed = [], index = 0, selected = 22, epoch = 0, savedOK = true, timers = new Set(), state;
+    let completed = [], index = 0, selected = 22, epoch = 0, savedOK = true, timers = new Set(), state, resumed = null, best = {}, soundOn = false, audio;
     try {
         const raw = JSON.parse(localStorage.getItem(KEY) || '{}');
         if (raw && typeof raw === 'object') {
             completed = Array.isArray(raw.completed) ? [...new Set(raw.completed.filter(n => Number.isInteger(n) && n >= 0 && n < E.levels.length))] : [];
+            resumed = E.restore(raw.run);
+            best = raw.best && typeof raw.best === 'object' && !Array.isArray(raw.best) ? raw.best : {};
+            soundOn = raw.sound === true;
             index = Number.isInteger(raw.index) && E.levels[raw.index] ? raw.index : 0;
         }
     } catch (_) { savedOK = false; }
@@ -34,9 +37,9 @@
     function later(callback, delay) { const ownEpoch = epoch; const timer = setTimeout(() => { timers.delete(timer); if (ownEpoch === epoch) callback(); }, delay); timers.add(timer); return timer; }
     function reduced() { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
     function save() {
-        try { localStorage.setItem(KEY, JSON.stringify({ index: state.index, completed })); savedOK = true; }
+        try { localStorage.setItem(KEY, JSON.stringify({ index: state.index, completed, run: E.save(state), best, sound: soundOn })); savedOK = true; }
         catch (_) { savedOK = false; }
-        $('save-status').textContent = savedOK ? '完成进度保存在当前浏览器。' : '此浏览器暂时无法保存进度，仍可正常游玩。';
+        $('save-status').textContent = savedOK ? '本局与完成进度自动保存在当前浏览器。' : '此浏览器暂时无法保存进度，仍可正常游玩。';
     }
     function tileName(tile) {
         if (!tile.revealed) return '未知土地';
@@ -53,7 +56,7 @@
         primary.disabled = secondary.disabled = true; secondary.className = 'secondary'; $('commands').classList.remove('single');
         buttonContent(primary, '建伐木场', '2 木材 · 1 行动'); buttonContent(secondary, '建兵营', '3 木材 · 1 行动');
         if (tile.owned && tile.terrain === 'plain' && !tile.building) {
-            $('selected-copy').textContent = '选一种建筑，让这块空地有用起来';
+            $('selected-copy').textContent = '伐木场需 6 次后续行动回本；兵营可立即招兵。剩余 ' + (state.budget-state.actions) + ' 行动。';
             primary.dataset.action = 'mill'; secondary.dataset.action = 'barracks';
             primary.disabled = !!E.reason(state, { type: 'build', id: selected, building: 'mill' });
             secondary.disabled = !!E.reason(state, { type: 'build', id: selected, building: 'barracks' });
@@ -89,12 +92,17 @@
             b.addEventListener('click', () => choose(tile.id)); map.append(b);
         });
         configureCommands();
+        const left = state.budget - state.actions, pending = state.tiles.filter(t => t.revealed && t.terrain === 'outpost' && !t.owned).reduce((n, t) => n + t.guard, 0);
+        const income = state.tiles.filter(t => t.building === 'mill').reduce((n,t) => n + Math.floor((t.age + left) / 3), 0);
+        $('strategy-note').textContent = '规划：已发现据点还需 ' + pending + ' 兵；现有伐木场在剩余行动内最多产 ' + income + ' 木。新伐木场需 6 次后续行动回本' + (left <= 6 ? '，此时投资难回本。' : '；探索找木不必先花建造费。');
+        $('sound-toggle').textContent = soundOn ? '♪ 音效开' : '♪ 音效关';
+        $('sound-toggle').setAttribute('aria-pressed', String(soundOn));
         $('result').hidden = state.status === 'playing';
         if (state.status !== 'playing') {
             const won = state.status === 'won';
             $('result-stamp').textContent = won ? '⚑' : '↶'; $('result-kicker').textContent = won ? '旗帜升起 · 第 ' + (state.index + 1) + ' 关' : '计划可以重来';
             $('result-title').textContent = won ? state.index === 5 ? '三面旗，都归来了' : '这片土地，点亮了' : state.endReason === 'blocked' ? '暂时无路可走了' : '行动已经用尽';
-            $('result-copy').textContent = won ? '用 ' + state.actions + ' 次行动拿下 ' + state.target + ' 个据点。' + (state.index === 5 ? completed.length === E.levels.length ? '六关完成，重温你喜欢的布局吧。' : '这一关完成，也可以回头挑战其他关卡。' : '带上这份远见，去下一片土地。') : state.endReason === 'blocked' ? '已没有可执行的行动。重来时，给木材和招兵留些余地。' : '还差 ' + (state.target - state.captured) + ' 个据点。少走一步，或者更早投资，再试一次。';
+            $('result-copy').textContent = won ? '用 ' + state.actions + ' 次行动（最佳 ' + best[state.index] + '）拿下 ' + state.target + ' 个据点。' + (state.index === 5 ? completed.length === E.levels.length ? '六关完成，重温你喜欢的布局吧。' : '这一关完成，也可以回头挑战其他关卡。' : '带上这份远见，去下一片土地。') : state.endReason === 'blocked' ? '已没有可执行的行动。重来时，给木材和招兵留些余地。' : '还差 ' + (state.target - state.captured) + ' 个据点。少走一步，或者更早投资，再试一次。';
             $('result-action').textContent = won && state.index < E.levels.length - 1 ? '下一片土地 →' : '重新规划这一关';
         }
         if (focusId !== undefined && state.status === 'playing') { const tile = map.querySelector('[data-tile="' + focusId + '"]'); if (tile) tile.focus({ preventScroll: true }); }
@@ -124,7 +132,8 @@
         const result = E.act(state, action);
         if (!result.ok) { $('feedback').textContent = result.reason; return false; }
         selected = action.id;
-        if (state.status === 'won' && !completed.includes(state.index)) { completed.push(state.index); save(); }
+        if (state.status === 'won') { if (!completed.includes(state.index)) completed.push(state.index); best[state.index] = Math.min(Number(best[state.index]) || Infinity, state.actions); }
+        save(); tone(result.type === 'attack' ? 660 : 440);
         render(); $('feedback').textContent = announce(result); animate(result);
         if (state.status !== 'playing') $('result-action').focus({ preventScroll: true });
         return true;
@@ -141,6 +150,10 @@
         if (!type || button.disabled) return;
         perform(type === 'mill' || type === 'barracks' ? { type: 'build', id: selected, building: type } : { type, id: selected });
     }
+    function tone(hz) {
+        if (!soundOn) return;
+        try { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; audio = audio || new AC(); if (audio.state === 'suspended') audio.resume().catch(() => {}); const o = audio.createOscillator(), g = audio.createGain(); o.connect(g); g.connect(audio.destination); o.frequency.value = hz; g.gain.setValueAtTime(.035, audio.currentTime); g.gain.exponentialRampToValueAtTime(.001, audio.currentTime + .12); o.start(); o.stop(audio.currentTime + .12); } catch (_) {}
+    }
     function start(n) {
         epoch++; timers.forEach(clearTimeout); timers.clear(); $('fx-layer').replaceChildren(); $('wood-count').classList.remove('pulse');
         state = E.create(n); selected = E.levels[n].camp; save(); render();
@@ -156,5 +169,6 @@
     $('result-action').addEventListener('click', () => start(state.status === 'won' && state.index < E.levels.length - 1 ? state.index + 1 : state.index));
     $('rules-open').addEventListener('click', openRules); $('rules-close').addEventListener('click', closeRules); $('rules-done').addEventListener('click', closeRules);
     $('rules-dialog').addEventListener('cancel', event => { event.preventDefault(); closeRules(); });
-    start(index);
+    $('sound-toggle').addEventListener('click', () => { soundOn = !soundOn; save(); render(); tone(550); });
+    if (resumed && resumed.index === index) { state = resumed; selected = E.levels[index].camp; render(); save(); $('feedback').textContent = '已恢复上次的规划，剩余 ' + (state.budget - state.actions) + ' 次行动。'; } else start(index);
 }());

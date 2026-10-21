@@ -50,3 +50,6 @@ assert.deepEqual(E.create(0,[0,0,-1,8,1.2,2]).completed,[0,2]);
 const queue=[E.LEVELS[0].bottles],seen=new Set([signature(queue[0])]);
 for(let head=0;head<queue.length;head++)for(const move of E.legalMoves(queue[head])){const next=E.pour(queue[head],move.from,move.to).bottles;assert.deepEqual(counts(next),{0:4,1:4,2:4});const key=signature(next);if(!seen.has(key)){seen.add(key);queue.push(next);}}
 console.log(`water-sort engine: ${transitions} tested transitions, ${seen.size} introductory reachable states, 8 solver traces, dead-end and corrupted-save checks PASS`);
+
+// Undo reconstructs the previous legal state and preserves earned completion.
+{ let s=E.create(); const start=E.save(s); assert.equal(E.undo(s),s); const path=E.solve(s); for(const m of path)s=E.act(s,m.from,m.to).state;const u=E.undo(s);assert.equal(u.moves,s.moves-1);assert.equal(E.won(u.bottles),false);assert(u.completed.includes(0));assert.equal(E.act(u,...s.history.at(-1)).won,true);let first=E.act(E.create(),path[0].from,path[0].to).state;assert.equal(E.save(E.undo(first)),start); }

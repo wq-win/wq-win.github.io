@@ -5,10 +5,16 @@
   const roleClass = { guard: 'wood', fire: 'fire', troop: 'people' };
   const roleName = { guard: '护卫', fire: '火兵', troop: '战兵' }, laneNames = ['左', '中', '右'];
   const reduced = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  let state, selected = null, busy = false, generation = 0;
+  let state, selected = null, busy = false, generation = 0, soundOn = false, audio, best = {};
+  const SETTINGS = 'ink-hanzi-settings-v1';
+  try { const settings = JSON.parse(localStorage.getItem(SETTINGS) || '{}'); soundOn = settings.sound === true; best = settings.best && typeof settings.best === 'object' && !Array.isArray(settings.best) ? settings.best : {}; } catch (_) {}
   const timers = new Set();
   try { state = E.restore(localStorage.getItem(KEY)); } catch (_) { state = E.create(); }
-  function save() { try { localStorage.setItem(KEY, E.save(state)); } catch (_) {} }
+  function save() { try { localStorage.setItem(KEY, E.save(state)); localStorage.setItem(SETTINGS, JSON.stringify({sound:soundOn,best})); } catch (_) {} }
+  function tone(hz) {
+    if (!soundOn) return;
+    try { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; audio = audio || new AC(); if (audio.state === 'suspended') audio.resume().catch(() => {}); const o = audio.createOscillator(), g = audio.createGain(); o.connect(g); g.connect(audio.destination); o.frequency.value = hz; g.gain.setValueAtTime(.035, audio.currentTime); g.gain.exponentialRampToValueAtTime(.001, audio.currentTime + .1); o.start(); o.stop(audio.currentTime + .1); } catch (_) {}
+  }
   function later(callback, delay) {
     const current = generation;
     const timer = setTimeout(() => { timers.delete(timer); if (current === generation) callback(); }, delay);
@@ -87,6 +93,7 @@
     $('gate').setAttribute('aria-label', '城门生命 ' + state.gate.hp + '，上限 ' + state.gate.maxHp);
     $('level-select').value = String(state.level); $('progress').textContent = state.completed.length + ' / 6 已破';
     renderBoard(); renderLanes();
+    $('sound-toggle').textContent = soundOn ? '♪ 音效：开' : '♪ 音效：关'; $('sound-toggle').setAttribute('aria-pressed', String(soundOn));
     $('march').disabled = state.phase !== 'prepare' || !state.army.some(Boolean) || busy;
     $('march').querySelector('span').textContent = state.phase === 'prepare' ? state.army.some(Boolean) ? '出 征' : '先部署，再出征' : state.phase === 'battle' ? '交 锋 中' : '本 阵 已 结';
     const finished = state.phase === 'won' || state.phase === 'lost'; $('result').hidden = !finished;
@@ -94,7 +101,7 @@
       const won = state.phase === 'won';
       $('result-seal').textContent = won ? '胜' : '再'; $('result-eyebrow').textContent = won ? '墨散，城安。' : '换一阵，再出征。';
       $('result-title').textContent = won ? state.completed.length === 6 ? '六阵已破，字有千军' : state.level === 5 ? '终阵已破' : '守住了这一阵' : '城门失守了';
-      $('result-copy').textContent = won ? '第 ' + state.round + ' 回合 · 城门余 ' + state.gate.hp + ' 点生命' : '观察三路敌人，把耐打的护卫放在强敌面前。';
+      $('result-copy').textContent = won ? '第 ' + state.round + ' 回合 · 城门余 ' + state.gate.hp + ' 点生命' + (best[state.level] ? ' · 最佳余 ' + best[state.level] + ' 点' : '') : '观察三路敌人，把耐打的护卫放在强敌面前。';
       $('result-action').textContent = won && state.level < 5 ? '下一阵 →' : won ? '再战此阵 ↶' : '调整阵容 ↶';
       $('rearrange').hidden = !won;
     }
@@ -106,7 +113,7 @@
     if (selected === null || selected === index) {
       selected = selected === index ? null : index; render(); focusSlot(index);
       if (selected === null) message('已取消选字。点两个字合成，或选字部署。');
-      else { const char = state.board[index]; message(char + ' · ' + labelStats(char).replace(/，/g, ' · ') + '。点配对字或空阵位。'); }
+      else { const char = state.board[index]; const forecasts = [0,1,2].map(lane => { const f = E.preview(state,char,lane); return laneNames[lane] + '：打' + f.attack + '/受' + f.incoming + (f.splashTargets.length ? '＋溅射' : ''); }); message(char + ' 首轮预估 ' + forecasts.join(' · ') + '。点配对字或空阵位；非最终胜负。'); }
       return;
     }
     const from = selected, a = state.board[from], b = state.board[index];
@@ -114,7 +121,7 @@
     const boundsA = first.getBoundingClientRect(), boundsB = second.getBoundingClientRect(); const ghost = second.cloneNode(true);
     const result = E.combine(state, from, index);
     if (!result.ok) { message(result.error); focusSlot(index); return; }
-    selected = null; save(); render(); message(a + ' + ' + b + ' → ' + result.char + '。合成成功，可继续合字或部署。');
+    selected = null; tone(660); save(); render(); message(a + ' + ' + b + ' → ' + result.char + '。合成成功，可继续合字或部署。');
     const target = document.querySelector('[data-slot="' + from + '"]');
     if (!reduced()) {
       busy = true; render(); ghost.classList.add('merge-ghost'); ghost.classList.remove('selected', 'matchable'); ghost.setAttribute('aria-hidden', 'true'); ghost.tabIndex = -1; ghost.disabled = true;
@@ -132,7 +139,7 @@
     if (selected === null) { message('先点字盘中的一个字，再点' + laneNames[lane] + '路空阵位。'); return; }
     const result = E.deploy(state, selected, lane);
     if (!result.ok) { message(result.error); return; }
-    selected = null; save(); render(); message(result.char + '已部署在' + laneNames[lane] + '路。点它可以撤回。');
+    selected = null; tone(440); save(); render(); message(result.char + '已部署在' + laneNames[lane] + '路。点它可以撤回。');
     document.querySelector('[data-army="' + lane + '"]').focus({ preventScroll: true });
   }
   function center(el, scene) { const r = el.getBoundingClientRect(); return { x: r.left - scene.left + r.width / 2, y: r.top - scene.top + r.height / 2 }; }
@@ -158,7 +165,10 @@
   }
   function battleTurn() {
     if (state.phase !== 'battle') return;
-    const events = E.step(state); effects(events);
+    if (document.hidden) return;
+    const events = E.step(state);
+    if (state.phase === 'won') best[state.level] = Math.max(Number(best[state.level]) || 0, state.gate.hp);
+    tone(state.phase === 'won' ? 880 : 330); effects(events);
     later(() => {
       $('fx-layer').replaceChildren(); $('gate').classList.remove('hit'); render(); save();
       const gateDamage = events.filter(e => e.type === 'gate').reduce((n, e) => n + e.amount, 0), fallen = events.filter(e => e.type === 'defeat' && e.side === 'enemy').length;
@@ -196,5 +206,7 @@
     if ($('help').open) { event.preventDefault(); event.stopImmediatePropagation(); closeHelp(); return; }
     if (selected !== null) { const previous = selected; selected = null; render(); message('已取消选字。'); focusSlot(previous); }
   });
+  $('sound-toggle').addEventListener('click', () => { soundOn = !soundOn; save(); render(); tone(550); });
+  document.addEventListener('visibilitychange', () => { if (state.phase !== 'battle') return; cancelPending(); render(); if (document.hidden) message('已暂停交锋，返回页面后继续。'); else later(battleTurn, 250); });
   render();
 })();

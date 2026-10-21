@@ -7,7 +7,7 @@ function setup({saved,reduced=true,denied=false}={}){
  w.document.write(fs.readFileSync(path.join(root,'game/water-sort.html'),'utf8'));w.matchMedia=()=>({matches:reduced});
  if(saved)w.localStorage.setItem('cozy-water-sort-v1',saved);
  if(denied)Object.defineProperty(w,'localStorage',{get(){throw new Error('Denied');}});
- for(const f of ['game/js/water-sort-levels.js','game/js/water-sort-engine.js','game/js/water-sort.js','js/game-view.js'])w.eval(fs.readFileSync(path.join(root,f),'utf8'));
+ for(const f of ['game/js/water-sort-levels.js','game/js/water-sort-engine.js','game/js/third-games-feedback.js','game/js/water-sort.js','js/game-view.js'])w.eval(fs.readFileSync(path.join(root,f),'utf8'));
  return w;
 }
 const $=(w,id)=>w.document.getElementById(id),b=(w,n)=>w.document.querySelector(`[data-bottle="${n}"]`),clickMove=(w,m)=>{b(w,m.from).click();b(w,m.to).click();},savedState=w=>E.restore(w.localStorage.getItem('cozy-water-sort-v1'));
@@ -21,6 +21,7 @@ try{
  b(w,0).click();assert.equal(w.document.querySelectorAll('.selected').length,0);assert.match($(w,'feedback').textContent,/取消/);
  b(w,0).click();b(w,0).dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));assert.equal(w.document.querySelectorAll('.selected').length,0);
  b(w,0).focus();b(w,0).dispatchEvent(new w.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(w.document.activeElement.dataset.bottle,'1');
+ assert.equal($(w,'undo').disabled,true);const initial=E.create();const undoFirst=E.solve(initial)[0];clickMove(w,undoFirst);assert.equal(savedState(w).moves,1);assert.equal($(w,'undo').disabled,false);$(w,'undo').click();assert.deepEqual(savedState(w).bottles,initial.bottles);assert.equal($(w,'undo').disabled,true);
  for(const m of E.solve(E.create()))clickMove(w,m);
  assert.equal($(w,'win-card').hidden,false);assert.equal($(w,'sorted-count').textContent,'3');assert.equal(w.document.activeElement.id,'next-level');assert.equal($(w,'water-board').inert,true);
  const resume=setup({saved:w.localStorage.getItem('cozy-water-sort-v1')});assert.equal($(resume,'win-card').hidden,false);assert.match($(resume,'win-detail').textContent,/1 \/ 8/);
@@ -28,7 +29,7 @@ try{
  // A reachable dead end must explain how to replan, including after restore.
  const dead=setup();$(dead,'level-select').value='5';$(dead,'level-select').dispatchEvent(new dead.Event('change'));
  for(const [from,to] of [[0,5],[4,6],[2,4],[0,2]])clickMove(dead,{from,to});
- assert.match($(dead,'feedback').textContent,/没有可倒的位置.*重新开始.*重新规划/);assert.equal($(dead,'win-card').hidden,true);
+ assert.match($(dead,'feedback').textContent,/没有可倒的位置.*撤销一步.*重新规划/);assert.equal($(dead,'win-card').hidden,true);
  const deadResume=setup({saved:dead.localStorage.getItem('cozy-water-sort-v1')});assert.match($(deadResume,'feedback').textContent,/没有可倒的位置/);$(dead,'restart').click();assert(E.legalMoves(savedState(dead).bottles).length);
  const different=setup();clickMove(different,E.solve(E.create())[0]);b(different,1).click();b(different,3).click();assert.match($(different,'feedback').textContent,/顶部颜色不同/);assert.equal(savedState(different).moves,1);
  // All eight levels can be completed through the actual UI handlers.

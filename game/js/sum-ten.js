@@ -5,7 +5,18 @@
     var feedback = d.getElementById('feedback'), result = d.getElementById('result'), startButton = d.getElementById('start'), fx = d.getElementById('fx-layer');
     var orientation = window.matchMedia('(orientation: landscape)'), reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
     var state = E.create(), landscape = orientation.matches, cells = [], cursor = 0, selection = null, drag = null, keyAnchor = null, frame = 0, epoch = 0, timers = new Set(), lastPhase = '', lastSecond = -1;
-    function now() { return performance.now(); }
+    var pausedAt = null, best = 0, sound=window.CozyThirdFeedback;
+    sound.attach(d.querySelector('.nav-actions'));
+    try { best = Math.max(0,Math.min(48,Number(localStorage.getItem('cozy-sum-ten-best-v1'))||0)); } catch (_) {}
+    var bestEl=d.createElement('span');bestEl.className='best-score';bestEl.textContent=' · 最高 '+best;scoreEl.parentElement.querySelector('span').append(bestEl);
+    function now() { return pausedAt === null ? performance.now() : pausedAt; }
+    function syncPause() {
+        var shouldPause=d.hidden || !!d.getElementById('rules-dialog').open;
+        if(shouldPause && state.status==='playing' && pausedAt===null){pausedAt=performance.now();cancelSelection();if(frame)cancelAnimationFrame(frame);frame=0;say('已暂停计时，返回游戏后继续。');}
+        else if(!shouldPause && pausedAt!==null){if(state.status==='playing')state.deadline+=performance.now()-pausedAt;pausedAt=null;say('继续整理，计时已恢复。');tick();}
+        app.dataset.paused=String(pausedAt!==null);
+        if(pausedAt===null)tick();
+    }
     function pointFor(id) { return { row: Math.floor(id / E.COLS), col: id % E.COLS }; }
     function idFor(p) { return p.row * E.COLS + p.col; }
     function say(message) { feedback.textContent = message; }
@@ -49,6 +60,7 @@
             lastPhase = state.status; paintCells(); result.hidden = state.status !== 'finished';
             if (state.status === 'finished') {
                 cancelSelection(); if (frame) cancelAnimationFrame(frame); frame = 0;
+                best=Math.max(best,state.score);try{localStorage.setItem('cozy-sum-ten-best-v1',String(best));}catch(_){}bestEl.textContent=' · 最高 '+best;sound.tone('win');
                 var title = state.reason === 'time' ? '时间到，收好这一篮' : state.reason === 'cleared' ? '整座果园，收空了！' : '这一盘，已经没有十了';
                 d.getElementById('result-title').textContent = title; d.getElementById('result-kicker').textContent = state.reason === 'cleared' ? '48 颗，满满一篮' : '这一篮，收好了'; d.getElementById('result-copy').textContent = '收获 ' + state.score + ' 颗果实，得到 ' + state.score + ' 分。'; say(title + '。本局 ' + state.score + ' 分。');
                 if (!d.getElementById('rules-dialog').open) d.getElementById('result-restart').focus({ preventScroll: true });
@@ -57,13 +69,13 @@
     }
     function tick() {
         if (frame) cancelAnimationFrame(frame); frame = 0; state = E.settle(state, now()); paintStatus();
-        if (state.status === 'playing') frame = requestAnimationFrame(tick);
+        if (state.status === 'playing' && pausedAt === null) frame = requestAnimationFrame(tick);
     }
-    function live() { state = E.settle(state, now()); paintStatus(); return state.status === 'playing'; }
+    function live() { state = E.settle(state, now()); paintStatus(); return state.status === 'playing' && pausedAt === null; }
     function start() {
         if (frame) cancelAnimationFrame(frame); frame = 0; cancelSelection(); clearEffects();
         if (state.status !== 'ready') state = E.create();
-        state = E.start(state, now()); cursor = 0; lastPhase = ''; lastSecond = -1; paintCells(); paintSelection(); say('拖出矩形，合计 10 就收下。'); tick(); cells[cursor].focus({ preventScroll: true });
+        pausedAt=null; state = E.start(state, now()); cursor = 0; lastPhase = ''; lastSecond = -1; paintCells(); paintSelection(); say('拖出矩形，合计 10 就收下。'); tick(); cells[cursor].focus({ preventScroll: true });
     }
     function harvest(ids, values) {
         if (reduced.matches) return;
@@ -73,7 +85,7 @@
     }
     function commit(from, to) {
         var before = state.board, outcome = E.select(state, from, to, now()); state = outcome.state;
-        if (outcome.accepted) { harvest(outcome.removed, before); say('刚好 10！收获 ' + outcome.removed.length + ' 颗，+' + outcome.removed.length + ' 分。'); paintCells(); }
+        if (outcome.accepted) { sound.tone('match'); harvest(outcome.removed, before); say('刚好 10！收获 ' + outcome.removed.length + ' 颗，+' + outcome.removed.length + ' 分。'); paintCells(); }
         else if (state.status === 'playing') say('合计 ' + (outcome.rectangle ? outcome.rectangle.sum : 0) + '，再圈一个刚好 10 的框。');
         paintStatus();
     }
@@ -114,9 +126,9 @@
     startButton.addEventListener('click', start); d.getElementById('result-restart').addEventListener('click', start);
     function resize() { var next = orientation.matches; cancelSelection(); if (next !== landscape) { landscape = next; orderCells(); } tick(); }
     orientation.addEventListener('change', resize); window.addEventListener('resize', resize); app.addEventListener('gameviewchange', resize);
-    window.addEventListener('blur', cancelSelection); d.addEventListener('visibilitychange', function () { cancelSelection(); tick(); });
-    var rules = d.getElementById('rules-dialog'); d.getElementById('rules-open').addEventListener('click', function () { cancelSelection(); rules.showModal(); tick(); });
-    function closeRules() { rules.close(); tick(); (state.status === 'finished' ? d.getElementById('result-restart') : d.getElementById('rules-open')).focus({ preventScroll: true }); }
+    window.addEventListener('blur', cancelSelection); d.addEventListener('visibilitychange', syncPause);
+    var rules = d.getElementById('rules-dialog'); d.getElementById('rules-open').addEventListener('click', function () { cancelSelection(); rules.showModal(); syncPause(); });
+    function closeRules() { rules.close(); syncPause(); tick(); (state.status === 'finished' ? d.getElementById('result-restart') : d.getElementById('rules-open')).focus({ preventScroll: true }); }
     d.getElementById('rules-close').addEventListener('click', closeRules); d.getElementById('rules-done').addEventListener('click', closeRules); rules.addEventListener('cancel', function (event) { event.preventDefault(); closeRules(); });
     // Read-only helpers for reproducible QA. No player state setters or cheat controls.
     window.SumTenDebug = Object.freeze({ snapshot: function () { return JSON.parse(JSON.stringify(state)); }, legalRectangles: function () { return E.legalRectangles(state.board); }, layout: function () { return { landscape: landscape, rows: landscape ? E.COLS : E.ROWS, cols: landscape ? E.ROWS : E.COLS }; }, visual: function (p) { return E.visual(p, landscape); }, logical: function (p) { return E.logical(p, landscape); } });

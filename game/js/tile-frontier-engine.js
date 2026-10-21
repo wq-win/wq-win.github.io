@@ -23,7 +23,7 @@
         Object.entries(level.forests || {}).forEach(([id, wood]) => Object.assign(tiles[Number(id)], { terrain: 'forest', wood }));
         Object.entries(level.outposts).forEach(([id, guard]) => Object.assign(tiles[Number(id)], { terrain: 'outpost', guard }));
         Object.assign(tiles[level.camp], { terrain: 'camp', revealed: true, owned: true });
-        return { index, tiles, wood: level.wood, troops: level.troops, actions: 0, budget: level.budget, captured: 0, target: Object.keys(level.outposts).length, status: 'playing', endReason: null };
+        return { index, history: [], tiles, wood: level.wood, troops: level.troops, actions: 0, budget: level.budget, captured: 0, target: Object.keys(level.outposts).length, status: 'playing', endReason: null };
     }
     function adjacent(state, id) { return neighbors(id).some(n => state.tiles[n].owned); }
     function reason(state, action) {
@@ -65,6 +65,7 @@
         } else if (action.type === 'attack') {
             result.spentTroops = tile.guard; state.troops -= tile.guard; tile.owned = true; state.captured++;
         }
+        state.history.push(action.type === 'build' ? { type: action.type, id: action.id, building: action.building } : { type: action.type, id: action.id });
         state.actions++;
         mills.forEach(mill => { mill.age++; if (mill.age === 3) { mill.age = 0; state.wood++; result.produced++; result.producers.push(mill.id); } });
         // The last available action may win; success takes precedence over the clock.
@@ -92,6 +93,15 @@
         }
         return { state, results, valid: true };
     }
-    const api = { SIZE, COSTS, configure, create, neighbors, adjacent, reason, act, available, solution, replay, get levels() { return levels; } };
+    function save(state) { return { v: 1, index: state.index, history: state.history }; }
+    function restore(raw) {
+        try {
+            const value = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            if (!value || value.v !== 1 || !Number.isInteger(value.index) || !levels[value.index] || !Array.isArray(value.history) || value.history.length > levels[value.index].budget) return null;
+            const replayed = replay(value.index, value.history);
+            return replayed.valid ? replayed.state : null;
+        } catch (_) { return null; }
+    }
+    const api = { save, restore, SIZE, COSTS, configure, create, neighbors, adjacent, reason, act, available, solution, replay, get levels() { return levels; } };
     return api;
 }));

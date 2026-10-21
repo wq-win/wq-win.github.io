@@ -301,4 +301,20 @@ test('bad saves, fabricated characters, wrong materials, and broken inventory re
   unchanged(injected, () => E.start(injected));
 });
 
+test('lane previews match queued first-round combat without mutating the state', () => {
+  for (let level = 0; level < 6; level++) {
+    const army = E.solve(level).army, state = formation(level, army), before = JSON.stringify(state);
+    const predictions = army.map((char,lane)=>char && E.preview(state,char,lane));
+    assert.equal(JSON.stringify(state),before);
+    E.start(state); const events = E.step(state);
+    predictions.forEach((prediction,lane)=>{ if (!prediction) return;
+      const attack = events.find(e=>e.side==='army' && e.type==='attack' && e.lane===lane);
+      assert.equal(attack.amount,prediction.attack); assert.equal(attack.targetLane,prediction.targetLane);
+      const received = events.find(e=>e.side==='enemy' && e.type==='attack' && e.lane===lane);
+      assert.equal(received ? received.amount : 0,prediction.incoming);
+      assert.deepEqual(events.filter(e=>e.side==='army' && e.type==='splash' && e.lane===lane).map(e=>e.targetLane),prediction.splashTargets);
+    });
+  }
+  assert.equal(E.preview(E.create(), '龙', 0), null); assert.equal(E.preview(E.create(), '木', 3), null);
+});
 console.log(`Hanzi Battle: ${checks} test groups passed. Six levels solved; recipes, inventory, simultaneous combat, roles, placement, and restore verified.`);

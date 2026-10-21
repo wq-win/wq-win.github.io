@@ -5,10 +5,11 @@ const { pathToFileURL } = require('node:url');
   const { Window } = await import(pathToFileURL(require.resolve('happy-dom')).href);
   const root = path.resolve(__dirname, '..'), html = fs.readFileSync(path.join(root, 'game/hanzi-battle.html'), 'utf8');
   const windows = [], KEY = 'ink-hanzi-battle-v1'; let checks = 0;
-  function boot(saved, motion = true, unavailableStorage = false) {
+  function boot(saved, motion = true, unavailableStorage = false, settings) {
     const w = new Window({ url: 'https://example.test/game/hanzi-battle.html', settings: { disableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } }); windows.push(w);
     w.document.write(html.replace(/<script[\s\S]*?<\/script>/g, ''));
     if (saved) w.localStorage.setItem(KEY, saved);
+    if (settings) w.localStorage.setItem('ink-hanzi-settings-v1', settings);
     if (unavailableStorage) { w.localStorage.getItem = () => { throw new Error('blocked'); }; w.localStorage.setItem = () => { throw new Error('blocked'); }; }
     w.matchMedia = () => ({ matches: motion });
     for (const file of ['hanzi-battle-levels.js', 'hanzi-battle-engine.js', 'hanzi-battle.js']) {
@@ -98,6 +99,20 @@ const { pathToFileURL } = require('node:url');
     });
     await test('blocked storage does not prevent a playable new game', () => {
       const blocked = boot(null, true, true); blocked.document.querySelector('[data-slot="0"]').click(); blocked.document.querySelector('[data-slot="1"]').click(); assert.equal(blocked.__test.state.board[0], '林'); blocked.happyDOM.abort();
+    });
+    await test('selection shows lane forecast; sound preference persists; hidden battle pauses then resumes', async () => {
+      const q = boot(), qa=q.__test, doc=q.document;
+      doc.querySelector('[data-slot="0"]').click(); assert.match(doc.getElementById('feedback').textContent,/首轮预估.*左.*中.*右/);
+      doc.getElementById('sound-toggle').click();
+      const settings=q.localStorage.getItem('ink-hanzi-settings-v1');
+      const restored=boot(null,true,false,settings); assert.equal(restored.document.getElementById('sound-toggle').getAttribute('aria-pressed'),'true');
+      doc.querySelector('[data-army="1"]').click();
+      Object.defineProperty(doc,'hidden',{configurable:true,get:()=>true});
+      qa.march(); doc.dispatchEvent(new q.Event('visibilitychange')); const round=qa.state.round;
+      await pause(180); assert.equal(qa.state.round,round); assert.equal(qa.timers,0);
+      Object.defineProperty(doc,'hidden',{configurable:true,get:()=>false}); doc.dispatchEvent(new q.Event('visibilitychange'));
+      await until(()=>qa.state.round>round,'resume hidden battle');
+      doc.getElementById('restart').click(); assert.equal(qa.state.phase,'prepare'); assert.equal(qa.timers,0);
     });
     console.log('Hanzi Battle UI: ' + checks + ' groups passed, including all six complete click-through battles. Browser geometry and visual inspection are separate QA.');
   } finally { for (const window of windows) window.happyDOM.abort(); }

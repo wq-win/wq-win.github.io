@@ -1,6 +1,7 @@
 (function () {
 'use strict';
-const E = window.WaterSortEngine;
+const E = window.WaterSortEngine, sound=window.CozyThirdFeedback;
+sound.attach(document.querySelector('.topbar'));
 const COLOURS = [
   {name:'珊瑚',paint:'#e9a08e',symbol:'●'},
   {name:'海蓝',paint:'#87c3cb',symbol:'◆'},
@@ -42,6 +43,7 @@ function makeBottle(bottle,index) {
   button.append(glass,label);button.addEventListener('click',()=>pick(index)); return button;
 }
 function render(focusIndex) {
+  $('undo').disabled = !state.history.length || !!pending;
   board.replaceChildren();
   const count = state.bottles.length, rowLength = count > 5 ? Math.ceil(count/2) : count;
   for(let i=0;i<count;i+=rowLength){const row=document.createElement('div');row.className='bottle-row';state.bottles.slice(i,i+rowLength).forEach((b,j)=>row.append(makeBottle(b,i+j)));board.append(row);}
@@ -71,14 +73,15 @@ function invalid(index,text) {
 function finishPour() {
   if (!pending) return;
   const result=pending;clearTimeout(timer);pending=null;layer.replaceChildren();state=result.state;selected=null;store();render(result.to);
+  sound.tone(result.won?'win':'tap');
   if(result.won) message('所有颜色都分好了。','success');
-  else if(!E.legalMoves(state.bottles).length) message('没有可倒的位置了，点“重新开始”重新规划。','error');
+  else if(!E.legalMoves(state.bottles).length) message('没有可倒的位置了，可撤销一步重新规划。','error');
   else message(`${result.from+1} → ${result.to+1} 号瓶，倒入 ${result.amount} 段${COLOURS[result.color].name}。继续选一瓶。`,'success');
   const target=board.querySelector(`[data-bottle="${result.to}"]`);
   if(target?.classList.contains('complete')){target.classList.add('completed-now');clearTimeout(effectTimer);effectTimer=setTimeout(()=>target.classList.remove('completed-now'),650);}
 }
 function animate(result) {
-  pending=result;const token=++epoch;
+  pending=result;$('undo').disabled=true;const token=++epoch;
   if(reduced()){finishPour();return;}
   const source=board.querySelector(`[data-bottle="${result.from}"]`),target=board.querySelector(`[data-bottle="${result.to}"]`),sceneRect=$('scene').getBoundingClientRect();
   const a=source.querySelector('.bottle-glass').getBoundingClientRect(),b=target.querySelector('.bottle-glass').getBoundingClientRect();
@@ -98,6 +101,7 @@ function pick(index) {
   animate(result);
 }
 E.LEVELS.forEach((level,index)=>{const option=document.createElement('option');option.value=index;option.textContent=`${String(index+1).padStart(2,'0')} · ${level.name}`;$('level-select').append(option);});
+$('undo').addEventListener('click',()=>{if(pending||!state.history.length)return;cancelAnimation();selected=null;state=E.undo(state);store();render();message('已撤销上一步，换一种倒法试试。');});
 $('restart').addEventListener('click',()=>start(state.level));$('level-select').addEventListener('change',()=>start(Number($('level-select').value)));$('next-level').addEventListener('click',()=>start((state.level+1)%E.LEVELS.length));
 board.addEventListener('keydown',event=>{
   const button=event.target.closest('[data-bottle]');if(!button)return;
@@ -107,5 +111,5 @@ board.addEventListener('keydown',event=>{
 });
 window.addEventListener('resize',()=>{if(pending)finishPour();});document.querySelector('[data-game-view]').addEventListener('gameviewchange',()=>{if(pending)finishPour();});
 render();store();
-if(E.won(state.bottles))message('这一关已完成，可以继续下一关。','success');else if(!E.legalMoves(state.bottles).length)message('没有可倒的位置了，点“重新开始”重新规划。','error');
+if(E.won(state.bottles))message('这一关已完成，可以继续下一关。','success');else if(!E.legalMoves(state.bottles).length)message('没有可倒的位置了，可撤销一步重新规划。','error');
 })();

@@ -1,28 +1,22 @@
-# Parking puzzle QA
+# Parking dense-lot upgrade
 
-## Implemented
-- 16 deterministic, unique 5×5 layouts, growing from 3 to 9 two-cell cars.
-- Straight-ahead collision model, immediate blocked-car motion and blocker outlines.
-- Departure animation, keyboard-native car buttons, level selection, restart, next-level progression and final-level wrap.
-- Validated versioned local save; corrupted and physically impossible saves reset safely.
-- Shared fullscreen controller with in-page fallback and Escape exit.
-- Responsive portrait/landscape composition and reduced-motion handling.
+## Changes
+- 16 levels: 50, 70, 90, …, 350 cars (exact 20-car increments).
+- Deterministic concentric domino layout, non-overlapping geometry, guaranteed outward dependency ordering. Level data is generated immediately without rejection sampling.
+- Cached spatial lookup for blockers, iterative solver and bounded save validation.
+- Compact responsive overview, zoom controls (up to a 48px cell), native pan/scroll, accessible per-car buttons and direction labels.
+- Independent outgoing animations allow consecutive successful taps. Blocked cars highlight obstructions.
+- Optional short procedural sound, persisted mute setting. Versioned v2 progress avoids reusing old 3–9-car saved states.
 
-## Executed tests
-- `node tools/parking-test.js`: PASS. Geometry, non-overlap, 16 unique levels, all 295 reachable states exhaustively traversed, legal move existence in every reachable nonterminal state, dependency chains, blocked moves, wins, save/restore.
-- `node tools/parking-ui-test.js`: PASS (happy-dom). Blocked feedback, obstacle highlighting, legal exit sequence, level victory, final level, restart during pending departure, saved completed state, malformed save, fullscreen fallback and Escape.
+## Completed checks
+- `node tools/parking-test.js`: all 16 exact counts, in-bounds non-overlapping dominoes, complete solutions, blocked moves do not mutate state, persistence, malformed/impossible/old saves, 25,600 exits across random legal orders. Passed (~3.3s).
+- `node tools/parking-contrast-test.js`: all essential UI ink/paint pairs >=4.5:1. Passed.
+- `node --check game/js/parking.js` and engine syntax. Passed.
+- Baseline files compared against public-main snapshot 990a911; identical before changes.
 
-## Visual verification
-Shell Chromium screenshot startup was blocked by sandbox socket permissions. Parent browser QA should inspect 1280×800, 390×844, 320×568 and 844×390, and check final-level density plus departing-car motion. No browser screenshots claimed as verified here.
+## Browser acceptance
+Cloud Chromium checks at 390x844 and 844x390 iframe viewports verified dense layouts, level 1 / level 16 counts, zoom/pan, blocked feedback, successful exits, and reload restoration. Fifty consecutive valid pointer clicks cleared level 1 and opened the win panel; the next level showed 70 cars. Departing-car overflow was clipped to prevent transient scroll expansion during consecutive exits.
 
-## Contrast follow-up
-Essential muted labels/instructions now use #4e6550 (5.55:1 on page, 4.91:1 on board); blocked feedback 5.81:1; select/restart 9.37:1; next-level action 7.31:1. Car arrows/numbers use opaque dark #172a20, ranging 4.94:1–9.12:1 across all nine car paints. Number size increased to 10px. Decorative car palette retained. `node tools/parking-contrast-test.js` verifies these color pairs and CSS contracts; PASS. UI regression still PASS.
+See `game-polish-20261021-qa.md` for the integrated verification record and limits. Physical-phone testing and manual clears of every level were not performed. Automated model and DOM regressions cover all levels and interrupted/repeated flows.
 
-## Pointer hit-testing follow-up
-Parent browser QA found native car clicks unreliable within the preview iframe when the board used perspective/preserve-3d and hover compositing. Replaced projection with affine rotate/skew/scale, removed preserve-3d and moved hover brightness to the pointer-inert visual child. Car dimensions are unchanged. Model, UI and contrast tests PASS; UI test now guards against reintroducing 3D hit areas. Parent is rechecking native iframe clicks.
-
-## Real cloud Chromium review (2026-10-19)
-- Verified pointer-blocked feedback, then pointer-only first-level win, next-level progression and restart. Affine tilt fixed iframe CSS-3D hit testing; final pointer sequence passes.
-- Late nine-car layout inspected at 1440×900, 390×844, 320×740, 320×568, 844×390 and 667×375. Final short-phone document dimensions are exactly 320×568, with visible full controls and no page overflow.
-- Original car dimensions preserve 44px minimum untransformed hit areas; observed transformed bounding boxes exceed 69px on their shorter dimension at 320px.
-- Real top-level browser departure and persisted remaining-car restore also verified. This is desktop Chromium CSS viewport testing, not a physical mobile-device test.
+`tools/parking-ui-test.js` contains DOM regression coverage (requires happy-dom).
