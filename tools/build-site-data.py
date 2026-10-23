@@ -89,6 +89,10 @@ ALIASES = {
 }
 
 EXTRA_EDGES = [
+    ("rl:03-dyna", "game:rl-dyna"),
+    ("llm:047-lora", "game:llm-lora"),
+    ("robot-classic:035-prm", "game:classic-prm"),
+    ("robot-learn:008-promp", "game:learn-promp"),
     ("rl:27-ppo", "llm:054-instructgpt"),
     ("rl:47-instructgpt", "llm:054-instructgpt"),
     ("rl:49-dpo", "llm:075-dpo"),
@@ -139,6 +143,10 @@ EXTRA_EDGES = [
 ]
 
 STATIC_PAGES = [
+    {"url": "game/rl/dyna-q.html", "title": "Dyna-Q：真实经验与模型规划", "cardTitle": "Dyna-Q：真实经验与模型规划", "question": "dyna-q", "excerpt": "真实交互更新一次，再用学到的模型重放经验。", "series": "game", "seriesLabel": "强化学习演示", "year": 2026, "id": "game:rl-dyna"},
+    {"url": "game/llm/lora.html", "title": "LoRA：低秩更新", "cardTitle": "LoRA：低秩更新", "question": "lora", "excerpt": "把低秩矩阵乘积逐项展开，理解冻结权重和可训练参数。", "series": "game", "seriesLabel": "大语言模型演示", "year": 2026, "id": "game:llm-lora"},
+    {"url": "game/robot-classic/prm.html", "title": "PRM 概率路线图", "cardTitle": "PRM 概率路线图", "question": "prm", "excerpt": "先采样和连边，再在同一路线图上查询不同起终点。", "series": "game", "seriesLabel": "机器人经典演示", "year": 2026, "id": "game:classic-prm"},
+    {"url": "game/robot-learn/promp.html", "title": "ProMP：轨迹分布与条件化", "cardTitle": "ProMP：轨迹分布与条件化", "question": "promp", "excerpt": "看示范轨迹的均值与不确定性如何在经过点约束后改变。", "series": "game", "seriesLabel": "机器人学习演示", "year": 2026, "id": "game:learn-promp"},
     {
         "url": "index.html",
         "title": "MyLog 首页",
