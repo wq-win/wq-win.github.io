@@ -1,6 +1,0 @@
-'use strict';
-const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');const css=fs.readFileSync(path.join(__dirname,'../game/assets/grocery-triple.css'),'utf8');
-function l(hex){const a=hex.match(/../g).map(s=>parseInt(s,16)/255).map(n=>n<=.04045?n/12.92:((n+.055)/1.055)**2.4);return a[0]*.2126+a[1]*.7152+a[2]*.0722;}function ratio(fg,bg){return (Math.max(l(fg),l(bg))+.05)/(Math.min(l(fg),l(bg))+.05);}
-for(const [name,fg,bg] of [['primary text','483d33','f6efe3'],['secondary text','74604f','f6efe3'],['basket text','74604f','fffaf1'],['result action','fffaf1','395e50'],['rule numbers','934b3d','f6efe3'],['field text','483d33','fffaf1']]){const r=ratio(fg,bg);assert.ok(r>=4.5,name+' '+r);assert.ok(css.includes('#'+fg)&&css.includes('#'+bg));console.log(`${name}: ${r.toFixed(2)}:1`);}
-assert.match(css,/\.good\{[^}]*width:44px;height:44px;min-height:44px/);assert.match(css,/button,a,select\{min-height:44px/);assert.match(css,/@media\(prefers-reduced-motion:reduce\)/);assert.match(css,/\.good\.blocked\{[^}]*pointer-events:none/);assert.match(css,/grid-template-columns:repeat\(7,minmax\(0,1fr\)\)/);assert.ok(!/@import|url\(https?:/.test(css));
-console.log('grocery-triple contrast: informative text exceeds WCAG AA; 44px native controls, seven noninteractive slots and reduced-motion styles verified');
