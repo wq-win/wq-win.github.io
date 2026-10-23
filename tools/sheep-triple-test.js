@@ -15,3 +15,13 @@ for(let seed=1000;seed<1040;seed++){let s=E.create(0,seed),steps=0;while(s.statu
 // Explicit six-singleton state: shuffle must not charge for an impossible rescue.
 s=E.create(0,5);const ids=[];for(let t=0;t<6;t++)ids.push(s.tiles.find(a=>a.type===t).id);s.removed=ids.slice();s.rack=ids.slice();const n=s.counts.shuffle;assert(!E.tool(s,'shuffle'));assert.equal(s.counts.shuffle,n);assert(s.message.includes('未扣次数'));assert(E.tool(s,'remove'));assert(E.tool(s,'shuffle'));assert(E.verify(s,s.certificate).valid);
 console.log(`sheep-triple: ${solved} initial certificates, ${shuffled} shuffled certificates, budgets, geometry, conservation, undo and rescue PASS`);
+
+// Distinct silhouettes, no same-layer overlap, and explicit no-repeat restarts.
+const families=new Set();
+for(let seed=0;seed<100;seed++){
+ const board=E.create(0,seed);families.add(board.layout);
+ for(const a of board.tiles)for(const b of board.tiles)if(a.id<b.id&&a.z===b.z)assert(Math.abs(a.x-b.x)>=40||Math.abs(a.y-b.y)>=40,'same-layer overlap');
+ const restart=E.create(0,seed,board.layout);assert.notEqual(restart.layout,board.layout);assert(E.verify(restart,restart.certificate).valid);
+}
+assert.equal(families.size,6);
+console.log('sheep-triple geometry: six silhouettes, 100 non-repeating restarts, no same-layer overlap PASS');
