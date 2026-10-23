@@ -25,7 +25,6 @@
             { group: '大语言模型', cat: 'llm', file: 'lora', href: 'game/llm/lora.html', title: 'LoRA：低秩更新' },
             { group: '机器人经典', cat: 'robot-classic', file: 'prm', href: 'game/robot-classic/prm.html', title: 'PRM 概率路线图' },
             { group: '机器人学习', cat: 'robot-learn', file: 'promp', href: 'game/robot-learn/promp.html', title: 'ProMP：轨迹分布与条件化' },
-            { group: '游戏', href: 'game/grocery-triple.html', title: '杂货找三消' },
             { group: '游戏', href: 'game/water-sort.html', title: '倒水分色' },
             { group: '游戏', href: 'game/sum-ten.html', title: '框选凑十' },
             { group: '游戏', href: 'game/tile-frontier.html', title: '翻格筑城' },

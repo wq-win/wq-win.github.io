@@ -5,7 +5,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 const index = read('game/index.html'), nav = read('js/site-config.js');
-for (const slug of ['grocery-triple','water-sort','sum-ten','tile-frontier','hanzi-battle','yarn','parking','screws']) {
+for (const slug of ['water-sort','sum-ten','tile-frontier','hanzi-battle','yarn','parking','screws']) {
   assert(index.includes(`href="${slug}.html"`), `missing game card: ${slug}`);
   assert(nav.includes(`href: 'game/${slug}.html'`), `missing navigation: ${slug}`);
   const html = read(`game/${slug}.html`);
@@ -16,11 +16,11 @@ for (const slug of ['grocery-triple','water-sort','sum-ten','tile-frontier','han
     assert(fs.existsSync(target), `${slug}: missing local asset ${link}`);
   }
 }
-for (const slug of ['grocery-triple','water-sort','sum-ten']) {
+for (const slug of ['water-sort','sum-ten']) {
   const html = read(`game/${slug}.html`);
   assert(html.includes('lang="zh-CN"'), `${slug}: language`);
   assert(html.includes('viewport'), `${slug}: responsive viewport`);
   assert(html.includes('data-game-fullscreen'), `${slug}: fullscreen control`);
   assert(!/<(?:script|link|img)[^>]+(?:src|href)="https?:/i.test(html), `${slug}: remote dependency`);
 }
-console.log('third-batch integration: all three entries, five previous game entries, local assets, language, viewport and fullscreen passed');
+console.log('third-batch integration: both remaining entries, five previous game entries, local assets, language, viewport and fullscreen passed');
