@@ -23,11 +23,27 @@ const art=[
 '<path d="M14 18h20v21H14Zm20 5 9-6 1 5-10 11" fill="#8cb8b1"/><path d="M14 20C0 12 1 36 14 32m7-14V9h10v9" fill="none" stroke-width="4"/><path d="m40 12 5 8" fill="none" stroke-width="4"/>'
 ];
 function icon(type){return '<svg viewBox="0 0 48 48" aria-hidden="true" focusable="false" fill="none" stroke="#5a6549" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'+art[type%art.length]+'</svg>';}
+const music=window.SheepTripleAudio?.create({onChange:updateMusic});
+function updateMusic(s){
+ $('music-toggle').setAttribute('aria-pressed',String(s.enabled));
+ $('music-toggle').textContent=s.enabled?'♫ 关闭音乐':'♫ 开启音乐';
+ $('music-toggle').disabled=!s.supported;
+ $('music-volume').disabled=!s.supported;
+ $('music-status').textContent=({off:'原创牧场循环 · 点击开启',starting:'音乐启动中…',playing:'原创牧场循环 · 正在播放',paused:'已暂停 · 返回页面继续',unavailable:'当前浏览器不支持音乐',error:'音乐未能播放，请点击重试',destroyed:'音乐已停止'})[s.status]||'';
+}
+if(music){updateMusic(music.getState());$('music-toggle').addEventListener('click',()=>music.toggle());$('music-volume').addEventListener('input',()=>music.setVolume(Number($('music-volume').value)/100));}
+else{$('music-toggle').disabled=true;$('music-volume').disabled=true;$('music-status').textContent='音乐资源未加载，仍可继续游戏';}
 let state=E.create(0),busy=false;
 function tileById(id){return state.tiles.find(t=>t.id===id);}
 function name(t){return E.TYPES[t.type]?.name||('图案 '+(t.type+1));}
 function message(text){$('message').textContent=text;}
-function resize(){const field=document.querySelector('.field'),scale=Math.min(1,(field.clientWidth-16)/360);$('board').style.transform='scale('+scale+')';$('board').style.marginLeft=((field.clientWidth-360*scale)/2)+'px';field.style.height=(375*scale+24)+'px';}
+function resize(){
+ const field=document.querySelector('.field'),board=$('board');
+ const scale=Math.max(.1,Math.min((field.clientWidth-20)/360,(field.clientHeight-20)/375));
+ board.style.transform='scale('+scale+')';
+ board.style.left=((field.clientWidth-360*scale)/2)+'px';
+ board.style.top=((field.clientHeight-375*scale)/2)+'px';
+}
 function render(){
  const gone=new Set(state.removed),available=new Set(E.available(state));
  $('board').replaceChildren();
@@ -42,8 +58,8 @@ function render(){
 }
 function pick(id){if(busy)return;busy=true;const before=state.matched;if(E.take(state,id)){render();if(state.status==='playing')message(state.matched>before?'三张配成一组，继续向下探索。':state.rack.length>=5?'收集槽快满了，留意已有的图案。':'找到同样的图案，再放入收集槽。');}busy=false;}
 function use(tool){if(busy)return;busy=true;if(E.tool(state,tool)){render();if(state.status==='playing')message(state.message||{remove:'已移入暂存区，点选卡牌可放回。',undo:'已撤回一步，换个顺序试试。',shuffle:'剩余卡牌已重新排列。'}[tool]);}else message(state.message||'现在不能使用这个道具。');busy=false;}
-function start(level){state=E.create(level);render();message('先看看哪些卡牌没有被压住。');}
+function start(level){state=E.create(level,undefined,state.layout);render();message('先看看哪些卡牌没有被压住。');}
 for(let i=0;i<5;i++){const b=document.createElement('button');b.className='level';b.innerHTML='<strong>0'+(i+1)+'</strong><small>道具各 '+(5-i)+' 次</small>';b.setAttribute('aria-label','第 '+(i+1)+' 关，每种道具 '+(5-i)+' 次');b.addEventListener('click',()=>start(i));$('levels').append(b);}
 for(const t of ['remove','undo','shuffle'])$('tool-'+t).addEventListener('click',()=>use(t));
-$('restart').addEventListener('click',()=>start(state.level));$('next').addEventListener('click',()=>start(Math.min(4,state.level+1)));$('help').addEventListener('click',()=>{if(!$('help-dialog').open)$('help-dialog').showModal();});for(const id of ['close-help','understood'])$(id).addEventListener('click',()=>$('help-dialog').close());window.addEventListener('resize',resize);render();
+$('restart').addEventListener('click',()=>start(state.level));$('next').addEventListener('click',()=>start(Math.min(4,state.level+1)));$('help').addEventListener('click',()=>{if(!$('help-dialog').open)$('help-dialog').showModal();});for(const id of ['close-help','understood'])$(id).addEventListener('click',()=>$('help-dialog').close());window.addEventListener('resize',resize);if(window.ResizeObserver)new ResizeObserver(resize).observe(document.querySelector('.field'));render();
 })();
