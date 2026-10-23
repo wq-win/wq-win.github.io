@@ -13,6 +13,14 @@
             { id: 'robot-classic', href: 'robot-classic/index.html', label: '机器人经典基础 100 篇', short: '机器人经典' }
         ],
         demos: [
+            { group: '强化学习', cat: 'rl', file: 'dqn', href: 'game/rl/dqn.html', title: 'DQN：经验回放与目标网络' },
+            { group: '强化学习', cat: 'rl', file: 'ppo', href: 'game/rl/ppo.html', title: 'PPO：裁剪代理目标' },
+            { group: '大语言模型', cat: 'llm', file: 'rope', href: 'game/llm/rope.html', title: 'RoPE：旋转位置编码' },
+            { group: '大语言模型', cat: 'llm', file: 'kv-cache', href: 'game/llm/kv-cache.html', title: 'KV Cache：Prefill 与 Decode' },
+            { group: '机器人经典', cat: 'robot-classic', file: 'rrt-star', href: 'game/robot-classic/rrt-star.html', title: 'RRT*：选择父节点与重连' },
+            { group: '机器人经典', cat: 'robot-classic', file: 'mpc', href: 'game/robot-classic/mpc.html', title: 'MPC：预测、优化、只执行一步' },
+            { group: '机器人学习', cat: 'robot-learn', file: 'her', href: 'game/robot-learn/her.html', title: 'HER：重新标记目标' },
+            { group: '机器人学习', cat: 'robot-learn', file: 'diffusion-policy', href: 'game/robot-learn/diffusion-policy.html', title: 'Diffusion Policy：条件去噪动作' },
             { group: '强化学习', cat: 'rl', file: 'dyna-q', href: 'game/rl/dyna-q.html', title: 'Dyna-Q：真实经验与模型规划' },
             { group: '大语言模型', cat: 'llm', file: 'lora', href: 'game/llm/lora.html', title: 'LoRA：低秩更新' },
             { group: '机器人经典', cat: 'robot-classic', file: 'prm', href: 'game/robot-classic/prm.html', title: 'PRM 概率路线图' },

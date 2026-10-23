@@ -89,6 +89,14 @@ ALIASES = {
 }
 
 EXTRA_EDGES = [
+    ("rl:16-dqn", "game:rl-dqn"),
+    ("rl:27-ppo", "game:rl-ppo"),
+    ("llm:046-rope", "game:llm-rope"),
+    ("llm:073-gqa", "game:llm-kv-cache"),
+    ("robot-classic:062-rrtstar", "game:classic-rrt-star"),
+    ("robot-classic:094-cheetah-mpc", "game:classic-mpc"),
+    ("robot-learn:022-her", "game:learn-her"),
+    ("robot-learn:061-diffusion-policy", "game:learn-diffusion-policy"),
     ("rl:03-dyna", "game:rl-dyna"),
     ("llm:047-lora", "game:llm-lora"),
     ("robot-classic:035-prm", "game:classic-prm"),
@@ -143,6 +151,14 @@ EXTRA_EDGES = [
 ]
 
 STATIC_PAGES = [
+    {"url": "game/rl/dqn.html", "title": "DQN：经验回放与目标网络", "cardTitle": "DQN：经验回放与目标网络", "question": "dqn", "excerpt": "真实小型神经网络如何从回放样本学习动作价值。", "series": "game", "seriesLabel": "强化学习演示", "year": 2026, "id": "game:rl-dqn"},
+    {"url": "game/rl/ppo.html", "title": "PPO：裁剪代理目标", "cardTitle": "PPO：裁剪代理目标", "question": "ppo", "excerpt": "比较正负优势下的概率比与裁剪目标，理解更新激励。", "series": "game", "seriesLabel": "强化学习演示", "year": 2026, "id": "game:rl-ppo"},
+    {"url": "game/llm/rope.html", "title": "RoPE：旋转位置编码", "cardTitle": "RoPE：旋转位置编码", "question": "rope", "excerpt": "旋转查询和键，观察相对位置如何进入点积。", "series": "game", "seriesLabel": "大语言模型演示", "year": 2026, "id": "game:llm-rope"},
+    {"url": "game/llm/kv-cache.html", "title": "KV Cache：Prefill 与 Decode", "cardTitle": "KV Cache：Prefill 与 Decode", "question": "kv-cache", "excerpt": "因果注意力如何缓存旧 K/V，只为新 token 计算 Q/K/V。", "series": "game", "seriesLabel": "大语言模型演示", "year": 2026, "id": "game:llm-kv-cache"},
+    {"url": "game/robot-classic/rrt-star.html", "title": "RRT*：选择父节点与重连", "cardTitle": "RRT*：选择父节点与重连", "question": "rrt-star", "excerpt": "共享采样下对比 RRT 与 RRT*，观察路径成本传播。", "series": "game", "seriesLabel": "机器人经典演示", "year": 2026, "id": "game:classic-rrt-star"},
+    {"url": "game/robot-classic/mpc.html", "title": "MPC：预测、优化、只执行一步", "cardTitle": "MPC：预测、优化、只执行一步", "question": "mpc", "excerpt": "受约束小系统的滚动时域控制，与 PID 并排比较。", "series": "game", "seriesLabel": "机器人经典演示", "year": 2026, "id": "game:classic-mpc"},
+    {"url": "game/robot-learn/her.html", "title": "HER：重新标记目标", "cardTitle": "HER：重新标记目标", "question": "her", "excerpt": "把实际到达的状态变成目标，重新计算奖励并回放。", "series": "game", "seriesLabel": "机器人学习演示", "year": 2026, "id": "game:learn-her"},
+    {"url": "game/robot-learn/diffusion-policy.html", "title": "Diffusion Policy：条件去噪动作", "cardTitle": "Diffusion Policy：条件去噪动作", "question": "diffusion-policy", "excerpt": "在解析教学分布中逐步去噪动作序列，理解条件生成。", "series": "game", "seriesLabel": "机器人学习演示", "year": 2026, "id": "game:learn-diffusion-policy"},
     {"url": "game/rl/dyna-q.html", "title": "Dyna-Q：真实经验与模型规划", "cardTitle": "Dyna-Q：真实经验与模型规划", "question": "dyna-q", "excerpt": "真实交互更新一次，再用学到的模型重放经验。", "series": "game", "seriesLabel": "强化学习演示", "year": 2026, "id": "game:rl-dyna"},
     {"url": "game/llm/lora.html", "title": "LoRA：低秩更新", "cardTitle": "LoRA：低秩更新", "question": "lora", "excerpt": "把低秩矩阵乘积逐项展开，理解冻结权重和可训练参数。", "series": "game", "seriesLabel": "大语言模型演示", "year": 2026, "id": "game:llm-lora"},
     {"url": "game/robot-classic/prm.html", "title": "PRM 概率路线图", "cardTitle": "PRM 概率路线图", "question": "prm", "excerpt": "先采样和连边，再在同一路线图上查询不同起终点。", "series": "game", "seriesLabel": "机器人经典演示", "year": 2026, "id": "game:classic-prm"},
