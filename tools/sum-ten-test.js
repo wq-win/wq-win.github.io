@@ -27,17 +27,57 @@ check('invalid totals and corners never change board, score or deadline', () => 
     for (const [a, z] of [[p(0), p(0)], [{ row: -1, col: 0 }, p(2)], [null, p(0)], [{ row: 1.5, col: 0 }, p(3)]]) { const out = E.select(s, a, z, 301); assert.equal(out.accepted, false); assert.equal(out.state, s); }
     assert.throws(() => E.create([1]), /48/); assert.throws(() => E.create(Array(48).fill(10)), /48/); assert.throws(() => E.start(E.create(), NaN), /timestamp/);
 });
-check('1,000 seeded boards contain only 1–9 and at least 24 legal opening rectangles', () => {
-    for (let seed = 0; seed < 1000; seed++) { const b = E.generate(random(seed)); assert.equal(b.length, 48); assert.ok(b.every(n => n >= 1 && n <= 9)); assert.ok(E.legalRectangles(b).length >= 24); }
-    assert.ok(E.legalRectangles(E.generate(() => 0)).length >= 24); assert.ok(E.legalRectangles(E.generate(() => 1)).length >= 24);
+check('1,000 mixed boards are full, diverse, replay-solvable and cannot be cleared as pairs', () => {
+    const distinct = new Set(), shapes = new Set(), structuralShapes = new Set(); let minOpening = Infinity, maxOpening = 0, minMulti = Infinity, minGaps = Infinity, maxPairs = 0;
+    for (let seed = 0; seed < 1000; seed++) {
+        const puzzle = E.generatePuzzle(random(seed)), b = puzzle.board, total = b.reduce((a, n) => a + n, 0);
+        assert.equal(b.length, 48); assert.ok(b.every(n => Number.isInteger(n) && n >= 1 && n <= 9));
+        assert.ok(total >= 140 && total <= 170); assert.equal(total % 10, 0); assert.equal(puzzle.path.length, total / 10);
+        // Any full clear takes total/10 moves. Fewer than 24 moves for 48 cells
+        // proves that pairs alone cannot solve it, independently of the witness.
+        assert.ok(total / 10 < 24);
+        const opening = E.legalRectangles(b); assert.ok(opening.length >= 5); assert.ok(opening.length <= 24);
+        minOpening = Math.min(minOpening, opening.length); maxOpening = Math.max(maxOpening, opening.length);
+        maxPairs = Math.max(maxPairs, opening.filter(m => E.rectangle(b, m.from, m.to).filled.length === 2).length);
+        const adjacent = id => [id % 6 ? id - 1 : -1, id % 6 < 5 ? id + 1 : -1, id >= 6 ? id - 6 : -1, id < 42 ? id + 6 : -1].filter(id => id >= 0);
+        // This nine has no dense rectangle summing to ten. It MUST eventually
+        // cross a cleared cell, whichever solution a player finds.
+        assert.ok(b.some((n, id) => n === 9 && adjacent(id).every(j => b[j] >= 2)), 'mandatory gap witness');
+        let state = E.start(E.create(b), 0), multi = 0, gaps = 0;
+        const groups = [];
+        for (const [step, move] of puzzle.path.entries()) {
+            const box = E.rectangle(state.board, move.from, move.to), before = state.board.slice();
+            assert.equal(box.sum, 10); assert.ok(box.filled.length >= 2);
+            multi += box.filled.length > 2; gaps += box.cells.length > box.filled.length; groups.push(box.filled.join('.'));
+            const out = E.select(state, move.from, move.to, 100 + step);
+            assert.equal(out.accepted, true); assert.deepEqual(state.board, before, 'select is immutable'); state = out.state;
+        }
+        assert.ok(multi >= 8); assert.ok(gaps >= 6); minMulti = Math.min(minMulti, multi); minGaps = Math.min(minGaps, gaps);
+        assert.equal(state.status, 'finished'); assert.equal(state.reason, 'cleared'); assert.equal(state.score, 48); assert.ok(state.board.every(n => !n));
+        let greedy = b.slice();
+        for (;;) {
+            const pair = E.legalRectangles(greedy).map(m => E.rectangle(greedy, m.from, m.to)).find(box => box.filled.length === 2);
+            if (!pair) break; pair.filled.forEach(id => { greedy[id] = 0; });
+        }
+        assert.ok(greedy.filter(Boolean).length >= 14, 'even unrestricted pair-only greedy must leave at least 14 cells');
+        distinct.add(b.join(',')); shapes.add(groups.join('/'));
+        const reflections = [0, 1, 2, 3].map(flip => groups.map(group => group.split('.').map(Number).map(id => {
+            const r = Math.floor(id / 6), c = id % 6;
+            return ((flip & 1) ? 7 - r : r) * 6 + ((flip & 2) ? 5 - c : c);
+        }).sort((a, b) => a - b).join('.')).sort().join('/'));
+        structuralShapes.add(reflections.sort()[0]);
+        assert.deepEqual(E.generate(random(seed)), b, 'generate preserves its array API and deterministic injection');
+    }
+    assert.ok(distinct.size >= 990, `only ${distinct.size} distinct numeric boards`);
+    assert.ok(structuralShapes.size >= 30, 'sampled partitions must differ structurally, not just by reflection or label');
+    assert.ok(shapes.size >= 100, `only ${shapes.size} different removal layouts, including reflections`);
+    console.log(`Challenge metrics: ${distinct.size}/1000 unique boards, ${structuralShapes.size} structural layouts (${shapes.size} reflected variants), ${minOpening}–${maxOpening} opening rectangles, at most ${maxPairs} opening pairs, witness minima ${minMulti} multi-number and ${minGaps} true gap clears; pair-only clear rate 0%.`);
 });
-check('120 complete generated boards can be cleared via their initial disjoint pairs', () => {
-    for (let seed = 1; seed <= 120; seed++) {
-        const b = E.generate(random(seed)), pairs = [];
-        for (let r = 0; r < 8; r += 2) for (let c = 0; c < 6; c += 2) { const i = r * 6 + c; if (b[i] + b[i + 1] === 10 && b[i + 6] + b[i + 7] === 10) pairs.push([i, i + 1], [i + 6, i + 7]); else pairs.push([i, i + 6], [i + 1, i + 7]); }
-        let s = E.start(E.create(b), 0);
-        pairs.forEach(([a, z], i) => { const out = E.select(s, p(a), p(z), 100 + i); assert.equal(out.accepted, true); s = out.state; });
-        assert.equal(s.status, 'finished'); assert.equal(s.reason, 'cleared'); assert.equal(s.score, 48); assert.ok(s.board.every(n => !n));
+check('constant RNGs terminate and still produce a complete legal certificate', () => {
+    for (const value of [0, .5, 1]) {
+        const { board: initial, path } = E.generatePuzzle(() => value), b = initial.slice();
+        for (const move of path) { const box = E.rectangle(b, move.from, move.to); assert.ok(box.valid); box.filled.forEach(id => { b[id] = 0; }); }
+        assert.ok(b.every(n => n === 0)); assert.ok(initial.every(n => n > 0));
     }
 });
 check('prefix-sum legal finder agrees with exhaustive rectangles including holes', () => {
