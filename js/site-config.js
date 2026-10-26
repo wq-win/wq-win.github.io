@@ -10,7 +10,8 @@
             { id: 'rl', href: 'rl/index.html', label: '强化学习 60 篇', short: '强化学习' },
             { id: 'llm', href: 'llm/index.html', label: '大语言模型 100 篇', short: '大语言模型' },
             { id: 'robot-learn', href: 'robot-learn/index.html', label: '机器人学习 100 篇', short: '机器人学习' },
-            { id: 'robot-classic', href: 'robot-classic/index.html', label: '机器人经典基础 100 篇', short: '机器人经典' }
+            { id: 'robot-classic', href: 'robot-classic/index.html', label: '机器人经典基础 100 篇', short: '机器人经典' },
+            { id: 'english', href: 'english/index.html', label: '英语学习 · 小学到大学', short: '英语学习' }
         ],
         demos: [
             { group: '强化学习', cat: 'rl', file: 'dqn', href: 'game/rl/dqn.html', title: 'DQN：经验回放与目标网络' },

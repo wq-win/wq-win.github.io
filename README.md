@@ -3,7 +3,7 @@
 [![中文](https://img.shields.io/badge/中文-阅读中文版-64748b?style=for-the-badge)](README.zh-CN.md)
 [![English](https://img.shields.io/badge/English-Current-2563eb?style=for-the-badge)](README.md)
 
-Paper-reading notes, interactive algorithm demos, and browser games by **wq-win**.
+Paper-reading notes, a staged English-learning course, interactive algorithm demos, and browser games by **wq-win**.
 
 [Visit the site](https://wq-win.github.io/) · [Demos & games](https://wq-win.github.io/game/) · [RSS](https://wq-win.github.io/rss.xml) · [Report an issue](https://github.com/wq-win/wq-win.github.io/issues)
 
@@ -29,6 +29,14 @@ Each series begins with a Day 0 reading guide, followed by a timeline and closin
 - Search the shared 104-concept glossary and 70 scoped symbol entries
 - Use light/dark themes and responsive layouts; choose Static, Floating Light, Aurora or Stardust with strength, speed and pause in the appearance menu
 
+### English learning
+
+The fifth series, [English learning](https://wq-win.github.io/english/), follows primary, junior-secondary, senior-secondary and university ability stages. Each original lesson includes instruction, worked examples, exercises and explained answers. Browse by stage/grade/module, use the shared search, and read the explained answers.
+
+Jiangxi/PEP textbook alignment is provisional, not a verified unit-by-unit or word-by-word match. The course excludes listening; 80%/95% are written-practice goals, not guaranteed exam scores. The [coverage table](https://wq-win.github.io/english/coverage.html) links authored objectives to real teaching and practice; [sources and scope](https://wq-win.github.io/english/sources.html) separate that evidence from uncompleted external textbook/standards audits.
+
+English has an independent static build and tests: see [ENGLISH_BUILD.md](ENGLISH_BUILD.md). It does not change the existing paper audits or treat opening a lesson as mastery.
+
 ### Interactive demos
 
 The [demo hub](https://wq-win.github.io/game/) includes 17 algorithm demos:
@@ -52,7 +60,7 @@ Paodekuai and Doudizhu share blue-and-gold table styling, original character por
 
 ## Run locally
 
-Requirements: Git and Python 3. Node.js is only needed for the game regression tests.
+Requirements: Git and Python 3. Node.js 20+ is needed to rebuild the site or run regression tests.
 
 ```sh
 git clone https://github.com/wq-win/wq-win.github.io.git
