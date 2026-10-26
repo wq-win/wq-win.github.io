@@ -1,0 +1,190 @@
+# 句子与段落还原 找到语篇连接处
+
+七至九年级原创英语读写课程 · 9年级上学期 · 第7课
+
+**适用与边界**：按初中知识依赖循序推进，不冒充学校教材的精确单元顺序。全部短文、情境、题目为自编，不含听力。文中的80与95是本课程练习目标，不是中考分数承诺。
+
+<a id="objectives"></a>
+## 学习目标
+
+- 用指代、复现、逻辑和结构定位缺失句。
+- 区分可放在局部与真正吻合整篇的候选句。
+- 完成有多余项的原创语篇还原并说明排除依据。
+
+<a id="core"></a>
+## 核心讲解
+
+### 空格前后要同时成立
+还原题不是选“最好的句子”，而是选最适合这个位置的句子。读空前确定已知信息，读空后确定接续要求；候选句既要承接前文，也要引出后文。A句含they时应有清楚复数先行词，含this problem时前面应出现问题；但并不是任何复数名词都能承接they，语义也要合。
+
+四类连接：词汇复现与同义替换（device→tool）；指代（these results→前面结果）；逻辑（however转折、therefore结果、for example例证）；结构（总起句、步骤句、总结句）。段首常立话题，段末常总结或过渡，但“段首一定主旨”不是绝对规则。
+
+遇多个看似可用句，可先比较关键词和信息新旧。某候选句语法通顺却引入全文未谈的新人物或新条件，往往是干扰；另一个只重复前句、无法解释后句why/this等，也可能不合。先锁定强约束空，再交叉验证其他空，而不是按选项字母顺序填。
+
+科学项目语篇常按问题—设计—测试—限制—改进组织。标题已经提到“太阳能”不代表所有关于太阳的句子都可填入；“热”与“亮”也不能无证据替换。本文实验是虚构课堂活动，训练的是衔接和证据，不提供设备操作规范。
+
+### 本课词汇与搭配
+
+词义按本课语境给出；同一词可能还有其他含义。先遮住中文回忆，再把搭配写入自己的句子，不只抄单词。
+
+|词或短语|本课意思|常用搭配或用法|
+|---|---|---|
+|link|联系 连接|link two ideas|
+|reference|指代 参考|a clear reference|
+|repeat|重复|repeat a key word|
+|sequence|顺序|in a clear sequence|
+|sample|样本|label a sample|
+|compare|对比|compare two designs|
+|insulate|隔热|insulate a box|
+|temperature|温度|record the temperature|
+|measurement|测量结果|repeat a measurement|
+|conclusion|结论|draw a conclusion|
+
+<a id="theme-extension"></a>
+### 主题阅读与词汇扩展 学习方法 从重复到提取与验证
+
+以下为同课主题拓展的已讲词条，每条包含本课释义、搭配和原创例句。可遮中文回忆，再改写一个例句；不是要求一次背完，也不冒充官方完整词表。
+
+|词或表达|本课意思|搭配|原创例句|
+|---|---|---|---|
+|memorise|记忆|memorise in context|I try to memorise phrases in context.|
+|recall|回忆 提取|recall a rule|Close the notes and recall the rule.|
+|reviewer|审阅者|a peer reviewer|A peer reviewer asks for evidence.|
+|strategy|策略|change a strategy|Change a strategy when it does not fit the task.|
+|monitor|监测|monitor progress|We monitor progress with unfamiliar texts.|
+|self-check|自查|a quick self-check|Use a self-check before reading the model answer.|
+|explain|解释|explain a choice|Explain a choice instead of copying a letter.|
+|connection|联系|make a connection|Make a connection between the new word and an example.|
+|misconception|错误观念|correct a misconception|The example corrects a common misconception.|
+|independently|独立地|work independently|Try the new passage independently first.|
+
+**选读脚手架**：这段主题阅读用于在语境中复现词汇，不要求初次学习就独立认出所有词。先读后面的中文问题，再找谁、做什么、为什么；未列入词表的难词可查阅或请教师解释，不因出现过一次就计作已掌握。
+
+**原创主题短文**
+
+Li used to reread a grammar page until it looked familiar. In a new passage, however, she still chose answers without understanding the sentence. She changed her review method. After studying an example, she closed the page and explained the rule in her own words. Then she applied it to a different sentence and checked the result. When she could not explain a choice, she returned to the relevant step rather than marking the whole topic “finished”. Familiarity became a starting point, not the only evidence of learning.
+
+**读写示范问题**：新的学习方法比“看熟了”多了哪两步？如何知道还需返回讲解？
+
+**证据解析与迁移**：增加离开原文提取/解释和迁移到新句验证；若无法解释选择，就定位返回相关步骤。此文训练连贯还原，也提供与课程80/95内部目标相符的独立证据，不保证某法对人人产生同样成绩。
+
+以上是有解析的教学示范，不另计入独立编号练习；计分任务总数见练习区。
+
+<a id="worked"></a>
+## 例题解析
+
+**例1**：We numbered the samples. ___. It helped us avoid mixing them up。中间适合介绍清楚标签系统的句子，It要有可回指的单数做法；不能插入与样品无关的“天气很好”。
+
+**例2**：The first design was cheap. However, it broke during the test。However提示后一信息限制前面的优势；不能把cheap误当“必然耐用”的依据。
+
+**例3**：段尾“To find out, we compared two boxes.”预示下一段应描述比较方法或结果，而非突然介绍全新人物。
+
+<a id="practice"></a>
+## 练习
+
+**作答要求**：除填写答案或写句子外，非写作题均补一句简短理由或原文依据；答案中说明/依据的分数正用于这一步。开放写作按所列量表评分，不必另写语法理由。
+
+共10个编号任务，每题10分，总分100分；一题多空按答案分项给分。第1—8题为基础区80分，目标至少64/80并订正错因；第9—10题为巩固迁移区。冲刺95%以全课得分除以总分计算，至少需95/100，还要求阅读依据可靠、写作切题，不能只背答案。开放题示例不是唯一答案。
+
+### 1. G9A07-E01
+
+句后“They were easy to carry”。前句A We made two small boxes. B We chose a name. 哪个更可衔接？
+
+### 2. G9A07-E02
+
+填逻辑词：The design was light. ___, it was not strong enough.
+
+### 3. G9A07-E03
+
+解释候选句“This solved the problem”需要前文提供什么。
+
+### 4. G9A07-E04
+
+为“For example, ...”前面补一种合理功能的句子，不必编整篇。
+
+### 5. G9A07-E05
+
+判断“段落首句一定是全文主旨”是否可靠。
+
+### 6. G9A07-E06
+
+将these results对应到可能前文：A 两组温度测量数据 B 一位学生姓名。
+
+### 7. G9A07-E07
+
+给科学项目结构排序：①讨论限制 ②提出问题 ③设计和测试 ④根据结果改进。
+
+### 8. G9A07-E08
+
+为什么选项含与标题相同的science一词还不足以证明可填？
+
+### 9. G9A07-E09
+
+原创还原题，5空，7选项，每项最多用一次。
+Our class wanted to know whether wrapping a box could slow the warming of a cold drink. (1) We placed one cold bottle in each box and kept the starting conditions the same.
+One box was wrapped in thick cloth; the other was not. (2) Every ten minutes, we recorded the temperature of the drink in each bottle.
+At first, we mixed up two numbers in our notebook. (3) After that, the records were easier to follow.
+The drink in the wrapped box warmed more slowly in our classroom. (4) We had only tested one kind of cloth in one room.
+We therefore planned another comparison using different materials. (5)
+A. Both boxes were put on the same table, away from direct sunlight.
+B. Every drink in the world stays cold for the same amount of time.
+C. This would help us see whether the first result held under other conditions.
+D. We began by finding two boxes of the same size.
+E. So we labelled the columns clearly and checked each entry together.
+F. However, that did not prove cloth was the best material in every situation.
+G. A classmate’s favourite subject was history.
+
+### 10. G9A07-E10
+
+写100—120词解释第9题实验结论的边界和下一步，不必复述所有操作，至少用一个转折、一个指代和一个因果连接。
+
+<a id="answers"></a>
+## 参考答案与解析
+
+### 1. G9A07-E01 答案
+
+A。They可指two small boxes，carry也符合物体；a name单数且不能按本意搬运。选择5分，指代和语义5分。
+
+### 2. G9A07-E02 答案
+
+However。优势与限制转折；句首However后用逗号。连接6分，关系4分。
+
+### 3. G9A07-E03 答案
+
+必须有明确问题及解决它的措施，This通常指措施/行动；若前文只有无关事实则指代不清。必要信息6分，指代4分。
+
+### 4. G9A07-E04 答案
+
+前面可先提出一般观点，如Simple labels can prevent mistakes. 后句举标签如何避免错误的例子。一般观点6分，与例证关系4分。
+
+### 5. G9A07-E05 答案
+
+不可靠。段首可叙述背景、提出问题、承接前段或给局部主题，需看全篇功能。判断4分，至少两种其他作用6分。
+
+### 6. G9A07-E06 答案
+
+A。results复数且指测量结果；姓名不符数与语义类别。选择5分，双重依据5分。
+
+### 7. G9A07-E07 答案
+
+②③①④。问题引实验，结果引限制，限制引改进。排序6分，逻辑4分；实际文章可有别的组织，此题给定序列最自然。
+
+### 8. G9A07-E08 答案
+
+主题同词只说明大致相关，仍须满足前后指代、因果、时序和信息推进。解释6分，列至少两种检查4分。
+
+### 9. G9A07-E09 答案
+
+1D：引出two boxes并保持同尺寸对比；2A：继续控制放置条件，接测温；3E：混数字→清楚标列解决问题；4F：结果后转限制，后句只测一布一屋解释限制；5C：This指计划的新比较，说明检验外推。每空1分，五处衔接各1分。B为无依据普遍断言，G离题。
+
+### 10. G9A07-E10 答案
+
+示例：The classroom comparison suggested that wrapping one box in thick cloth slowed the warming of the cold drink under the tested conditions. However, this result does not show that cloth is always the best material. Only one kind of cloth and one room were used. The group also noticed a recording problem, so it improved the labels before continuing. A useful next step would be to compare other materials while keeping the bottle size and starting temperature similar. These comparisons could show whether the first pattern is repeated. The conclusion should remain limited until there is more evidence, rather than becoming a claim about every possible situation. 内容4分，连接与指代4分，边界准确2分。
+
+## 学习证据与复习
+
+基础区低于64分：返回本课核心讲解，给每个错误贴上“词义、句法、时间、证据、表达”之一，再不看答案重做。达到基础目标：隔两天用不同主语或情境重新造句。冲刺95：将第9题的证据位置和第10题的修改理由写出来；不要把一次满分当成迁移能力。
+
+前置复习：[上一课](junior-g9a-06.html)。
+
+课程定位参考：[人民教育出版社新版初中英语教材介绍](https://www.pep.com.cn/xw/zt/hd/12/xjcjs/cz/202510/t20251024_2004130.html)。仅用于教材背景，不表示出版社审核或认可本课程。
