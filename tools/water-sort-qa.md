@@ -1,5 +1,41 @@
 # 倒水分色 QA
 
+## 2026-10-26 challenge revision (current)
+
+- Replaced all eight boards with interleaved 5, 5, 6, 6, 6, 6, 7 and 7-colour puzzles. Every colour still has four units, capacity remains four, and every starting board still has **two** empty bottles. Rules, undo, restart, progression and visual controls are unchanged.
+- The first board is no longer a 4-pour paired-layer tutorial. Independent breadth-first search proves minimum solution lengths of **16, 17, 19, 20, 21, 22, 23 and 24 pours**. The production solver also returns and replays a winning trace for every board (22, 21, 31, 25, 26, 24, 24 and 31 pours; it does not claim shortest paths).
+- Exhaustive graph analysis canonicalizes interchangeable bottle labels and reverses all reachable edges from the win. All boards have reachable losing states, and **no board can be solved while leaving at least one bottle empty at every step**: both spare-capacity buffers genuinely have to be used.
+
+| Level | Reachable states | Cannot reach a win | No-move dead ends | Matching-first greedy wins / 200 |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 1,268 | 102 | 9 | 185 |
+| 2 | 1,848 | 112 | 5 | 115 |
+| 3 | 4,787 | 397 | 21 | 148 |
+| 4 | 4,219 | 337 | 8 | 68 |
+| 5 | 3,476 | 334 | 9 | 95 |
+| 6 | 2,494 | 179 | 9 | 127 |
+| 7 | 4,090 | 506 | 12 | 0 |
+| 8 | 6,503 | 1,231 | 7 | 45 |
+
+The greedy benchmark prefers same-colour consolidation, completed bottles and draining a source, breaks ties with 200 deterministic seeds, and avoids repeated states. These are policy-regression metrics, **not human win-rate claims**. Losing-state percentages are graph properties, not random-play probabilities.
+
+### Executed checks
+
+- `node tools/water-sort-test.js`: PASS. All eight complete state graphs, exact shortest solutions, production-solver replay, both-spare requirement, 22,790 valid/invalid transitions, colour conservation, capacity, immutability, no-move traces, undo recovery, save/restore and corrupt-input cases.
+- `node tools/water-sort-ui-test.js`: PASS (happy-dom). All eight wins through actual UI handlers; direct-final versus all-complete distinction; new first-board dead end, restore and undo recovery; target errors, source cancellation, keyboard focus, restart/selection/resize animation races, denied storage, fullscreen and progression.
+- `node tools/water-sort-contrast-test.js`: PASS. Essential text and all seven colour symbols ≥4.5:1; 44px target and reduced-motion contracts remain intact.
+- Save schema is now version 2. Version-1 histories describe different board contents and are **not** replayed: earned completions and selected level survive; an unfinished old board restarts safely. The existing storage key is retained to make this migration possible. UI and engine tests cover it.
+- Current real-browser desktop/mobile rendering and inputs were not verified: the retained local HTTP preview is isolated from the CUA browser (connection refused), and an elevated server attempt failed before execution on the restricted mount. No external preview was published. The happy-dom checks above are not a substitute for rendered layout or physical-device testing.
+
+### Changed water-sort files
+
+`game/js/water-sort-levels.js`, `game/js/water-sort-engine.js`, `game/water-sort.html`, `tools/water-sort-analysis.js`, `tools/water-sort-test.js`, `tools/water-sort-ui-test.js`, and this QA note. No new gameplay rules or timer penalties.
+
+---
+
+# Earlier release record (historical, not the current boards)
+
+
 ## Scope
 - Eight fixed original puzzles; colour counts 3, 3, 4, 4, 5, 5, 6, 7.
 - Every colour has exactly four units, every bottle has capacity four, and every initial puzzle has two spare bottles.

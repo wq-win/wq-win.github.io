@@ -52,6 +52,21 @@ const { pathToFileURL } = require('node:url');
         single[47] = 0; api.load(single); drag(c, { row: 0, col: 0 }, { row: 0, col: 1 }); assert.equal(api.state.reason, 'cleared'); assert.match(d.getElementById('result-title').textContent, /收空/); assert.equal(api.timers.size, 0, 'Reduced motion skips effects');
         assert.equal(w.localStorage.getItem('cozy-sum-ten-best-v1'),'2'); assert.match(d.querySelector('.best-score').textContent,/2/); const soundButton=d.querySelector('.cozy-sound');soundButton.click();assert.equal(w.localStorage.getItem('cozy-third-audio-v1'),'on');soundButton.click();assert.equal(w.localStorage.getItem('cozy-third-audio-v1'),'off');
         const animated = boot({ motion: true }); animated.d.getElementById('start').click(); animated.api.load(fixture()); drag(animated, { row: 0, col: 0 }, { row: 0, col: 1 }); assert.ok(animated.api.timers.size); assert.ok(animated.d.querySelector('.harvest')); const epoch = animated.api.epoch; animated.d.getElementById('start').click(); assert.ok(animated.api.epoch > epoch); assert.equal(animated.api.timers.size, 0); assert.equal(animated.d.querySelector('.harvest'), null); await new Promise(resolve => setTimeout(resolve, 650)); assert.equal(animated.api.state.score, 0); assert.equal(animated.d.querySelector('.harvest'), null);
+        // Exercise actual generated multi-number and gap rectangles through pointer
+        // input in both orientations; the engine certificate is never an auto-play UI.
+        for (const landscape of [false, true]) {
+            const generated = boot({ landscape }), puzzle = generated.w.SumTen.generatePuzzle(() => .314159);
+            generated.api.load(puzzle.board); let multi = 0, gaps = 0;
+            for (const move of puzzle.path) {
+                const box = generated.w.SumTen.rectangle(generated.api.state.board, move.from, move.to);
+                multi += box.filled.length > 2; gaps += box.cells.length > box.filled.length;
+                drag(generated, move.from, move.to);
+            }
+            assert.ok(multi >= 8); assert.ok(gaps >= 6); assert.equal(generated.api.state.score, 48);
+            assert.equal(generated.api.state.reason, 'cleared'); assert.equal(generated.d.getElementById('result').hidden, false);
+            generated.d.getElementById('result-restart').click(); assert.equal(generated.api.state.score, 0);
+            assert.equal(generated.api.state.status, 'playing'); assert.ok(generated.api.state.board.every(n => n > 0));
+        }
         assert.match(css, /touch-action:none/); assert.match(css, /button\{[^}]*touch-action:manipulation/); assert.match(css, /min-width:44px;min-height:44px/); assert.match(css, /orientation:portrait/); assert.match(css, /orientation:landscape/); assert.match(css, /max-height:375px/); assert.match(css, /prefers-reduced-motion:reduce/); assert.doesNotMatch(css, /@import|https?:\/\//);
         assert.doesNotMatch(fs.readFileSync(path.join(root, 'game/js/sum-ten.js'), 'utf8'), /setInterval/);
         console.log('sum-ten UI: real PointerEvent dispatch down/move/up, capture/release, all relevant cancellations, multi-touch isolation, live sums, score, keyboard, transposed directions, orientation/fullscreen preservation, explicit start, exact deadline, background pause/resume, no-moves/cleared results, restart cleanup and reduced-motion passed.');

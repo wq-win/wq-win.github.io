@@ -1,6 +1,6 @@
 'use strict';
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
-const E=require('../game/js/water-sort-engine');const root=path.resolve(__dirname,'..');
+const E=require('../game/js/water-sort-engine');const {analyze}=require('./water-sort-analysis');const root=path.resolve(__dirname,'..');
 (async()=>{const {Window}=await import('happy-dom');const windows=[];
 function setup({saved,reduced=true,denied=false}={}){
  const w=new Window({url:'https://example.test/game/water-sort.html',settings:{disableJavaScriptEvaluation:true,disableJavaScriptFileLoading:true,disableCSSFileLoading:true}});windows.push(w);
@@ -13,32 +13,37 @@ function setup({saved,reduced=true,denied=false}={}){
 const $=(w,id)=>w.document.getElementById(id),b=(w,n)=>w.document.querySelector(`[data-bottle="${n}"]`),clickMove=(w,m)=>{b(w,m.from).click();b(w,m.to).click();},savedState=w=>E.restore(w.localStorage.getItem('cozy-water-sort-v1'));
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 try{
- const w=setup();assert.equal(w.document.querySelectorAll('.bottle').length,5);assert.equal($(w,'level-select').options.length,8);
- assert.equal(w.document.querySelectorAll('.liquid-symbol').length,12);assert.equal(w.document.querySelectorAll('.palette-chip').length,3);
- b(w,3).click();assert.match($(w,'feedback').textContent,/这是空瓶/);assert(b(w,3).classList.contains('invalid'));
- b(w,0).click();assert.equal(b(w,0).getAttribute('aria-pressed'),'true');assert(b(w,3).classList.contains('target'));
+ const w=setup();assert.equal(w.document.querySelectorAll('.bottle').length,7);assert.equal($(w,'level-select').options.length,8);
+ assert.equal(w.document.querySelectorAll('.liquid-symbol').length,20);assert.equal(w.document.querySelectorAll('.palette-chip').length,5);
+ b(w,5).click();assert.match($(w,'feedback').textContent,/这是空瓶/);assert(b(w,5).classList.contains('invalid'));
+ b(w,0).click();assert.equal(b(w,0).getAttribute('aria-pressed'),'true');assert(b(w,5).classList.contains('target'));
  b(w,1).click();assert.match($(w,'feedback').textContent,/已经满了/);assert(b(w,0).classList.contains('selected'));assert.equal(savedState(w).moves,0);
  b(w,0).click();assert.equal(w.document.querySelectorAll('.selected').length,0);assert.match($(w,'feedback').textContent,/取消/);
  b(w,0).click();b(w,0).dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));assert.equal(w.document.querySelectorAll('.selected').length,0);
  b(w,0).focus();b(w,0).dispatchEvent(new w.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(w.document.activeElement.dataset.bottle,'1');
  assert.equal($(w,'undo').disabled,true);const initial=E.create();const undoFirst=E.solve(initial)[0];clickMove(w,undoFirst);assert.equal(savedState(w).moves,1);assert.equal($(w,'undo').disabled,false);$(w,'undo').click();assert.deepEqual(savedState(w).bottles,initial.bottles);assert.equal($(w,'undo').disabled,true);
  for(const m of E.solve(E.create()))clickMove(w,m);
- assert.equal($(w,'win-card').hidden,false);assert.equal($(w,'sorted-count').textContent,'3');assert.equal(w.document.activeElement.id,'next-level');assert.equal($(w,'water-board').inert,true);
+ assert.equal($(w,'win-card').hidden,false);assert.equal($(w,'sorted-count').textContent,'5');assert.equal(w.document.activeElement.id,'next-level');assert.equal($(w,'water-board').inert,true);
  const resume=setup({saved:w.localStorage.getItem('cozy-water-sort-v1')});assert.equal($(resume,'win-card').hidden,false);assert.match($(resume,'win-detail').textContent,/1 \/ 8/);
  $(w,'next-level').click();assert.equal($(w,'level-number').textContent,'02');assert.equal($(w,'win-card').hidden,true);assert.equal($(w,'water-board').inert,false);
  // A reachable dead end must explain how to replan, including after restore.
- const dead=setup();$(dead,'level-select').value='5';$(dead,'level-select').dispatchEvent(new dead.Event('change'));
- for(const [from,to] of [[0,5],[4,6],[2,4],[0,2]])clickMove(dead,{from,to});
+ const dead=setup();$(dead,'level-select').value='0';$(dead,'level-select').dispatchEvent(new dead.Event('change'));
+ for(const [from,to] of analyze(E.create(0).bottles).deadPath)clickMove(dead,{from,to});
  assert.match($(dead,'feedback').textContent,/没有可倒的位置.*撤销一步.*重新规划/);assert.equal($(dead,'win-card').hidden,true);
- const deadResume=setup({saved:dead.localStorage.getItem('cozy-water-sort-v1')});assert.match($(deadResume,'feedback').textContent,/没有可倒的位置/);$(dead,'restart').click();assert(E.legalMoves(savedState(dead).bottles).length);
- const different=setup();clickMove(different,E.solve(E.create())[0]);b(different,1).click();b(different,3).click();assert.match($(different,'feedback').textContent,/顶部颜色不同/);assert.equal(savedState(different).moves,1);
+ const deadResume=setup({saved:dead.localStorage.getItem('cozy-water-sort-v1')});assert.match($(deadResume,'feedback').textContent,/没有可倒的位置/);const trappedMoves=savedState(deadResume).moves;$(deadResume,'undo').click();assert.equal(savedState(deadResume).moves,trappedMoves-1);assert(E.legalMoves(savedState(deadResume).bottles).length);$(dead,'restart').click();assert(E.legalMoves(savedState(dead).bottles).length);
+ const different=setup();clickMove(different,E.solve(E.create())[0]);
+ const mixed=savedState(different).bottles;let mismatch;
+ for(let from=0;from<mixed.length;from++)for(let to=0;to<mixed.length;to++)if(E.inspect(mixed,from,to).reason==='color')mismatch={from,to};
+ assert(mismatch);clickMove(different,mismatch);assert.match($(different,'feedback').textContent,/顶部颜色不同/);assert.equal(savedState(different).moves,1);
  // All eight levels can be completed through the actual UI handlers.
  const all=setup();for(let i=0;i<8;i++){for(const m of E.solve(E.create(i)))clickMove(all,m);assert.equal($(all,'win-card').hidden,false);if(i<7)$(all,'next-level').click();}
  assert.match($(all,'win-title').textContent,/八份色彩，都收好/);assert.match($(all,'win-detail').textContent,/全部完成/);
  const direct=setup();$(direct,'level-select').value='7';$(direct,'level-select').dispatchEvent(new direct.Event('change'));assert.equal(direct.document.querySelectorAll('.bottle').length,9);assert.equal(direct.document.querySelectorAll('.bottle-row').length,2);
  for(const m of E.solve(E.create(7)))clickMove(direct,m);assert.match($(direct,'win-title').textContent,/最后一份/);assert.doesNotMatch($(direct,'win-title').textContent,/八份|全部/);assert.match($(direct,'win-detail').textContent,/1 \/ 8/);$(direct,'next-level').click();assert.equal($(direct,'level-number').textContent,'01');
- const bad=setup({saved:'{broken'});assert.equal(bad.document.querySelectorAll('.bottle').length,5);
- const denied=setup({denied:true});clickMove(denied,E.solve(E.create())[0]);assert.equal(denied.document.querySelectorAll('.liquid').length,12);assert.match($(denied,'saved').textContent,/无法保存/);
+ const legacy=setup({saved:JSON.stringify({v:1,level:3,history:[[0,4],[1,5]],completed:[0,2]})});
+ assert.deepEqual(savedState(legacy),E.create(3,[0,2]));assert.equal($(legacy,'level-number').textContent,'04');assert.equal(JSON.parse(legacy.localStorage.getItem('cozy-water-sort-v1')).v,2);
+ const bad=setup({saved:'{broken'});assert.equal(bad.document.querySelectorAll('.bottle').length,7);
+ const denied=setup({denied:true});clickMove(denied,E.solve(E.create())[0]);assert.equal(denied.document.querySelectorAll('.liquid').length,20);assert.match($(denied,'saved').textContent,/无法保存/);
  // During real-duration animation, repeated input is ignored; restart/selection cancel it.
  const racing=setup({reduced:false});const first=E.solve(E.create())[0];clickMove(racing,first);assert(racing.document.querySelector('.pour-ghost'));assert(b(racing,0).disabled);b(racing,2).click();assert.equal(savedState(racing).moves,0);
  $(racing,'restart').click();assert.equal(racing.document.querySelectorAll('.pour-ghost').length,0);await delay(570);assert.deepEqual(savedState(racing).bottles,E.create().bottles);assert(!b(racing,0).disabled);
