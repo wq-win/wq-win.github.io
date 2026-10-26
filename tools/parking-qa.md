@@ -38,3 +38,11 @@
 
 ## Rendering verification limit
 Current cloud CUA cannot reach the local HTTP server in the execution environment, and the attempted environment escalation was blocked. Actual desktop/mobile browser rendering and physical touch interaction were **not verified for this revision**. No alternate browser/CDP route or external hosting was used. Prior visual checks of the old ring layout do not validate these new diagonal layouts.
+
+
+## Live-QA control-clipping correction (2026-10-26)
+- Live Chromium at 1188 × 761 found restart spanning y728.19–772.19 and the level picker y729.19–771.19. The app was fixed to 761px with `overflow:hidden`, so the bottom 11px were inaccessible to ordinary scrolling. The desktop play column was 603.38px tall inside a 553px row: the 58dvh scene did not yield to the heading/navigation/control height.
+- Minimal desktop-only CSS correction: make the play column a full-row-height flex column, retain the full height of every non-scene child, and let the scene shrink to its existing 260px minimum. `safe center` keeps overflowing content top-aligned on exceptionally short rows; `overflow-y:auto` on the app provides an ordinary scroll fallback. Existing narrow and low-landscape natural document flow is unchanged.
+- No puzzle rules, geometry, car targets, zoom range or controller behavior changed. The lot viewport still scrolls independently; overview sizing uses the resulting scene size and the same max zoom still produces 47.04px narrow car targets.
+- Regression coverage checks the actual CSS cascade at 1188×761,1366×768,800×500,761×481,390×844,320×568,844×390 and667×375, including fullscreen fallback. Existing controller tests now also exercise 391px and 260px high lot containers, fit/reset and max-zoom targets.
+- These CSS/DOM checks do not prove pixel layout. Final live rendering, wheel-scroll reachability and hit testing must be rechecked after deployment by the parent QA thread.
