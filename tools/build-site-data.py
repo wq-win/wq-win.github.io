@@ -167,8 +167,8 @@ STATIC_PAGES = [
         "url": "index.html",
         "title": "MyLog 首页",
         "cardTitle": "首页",
-        "question": "论文精读",
-        "excerpt": "强化学习、大语言模型、机器人学习与机器人经典基础论文精读。",
+        "question": "论文精读与英语学习",
+        "excerpt": "四个论文精读系列，以及小学至大学的英语分阶段学习资料。",
         "series": "site",
         "seriesLabel": "站点",
         "year": 2026,
@@ -524,6 +524,30 @@ def collect_items():
                 "token": "",
             }
         )
+    # English is an authored course, never a scholarly paper or a paper-alias node.
+    english_catalog = ROOT / "english/catalog.json"
+    if english_catalog.exists():
+        for lesson in json.loads(english_catalog.read_text()):
+            items.append({
+                "id": lesson["id"], "series": "english", "seriesLabel": "英语学习",
+                "slug": lesson["slug"], "url": lesson["url"],
+                "title": lesson["title"], "cardTitle": lesson["title"],
+                "question": " · ".join([lesson["gradeLabel"], lesson["semester"]] + lesson.get("tags", [])),
+                "excerpt": "；".join(objective["text"] for objective in lesson["objectives"])[:280],
+                "year": None, "era": lesson["gradeLabel"], "kind": "lesson", "token": "",
+            })
+        for slug, title in [("index", "英语学习：小学到大学"), ("coverage", "英语课程目标与练习覆盖"), ("sources", "英语课程来源与范围"), ("vocabulary", "本站已讲英语词汇索引")]:
+            items.append({"id": f"english:{slug}", "series": "english", "seriesLabel": "英语学习",
+                          "slug": slug, "url": f"english/{slug}.html", "title": title, "cardTitle": title,
+                          "question": "英语课程 词汇 语法 阅读 写作 翻译", "excerpt": title,
+                          "year": None, "era": "", "kind": "course", "token": ""})
+    guide_catalog = ROOT / "english/guide-catalog.json"
+    if guide_catalog.exists():
+        for guide in json.loads(guide_catalog.read_text()):
+            items.append({"id": f"english:guide:{guide['slug']}", "series": "english", "seriesLabel": "英语学习指南",
+                          "slug": guide["slug"], "url": guide["url"], "title": guide["title"], "cardTitle": guide["title"],
+                          "question": "教材主题路线 进度 学习指南 目标覆盖", "excerpt": guide["title"],
+                          "year": None, "era": "", "kind": "course", "token": ""})
     return items
 
 
@@ -531,7 +555,7 @@ def build_related(items):
     by_id = {item["id"]: item for item in items}
     groups = {}
     for item in items:
-        if item["kind"] == "page":
+        if item["kind"] in {"page", "lesson", "course"}:
             continue
         group = alias_group(item["token"])
         if not group:
@@ -563,7 +587,7 @@ def build_related(items):
 
     packed = {}
     for item in items:
-        if item["kind"] == "page":
+        if item["kind"] in {"page", "lesson", "course"}:
             continue
         entries = related.get(item["id"], [])
         entries.sort(key=lambda entry: 0 if entry["id"].split(":")[0] != item["series"] else 1)
