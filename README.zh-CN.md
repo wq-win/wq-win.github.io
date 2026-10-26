@@ -3,7 +3,7 @@
 [![中文](https://img.shields.io/badge/中文-当前语言-2563eb?style=for-the-badge)](README.zh-CN.md)
 [![English](https://img.shields.io/badge/English-Read_in_English-64748b?style=for-the-badge)](README.md)
 
-**wq-win** 的论文精读笔记、算法交互演示与浏览器小游戏。
+**wq-win** 的论文精读笔记、分阶段英语课程、算法交互演示与浏览器小游戏。
 
 [访问网站](https://wq-win.github.io/) · [演示与游戏](https://wq-win.github.io/game/) · [RSS 订阅](https://wq-win.github.io/rss.xml) · [反馈问题](https://github.com/wq-win/wq-win.github.io/issues)
 
@@ -29,6 +29,14 @@
 - 共用 104 个概念词条和 70 个带语境的符号条目，可搜索中英文和用途
 - 明暗主题与响应式布局；右上角外观菜单可选静态、浮光、极光、星尘，并调节强度、速度或暂停
 
+### 英语学习
+
+第五系列[英语学习](https://wq-win.github.io/english/)按小学、初中、高中、大学能力模块组织，每课包含原创讲解、例题、练习和答案解析。支持学段／年级／模块目录、全站搜索与答案解析。
+
+江西／人教版仅为暂定参照，尚未完成学校实际教材逐课逐词映射。不含听力；80%／95%是书面练习目标，不保证考试成绩。[目标覆盖表](https://wq-win.github.io/english/coverage.html)链接本站已写目标的教学与练习证据；[来源与范围](https://wq-win.github.io/english/sources.html)明确它与尚未完成的外部课标／教材审计的区别。
+
+独立静态构建与测试见 [ENGLISH_BUILD.md](ENGLISH_BUILD.md)，不改动既有论文审计，也不把打开课文当作知识掌握。
+
 ### 算法交互演示
 
 [演示入口](https://wq-win.github.io/game/)目前包含 17 个算法演示：
@@ -52,7 +60,7 @@
 
 ## 本地运行
 
-需要 Git 和 Python 3。只有运行游戏回归测试时才需要 Node.js。
+需要 Git 和 Python 3。重新构建网站或运行回归测试需要 Node.js 20 及以上版本。
 
 ```sh
 git clone https://github.com/wq-win/wq-win.github.io.git
