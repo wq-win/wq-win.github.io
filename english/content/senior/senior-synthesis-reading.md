@@ -1,0 +1,146 @@
+# 31 多文本阅读：对照主张、证据与口径
+
+> 建议位置：高3·下；原创能力递进，不等同于学校实际学期/人教版单元。只训练书面英语。每个编号计一道练习；编号内小项不重复计数。
+
+## 学习目标
+
+- 在两篇来源目的不同的文章间比较主张与证据
+- 识别百分比的分母、观察范围和缺失变量
+- 整合笔记形成不夸大、不抄句的摘要
+- 在“交通、城市流动与旅行体验”语境中区分常用词义、搭配并完成新的书面迁移。
+
+## 核心讲解
+
+### 1. 先问两篇是否真的在回答同一个问题
+“有多少次租车”不等于“替代了多少次汽车行程”；“用户喜欢”不等于“全体居民受益”。比较时列：作者/目的、主张、证据、样本、时段、测量指标、未回答问题。不要仅凭两篇都出现electric bicycle就视为结论矛盾。
+### 2. 百分比必须带分母
+60% of 200 respondents 与60% of all residents不是同一范围。增长50%若基数只有10次，其增加量为5次；不能凭百分比判断规模。本站训练中的虚构调查数字只服务阅读，不是现实城市统计。
+### 3. 综合写作
+先用一句概括共同主题，再指出不同测量指标，最后写能共同支持的有限结论和下一步。转述准确使用according to / reports / suggests；不以“研究证明”替换文章中的“用户表示”。
+
+### 笔记式阅读：把证据和解读分开
+用四栏笔记“指标—范围/分母—文本直接支持—不能推出”压缩信息。允许词组，不要求整句；但数字、时间、限定词必须保留。先写原文事实，再另栏写解释，避免把自己的猜测混进记录。
+
+### 主题词汇拓展：交通、城市流动与旅行体验
+
+下面的词条按本课情境扩展意义与搭配，不是课标完整词表。先把词分成“人/物、行动、性质/关系”三组；同一中文词不保证英语可互换。每条搭配示范本课采用的义项。读完语境再做新增的两项迁移题；能认出词义但不能在句中正确使用时，仍应保留为待复习项。
+
+### 本课词汇与搭配
+
+|词条|词性 / 条目类型|核心义|语境搭配|
+|---|---|---|---|
+|rental|n.|租用|rental totals|
+|operator|n.|运营方|a service operator|
+|respondent|n.|受访者|survey respondents|
+|commuter|n.|通勤者|regular commuters|
+|substitute|n./v.|替代物；替代|substitute for a car trip|
+|accessible|adj.|可到达的|accessible stations|
+|emission|n.|排放|transport emissions|
+|impact|n./v.|影响|environmental impact|
+|distribution|n.|分布|station distribution|
+|voluntary|adj.|自愿的|a voluntary survey|
+|indicator|n.|指标|an indicator of use|
+|interpretation|n.|解释|a cautious interpretation|
+|infrastructure|单词|基础设施|transport infrastructure|
+|commuting|单词|通勤|daily commuting|
+|congestion|单词|拥堵|traffic congestion|
+|junction|单词|交叉口|a busy junction|
+|intersection|单词|十字路口；交点|a road intersection|
+|crossing|单词|过街处|a pedestrian crossing|
+|cycle lane|短语|自行车道|a protected cycle lane|
+|fare|单词|车船票价|a reduced fare|
+|pass|单词|通票；通行证|a monthly pass|
+|interchange|单词|换乘站|a transport interchange|
+|terminal|单词|航站楼；终点站|a bus terminal|
+|platform|单词|站台|the station platform|
+|carriage|单词|火车车厢|a crowded carriage|
+|compartment|单词|隔间|a luggage compartment|
+|luggage|单词|行李|carry luggage|
+|baggage allowance|短语|行李额度|check the baggage allowance|
+|boarding|单词|登车；登机|a boarding gate|
+|cancellation fee|短语|取消费用|a cancellation fee|
+|return ticket|短语|往返票|buy a return ticket|
+|single ticket|短语|单程票|a single ticket|
+|pedestrianisation|单词|步行化|town-centre pedestrianisation|
+|ridership|单词|乘客人数或乘坐量|changes in ridership|
+|mode|单词|方式|a mode of transport|
+|modal shift|短语|出行方式转变|evidence of modal shift|
+|last mile|短语|最后一段路程|last-mile connections|
+|mobility|单词|流动性；行动能力|improve mobility|
+|spatial|单词|空间的|spatial distribution|
+|proximity|单词|接近|proximity to a station|
+|outskirts|单词|市郊|on the outskirts|
+|wayfinding|单词|寻路导向|clear wayfinding signs|
+
+
+## 阅读材料
+
+### Text A: An Operator’s Update（原创虚构数据）
+During the first six months of the town’s shared electric-bicycle service, monthly rentals rose from 4,000 to 6,500. The operator described the increase as a sign that the scheme was becoming part of daily travel. In a voluntary online survey of 200 registered users, 60% said it had made at least one regular journey more convenient. Several respondents mentioned trips between the railway station and the town centre. The operator plans to add more bicycles at the busiest stations.
+
+### Text B: A Transport Group’s Response（原创评论）
+The rental figures show that the service is being used, but they do not tell us what would have happened without it. A bicycle trip that replaces a car journey has different implications from one that replaces walking or an existing bus trip. The survey asked users about convenience, not about all their travel choices.
+
+Location matters too. Most stations are in the centre, while residents in outer neighbourhoods may have little opportunity to try the service. Asking only registered users cannot explain why other residents have not joined. The response also notes that no systematic comparison of road injuries has been reported. These gaps are reasons for better evaluation, not proof that the service has failed. Future reports should distinguish popularity among users from changes in transport across the whole town.
+
+### 主题词汇语境：交通、城市流动与旅行体验
+
+A new interchange improved connections between buses and trains, but residents on the outskirts still faced long last-mile journeys. Rising ridership showed that more trips were being made on the service; it did not alone establish a modal shift away from cars. Fare changes, new destinations and population growth could also affect the totals. Comparing spatial distribution and accessibility helped planners see which groups gained mobility and which still faced barriers.
+
+## 例题解析
+
+**例** 文本A报告共享车月租用量增长；文本B指出，租用量本身不能说明替代的是汽车、步行还是公交行程。二者并不矛盾：A提供使用量数据，B讨论这些数据尚不能回答的问题。综合答案应区分“已测指标”和“仍需补查的信息”，而不是简单判断“谁撒谎”。
+
+## 练习
+
+1. 分别用一句中文概括A、B的核心主张，并注明它们测量的指标。
+
+2. A中“60%”的分母是什么？能否换成“全城60%居民”？为什么？
+
+3. B指出的两项未解决问题是什么？
+
+4. 选择最准确综合结论：A. Rising rentals establish a town-wide shift away from car travel. B. The operator’s survey mainly evaluates road-injury risk. C. The service is popular among some users, but its wider effects need better evidence. D. Outer neighbourhoods report the same convenience as the centre.
+
+5. 若要检验“减少汽车出行”，应追加哪类数据？给两个具体字段而非只说more research。
+
+6. 根据材料写70—90词比较概要，不选择立场，不额外编造减排数字。
+
+7. 【笔记式阅读】不用整句，完成四栏笔记：①A的租用量：指标/两个数字及时间/直接支持/不能推出；②A的60%：分母/测量内容/直接支持/不能推出；③B建议补查的两类信息。每栏用中文或英文短语均可。
+
+8. 【主题词汇·辨义】区分ridership、modal shift、mobility；为什么新车站总乘次增加不能单独证明原来开车的人转乘了？
+
+9. 【主题词汇·迁移】写两句数据评价：一段铁路乘次增加，但郊区到站距离仍长；用whereas和last-mile或proximity。
+
+## 参考答案与解析
+
+1. A：租用量上升且受访用户多表示方便，指标为月租用次数及受访用户对行程便利程度的自报；B：这些数字不足以确定交通和环境效应，强调被替代的出行方式、可达性与使用分布等缺口。
+
+2. 200名自愿回答问卷的注册用户，不是全部用户更不是全城居民。样本自愿选择，且未使用服务的人未纳入；不能换分母。
+
+3. 可写：租车替代的是汽车、步行还是公交；站点分布是否服务离中心较远社区；未调查不使用者原因；安全变化未被系统跟踪。任选两项并说明与效益评估关系。
+
+4. C。既承认局部受欢迎，又保留社会效果的不确定。A把租用增加当成汽车出行被替代；D把中心用户体验推广到未充分覆盖地区；B偷换调查指标，问卷测便利感而非伤害风险。
+
+5. 每次租用原本可能采用的交通方式；起终点与距离；是否拥有/使用汽车及同日汽车行程变化；出行目的。任选两个可操作字段，最好说明比较前后并减少自报偏差。
+
+6. 示例：The operator’s report describes rising use of shared electric bicycles and convenience reported by many surveyed users. The transport group does not deny these benefits, but notes that rental totals do not show which journeys have been replaced. It also questions whether outer neighbourhoods have equal access and observes that safety effects were not measured. Together, the texts suggest that the service has attracted users, while evidence about its wider transport and environmental impact remains incomplete. 量规12：A准确3；B准确4；区分指标2；综合/语言3。
+
+7. 示例笔记：①指标=monthly rentals；数字=首六个月内从4,000到6,500；支持=租用次数增长；不能推出=汽车行程相应减少或每位居民受益。②分母=200名自愿答卷的注册用户；内容=至少一条常用行程的便利感；支持=这批受访用户60%表示更方便；不能推出=全城60%居民态度或交通伤害下降。③可补查：被替代的原出行方式、外圈社区可达性/不使用者原因，或系统安全数据；任两类。自查计分：4,000、6,500、前六个月、200名自愿注册答卷者四项各1分；两个“不能推出”各2分；补查两类各1分，共10分自查，不并入某套120分卷。
+
+8. ridership测乘坐数量；modal shift测从某出行方式转为另一方式；mobility泛指出行/行动能力。新乘次可能来自新增出行、步行/公交转移或人口变化，需要原出行方式等数据，不能由总量直接推因果。
+
+9. 示例：Ridership on the railway has increased, whereas residents on the outskirts still report difficult last-mile journeys. An evaluation should consider proximity to stations as well as the total number of trips. 要点：指标并列且不互相替代；不是因中心受益就说全部覆盖。
+
+## 订正与迁移
+
+先遮住答案独立完成，再为每处错误记录“语境线索—适用规则—我的新例句”。隔一天换一个主题复做，不以背熟本页答案代替迁移。完整篇章写作按题后量规人工核查，短句产出按答案中的结构与信息要点自查；不把示例当成唯一答案。
+
+## 课程与来源说明
+
+原创高中书面英语能力递进课；参考人教版必修—选择性必修的能力梯度，但未取得学习者学校的准确版次和教学表，年级/学期仅为建议学习位置，不等同于官方教材单元对应。课标以2017年版2025年修订为当前版本；不把2020年文本称为最新，也不声称已逐条核对2025全文。考试形式参照已核验的江西/新课标公开说明；不含听力。
+
+本课讲解、例句、语篇和题目为原创。来源链接用于课程/考试形式定位，不表示转载官方试题或逐句对应教材：
+
+- https://www.neea.edu.cn/html1/report/2401/499-1.htm
+- https://gaokao.chsi.com.cn/gkxx/zc/ss/202604/20260407/2293461519-4.html
+- https://paper.jyb.cn/zgjyb/h5/html5/2026-06/09/content_144741_19604051.htm
