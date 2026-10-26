@@ -3,7 +3,8 @@
         { id: 'rl', href: 'rl/index.html', label: '强化学习 60 篇' },
         { id: 'llm', href: 'llm/index.html', label: '大语言模型 100 篇' },
         { id: 'robot-learn', href: 'robot-learn/index.html', label: '机器人学习 100 篇' },
-        { id: 'robot-classic', href: 'robot-classic/index.html', label: '机器人经典基础 100 篇' }
+        { id: 'robot-classic', href: 'robot-classic/index.html', label: '机器人经典基础 100 篇' },
+        { id: 'english', href: 'english/index.html', label: '英语学习 · 小学到大学' }
     ];
 
     const FALLBACK_DEMOS = [
@@ -487,7 +488,7 @@
             </a>
             <div class="hidden md:flex items-center space-x-6">
                 ${navLink(root + 'index.html', 'Home')}
-                ${dropdown('精读', seriesItems, active)}
+                ${dropdown('系列', seriesItems, active)}
                 ${groupedDropdown('演示', groups.map((group) => ({
                     heading: group.heading,
                     items: group.items.map((item) => ({ href: root + item.href, label: item.label }))
@@ -568,7 +569,7 @@
             <div class="site-search-panel">
                 <div class="flex items-center gap-3 border-b border-gray-200 pb-3 mb-3">
                     <i class="fa fa-search text-gray-400"></i>
-                    <input id="site-search-input" type="search" placeholder="搜索论文、概念、演示… 支持模糊匹配" class="flex-1 bg-transparent outline-none text-gray-800">
+                    <input id="site-search-input" type="search" placeholder="搜索课程、论文、概念、演示… 支持模糊匹配" class="flex-1 bg-transparent outline-none text-gray-800">
                     <kbd class="text-xs text-gray-400 border rounded px-1.5 py-0.5">Esc</kbd>
                 </div>
                 <div id="site-search-results" class="max-h-[60vh] overflow-y-auto text-sm"></div>
@@ -586,7 +587,7 @@
             <div class="flex flex-col md:flex-row justify-between items-center gap-4">
                 <div class="mb-2 md:mb-0 text-center md:text-left">
                     <p class="text-lg font-bold">MyLog</p>
-                    <p class="text-gray-400 text-sm">© 2026 论文精读笔记</p>
+                    <p class="text-gray-400 text-sm">© 2026 学习笔记</p>
                 </div>
                 <div class="flex flex-wrap justify-center gap-4 text-sm">
                     <a href="${root}index.html" class="text-gray-400 hover:text-white">Home</a>
