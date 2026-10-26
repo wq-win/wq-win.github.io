@@ -3,10 +3,10 @@
 const E=window.ScrewPuzzle,$=id=>document.getElementById(id),colors=['var(--red)','var(--blue)','var(--yellow)','var(--green)','var(--purple)'],symbols=['○','△','□','◇','✚'];
 const KEY='pine-screw-progress-v1';let completed=[],index=0,busy=false,timer=0,token=0;
 try{const saved=JSON.parse(localStorage.getItem(KEY)||'{}');completed=Array.isArray(saved.completed)?[...new Set(saved.completed.filter(n=>Number.isInteger(n)&&n>=0&&n<16))]:[];index=Number.isInteger(saved.index)&&saved.index>=0&&saved.index<16?saved.index:0;}catch(_){}
-const levelOrder=[0,1,3,4,2,5,7,8,6,9,11,12,10,13,14,15];try{const old=JSON.parse(localStorage.getItem(KEY));if(old&&old.version!==2){index=levelOrder.indexOf(index);completed=completed.map(n=>levelOrder.indexOf(n));}}catch(_){}
+const levelOrder=[0,1,3,4,2,5,7,8,6,9,11,12,10,13,14,15];try{const old=JSON.parse(localStorage.getItem(KEY));if(old&&(!old.version||old.version<2)){index=levelOrder.indexOf(index);completed=completed.map(n=>levelOrder.indexOf(n));}}catch(_){}
 let state=E.create(index),history=[];const sound=window.WorkshopFeedback?window.WorkshopFeedback($('sound')):{play(){}};
-try{const run=JSON.parse(localStorage.getItem(KEY+'-run'));if(run&&run.version===2&&run.index===index&&Array.isArray(run.moves)&&run.moves.length<=30){const candidate=E.create(index);if(run.moves.every(id=>E.take(candidate,id))){state=candidate;history=run.moves.slice();}}}catch(_){}
-function save(){try{localStorage.setItem(KEY,JSON.stringify({version:2,completed,index:state.index}));localStorage.setItem(KEY+'-run',JSON.stringify({version:2,index:state.index,moves:history}));}catch(_){}}
+try{const run=JSON.parse(localStorage.getItem(KEY+'-run'));if(run&&run.version===3&&run.index===index&&Array.isArray(run.moves)&&run.moves.length<=30){const candidate=E.create(index);if(run.moves.every(id=>E.take(candidate,id))){state=candidate;history=run.moves.slice();}}}catch(_){}
+function save(){try{localStorage.setItem(KEY,JSON.stringify({version:3,completed,index:state.index}));localStorage.setItem(KEY+'-run',JSON.stringify({version:3,index:state.index,moves:history}));}catch(_){}}
 function element(tag,cls,text){const el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el;}
 function head(c){const h=element('span','head');h.append(element('span','screw-symbol',symbols[c]));h.style.setProperty('--color',colors[c]);h.setAttribute('aria-hidden','true');return h;}
 function render(){$('undo').disabled=!history.length||busy;
@@ -29,7 +29,7 @@ $('status').textContent=state.status==='won'?'这一关已完成，进度已保�
 const next=document.querySelector('.screw:not(:disabled)');if(state.status!=='playing')$('result-action').focus({preventScroll:true});else if(next)next.focus({preventScroll:true});
 },motion?0:230);
 }
-function start(n){clearTimeout(timer);token++;busy=false;history=[];state=E.create(n);save();$('status').textContent='先观察颜色，再拧下一枚螺丝。';render();}
+function start(n){clearTimeout(timer);token++;busy=false;history=[];state=E.create(n);save();$('status').textContent='先看下层：拆哪块板，才能把同色接上？';render();}
 $('undo').addEventListener('click',()=>{if(busy||!history.length)return;clearTimeout(timer);token++;history.pop();state=E.create(state.index);history.forEach(id=>E.take(state,id));save();render();$('status').textContent='已撤销一步，先为同色螺丝留出空位。';});
 E.levels.forEach((l,i)=>{const o=element('option','',String(i+1).padStart(2,'0')+' · '+l.name);o.value=String(i);$('level').append(o);});$('level').addEventListener('change',()=>start(Number($('level').value)));$('restart').addEventListener('click',()=>start(state.index));$('result-action').addEventListener('click',()=>start(state.status==='won'&&state.index<15?state.index+1:state.index));render();if(history.length&&state.status==='playing')$('status').textContent='已恢复上次拆解进度。';
 })();

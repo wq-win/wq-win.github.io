@@ -24,18 +24,106 @@
         }
         return found;
     }
-    function generate(random) {
-        random = random || Math.random;
-        function sample(n) { return Math.min(n - 1, Math.max(0, Math.floor(random() * n))); }
-        var board = Array(ROWS * COLS).fill(0);
-        // Random horizontal/vertical dominoes in each 2×2 patch guarantee 24 opening moves.
-        for (var r = 0; r < ROWS; r += 2) for (var c = 0; c < COLS; c += 2) {
-            var a = 1 + sample(9), b = 1 + sample(9), i = r * COLS + c;
-            if (sample(2)) { board[i] = a; board[i + 1] = 10 - a; board[i + COLS] = b; board[i + COLS + 1] = 10 - b; }
-            else { board[i] = a; board[i + COLS] = 10 - a; board[i + 1] = b; board[i + COLS + 1] = 10 - b; }
-        }
-        return board;
+    // A layout labels the cells removed by successive solver-verified rectangles.
+    // Unlike disjoint domino patches, later groups cross holes made by earlier ones.
+    // These 32 interleavings came from full-clear solution searches of mixed boards;
+    // the numbers are remixed below, not copied from a fixed board catalogue.
+    var LAYOUTS = [
+        'AAAAFPBBBBFNEPCOFNEPCJMMDDCIHHDDCILLEKKJKMEGGGON',
+        'CEFAANCEFAAMBEFAALBDDDDLBNMIIKBJGGGJCHHHIKCNNLKK',
+        'BBIIMPBBCCCCELHFFFEDDADDELGAHNMKGAHKPJIAJJOLOAPN',
+        'GDDDOOAAAELOAAAELNGFFHJKGGHCBBKIICBBLJJCBBONMCCM',
+        'LAAAAIHGFFFIHGGBBPCCHBBMCCLOJMKKLNJOPDDDDOEEEENO',
+        'IQNLFEAAAAFEHPKDDDBBBBFEHJJKLEIOGMMNIOGCCNPPGCCQ',
+        'JJJMLMJICCCIQAAOKOPAAFKNBBBBHNHHDFGGEEDEEGPQDFLO',
+        'ODPNNEIDFFFEIDJJKEGGGHBMMLKHBLCCCCBNOOPHBPAAAAAA',
+        'JEEEGPJHGGFOIHAHFNIBAKFNIBAKLCJBAMLCPBMDDCPOODDC',
+        'CBBCDOCBACDNHBAHDNONAKDMLIAIELGGAJEJGFAKELGFFKOM',
+        'PBBBBCDDDPCCHGGPFFHOEEEANLOKFANJIJQAMLIKMANNOPQA',
+        'MFEBABIFEBABIFEMAOCCFLANCCHJANMLGGAGNKHJDDOKHKDD',
+        'MAAAAABIMLJMBIFLJCBDDDDCBKFKOCNEEEECHHFLNNHGGGOO',
+        'OOKDQPONJDGGEEEDIIQMIAHHFLJALMFNJABPFNKABQCCCBBC',
+        'DLLKLODFJEEEDFHIIOMFGGGNAAHJMBAAHKNBQQOCCBPPQCCB',
+        'QMLCCCKJKHHDAAAAAAGGEIPDGFBBBBOFEIODQFEMPQNJLMNN',
+        'BNGHEEBMFFHCBLGLPCBLGKOCNLGJJCAAAAAAPMIDDIPOKDDJ',
+        'DAAAAADDBBHHEEBBEFJJNMFFIJKMCPIKKLCOLLGGCGPPNMCO',
+        'AAJEEEAABFGOCBBFGMCBBFHMCCIMHLJJINNLJJJKKNOKDDDD',
+        'CCCCDDLFHLDDKFGANOJFGAJBEEEAEBKHGAMBLHHAMBOIIONB',
+        'OQPNNCMDLMNCODIGGCEDHHKQEEIFJBOKKFJBQLLFPBAAAAAB',
+        'BABBBJHAGGHICACCIDKAOJIDKAMNIDNMENLLQFEFFPQPEOOP',
+        'AALEMNAALDFJMCKDFJPCIDFIGCBEGGOOBEJHPPBKNHQQBLNH',
+        'MLMMQQNFAIGPHFAHGODBABDDNBABCOKKCCCEKJJIJEQLPIPE',
+        'JEDDEPIBCDELIBCDKLJBCJFOONMKFMAANGFOAANGGPAAHHHP',
+        'DAAAADDDCBCDMOCBCOLNEBKKJJEBJKJHEHIGLIEFFGMNOFFG',
+        'DDDNPQJEAJBQKEAMBMKEAHBOGFAGBGLFFHHILPONIIQPCCCC',
+        'EBBBABEPHHAPEFKLAPLFJIAIMFJJAPMGCCCCNGKNOPOGDDDD',
+        'NAGBNQMAGBIPLAHBHDKAJBIDFAFFJDKLLNNEMOOCCEMQPCCE',
+        'KJEKKLLBBLFFCBBGAGCCCDADNIEDADHHINAOMJJMAMOOOOAO',
+        'OLEEEFCGMFAFCGDIAOCKDHAKCLDHAONMDIANBBBBBNNJJIIJ',
+        'BFDDDEAAAAEEBFFNHHBOMMHGBILCCGBIJCCGJIJLLNOLKKKO'
+    ].map(function (layout) {
+        var groups = [];
+        for (var id = 0; id < layout.length; id++) { var group = layout.charCodeAt(id) - 65; (groups[group] || (groups[group] = [])).push(id); }
+        return groups;
+    });
+    function neighbors(id) {
+        var row = Math.floor(id / COLS), col = id % COLS, result = [];
+        if (row) result.push(id - COLS); if (row < ROWS - 1) result.push(id + COLS);
+        if (col) result.push(id - 1); if (col < COLS - 1) result.push(id + 1);
+        return result;
     }
+    function bounds(ids) {
+        var rows = ids.map(function (id) { return Math.floor(id / COLS); }), cols = ids.map(function (id) { return id % COLS; });
+        return { from: { row: Math.min.apply(null, rows), col: Math.min.apply(null, cols) }, to: { row: Math.max.apply(null, rows), col: Math.max.apply(null, cols) } };
+    }
+    function certifiedPuzzle(sample) {
+        var groups = LAYOUTS[sample(LAYOUTS.length)], pairs = groups.filter(function (group) { return group.length === 2 && !neighbors(group[0]).includes(group[1]); });
+        var pair = pairs[sample(pairs.length)], anchor = pair[sample(2)], buffer = neighbors(anchor), board = Array(ROWS * COLS).fill(0);
+        for (var i = 0; i < groups.length; i++) {
+            var group = groups[i];
+            if (group === pair) { group.forEach(function (id) { board[id] = id === anchor ? 9 : 1; }); continue; }
+            var total = 0;
+            group.forEach(function (id) { board[id] = buffer.includes(id) ? 2 : 1; total += board[id]; });
+            if (total > 10) return null;
+            while (total++ < 10) board[group[sample(group.length)]]++;
+        }
+        // A 9 with no adjacent 1 cannot be collected by a dense rectangle. Every
+        // complete solution must first make a hole and then span it; this remains
+        // true under every number remix, not merely along our stored witness.
+        var flipRows = sample(2), flipCols = sample(2);
+        function transform(id) { var r = Math.floor(id / COLS), c = id % COLS; return (flipRows ? ROWS - 1 - r : r) * COLS + (flipCols ? COLS - 1 - c : c); }
+        var output = Array(ROWS * COLS); board.forEach(function (n, id) { output[transform(id)] = n; });
+        var path = groups.map(function (group) { return bounds(group.map(transform)); });
+        // Replay the certificate before returning anything playable. This catches
+        // corrupt layouts and ensures every random composition is actually clearable.
+        var check = output.slice();
+        for (var move of path) {
+            var box = rectangle(check, move.from, move.to);
+            if (!box.valid) return null;
+            box.filled.forEach(function (id) { check[id] = 0; });
+        }
+        return check.every(function (n) { return n === 0; }) ? { board: output, path: path } : null;
+    }
+    function generatePuzzle(random) {
+        random = random || Math.random;
+        // Seed a local stream so even a constant injected RNG cannot get stuck in
+        // rejection sampling. Generation is bounded and never searches during play.
+        var seed = (Math.floor(Math.min(1, Math.max(0, random())) * 4294967295) ^ 0x9e3779b9) >>> 0;
+        function sample(n) { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return Math.floor(seed / 4294967296 * n); }
+        var puzzle = null, bestPenalty = Infinity;
+        for (var attempt = 0; attempt < 64; attempt++) {
+            var candidate = certifiedPuzzle(sample); if (!candidate) continue;
+            var opening = legalRectangles(candidate.board), pairs = opening.filter(function (move) { return rectangle(candidate.board, move.from, move.to).filled.length === 2; }).length;
+            var penalty = Math.max(0, 5 - opening.length) + Math.max(0, opening.length - 18) + 3 * Math.max(0, pairs - 4);
+            if (penalty < bestPenalty) { bestPenalty = penalty; puzzle = candidate; }
+            if (penalty === 0) return candidate;
+        }
+        // The bounded fallback is still replay-verified and retains the multi-number
+        // and mandatory-gap invariants; only the opening-count preference may relax.
+        if (puzzle) return puzzle;
+        throw new Error('Could not build a certified sum-ten board');
+    }
+    function generate(random) { return generatePuzzle(random).board; }
     function create(board) {
         board = board === undefined ? generate() : board;
         if (!validate(board)) throw new TypeError('Expected 48 integers from 0 to 9');
@@ -64,5 +152,5 @@
     }
     function visual(pointValue, landscape) { return landscape ? { row: pointValue.col, col: pointValue.row } : { row: pointValue.row, col: pointValue.col }; }
     function logical(pointValue, landscape) { return landscape ? { row: pointValue.col, col: pointValue.row } : { row: pointValue.row, col: pointValue.col }; }
-    return Object.freeze({ ROWS: ROWS, COLS: COLS, DURATION: DURATION, create: create, generate: generate, start: start, remaining: remaining, settle: settle, select: select, rectangle: rectangle, legalRectangles: legalRectangles, visual: visual, logical: logical });
+    return Object.freeze({ ROWS: ROWS, COLS: COLS, DURATION: DURATION, create: create, generate: generate, generatePuzzle: generatePuzzle, start: start, remaining: remaining, settle: settle, select: select, rectangle: rectangle, legalRectangles: legalRectangles, visual: visual, logical: logical });
 }));

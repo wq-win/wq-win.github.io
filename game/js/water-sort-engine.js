@@ -79,12 +79,15 @@ function solve(input, options = {}) {
 function score(m,b) {
   return (b[m.to].length ? 10 : 0) + (b[m.to].length + m.amount === CAPACITY && same(b[m.to]) ? 20 : 0) + (m.amount === b[m.from].length ? 7 : 0) + m.amount;
 }
-function save(state) { return JSON.stringify({v:1,level:state.level,history:state.history,completed:state.completed}); }
+function save(state) { return JSON.stringify({v:2,level:state.level,history:state.history,completed:state.completed}); }
 function restore(raw) {
   try {
     const data = JSON.parse(raw);
-    if (!data || data.v !== 1 || !Number.isInteger(data.level) || data.level < 0 || data.level >= LEVELS.length || !Array.isArray(data.history) || data.history.length > 10000 || !Array.isArray(data.completed)) return create();
+    if (!data || ![1,2].includes(data.v) || !Number.isInteger(data.level) || data.level < 0 || data.level >= LEVELS.length || !Array.isArray(data.history) || data.history.length > 10000 || !Array.isArray(data.completed)) return create();
     let state = create(data.level,data.completed);
+    // Level revision 2 changes bottle contents: never replay an old trace on a
+    // different puzzle. Keep earned completion and the selected level instead.
+    if (data.v === 1) return state;
     for (const step of data.history) {
       if (!Array.isArray(step) || step.length !== 2) return create();
       const result = act(state,step[0],step[1]);
