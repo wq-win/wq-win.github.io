@@ -10,7 +10,7 @@ const { ROOT, COURSE, loadLessons } = require('./build-english.cjs');
     const window = new Window({ url: 'https://example.test/english/' + url, width, height: 844, settings: { disableJavaScriptFileLoading:true, disableCSSFileLoading:true, disableJavaScriptEvaluation:true } });
     windows.push(window);
     window.document.write(fs.readFileSync(path.join(COURSE, file), 'utf8'));
-    const style = window.document.createElement('style'); style.textContent = fs.readFileSync(path.join(COURSE, 'css/course.css'), 'utf8'); window.document.head.appendChild(style);
+    const style = window.document.createElement('style'); style.textContent = fs.readFileSync(path.join(ROOT, 'css/style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(COURSE, 'css/course.css'), 'utf8'); window.document.head.appendChild(style);
     window.eval(fs.readFileSync(path.join(COURSE, 'js/course.js'), 'utf8'));
     return window;
   }
@@ -52,7 +52,7 @@ const { ROOT, COURSE, loadLessons } = require('./build-english.cjs');
     assert.equal(window.localStorage.length, 0, 'opening a lesson does not create mastery or reading state');
     const css = fs.readFileSync(path.join(COURSE, 'css/course.css'), 'utf8');
     assert(css.includes('@media print') && css.includes('@media (max-width:520px)') && css.includes('.dark .course-page'));
-    const luminance = color => { color = color.length === 4 ? '#' + color.slice(1).split('').map(char => char + char).join('') : color; const rgb = color.slice(1).match(/../g).map(value => parseInt(value, 16) / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4); return .2126 * rgb[0] + .7152 * rgb[1] + .0722 * rgb[2]; };
+    const luminance = color => { color = color.length === 4 ? '#' + color.slice(1).split('').map(char => char + char).join('') : color; const channels = /^rgb/.test(color) ? color.match(/[\d.]+/g).slice(0, 3).map(Number) : color.slice(1).match(/../g).map(value => parseInt(value, 16)); const rgb = channels.map(value => value / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4); return .2126 * rgb[0] + .7152 * rgb[1] + .0722 * rgb[2]; };
     const contrast = (a, b) => { const values = [luminance(a), luminance(b)].sort((a, b) => b - a); return (values[0] + .05) / (values[1] + .05); };
     for (const dark of [false, true]) {
       window.document.documentElement.classList.toggle('dark', dark);
@@ -77,10 +77,28 @@ const { ROOT, COURSE, loadLessons } = require('./build-english.cjs');
     input.value = example.title; input.dispatchEvent(new chrome.Event('input'));
     assert(shared.querySelector('.site-search-hit[href="../english/' + example.slug + '.html"]'), 'actual shared search returns a course lesson');
     assert(shared.getElementById('site-search-results').textContent.includes('英语学习'), 'search result uses English series label');
+    input.value = '语态'; input.dispatchEvent(new chrome.Event('input'));
+    for (const dark of [false, true]) {
+      shared.documentElement.classList.toggle('dark', dark);
+      for (const selector of ['.site-search-hit span mark', '.site-search-hit p mark']) {
+        const marks = [...shared.querySelectorAll(selector)];
+        assert(marks.length > 0, 'actual search produces title and summary highlights');
+        for (const mark of marks) {
+          const style = chrome.getComputedStyle(mark);
+          assert(contrast(style.color, style.backgroundColor) >= 4.5, `${dark ? 'dark' : 'light'} search highlight contrast: ${selector}`);
+        }
+      }
+    }
+    const nonCourse = new Window({ settings: { disableJavaScriptEvaluation:true } }); windows.push(nonCourse);
+    nonCourse.document.write('<html class="dark"><head><style>' + fs.readFileSync(path.join(ROOT, 'css/style.css'), 'utf8') + '\n' + css + '</style></head><body><a class="site-search-hit"><span class="text-gray-800"><mark>语态</mark></span><p class="text-gray-500"><mark>语态</mark></p></a></body></html>');
+    for (const mark of nonCourse.document.querySelectorAll('.site-search-hit mark')) {
+      assert(!mark.matches('.course-page .site-search-hit mark'), 'English override selector excludes non-course pages');
+      assert.equal(nonCourse.getComputedStyle(mark).color, nonCourse.getComputedStyle(mark.parentElement).color, 'non-course search retains its existing inherited foreground');
+    }
     shared.dispatchEvent(new chrome.KeyboardEvent('keydown', { key:'Escape', bubbles:true }));
     assert(modal.classList.contains('hidden'), 'shared search dismisses with Escape');
     shared.getElementById('site-search-button').click(); assert(!modal.classList.contains('hidden'), 'shared search can reopen');
     modal.dispatchEvent(new chrome.MouseEvent('click', { bubbles:true })); assert(modal.classList.contains('hidden'), 'shared search backdrop dismisses');
-    console.log('English UI: 320/390/1440 DOM navigation, stage/query/empty/reset/repeated filters, reload/history, answer anchors, shared mobile navigation/search, native-print CSS and no mastery storage passed. Real-browser geometry remains a separate check.');
+    console.log('English UI: 320/390/1440 DOM navigation, stage/query/empty/reset/repeated filters, reload/history, answer anchors, shared mobile navigation/search and light/dark highlight contrast, native-print CSS and no mastery storage passed. Real-browser geometry remains a separate check.');
   } finally { for (const window of windows) await window.happyDOM.abort(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
