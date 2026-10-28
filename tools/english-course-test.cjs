@@ -190,7 +190,9 @@ for (const file of files) {
 }
 const config = {}, fallback = {};
 vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'js/site-config.js'), 'utf8'), { window: config });
-assert.equal(config.SITE.series.length, 5, 'fifth series in shared config');
+for (const id of ['rl', 'llm', 'robot-learn', 'robot-classic', 'english']) {
+  assert(config.SITE.series.some(series => series.id === id), 'existing series remains in shared config: ' + id);
+}
 assert(config.SITE.series.some(series => series.id === 'english'));
 assert(fs.readFileSync(path.join(ROOT, 'js/site-chrome.js'), 'utf8').includes("id: 'english'"), 'old paper pages receive English fallback nav');
 assert(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').includes('href="english/index.html"'), 'home entry');

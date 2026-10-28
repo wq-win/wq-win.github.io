@@ -524,6 +524,22 @@ def collect_items():
                 "token": "",
             }
         )
+    # The five Dahua tutorials preserve their own source and are not paper-audit nodes.
+    dahua_catalog = ROOT / "dahua-rl/catalog.json"
+    if dahua_catalog.exists():
+        for post in json.loads(dahua_catalog.read_text()):
+            items.append({
+                "id": f"dahua-rl:{post['slug']}", "series": "dahua-rl", "seriesLabel": "大话强化学习算法",
+                "slug": post["slug"], "url": f"dahua-rl/{post['slug']}.html",
+                "title": post["title"], "cardTitle": post["title"],
+                "question": post["question"], "excerpt": post["excerpt"],
+                "year": None, "era": "算法详解", "kind": "tutorial", "token": "",
+            })
+        items.append({"id": "dahua-rl:index", "series": "dahua-rl", "seriesLabel": "大话强化学习算法",
+                      "slug": "index", "url": "dahua-rl/index.html", "title": "大话强化学习算法 系列导读",
+                      "cardTitle": "大话强化学习算法 系列导读", "question": "DDPG PPO TD3 SAC TQC 阅读路线",
+                      "excerpt": "从赛车例子出发，对照五种算法的直觉、网络分工、公式与数字推演。",
+                      "year": None, "era": "系列导读", "kind": "tutorial", "token": ""})
     # English is an authored course, never a scholarly paper or a paper-alias node.
     english_catalog = ROOT / "english/catalog.json"
     if english_catalog.exists():
@@ -555,7 +571,7 @@ def build_related(items):
     by_id = {item["id"]: item for item in items}
     groups = {}
     for item in items:
-        if item["kind"] in {"page", "lesson", "course"}:
+        if item["kind"] in {"page", "lesson", "course", "tutorial"}:
             continue
         group = alias_group(item["token"])
         if not group:
@@ -587,7 +603,7 @@ def build_related(items):
 
     packed = {}
     for item in items:
-        if item["kind"] in {"page", "lesson", "course"}:
+        if item["kind"] in {"page", "lesson", "course", "tutorial"}:
             continue
         entries = related.get(item["id"], [])
         entries.sort(key=lambda entry: 0 if entry["id"].split(":")[0] != item["series"] else 1)
