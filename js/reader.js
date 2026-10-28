@@ -20,7 +20,7 @@
     function seriesFromPath() {
         const parts = location.pathname.split('/').filter(Boolean);
         if (parts.includes('game')) return '';
-        const known = ['rl', 'llm', 'robot-learn', 'robot-classic'];
+        const known = ['rl', 'llm', 'robot-learn', 'robot-classic', 'dahua-rl'];
         return known.find((name) => parts.includes(name)) || '';
     }
 
@@ -232,7 +232,7 @@
         const body = document.getElementById('article-body');
         if (body) {
             if (global.ReadingGuide) {
-                global.ReadingGuide.mount({ container: body, root, series, slug });
+                global.ReadingGuide.mount({ container: body, root, series, slug, guideHref: body.dataset.readingGuide });
             } else {
                 renderToc(body);
                 wrapGlossary(body, root);
