@@ -545,7 +545,7 @@
                 <button id="theme-toggle" class="w-9 h-9 rounded-full border border-gray-200 text-gray-600 hover:text-primary hover:border-primary" title="切换深色模式" aria-label="切换深色模式">
                     <i class="fa fa-moon-o"></i>
                 </button>
-                <button id="mobile-menu-button" class="md:hidden text-gray-700 focus:outline-none">
+                <button id="mobile-menu-button" aria-label="打开菜单" aria-controls="mobile-menu" aria-expanded="false" class="md:hidden text-gray-700 focus:outline-none">
                     <i class="fa fa-bars text-xl"></i>
                 </button>
             </div>
@@ -553,7 +553,7 @@
         <div id="mobile-menu" class="mobile-menu fixed top-0 left-0 h-full w-3/4 max-w-xs bg-white shadow-lg z-50 p-4">
             <div class="flex justify-between items-center mb-8">
                 <span class="text-xl font-bold text-primary">MyLog</span>
-                <button id="close-menu-button" class="text-gray-700 focus:outline-none">
+                <button id="close-menu-button" aria-label="关闭菜单" class="text-gray-700 focus:outline-none">
                     <i class="fa fa-times text-xl"></i>
                 </button>
             </div>
@@ -601,7 +601,7 @@
             </div>
         </div>
     </footer>
-    <button id="back-to-top" class="fixed bottom-6 right-6 bg-primary text-white w-12 h-12 rounded-full flex items-center justify-center shadow-lg opacity-0 invisible transition-all-300">
+    <button id="back-to-top" aria-label="返回顶部" class="fixed bottom-6 right-6 bg-primary text-white w-12 h-12 rounded-full flex items-center justify-center shadow-lg opacity-0 invisible transition-all-300">
         <i class="fa fa-arrow-up"></i>
     </button>`;
     }
@@ -614,10 +614,7 @@
         } catch (error) {
             /* ignore */
         }
-        const icon = document.querySelector('#theme-toggle i');
-        if (icon) {
-            icon.className = next === 'dark' ? 'fa fa-sun-o' : 'fa fa-moon-o';
-        }
+        syncThemeIcon();
         if (global.mermaid) {
             global.mermaid.initialize({
                 startOnLoad: false,
@@ -628,9 +625,16 @@
     }
 
     function syncThemeIcon() {
+        const button = document.getElementById('theme-toggle');
+        const dark = document.documentElement.classList.contains('dark');
+        if (button) {
+            const label = dark ? '切换浅色模式' : '切换深色模式';
+            button.setAttribute('aria-label', label);
+            button.setAttribute('title', label);
+        }
         const icon = document.querySelector('#theme-toggle i');
         if (icon) {
-            icon.className = document.documentElement.classList.contains('dark') ? 'fa fa-sun-o' : 'fa fa-moon-o';
+            icon.className = dark ? 'fa fa-sun-o' : 'fa fa-moon-o';
         }
     }
 
@@ -715,15 +719,19 @@
         const backToTopButton = document.getElementById('back-to-top');
         const openMenu = document.getElementById('mobile-menu-button');
         const closeMenu = document.getElementById('close-menu-button');
+        const setMenuOpen = (open) => {
+            if (mobileMenu) mobileMenu.classList.toggle('open', open);
+            if (openMenu) openMenu.setAttribute('aria-expanded', String(open));
+        };
         if (openMenu && mobileMenu) {
-            openMenu.addEventListener('click', () => mobileMenu.classList.add('open'));
+            openMenu.addEventListener('click', () => setMenuOpen(true));
         }
         if (closeMenu && mobileMenu) {
-            closeMenu.addEventListener('click', () => mobileMenu.classList.remove('open'));
+            closeMenu.addEventListener('click', () => setMenuOpen(false));
         }
         if (mobileMenu) {
             mobileMenu.querySelectorAll('a').forEach((link) => {
-                link.addEventListener('click', () => mobileMenu.classList.remove('open'));
+                link.addEventListener('click', () => setMenuOpen(false));
             });
         }
         const themeToggle = document.getElementById('theme-toggle');
