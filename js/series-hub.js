@@ -40,7 +40,7 @@
             const root = document.getElementById('series-era-filters') || document.getElementById('rl-era-filters');
             if (!root) return;
             root.innerHTML = eraOrder.map((era) => `
-                <button data-era="${era.id}" class="rl-era-chip px-3 py-1 rounded-full text-sm font-medium ${era.id === activeEra ? 'active bg-primary text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                <button type="button" data-era="${era.id}" aria-pressed="${era.id === activeEra}" class="rl-era-chip px-3 py-1 rounded-full text-sm font-medium ${era.id === activeEra ? 'active bg-primary text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
                     ${era.label}
                 </button>
             `).join('');
@@ -48,7 +48,14 @@
                 button.addEventListener('click', () => {
                     activeEra = button.getAttribute('data-era');
                     renderCatalog();
-                    renderFilters();
+                    root.querySelectorAll('button').forEach((filter) => {
+                        const selected = filter.getAttribute('data-era') === activeEra;
+                        filter.setAttribute('aria-pressed', String(selected));
+                        filter.classList.toggle('active', selected);
+                        filter.classList.toggle('bg-primary', selected);
+                        filter.classList.toggle('text-white', selected);
+                        ['bg-gray-200', 'text-gray-700', 'hover:bg-gray-300'].forEach((name) => filter.classList.toggle(name, !selected));
+                    });
                 });
             });
         }
