@@ -15,7 +15,7 @@
             { id: 'english', href: 'english/index.html', label: '英语学习 · 小学到大学', short: '英语学习' }
         ],
         demos: [
-            { group: '函数可视化', href: 'game/function-visualizer.html', title: '函数实验室 · 12 种常见函数' },
+            { group: '函数可视化', href: 'game/function-visualizer.html', title: '函数实验室 · 23 种常见函数' },
             { group: '强化学习', cat: 'rl', file: 'dqn', href: 'game/rl/dqn.html', title: 'DQN：经验回放与目标网络' },
             { group: '强化学习', cat: 'rl', file: 'ppo', href: 'game/rl/ppo.html', title: 'PPO：裁剪代理目标' },
             { group: '大语言模型', cat: 'llm', file: 'rope', href: 'game/llm/rope.html', title: 'RoPE：旋转位置编码' },
