@@ -151,6 +151,7 @@ EXTRA_EDGES = [
 ]
 
 STATIC_PAGES = [
+    {"url": "game/function-visualizer.html", "title": "函数实验室 · 常见函数参数可视化", "cardTitle": "函数实验室", "question": "正态分布 均值 标准差 三角函数 幅值 频率 相位 多项式 指数 对数 幂函数 Sigmoid tanh", "excerpt": "调整 12 种常见函数的参数，实时观察曲线。正态分布使用均值 μ 和标准差 σ，并显示方差 σ²。", "series": "game", "seriesLabel": "函数可视化", "year": 2026, "id": "game:function-visualizer"},
     {"url": "game/rl/dqn.html", "title": "DQN：经验回放与目标网络", "cardTitle": "DQN：经验回放与目标网络", "question": "dqn", "excerpt": "真实小型神经网络如何从回放样本学习动作价值。", "series": "game", "seriesLabel": "强化学习演示", "year": 2026, "id": "game:rl-dqn"},
     {"url": "game/rl/ppo.html", "title": "PPO：裁剪代理目标", "cardTitle": "PPO：裁剪代理目标", "question": "ppo", "excerpt": "比较正负优势下的概率比与裁剪目标，理解更新激励。", "series": "game", "seriesLabel": "强化学习演示", "year": 2026, "id": "game:rl-ppo"},
     {"url": "game/llm/rope.html", "title": "RoPE：旋转位置编码", "cardTitle": "RoPE：旋转位置编码", "question": "rope", "excerpt": "旋转查询和键，观察相对位置如何进入点积。", "series": "game", "seriesLabel": "大语言模型演示", "year": 2026, "id": "game:llm-rope"},
