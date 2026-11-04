@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<meta name="description" content="12 种常见函数的交互可视化：调整正态分布的均值与标准差、三角函数的幅值频率相位，以及多项式等函数参数，即时观察曲线。">
+<meta name="description" content="23 种常见函数的交互可视化：调整正态分布的均值与标准差、三角函数的幅值频率相位，以及多项式等函数参数，即时观察曲线。">
 <title>函数实验室 · 参数可视化 | MyLog</title>
 <script>try { if (localStorage.getItem('mylog-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}</script>
 <script src="/js/vendor/tailwind.js"></script>
@@ -32,7 +32,7 @@
 .function-lab .edition{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:8px}
 .function-lab .dot{width:6px;height:6px;border-radius:50%;background:#55a68c;display:inline-block}
 .function-lab .workspace{display:grid;grid-template-columns:190px minmax(0,1fr);gap:20px;align-items:start}
-.function-lab .catalog{padding:20px 10px;background:var(--paper);border:1px solid var(--border);border-radius:18px}
+.function-lab .catalog{max-height:calc(100vh - 32px);overflow-y:auto;position:sticky;top:16px;padding:20px 10px;background:var(--paper);border:1px solid var(--border);border-radius:18px}
 .function-lab .section-label{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:11px;letter-spacing:.6px;padding:0 12px 14px}
 .function-lab .count{font-variant-numeric:tabular-nums;color:var(--muted)}
 .function-lab .function-btn{font-size:13px;display:flex;align-items:center;gap:12px;width:100%;background:transparent;border:0;border-radius:10px;color:var(--muted);text-align:left;padding:10px 12px;min-height:44px;margin-bottom:3px;transition:background .15s,color .15s}
@@ -164,11 +164,11 @@ html.dark .function-lab .param-value{color-scheme:dark}html.dark .function-lab .
 <p class="breadcrumb"><a href="../index.html">MyLog</a> / <a href="index.html">演示与游戏</a> / 函数实验室</p>
  <header class="masthead">
   <div class="brand"><div class="mark" aria-hidden="true">ƒ</div><div><div class="eyebrow">FUNCTION EXPLORER</div><h1>函数实验室</h1><p class="tagline">拖动参数，看见函数如何变化。</p></div></div>
-  <div class="edition"><span class="dot"></span>12 种常见函数 · 即时绘图</div>
+  <div class="edition"><span class="dot"></span>23 种常见函数 · 即时绘图</div>
  </header>
  <div class="mobile-select"><label class="mobile-function-label" for="function-select">选择函数</label><select id="function-select" aria-label="选择函数"></select></div>
  <div class="workspace">
-  <nav class="catalog" aria-label="常见函数"><div class="section-label"><span>函数目录</span><span class="count">12</span></div><div id="function-list"></div></nav>
+  <nav class="catalog" aria-label="常见函数"><div class="section-label"><span>函数目录</span><span class="count">23</span></div><div id="function-list"></div></nav>
   <div class="main"><section class="experiment" aria-labelledby="function-title">
    <header class="experiment-head"><div><h2 id="function-title"></h2><div id="formula" class="formula" aria-label="函数公式"></div></div><div class="live"><span class="dot"></span>实时</div></header>
    <div class="experiment-body">
@@ -195,6 +195,31 @@ const fmt=(n,d=2)=>!Number.isFinite(n)?'不可计算':n===0?'0':(Math.abs(n)>=1e
 const par=(id,name,symbol,min,max,step,value,hint)=>({id,name,symbol,min,max,step,value,hint});
 const commonTrig=[par('A','幅值','A',0,3,.05,1,'|A| 控制高度；A < 0 时上下翻转。'),par('w','角频率','ω',.2,3,.05,1,'|ω| 越大，波形越密；单位为 rad/x。'),par('phi','相位','φ',-3.14,3.14,.01,0,'单位为弧度；水平移位量为 −φ/ω。')];
 const trigDetail=p=>p.w===0?'ω = 0：当前为常数函数。':`幅值 |A| = ${fmt(Math.abs(p.A))}；周期 T = ${fmt(TAU/Math.abs(p.w))}；水平平移 ${fmt(-p.phi/p.w)}。`;
+const gaussian=(x,mu,sigma)=>Math.exp(-.5*((x-mu)/sigma)**2)/(sigma*Math.sqrt(TAU));
+const stirlingCorrection=z=>{const r=1/z;return r/12-r**3/360+r**5/1260-r**7/1680+r**9/1188;};
+function logBeta(a,b){
+ let correction=0;
+ while(a<8){correction+=Math.log1p(b/a);a++;}
+ while(b<8){correction+=Math.log1p(a/b);b++;}
+ const logSum=Math.log(Math.max(a,b))+Math.log1p(Math.min(a,b)/Math.max(a,b));
+ return -a*Math.log1p(b/a)-b*Math.log1p(a/b)+.5*(Math.log(TAU)+logSum-Math.log(a)-Math.log(b))+stirlingCorrection(a)+stirlingCorrection(b)-stirlingCorrection(a+b)+correction;
+}
+function betaDensity(x,p){
+ if(x<0||x>1)return NaN;
+ if(x===0)return p.alpha<1?Infinity:p.alpha===1?p.beta:0;
+ if(x===1)return p.beta<1?Infinity:p.beta===1?p.alpha:0;
+ return Math.exp((p.alpha-1)*Math.log(x)+(p.beta-1)*Math.log1p(-x)-logBeta(p.alpha,p.beta));
+}
+function poissonMass(k,p){
+ if(!Number.isSafeInteger(k)||k<0)return NaN;
+ if(p.lambda===0)return k===0?1:0;
+ if(k===0)return Math.exp(-p.lambda);
+ let logP;
+ if(k<30){let lf=0;for(let j=2;j<=k;j++)lf+=Math.log(j);logP=k*Math.log(p.lambda)-p.lambda-lf;}
+ else{const d=(p.lambda-k)/k;logP=k*(Math.log1p(d)-d)-.5*Math.log(TAU*k)-stirlingCorrection(k);}
+ return Math.exp(logP);
+}
+const shiftParams=()=>[par('a','伸缩系数','a',-3,3,.1,1,'控制竖直伸缩；负数时上下翻转。'),par('h','水平平移','h',-4,4,.1,0,'改变图形的横向位置。'),par('k','竖直平移','k',-4,4,.1,0,'将图形上下移动。')];
 const functions=[
  {id:'normal',name:'正态分布',en:'Normal distribution',icon:'M1 18 C8 18 8 3 13 3 S18 18 25 18',formula:'f(x) = exp[−(x − μ)² / (2σ²)] / (σ√(2π))',range:[-10,10,-.05,.9],params:[par('mu','均值','μ',-4,4,.05,0,'决定钟形曲线的中心位置。'),par('sigma','标准差','σ',.5,3,.05,1,'σ 越大，曲线越宽、峰值越低；σ 必须大于 0。')],fn:(x,p)=>Math.exp(-.5*((x-p.mu)/p.sigma)**2)/(p.sigma*Math.sqrt(TAU)),insight:'<b>μ 控制位置，σ 控制分散程度。</b>方差为 σ²；这是概率密度，不是某个点的概率。',detail:p=>`μ = ${fmt(p.mu)}，σ = ${fmt(p.sigma)}，方差 σ² = ${fmt(p.sigma**2,4)}。峰值 = ${fmt(1/(p.sigma*Math.sqrt(TAU)),3)}。`},
  {id:'sine',name:'正弦函数',en:'Sine',icon:'M1 12 C5 0 9 0 13 12 S21 24 25 12',formula:'y = A sin(ωx + φ)',range:[-TAU,TAU,-3.5,3.5],params:commonTrig,fn:(x,p)=>p.A*Math.sin(p.w*x+p.phi),insight:'<b>A 改变高度，ω 改变疏密，φ 改变左右位置。</b>横轴和相位都以弧度计算。',detail:trigDetail},
@@ -207,7 +232,19 @@ const functions=[
  {id:'logarithm',name:'对数函数',en:'Logarithmic',icon:'M2 22 C2 6 9 4 25 2',formula:'y = a log<sub>b</sub>(x − h)',range:[-3,10,-5,5],params:[par('base','底数','b',.2,5,.05,2,'b > 0 且 b ≠ 1；无效输入会提示，不会裁剪。'),par('a','缩放系数','a',-3,3,.1,1,'控制竖直伸缩；负数使曲线上下翻转。'),par('h','水平平移','h',-2,4,.1,0,'定义域为 x > h，渐近线为 x = h。')],fn:(x,p)=>x>p.h?p.a*Math.log(x-p.h)/Math.log(p.base):NaN,insight:'<b>对数只在 x > h 的一侧有定义。</b>0 < b < 1 与 b > 1 的变化方向相反。',detail:p=>`底数 b = ${String(p.base)}；定义域 x > ${fmt(p.h)}；经过 (${fmt(p.h+1)}, 0)。`},
  {id:'power',name:'幂函数',en:'Power',icon:'M1 21 Q19 21 24 2',formula:'y = a x<sup>p</sup>　(x ≥ 0)',range:[0,4,-8,8],params:[par('p','指数','p',.1,4,.05,2,'p 可以为任意实数；p ≤ 0 时只展示 x > 0。'),par('a','系数','a',-3,3,.1,1,'控制竖直伸缩，负数使曲线上下翻转。')],fn:(x,p)=>(x>0||(x===0&&p.p>0))?p.a*Math.pow(x,p.p):NaN,insight:'<b>指数 p 可直接输入任意有限实数。</b>p > 0 时包括原点；p ≤ 0 时仅展示 x > 0。',detail:p=>`p = ${fmt(p.p)}；定义域${p.p>0?'包含 x = 0':'为 x > 0'}；经过 (1, ${fmt(p.a)})。${p.p===1?'当前为直线的一部分。':''}`},
  {id:'sigmoid',name:'Sigmoid 函数',en:'Logistic sigmoid',icon:'M1 20 C15 20 9 3 25 3',formula:'y = 1 / [1 + e<sup>−k(x−x₀)</sup>]',range:[-8,8,-.1,1.1],params:[par('k','陡度','k',.1,4,.05,1,'|k| 控制陡度；k < 0 递减，k = 0 为常数。'),par('x0','中心位置','x₀',-4,4,.1,0,'中心处的函数值始终为 0.5。')],fn:(x,p)=>1/(1+Math.exp(-p.k*(x-p.x0))),insight:'<b>输出始终在 0 与 1 之间。</b>增大 |k|，平缓的 S 形逐渐变得更像阶跃；k < 0 时递减。',detail:p=>`中心点 (${fmt(p.x0)}, 0.5)；中心斜率 k/4 = ${fmt(p.k/4,3)}。`},
- {id:'tanh',name:'双曲正切',en:'Hyperbolic tangent',icon:'M1 20 C15 20 9 3 25 3',formula:'y = A tanh[k(x − x₀)]',range:[-8,8,-3.5,3.5],params:[par('A','幅值','A',.1,3,.05,1,'两端趋近 ±|A|；负系数使曲线翻转。'),par('k','陡度','k',.1,4,.05,1,'|k| 控制陡度；k < 0 时方向反转。'),par('x0','中心位置','x₀',-4,4,.1,0,'曲线经过中心点 (x₀, 0)。')],fn:(x,p)=>p.A*Math.tanh(p.k*(x-p.x0)),insight:'<b>tanh 是以中心点为对称中心的 S 形曲线。</b>两端趋近 ±A，但不会达到它们。',detail:p=>`中心点 (${fmt(p.x0)}, 0)；值域${p.A===0||p.k===0?' {0}':' (−'+fmt(Math.abs(p.A))+', '+fmt(Math.abs(p.A))+')'}；中心斜率 Ak = ${fmt(p.A*p.k,3)}。`}
+ {id:'tanh',name:'双曲正切',en:'Hyperbolic tangent',icon:'M1 20 C15 20 9 3 25 3',formula:'y = A tanh[k(x − x₀)]',range:[-8,8,-3.5,3.5],params:[par('A','幅值','A',.1,3,.05,1,'两端趋近 ±|A|；负系数使曲线翻转。'),par('k','陡度','k',.1,4,.05,1,'|k| 控制陡度；k < 0 时方向反转。'),par('x0','中心位置','x₀',-4,4,.1,0,'曲线经过中心点 (x₀, 0)。')],fn:(x,p)=>p.A*Math.tanh(p.k*(x-p.x0)),insight:'<b>tanh 是以中心点为对称中心的 S 形曲线。</b>两端趋近 ±A，但不会达到它们。',detail:p=>`中心点 (${fmt(p.x0)}, 0)；值域${p.A===0||p.k===0?' {0}':' (−'+fmt(Math.abs(p.A))+', '+fmt(Math.abs(p.A))+')'}；中心斜率 Ak = ${fmt(p.A*p.k,3)}。`},
+ {id:'absolute',name:'绝对值函数',en:'Absolute value',icon:'M2 3 13 21 24 3',formula:'y = a |x − h| + k',range:[-6,6,-2,7],params:shiftParams(),fn:(x,p)=>p.a*Math.abs(x-p.h)+p.k,insight:'<b>图像是一个 V 形。</b>顶点为 (h, k)，a 的符号决定开口朝向。',detail:p=>`顶点 (${fmt(p.h)}, ${fmt(p.k)})；左右斜率分别为 ${fmt(-p.a)} 与 ${fmt(p.a)}。`},
+ {id:'reciprocal',name:'反比例函数',en:'Reciprocal',icon:'M2 13 Q9 13 10 22 M15 2 Q15 11 24 11',formula:'y = a / (x − h) + k',range:[-6,6,-6,6],params:shiftParams(),fn:(x,p)=>x===p.h?NaN:p.a/(x-p.h)+p.k,segment:(x,p)=>x<p.h?0:1,insight:'<b>x = h 处无定义，图像在这里断开。</b>a ≠ 0 时，两条渐近线为 x = h 和 y = k。',detail:p=>`定义域 x ≠ ${fmt(p.h)}。${p.a===0?'a = 0：水平线上仍缺少 x = h 这一点。':'中心为 ('+fmt(p.h)+', '+fmt(p.k)+')。'}`},
+ {id:'sqrt',name:'平方根函数',en:'Square root',icon:'M2 21 Q2 5 24 3',formula:'y = a √(x − h) + k',range:[-1,10,-1,5],params:shiftParams(),fn:(x,p)=>x>=p.h?p.a*Math.sqrt(x-p.h)+p.k:NaN,insight:'<b>只在 x ≥ h 时有定义。</b>曲线从 (h, k) 出发，越往右变化越平缓。',detail:p=>`起点 (${fmt(p.h)}, ${fmt(p.k)})；定义域 x ≥ ${fmt(p.h)}。`},
+ {id:'step',name:'分段阶跃函数',en:'Step function',icon:'M2 19 13 19 M13 4 24 4',formula:'y = L (x < h)；y = H (x ≥ h)',range:[-6,6,-.3,1.3],params:[par('h','跳变位置','h',-4,4,.1,0,'左段不含 h；右段包含 h。'),par('lo','左侧值','L',-3,3,.1,0,'x < h 时的函数值。'),par('hi','右侧值','H',-3,3,.1,1,'x ≥ h 时的函数值。')],fn:(x,p)=>x<p.h?p.lo:p.hi,segment:(x,p)=>x<p.h?0:1,insight:'<b>用两条水平线表达分段定义。</b>空心点不包含端点，实心点包含端点；跳变处不画竖直连线。',detail:p=>`x < ${fmt(p.h)}：y = ${fmt(p.lo)}；x ≥ ${fmt(p.h)}：y = ${fmt(p.hi)}。`},
+ {id:'relu',name:'ReLU',en:'Rectified linear unit',icon:'M2 20 13 20 24 3',formula:'y = a max(0, x − h)',range:[-6,6,-1,7],params:shiftParams().slice(0,2),fn:(x,p)=>p.a*Math.max(0,x-p.h),insight:'<b>拐点左侧输出 0，右侧为直线。</b>常用于神经网络的激活函数。',detail:p=>`拐点 (${fmt(p.h)}, 0)；右侧斜率 ${fmt(p.a)}。`},
+ {id:'leakyrelu',name:'Leaky ReLU',en:'Leaky rectifier',icon:'M2 22 13 19 24 3',formula:'y = a [α(x − h) (x < h)；x − h (x ≥ h)]',range:[-6,6,-2,7],params:[...shiftParams().slice(0,2),par('alpha','负侧斜率比例','α',0,1,.01,.1,'保留负侧的小斜率；此处使用 0 ≤ α ≤ 1。')],fn:(x,p)=>p.a*(x<p.h?p.alpha*(x-p.h):x-p.h),insight:'<b>相比 ReLU，左侧保留一条斜线。</b>α = 0 退化为 ReLU，α = 1 退化为直线。',detail:p=>`左侧斜率 aα = ${fmt(p.a*p.alpha,4)}；右侧斜率 a = ${fmt(p.a)}。`},
+ {id:'mixture',name:'高斯混合分布',en:'Gaussian mixture',density:true,icon:'M1 20 C6 20 6 4 10 4 S14 20 17 20 C20 20 20 10 23 10 S25 20 26 20',formula:'f(x) = w N(x; μ₁, σ₁²) + (1−w) N(x; μ₂, σ₂²)',range:[-8,8,-.02,.5],params:[par('w','第一组权重','w',0,1,.01,.5,'0 ≤ w ≤ 1；第二组权重自动为 1 − w。'),par('mu1','第一组均值','μ₁',-5,5,.1,-2,'第一条钟形曲线的中心。'),par('sigma1','第一组标准差','σ₁',.2,3,.05,1,'必须大于 0。'),par('mu2','第二组均值','μ₂',-5,5,.1,2,'第二条钟形曲线的中心。'),par('sigma2','第二组标准差','σ₂',.2,3,.05,1,'必须大于 0。')],fn:(x,p)=>(p.w===0?0:p.w*gaussian(x,p.mu1,p.sigma1))+(p.w===1?0:(1-p.w)*gaussian(x,p.mu2,p.sigma2)),insight:'<b>两条正态密度按权重相加。</b>总面积仍为 1；均值分离时可出现两个峰。',detail:p=>`权重 ${fmt(p.w)} / ${fmt(1-p.w)}；混合均值 ${fmt(p.w*p.mu1+(1-p.w)*p.mu2)}。σ₁、σ₂ 均为标准差。`},
+ {id:'beta',name:'Beta 分布',en:'Beta distribution',density:true,icon:'M1 21 C6 21 6 3 13 3 S20 21 25 21',formula:'f(x) = x<sup>α−1</sup>(1−x)<sup>β−1</sup> / B(α, β)',range:[0,1,-.1,3],params:[par('alpha','形状参数','α',.1,8,.1,2,'α > 0；α < 1 时密度在左端趋于无穷。'),par('beta','形状参数','β',.1,8,.1,3,'β > 0；β < 1 时密度在右端趋于无穷。')],fn:betaDensity,insight:'<b>定义在 [0, 1] 上的概率密度。</b>α = β = 1 是均匀分布；小于 1 时可呈 U 形，端点的无穷密度不代表概率无穷。',detail:p=>`均值 α/(α+β) = ${fmt(1/(1+p.beta/p.alpha),4)}；${p.alpha<1?'x→0⁺ 时 f(x)→∞。':''}${p.beta<1?'x→1⁻ 时 f(x)→∞。':''}`},
+ {id:'poisson',name:'泊松分布',en:'Poisson distribution',kind:'discrete',icon:'M2 21 2 16 M7 21 7 8 M12 21 12 3 M17 21 17 7 M22 21 22 14',formula:'P(X = k) = e<sup>−λ</sup> λ<sup>k</sup> / k!；k = 0, 1, 2, …',range:[-.5,14.5,0,.3],params:[par('lambda','平均次数','λ',0,15,.1,4,'λ ≥ 0；均值和方差都等于 λ。')],fn:poissonMass,insight:'<b>这是离散概率，不是连续密度。</b>每根柱表示整数 k 的概率，所有整数上的概率总和为 1；λ = 0 时全部概率在 0。',detail:p=>`均值 = 方差 = ${fmt(p.lambda)}；标准差 = ${fmt(Math.sqrt(p.lambda))}。柱高为 P(X = k)。`},
+ {id:'damped',name:'正弦阻尼振荡',en:'Damped sine',icon:'M1 12 C4 -3 7 -3 10 12 S14 22 17 12 S21 8 25 12',formula:'y = A e<sup>−cx</sup> sin(ωx + φ)；x ≥ 0',range:[0,12,-1.2,1.2],params:[par('A','初始幅值','A',0,3,.05,1,'包络线为 ±|A|e^(−cx)。'),par('decay','阻尼系数','c',0,2,.05,.2,'c ≥ 0；越大衰减越快，c = 0 为等幅振荡。'),par('w','角频率','ω',.2,5,.05,2,'|ω| 越大振荡越快，单位 rad/x。'),commonTrig[2]],fn:(x,p)=>x>=0?p.A*Math.exp(-p.decay*x)*Math.sin(p.w*x+p.phi):NaN,insight:'<b>正弦振荡乘上指数衰减。</b>两条虚线给出包络，c 决定衰减，ω 决定振荡。',detail:p=>`半衰期 ${p.decay===0?'∞（不衰减）':fmt(Math.log(2)/p.decay)}；${p.w===0?'ω = 0，无周期振荡。':'振荡周期 '+fmt(TAU/Math.abs(p.w))+'。'}`},
+ {id:'bivariate',name:'二元高斯分布',en:'Bivariate Gaussian',kind:'contour',icon:'M2 18 C-1 9 15 -1 23 5 S16 25 6 22 Z M7 16 C5 11 16 5 19 9 S13 22 7 16',formula:'f(x,y) = exp[−Q/2] / [2πσₓσᵧ√(1−ρ²)]',range:[-3.5,3.5,-3.5,3.5],params:[par('muX','X 均值','μₓ',-4,4,.1,0,'等高线中心的横坐标。'),par('muY','Y 均值','μᵧ',-4,4,.1,0,'等高线中心的纵坐标。'),par('sigmaX','X 标准差','σₓ',.2,3,.05,1,'必须大于 0。'),par('sigmaY','Y 标准差','σᵧ',.2,3,.05,1,'必须大于 0。'),par('rho','相关系数','ρ',-.95,.95,.01,.5,'必须 −1 < ρ < 1，保证协方差矩阵正定。')],fn:(x,p,y=0)=>{const u=(x-p.muX)/p.sigmaX,v=(y-p.muY)/p.sigmaY,q=u*u+((v-p.rho*u)/Math.sqrt((1-p.rho)*(1+p.rho)))**2;return Math.exp(-q/2)/(TAU*p.sigmaX*p.sigmaY*Math.sqrt((1-p.rho)*(1+p.rho)));},insight:'<b>展示联合密度的二维等高线，不是 y=f(x) 曲线。</b>ρ > 0 向右上倾斜，ρ < 0 向右下倾斜，ρ = 0 时独立。Q = u² + (v−ρu)²/(1−ρ²)，u=(x−μₓ)/σₓ，v=(y−μᵧ)/σᵧ。',detail:p=>`中心 (${fmt(p.muX)}, ${fmt(p.muY)})；协方差 ρσₓσᵧ = ${fmt(p.rho*p.sigmaX*p.sigmaY,4)}；等高线 Q = 1、4、9，密度分别为峰值的 60.7%、13.5%、1.1%。`}
+
 ];
 const el=id=>document.getElementById(id);const svgNS='http://www.w3.org/2000/svg';
 let current=functions[0], values={}, frame=0;
@@ -215,11 +252,17 @@ const memory=Object.fromEntries(functions.map(f=>[f.id,Object.fromEntries(f.para
 const sliderBounds=Object.fromEntries(functions.map(f=>[f.id,Object.fromEntries(f.params.map(p=>[p.id,{min:p.min,max:p.max,step:p.step}]))]));
 function svg(tag,attrs={},text){const n=document.createElementNS(svgNS,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,String(v));if(text!==undefined)n.textContent=text;return n;}
 function buildMenu(){functions.forEach((f,i)=>{const b=document.createElement('button');b.type='button';b.className='function-btn';b.dataset.function=f.id;b.setAttribute('aria-pressed','false');b.innerHTML=`<svg class="mini" viewBox="0 0 26 24" aria-hidden="true"><path d="${f.icon}"/></svg><span>${f.name}</span><span class="index">${String(i+1).padStart(2,'0')}</span>`;b.addEventListener('click',()=>selectFunction(f.id));el('function-list').appendChild(b);const o=document.createElement('option');o.value=f.id;o.textContent=`${String(i+1).padStart(2,'0')}　${f.name}`;el('function-select').appendChild(o);if([3,6,9].includes(i)){const d=document.createElement('div');d.className='catalog-divider';el('function-list').appendChild(d);}});el('function-select').addEventListener('change',e=>selectFunction(e.target.value));}
-function selectFunction(id){current=functions.find(f=>f.id===id)||functions[0];values=memory[current.id];document.querySelectorAll('.function-btn').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.function===current.id)));el('function-select').value=current.id;el('function-title').innerHTML=`${current.name}<span class="subname">${current.en}</span>`;el('formula').innerHTML=current.formula;el('insight').innerHTML=current.insight;el('curve-label').textContent=current.id==='normal'?'概率密度 f(x)':'函数曲线 y = f(x)';el('param-count').textContent=`${current.params.length} 个参数`;el('parameters').replaceChildren();current.params.forEach(p=>{const div=document.createElement('div');div.className='param';div.innerHTML=`<div class="param-header"><label class="param-label" for="range-${p.id}"><span class="param-symbol">${p.symbol}</span>${p.name}</label><input class="param-value" type="number" id="number-${p.id}" aria-label="${p.name}数值" step="any" value="${values[p.id]}"></div><input type="range" id="range-${p.id}" aria-label="${p.name}" min="${p.min}" max="${p.max}" step="${p.step}" value="${values[p.id]}"><div class="range-labels"><span id="min-${p.id}">${p.min}</span><span id="max-${p.id}">${p.max}</span></div><div class="param-hint" id="hint-${p.id}">${p.hint}</div><div class="validation" id="validation-${p.id}" role="status"></div>`;el('parameters').appendChild(div);const range=el('range-'+p.id),number=el('number-'+p.id);range.setAttribute('aria-describedby','hint-'+p.id);number.setAttribute('aria-describedby','hint-'+p.id);range.addEventListener('input',()=>updateParameter(p,range.value,'range'));number.addEventListener('input',()=>updateParameter(p,number.value,'number'));number.addEventListener('change',()=>commitNumber(p));number.addEventListener('blur',()=>commitNumber(p));paintSlider(p);});updateDetail();draw();}
+function selectFunction(id){current=functions.find(f=>f.id===id)||functions[0];values=memory[current.id];document.querySelectorAll('.function-btn').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.function===current.id)));el('function-select').value=current.id;el('function-title').innerHTML=`${current.name}<span class="subname">${current.en}</span>`;el('formula').innerHTML=current.formula;el('insight').innerHTML=current.insight;el('curve-label').textContent=current.kind==='contour'?'联合密度等高线':current.kind==='discrete'?'离散概率 P(X = k)':(current.id==='normal'||current.density)?'概率密度 f(x)':'函数曲线 y = f(x)';el('param-count').textContent=`${current.params.length} 个参数`;el('parameters').replaceChildren();current.params.forEach(p=>{const div=document.createElement('div');div.className='param';div.innerHTML=`<div class="param-header"><label class="param-label" for="range-${p.id}"><span class="param-symbol">${p.symbol}</span>${p.name}</label><input class="param-value" type="number" id="number-${p.id}" aria-label="${p.name}数值" step="any" value="${values[p.id]}"></div><input type="range" id="range-${p.id}" aria-label="${p.name}" min="${p.min}" max="${p.max}" step="${p.step}" value="${values[p.id]}"><div class="range-labels"><span id="min-${p.id}">${p.min}</span><span id="max-${p.id}">${p.max}</span></div><div class="param-hint" id="hint-${p.id}">${p.hint}</div><div class="validation" id="validation-${p.id}" role="status"></div>`;el('parameters').appendChild(div);const range=el('range-'+p.id),number=el('number-'+p.id);range.setAttribute('aria-describedby','hint-'+p.id);number.setAttribute('aria-describedby','hint-'+p.id);range.addEventListener('input',()=>updateParameter(p,range.value,'range'));number.addEventListener('input',()=>updateParameter(p,number.value,'number'));number.addEventListener('change',()=>commitNumber(p));number.addEventListener('blur',()=>commitNumber(p));paintSlider(p);});updateDetail();draw();}
 function validParameter(p,value){
  if(!Number.isFinite(value))return '请输入有限实数；当前数值超出浏览器可表示范围。';
- if(current.id==='normal'&&p.id==='sigma'&&value<=0)return '标准差 σ 必须大于 0；曲线保留上一次有效值。';
+ if(['sigma','sigma1','sigma2','sigmaX','sigmaY'].includes(p.id)&&value<=0)return '标准差 σ 必须大于 0；曲线保留上一次有效值。';
  if(current.id==='logarithm'&&p.id==='base'&&(value<=0||value===1))return '对数底数必须大于 0 且不等于 1；曲线保留上一次有效值。';
+ if(current.id==='mixture'&&p.id==='w'&&(value<0||value>1))return '混合权重必须在 0 与 1 之间；曲线保留上一次有效值。';
+ if(current.id==='beta'&&value<=0)return 'Beta 形状参数必须大于 0；曲线保留上一次有效值。';
+ if(current.id==='poisson'&&value<0)return '平均次数 λ 必须大于或等于 0；图像保留上一次有效值。';
+ if(current.id==='damped'&&p.id==='decay'&&value<0)return '阻尼系数 c 必须大于或等于 0。';
+ if(current.id==='leakyrelu'&&p.id==='alpha'&&(value<0||value>1))return '此 Leaky ReLU 模型使用 0 ≤ α ≤ 1。';
+ if(current.id==='bivariate'&&p.id==='rho'&&Math.abs(value)>=1)return '相关系数必须满足 −1 < ρ < 1，保证协方差矩阵正定。';
  return '';
 }
 function commitNumber(p){const n=el('number-'+p.id);if(n.value.trim()===''){el('validation-'+p.id).textContent='请输入数值；曲线保留上一次有效值。';n.setAttribute('aria-invalid','true');return;}updateParameter(p,n.value,'number');}
@@ -238,7 +281,9 @@ function paintSlider(p){
   b.min=v-span;b.max=v+span;
   if(!Number.isFinite(b.min))b.min=v;
   if(!Number.isFinite(b.max))b.max=v;
-  if(current.id==='normal'&&p.id==='sigma'||current.id==='logarithm'&&p.id==='base')b.min=Math.max(Number.MIN_VALUE,v*.5);
+  if(['sigma','sigma1','sigma2','sigmaX','sigmaY'].includes(p.id)||current.id==='beta'||current.id==='logarithm'&&p.id==='base')b.min=Math.max(Number.MIN_VALUE,v*.5);
+  if(current.id==='mixture'&&p.id==='w'||current.id==='leakyrelu'&&p.id==='alpha'){b.min=0;b.max=1;}
+  if(current.id==='poisson'||current.id==='damped'&&p.id==='decay')b.min=Math.max(0,b.min);
   const step=(b.max-b.min)/200;b.step=step>0&&Number.isFinite(step)?Number(step.toPrecision(1)):Number.MIN_VALUE;
  }
  r.min=String(b.min);r.max=String(b.max);r.step=String(b.step);r.value=String(v);
@@ -268,9 +313,31 @@ function viewRange(f,p){
   let half=8;if(p.k!==0&&(Math.abs(p.k)<.1||Math.abs(p.k)>4))half=8/Math.abs(p.k);
   if(Math.abs(p.x0)>4||half!==8){xmin=p.x0-half;xmax=p.x0+half;}
   if(f.id==='tanh'){const a=Math.abs(p.A);if(a>3||(a>0&&a<.01)){ymin=-a*1.2;ymax=a*1.2;}}
+ }else if(['absolute','reciprocal','sqrt','step','relu','leakyrelu'].includes(f.id)){
+  xmin=p.h-(f.id==='sqrt'?1:6);xmax=p.h+(f.id==='sqrt'?10:6);
+  if(f.id==='reciprocal'){const h=Math.abs(p.a)*6||1;ymin=p.k-h;ymax=p.k+h;}
+ }else if(f.id==='mixture'){
+  const groups=[[p.w,p.mu1,p.sigma1],[1-p.w,p.mu2,p.sigma2]].filter(g=>g[0]>0);
+  xmin=Math.min(...groups.map(g=>g[1]-4*g[2]));xmax=Math.max(...groups.map(g=>g[1]+4*g[2]));
+  const peak=Math.max(...groups.map(g=>f.fn(g[1],p)));ymin=-peak*.04;ymax=peak*1.15;
+ }else if(f.id==='beta'){
+  const mean=1/(1+p.beta/p.alpha),sum=p.alpha+p.beta,sd=Math.sqrt(mean*(1-mean)/(sum+1));
+  if(p.alpha>1&&p.beta>1&&sd<.08){xmin=Math.max(0,mean-5*sd);xmax=Math.min(1,mean+5*sd);}
+  let peak=0;for(let i=1;i<500;i++)peak=Math.max(peak,f.fn(xmin+(xmax-xmin)*i/500,p));
+  peak=Math.max(peak,Number.isFinite(f.fn(0,p))?f.fn(0,p):0,Number.isFinite(f.fn(1,p))?f.fn(1,p):0);
+  ymin=-peak*.04;ymax=peak*1.15;
+ }else if(f.id==='poisson'){
+  if(p.lambda>Number.MAX_SAFE_INTEGER)return null;
+  const radius=Math.ceil(7*Math.sqrt(p.lambda)+6);if(!Number.isSafeInteger(Math.ceil(p.lambda+radius)))return null;xmin=Math.max(0,Math.floor(p.lambda-radius))-.5;xmax=Math.ceil(p.lambda+radius)+.5;
+  const peak=f.fn(Math.floor(p.lambda),p);ymin=0;ymax=peak*1.18;
+ }else if(f.id==='damped'){
+  const period=p.w===0?12:TAU/Math.abs(p.w),decaySpan=p.decay===0?period*3:6/p.decay;
+  xmax=Math.min(period*5,decaySpan);xmin=0;const a=Math.abs(p.A)||1;ymin=-a*1.2;ymax=a*1.2;
+ }else if(f.id==='bivariate'){
+  const hx=p.sigmaX<.2?3.5*p.sigmaX:Math.max(4,3.5*p.sigmaX),hy=p.sigmaY<.2?3.5*p.sigmaY:Math.max(4,3.5*p.sigmaY);xmin=p.muX-hx;xmax=p.muX+hx;ymin=p.muY-hy;ymax=p.muY+hy;
  }
- if(['linear','quadratic','cubic','exponential','logarithm','power'].includes(f.id)){
-  const ys=[];for(let i=0;i<=300;i++){const x=xmin+(xmax-xmin)*i/300;ys.push(f.fn(x,p));}scaledY(ys,outside||f.id==='logarithm');
+ if(['linear','quadratic','cubic','exponential','logarithm','power','absolute','sqrt','step','relu','leakyrelu'].includes(f.id)){
+  const ys=[];for(let i=0;i<=300;i++){const x=xmin+(xmax-xmin)*i/300;ys.push(f.fn(x,p));}scaledY(ys,outside||['logarithm','absolute','sqrt','step','relu','leakyrelu'].includes(f.id));
  }
  const range=[xmin,xmax,ymin,ymax];return range.every(Number.isFinite)&&xmax>xmin&&ymax>ymin&&Number.isFinite(xmax-xmin)&&Number.isFinite(ymax-ymin)?range:null;
 }
@@ -282,9 +349,24 @@ function draw(){const chart=el('chart');const width=Math.max(220,chart.getBoundi
  const title=el('chart-title')||svg('title',{id:'chart-title'}),desc=el('chart-description')||svg('desc',{id:'chart-description'});chart.replaceChildren(title,desc);updateDetail();title.textContent=current.name+'的实时曲线';const defs=svg('defs');const clip=svg('clipPath',{id:'plot-clip'});clip.appendChild(svg('rect',{x:margin.left,y:margin.top,width:W,height:H}));defs.appendChild(clip);chart.appendChild(defs);
  const grid=svg('g');let xticks=ticks(xmin-xoff,xmax-xoff,width<420?3:6).map(v=>v+xoff);const standardTrig=['sine','cosine','tangent'].includes(current.id)&&xmin===-TAU&&xmax===TAU;if(standardTrig)xticks=width<420?[-TAU,0,TAU]:[-TAU,-PI,0,PI,TAU];for(const x of xticks){grid.appendChild(svg('line',{x1:px(x),x2:px(x),y1:margin.top,y2:margin.top+H,stroke:'var(--grid)','stroke-width':1}));let label=tickText(x-xoff);if(standardTrig)label=x===0?'0':(x<0?'−':'')+(Math.abs(x)===TAU?'2π':'π');const align=Math.abs(x-xmin)<.00001?'start':Math.abs(x-xmax)<.00001?'end':'middle';grid.appendChild(svg('text',{x:px(x),y:height-28,'text-anchor':align},label));}
  for(const tick of yTicks){const y=tick+yoff;grid.appendChild(svg('line',{x1:margin.left,x2:margin.left+W,y1:py(y),y2:py(y),stroke:'var(--grid)','stroke-width':1}));grid.appendChild(svg('text',{x:margin.left-10,y:py(y)+4,'text-anchor':'end'},tickText(tick)));}chart.appendChild(grid);
- chart.appendChild(svg('rect',{x:margin.left,y:margin.top,width:W,height:H,fill:'none',stroke:'var(--border)','stroke-width':1}));const axes=svg('g',{stroke:'var(--axis)','stroke-width':1});if(ymin<=0&&ymax>=0)axes.appendChild(svg('line',{x1:margin.left,x2:margin.left+W,y1:py(0),y2:py(0)}));if(xmin<=0&&xmax>=0)axes.appendChild(svg('line',{x1:px(0),x2:px(0),y1:margin.top,y2:margin.top+H}));chart.appendChild(axes);chart.appendChild(svg('text',{class:'axis-title',x:margin.left,y:14,'text-anchor':'start'},(current.id==='normal'?'f(x)':'y')+(yoff?' − ('+fmt(yoff)+')':'')));chart.appendChild(svg('text',{class:'axis-title',x:margin.left+W/2,y:height-4,'text-anchor':'middle'},'x'+(xoff?' − ('+fmt(xoff)+')':'')));
- const clipped=svg('g',{'clip-path':'url(#plot-clip)'});if(current.id==='tangent'&&values.w!==0){const edge1=(values.w*xmin+values.phi-PI/2)/PI,edge2=(values.w*xmax+values.phi-PI/2)/PI,first=Math.ceil(Math.min(edge1,edge2)),last=Math.floor(Math.max(edge1,edge2));for(let k=first;k<=last&&k-first<100;k++){const x=(PI/2-values.phi+k*PI)/values.w;clipped.appendChild(svg('line',{class:'asymptote',x1:px(x),x2:px(x),y1:margin.top,y2:margin.top+H,stroke:'var(--axis)','stroke-dasharray':'4 5','stroke-width':1}));}}if(current.id==='logarithm'){clipped.appendChild(svg('line',{class:'asymptote',x1:px(values.h),x2:px(values.h),y1:margin.top,y2:margin.top+H,stroke:'var(--axis)','stroke-dasharray':'4 5','stroke-width':1}));}
- const N=Math.max(1200,Math.ceil(W*3));let path='',open=false,previousSegment=null;const points=[];for(let i=0;i<=N;i++){const x=xmin+(xmax-xmin)*i/N;const y=current.fn(x,values);const segment=current.segment?current.segment(x,values):0;if(!Number.isFinite(y)){open=false;previousSegment=segment;continue;}const X=px(x),Y=py(y);if(current.segment&&segment!==previousSegment)open=false;if(!Number.isFinite(X)||!Number.isFinite(Y)){open=false;continue;}path+=(open?'L':'M')+X.toFixed(2)+' '+Math.max(-1e7,Math.min(1e7,Y)).toFixed(2);open=true;previousSegment=segment;points.push([X,Y]);}if(current.id==='normal'&&points.length){const fillPath=`M ${points[0][0]} ${py(0)} ${path.replace(/^M/,'L')} L ${points[points.length-1][0]} ${py(0)} Z`;clipped.appendChild(svg('path',{d:fillPath,fill:'var(--purple)','fill-opacity':.07,stroke:'none'}));}clipped.appendChild(svg('path',{id:'function-curve',d:path,fill:'none',stroke:'var(--purple)','stroke-width':2.6,'stroke-linejoin':'round','stroke-linecap':'round','vector-effect':'non-scaling-stroke'}));chart.appendChild(clipped);
+ chart.appendChild(svg('rect',{x:margin.left,y:margin.top,width:W,height:H,fill:'none',stroke:'var(--border)','stroke-width':1}));const axes=svg('g',{stroke:'var(--axis)','stroke-width':1});if(ymin<=0&&ymax>=0)axes.appendChild(svg('line',{x1:margin.left,x2:margin.left+W,y1:py(0),y2:py(0)}));if(xmin<=0&&xmax>=0)axes.appendChild(svg('line',{x1:px(0),x2:px(0),y1:margin.top,y2:margin.top+H}));chart.appendChild(axes);chart.appendChild(svg('text',{class:'axis-title',x:margin.left,y:14,'text-anchor':'start'},(current.kind==='discrete'?'P(k)':current.id==='normal'||current.density?'f(x)':'y')+(yoff?' − ('+fmt(yoff)+')':'')));chart.appendChild(svg('text',{class:'axis-title',x:margin.left+W/2,y:height-4,'text-anchor':'middle'},(current.kind==='discrete'?'k':'x')+(xoff?' − ('+fmt(xoff)+')':'')));
+ const clipped=svg('g',{'clip-path':'url(#plot-clip)'});if(current.id==='tangent'&&values.w!==0){const edge1=(values.w*xmin+values.phi-PI/2)/PI,edge2=(values.w*xmax+values.phi-PI/2)/PI,first=Math.ceil(Math.min(edge1,edge2)),last=Math.floor(Math.max(edge1,edge2));for(let k=first;k<=last&&k-first<100;k++){const x=(PI/2-values.phi+k*PI)/values.w;clipped.appendChild(svg('line',{class:'asymptote',x1:px(x),x2:px(x),y1:margin.top,y2:margin.top+H,stroke:'var(--axis)','stroke-dasharray':'4 5','stroke-width':1}));}}if(['logarithm','reciprocal'].includes(current.id)){clipped.appendChild(svg('line',{class:'asymptote',x1:px(values.h),x2:px(values.h),y1:margin.top,y2:margin.top+H,stroke:'var(--axis)','stroke-dasharray':'4 5','stroke-width':1}));}
+
+ if(current.kind==='contour'){
+  const p=values;for(const r of [3,2,1]){let d='';for(let i=0;i<=240;i++){const t=TAU*i/240,u=r*Math.cos(t),v=r*(p.rho*Math.cos(t)+Math.sqrt((1-p.rho)*(1+p.rho))*Math.sin(t));d+=(i?'L':'M')+px(p.muX+p.sigmaX*u).toFixed(3)+' '+py(p.muY+p.sigmaY*v).toFixed(3);}clipped.appendChild(svg('path',{class:'density-contour','data-q':r*r,d:d+'Z',fill:'var(--purple)','fill-opacity':.06,stroke:'var(--purple)','stroke-width':1.8}));}
+  clipped.appendChild(svg('circle',{cx:px(p.muX),cy:py(p.muY),r:3,fill:'var(--purple)'}));chart.appendChild(clipped);el('plot-note').textContent='内至外：Q = 1、4、9。横纵坐标各自自适应，请结合刻度观察尺度；不是累计概率边界。';return;
+ }
+ if(current.kind==='discrete'){
+  const first=Math.max(0,Math.ceil(xmin)),last=Math.floor(xmax),stride=Math.max(1,Math.ceil((last-first+1)/Math.max(80,W/2))),barWidth=Math.max(.7,Math.min(24,W/(last-first+1)*.7));
+  for(let k=first;k<=last;k+=stride){const y=current.fn(k,values);if(Number.isFinite(y)){const bar=svg('rect',{class:'probability-bar','data-k':k,x:px(k)-barWidth/2,y:py(y),width:barWidth,height:Math.max(0,py(0)-py(y)),fill:'var(--purple)',opacity:.85});bar.appendChild(svg('title',{},`k = ${k}，P = ${fmt(y,7)}`));clipped.appendChild(bar);}}
+  chart.appendChild(clipped);el('plot-note').textContent=stride>1?`区间较宽：每隔 ${stride} 个整数展示一根真实概率柱，未合并概率；视窗覆盖均值附近。`:'每根柱只对应一个非负整数；左右尾部可能在视窗外。';return;
+ }
+ if(current.id==='damped'){for(const sign of [-1,1]){let d='';for(let i=0;i<=200;i++){const x=xmin+(xmax-xmin)*i/200;d+=(i?'L':'M')+px(x)+' '+py(sign*Math.abs(values.A)*Math.exp(-values.decay*x));}clipped.appendChild(svg('path',{class:'envelope',d,fill:'none',stroke:'var(--axis)','stroke-dasharray':'5 4'}));}}
+ if(current.id==='reciprocal'&&values.a===0)clipped.appendChild(svg('circle',{cx:px(values.h),cy:py(values.k),r:4,fill:'var(--paper)',stroke:'var(--purple)','stroke-width':2}));
+ if(current.id==='step'){clipped.appendChild(svg('circle',{cx:px(values.h),cy:py(values.lo),r:4,fill:'var(--paper)',stroke:'var(--purple)','stroke-width':2}));clipped.appendChild(svg('circle',{cx:px(values.h),cy:py(values.hi),r:4,fill:'var(--purple)'}));}
+ const N=Math.max(1200,Math.ceil(W*3));let path='',open=false,previousSegment=null;const points=[];const samples=Array.from({length:N+1},(_,i)=>xmin+(xmax-xmin)*i/N);
+ if(current.id==='mixture'){for(const [mu,sigma] of [[values.mu1,values.sigma1],[values.mu2,values.sigma2]])for(let i=0;i<=160;i++){const x=mu+sigma*(-4+i/20);if(x>=xmin&&x<=xmax)samples.push(x);}samples.sort((a,b)=>a-b);}
+ for(const x of samples){const y=current.fn(x,values);const segment=current.segment?current.segment(x,values):0;if(!Number.isFinite(y)){open=false;previousSegment=segment;continue;}const X=px(x),Y=py(y);if(current.segment&&segment!==previousSegment)open=false;if(!Number.isFinite(X)||!Number.isFinite(Y)){open=false;continue;}path+=(open?'L':'M')+X.toFixed(2)+' '+Math.max(-1e7,Math.min(1e7,Y)).toFixed(2);open=true;previousSegment=segment;points.push([X,Y]);}if((current.id==='normal'||current.id==='mixture'||current.id==='beta')&&points.length){const fillPath=`M ${points[0][0]} ${py(0)} ${path.replace(/^M/,'L')} L ${points[points.length-1][0]} ${py(0)} Z`;clipped.appendChild(svg('path',{d:fillPath,fill:'var(--purple)','fill-opacity':.07,stroke:'none'}));}clipped.appendChild(svg('path',{id:'function-curve',d:path,fill:'none',stroke:'var(--purple)','stroke-width':2.6,'stroke-linejoin':'round','stroke-linecap':'round','vector-effect':'non-scaling-stroke'}));chart.appendChild(clipped);if(current.id==='beta'&&(values.alpha<1||values.beta<1))el('plot-note').textContent='端点密度可能趋于无穷，图像只展示有限高度；没有把无穷改成有限值。';
 }
 buildMenu();selectFunction('normal');new ResizeObserver(()=>{if(!frame)frame=requestAnimationFrame(()=>{frame=0;draw();});}).observe(el('chart'));
 })();
