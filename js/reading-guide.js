@@ -10,6 +10,8 @@
 
     // English names need word boundaries; Chinese names may occur in compounds.
     function boundaryMatches(text, index, name) {
+        // “回 + 合法” (e.g. “投影回合法区间”) is not an Episode.
+        if (name === '回合' && text[index + name.length] === '法') return false;
         return !((asciiWord(name[0]) && asciiWord(text[index - 1])) ||
             (asciiWord(name[name.length - 1]) && asciiWord(text[index + name.length])));
     }
