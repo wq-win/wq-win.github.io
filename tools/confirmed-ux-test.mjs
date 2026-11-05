@@ -8,6 +8,48 @@ let checks = 0;
 const check = (value, message) => { assert.ok(value, message); checks++; };
 const scripts = html => [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].map(m=>m[1]).filter(Boolean);
 
+// PPO must not turn “回 + 合法” into Episode, or fall back to an outdated menu.
+{
+ const w=create('https://mylog.test/rl/27-ppo.html'),d=w.document;
+ d.write(read('rl/27-ppo.html').replace(/<script[\s\S]*?<\/script>/g,''));
+ w.eval(read('js/glossary-data.js'));
+ w.eval(read('js/reading-guide.js'));
+ const body=d.getElementById('article-body'),before=body.textContent;
+ const state=w.ReadingGuide.mount({container:body,series:'rl',slug:'27-ppo',root:'../'});
+ const answer=[...body.querySelectorAll('p')].find(p=>p.textContent.includes('投影回合法区间'));
+ check(Boolean(answer),'PPO regression uses the actual self-test answer');
+ check(!answer.querySelector('[data-term="episode"]'),'projection back to the feasible interval is not Episode');
+ check(body.textContent===before,'PPO article text stays unchanged');
+ state.destroy();
+ body.innerHTML='<p>投影回合法区间，跳回合法位置。每回合的奖励，一个回合结束后，回合并没有结束。Episode episode episodex。</p>';
+ const fixture=body.textContent;
+ w.ReadingGuide.mount({container:body,series:'rl',slug:'27-ppo',root:'../'});
+ check(JSON.stringify([...body.querySelectorAll('[data-term="episode"]')].map(b=>b.textContent))===JSON.stringify(['回合','回合','回合','Episode','episode']),'legitimate Chinese and English Episode mentions remain clickable');
+ check(body.textContent===fixture,'matching never rewrites text');
+ await w.happyDOM.close();
+}
+{
+ const menus=[];
+ for(const file of ['index.html','rl/27-ppo.html']) {
+  const w=create('https://mylog.test/'+file),d=w.document,html=read(file);
+  d.write('<div id="site-header"></div><div id="site-footer"></div>');
+  // Follow the page's real config/chrome loading order rather than inject a config.
+  for(const [,src] of html.matchAll(/<script\s+src="([^"]+)"[^>]*><\/script>/g)) {
+   if(/(?:site-config|site-chrome)\.js$/.test(src)) w.eval(read(src.replace(/^\.\.\//,'')));
+  }
+  w.SeriesChrome.mount({root:file.startsWith('rl/')?'../':'/'});
+  const menu=[...d.querySelectorAll('header button')].find(b=>b.textContent.trim()==='演示').parentElement;
+  const links=[...menu.querySelectorAll('a')].map(a=>[new URL(a.href).pathname,a.textContent.trim()]);
+  menus.push(links);
+  for(const target of ['/game/rl/ppo.html','/game/llm/kv-cache.html','/game/yarn.html','/game/function-visualizer.html']) {
+   check(links.some(([href])=>href===target),file+' demo menu includes '+target);
+   check(Boolean(d.querySelector('#mobile-menu a[href="'+(file.startsWith('rl/')?'../':'/')+target.slice(1)+'"]')),file+' mobile menu includes '+target);
+  }
+  await w.happyDOM.close();
+ }
+ check(JSON.stringify(menus[0])===JSON.stringify(menus[1]),'PPO and homepage use the same demo menu labels and destinations');
+}
+
 // Keep the original filter nodes so keyboard activation retains focus and tab order.
 for (const series of ['robot-classic', 'rl', 'llm', 'robot-learn']) {
  const w=create(), d=w.document;
