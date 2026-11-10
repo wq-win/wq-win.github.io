@@ -39,12 +39,12 @@ English has an independent static build and tests: see [ENGLISH_BUILD.md](ENGLIS
 
 ### Interactive demos
 
-The [demo hub](https://wq-win.github.io/game/) includes 17 algorithm demos:
+The [demo hub](https://wq-win.github.io/game/) includes 29 algorithm demos:
 
-- Reinforcement learning: Q-learning, value iteration, REINFORCE, and SARSA vs. Q-learning
-- Language models: attention, positional encoding, Softmax temperature, and BPE
-- Classic robotics: A*, RRT, Kalman filtering, potential fields, PID, and ICP
-- Robot learning: DMP, DAgger, and domain randomization
+- Reinforcement learning (7): Q-learning, value iteration, REINFORCE, SARSA vs. Q-learning, Dyna-Q, DQN, and PPO
+- Language models (7): attention, positional encoding, Softmax temperature, BPE, LoRA, RoPE, and KV Cache
+- Classic robotics (9): A*, RRT, Kalman filtering, potential fields, PID, ICP, PRM, RRT*, and MPC
+- Robot learning (6): DMP, DAgger, domain randomization, ProMP, HER, and Diffusion Policy
 
 ### Browser games
 
