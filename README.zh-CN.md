@@ -39,12 +39,12 @@
 
 ### 算法交互演示
 
-[演示入口](https://wq-win.github.io/game/)目前包含 17 个算法演示：
+[演示入口](https://wq-win.github.io/game/)目前包含 29 个算法演示：
 
-- 强化学习：Q-learning、价值迭代、REINFORCE、SARSA 与 Q-learning 对比
-- 大语言模型：注意力、位置编码、Softmax 温度、BPE
-- 机器人经典基础：A*、RRT、Kalman 滤波、人工势场、PID、ICP
-- 机器人学习：DMP、DAgger、域随机化
+- 强化学习（7 个）：Q-learning、价值迭代、REINFORCE、SARSA 与 Q-learning 对比、Dyna-Q、DQN、PPO
+- 大语言模型（7 个）：注意力、位置编码、Softmax 温度、BPE、LoRA、RoPE、KV Cache
+- 机器人经典基础（9 个）：A*、RRT、Kalman 滤波、人工势场、PID、ICP、PRM、RRT*、MPC
+- 机器人学习（6 个）：DMP、DAgger、域随机化、ProMP、HER、Diffusion Policy
 
 ### 浏览器小游戏
 
