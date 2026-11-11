@@ -7,7 +7,7 @@
         issues: 'https://github.com/wq-win/wq-win.github.io/issues/new',
         email: '643797037@qq.com',
         series: [
-            { id: 'rl', href: 'rl/index.html', label: '强化学习 60 篇', short: '强化学习' },
+            { id: 'rl', href: 'rl/index.html', label: '强化学习 62 篇', short: '强化学习' },
             { id: 'dahua-rl', href: 'dahua-rl/index.html', label: '大话强化学习算法 · 5 篇', short: '大话强化学习' },
             { id: 'llm', href: 'llm/index.html', label: '大语言模型 100 篇', short: '大语言模型' },
             { id: 'robot-learn', href: 'robot-learn/index.html', label: '机器人学习 100 篇', short: '机器人学习' },

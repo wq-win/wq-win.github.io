@@ -1,6 +1,6 @@
 window.RL_CATALOG = {
-  "title": "强化学习 60 篇论文：从预测、控制到推理与 Agent",
-  "subtitle": "以 60 篇代表论文为线索，串联早期控制、深度价值学习、策略梯度、探索与模仿、多智能体、离线学习、世界模型和语言模型强化学习。",
+  "title": "强化学习 62 篇论文：从预测、控制到推理与 Agent",
+  "subtitle": "已完成62篇精读，向100篇扩展：原01–60保留历史主线，61起补充专题进阶。",
   "posts": [
     {
       "slug": "00-强化学习发展时间线总览",
@@ -857,12 +857,44 @@ window.RL_CATALOG = {
       "excerpt": "在outcome-blind多轮Agent GRPO中，作者通过“动态生成并合并评分准则，用judge引用的步骤重分配组优势”应对“多轮工具任务缺少可靠终局成功标签”这一问题；证据边界或代价是：judge仍是额外监督，保符号分配不等于步骤因果价值。"
     },
     {
+      "slug": "61-cpo",
+      "file": "61-cpo.md",
+      "title": "第 61 天｜CPO：追求更高回报时，怎样把代价预算写进每次更新",
+      "cardTitle": "CPO：把约束写进策略更新",
+      "day": 61,
+      "year": 2017,
+      "kind": "paper",
+      "question": "如何提高回报，同时显式限制期望累计成本",
+      "excerpt": "从TRPO的信赖域走向约束MDP，区分理论保证、局部近似与真实训练中的约束违反。",
+      "eraId": "extension",
+      "eraYears": "",
+      "eraLabel": "专题进阶 · 安全与分布价值",
+      "shortTitle": "CPO：追求更高回报时，怎样把代价预算写进每次更新",
+      "eraRange": ""
+    },
+    {
+      "slug": "62-qr-dqn",
+      "file": "62-qr-dqn.md",
+      "title": "第 62 天｜QR-DQN：固定概率、学习位置，把回报分布变成分位数回归",
+      "cardTitle": "QR-DQN：用分位数学习回报分布",
+      "day": 62,
+      "year": 2017,
+      "kind": "paper",
+      "question": "固定概率质量、学习分位点，怎样连接分布投影与随机梯度",
+      "excerpt": "从C51的固定原子支持走向分位数回归，区分Wasserstein投影、策略评价理论和深度控制实现。",
+      "eraId": "extension",
+      "eraYears": "",
+      "eraLabel": "专题进阶 · 安全与分布价值",
+      "shortTitle": "QR-DQN：固定概率、学习位置，把回报分布变成分位数回归",
+      "eraRange": ""
+    },
+    {
       "slug": "61-系列收尾",
       "file": "61-系列收尾.md",
       "kind": "epilogue",
-      "day": 61,
+      "day": 101,
       "year": 2026,
-      "title": "系列收尾｜把 60 篇论文连成可检验的理解",
+      "title": "系列收尾｜把 62 篇论文连成可检验的理解",
       "shortTitle": "系列收尾",
       "question": "横向比较、实验设计与阅读记录",
       "eraId": "epilogue",

@@ -15,7 +15,7 @@
 
 | 系列 | 论文数量 | 主要内容 |
 | --- | ---: | --- |
-| [强化学习](https://wq-win.github.io/rl/) | 60 | 价值估计、策略、世界模型与语言模型强化学习 |
+| [强化学习](https://wq-win.github.io/rl/) | 62 | 价值估计、策略、世界模型与语言模型强化学习 |
 | [大语言模型](https://wq-win.github.io/llm/) | 100 | 表示、预训练、检索、对齐与推理 |
 | [机器人学习](https://wq-win.github.io/robot-learn/) | 100 | 示范、交互、运动基元与视觉语言动作模型 |
 | [机器人经典基础](https://wq-win.github.io/robot-classic/) | 100 | 几何、估计、规划、控制与 SLAM |
@@ -102,7 +102,7 @@ wq-win.github.io/
 
 1. Markdown 源文件放在对应系列的 `posts/` 目录中。
 2. 同步更新该系列的对应 HTML 页面及 `js/catalog.js`。文章页面内嵌了 Markdown，单独修改 `.md` 源文件不会更新线上文章。
-3. 如需批量生成，先检查 `scripts/build-rl.py` 和 `scripts/build-paper-series.py`。它们目前使用作者本机的源文件路径，在其他环境运行前需要调整。
+3. 当前构建使用 [READING_BUILD.md](READING_BUILD.md) 的 `npm run build` 与 `npm test`，同时维护逐篇来源和配图记录；篇数由校验后的目录推导。`scripts/build-rl.py` 和 `scripts/build-paper-series.py` 是含作者本机路径的旧导入脚本，不是当前阅读层构建入口。
 4. 修改页面与目录后，重新生成搜索索引、关联论文数据、站点地图、RSS 和 robots 文件：
 
 ```sh
@@ -125,7 +125,7 @@ git diff --check
 
 ### 阅读层检查
 
-360 篇论文与四篇 Day 0 已包含静态正文及本地 KaTeX 公式，关闭 JavaScript 仍可阅读；共享脚本再添加阅读工具。源码保留检查、重新生成命令及既有 LSTM 公式的原文问题，见[阅读层构建与验收说明](tools/reading-qa.md)。
+362 篇论文与四篇 Day 0 已包含静态正文及本地 KaTeX 公式，关闭 JavaScript 仍可阅读；共享脚本再添加阅读工具。源码保留检查、重新生成命令及既有 LSTM 公式的原文问题，见[阅读层构建与验收说明](tools/reading-qa.md)。
 
 ### GitHub Pages
 

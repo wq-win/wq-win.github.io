@@ -92,6 +92,9 @@ function inject(html,body,source,sourceHash){
  return html;
 }
 function build(){
+ const {corpus,exactRecords}=require('./lib/reading-corpus.cjs'),metadata=corpus(root);
+ exactRecords(manifest,metadata.papers.map(p=>p.path),'prerequisites','source');
+ exactRecords(manifest,metadata.papers.map(p=>p.key),'prerequisite keys','key');
  const report=[];
  for(const series of ['rl','llm','robot-learn','robot-classic']){
   const {posts,map}=catalog(series);

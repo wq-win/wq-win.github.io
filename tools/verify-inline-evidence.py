@@ -9,7 +9,9 @@ import json,hashlib,re,xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from PIL import Image
 ROOT=Path(__file__).resolve().parents[1]
-SERIES={'rl':60,'llm':100,'robot-learn':100,'robot-classic':100}
+from lib.reading_corpus import corpus
+metadata=corpus(ROOT,review=True)
+SERIES=metadata['counts']
 checks=0;total=0;purpose={};kind={};allrows=[]
 def check(v,label):
  global checks
@@ -78,5 +80,5 @@ for series,count in SERIES.items():
    purpose[f['purpose']]=purpose.get(f['purpose'],0)+1;kind[f['visual_type']]=kind.get(f['visual_type'],0)+1;total+=1
  for asset in (ROOT/series/'assets').rglob('*'):
   check(asset.suffix.lower()!='.pdf',str(asset)+' no full source PDF hosted')
-check(len(allrows)==360,'all 360 paper articles covered')
+check(len(allrows)==metadata['paperCount'],'all catalog paper articles covered')
 print(f'{checks} inline evidence assertions passed: {len(allrows)} articles, {total} figures; purposes={purpose}; types={kind}. No visual-browser claim is implied.')

@@ -15,7 +15,7 @@ The site is built with HTML, CSS, and JavaScript and hosted on GitHub Pages. Its
 
 | Series | Papers | Focus |
 | --- | ---: | --- |
-| [Reinforcement learning](https://wq-win.github.io/rl/) | 60 | Value estimation, policies, world models, and language-model RL |
+| [Reinforcement learning](https://wq-win.github.io/rl/) | 62 | Value estimation, policies, world models, and language-model RL |
 | [Large language models](https://wq-win.github.io/llm/) | 100 | Representations, pretraining, retrieval, alignment, and reasoning |
 | [Robot learning](https://wq-win.github.io/robot-learn/) | 100 | Demonstrations, interaction, motion primitives, and vision-language-action models |
 | [Classic robotics](https://wq-win.github.io/robot-classic/) | 100 | Geometry, estimation, planning, control, and SLAM |
@@ -102,7 +102,7 @@ wq-win.github.io/
 
 1. Keep Markdown sources in the relevant series' `posts/` directory.
 2. Update the corresponding HTML page and `js/catalog.js` in that series. Article pages embed their Markdown, so changing a `.md` source alone does not update the published article.
-3. For bulk generation, review `scripts/build-rl.py` and `scripts/build-paper-series.py` first. They currently use author-specific local source paths, which must be adapted before running them elsewhere.
+3. Use the current `npm run build` and `npm test` workflow in [READING_BUILD.md](READING_BUILD.md), including matching public source/figure records. Counts are derived from validated catalogs. The old `scripts/build-rl.py` and `scripts/build-paper-series.py` are legacy importers with author-specific source paths, not the current reading build.
 4. After updating pages and catalogs, regenerate the search index, related-paper data, sitemap, RSS, and robots file:
 
 ```sh
@@ -125,7 +125,7 @@ These dependency-free tests exercise game logic and controllers in a simulated D
 
 ### Reading-layer checks
 
-The 360 paper pages and four Day 0 guides include static text and local KaTeX math, so the article remains readable without JavaScript. Shared scripts add the reading tools. See the [reading build and QA guide](tools/reading-qa.md) for source-preservation checks, regeneration commands and the original LSTM formula caveat.
+The 362 paper pages and four Day 0 guides include static text and local KaTeX math, so the article remains readable without JavaScript. Shared scripts add the reading tools. See the [reading build and QA guide](tools/reading-qa.md) for source-preservation checks, regeneration commands and the original LSTM formula caveat.
 
 ### GitHub Pages
 

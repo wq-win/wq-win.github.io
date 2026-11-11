@@ -6,7 +6,8 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),cp=require('node:child_process'),crypto=require('node:crypto');
 const root=path.resolve(__dirname,'..');
 const seriesNames=['rl','llm','robot-learn','robot-classic'];
-const expected={rl:64,llm:104,'robot-learn':104,'robot-classic':104};
+const {corpus,exactRecords,validateReview}=require('./lib/reading-corpus.cjs'),metadata=corpus(root);
+const expected=metadata.sourceCounts;
 const relationTypes=new Set(['direct-inheritance','module-composition','parallel-method','teaching-link','historical-context']);
 const inspectedTypes=new Set(['full-text','section','abstract','metadata','unavailable']);
 const hash=s=>crypto.createHash('sha256').update(s).digest('hex');
@@ -16,6 +17,7 @@ const check=(v,label)=>{assert.ok(v,label);checks++};
 const equal=(a,b,label)=>{assert.deepEqual(a,b,label);checks++};
 function coverage(){
  const all=[];
+ validateReview(JSON.parse(read('data/reading-review-data.json')),metadata);
  for(const series of seriesNames){
   const rows=JSON.parse(read('data/reading-review-data.json')).coverage.filter(r=>r.series===series);
   check(Array.isArray(rows),series+' coverage is an array');equal(rows.length,expected[series],series+' reviewed sources');
@@ -28,7 +30,12 @@ function coverage(){
    check(Array.isArray(row.limitations),row.path+' limitations explicit');
    const current=read(row.path);
    equal(hash(fs.readFileSync(path.join(root,row.path))),row.source_sha256,row.path+' public audit source identity');
-   check(row.source_sha256!==row.published_baseline_sha256,row.path+' revised from published baseline');
+   if(row.change_type==='created'){
+    equal(row.published_baseline_sha256,null,row.path+' new source has no published baseline');
+   }else{
+    check(/^[a-f0-9]{64}$/.test(row.published_baseline_sha256||''),row.path+' revision has a real baseline hash');
+    check(row.source_sha256!==row.published_baseline_sha256,row.path+' revised from published baseline');
+   }
    check(!/[\uE200-\uE203]/.test(current),row.path+' no internal citation markers');
    check(!/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(current),row.path+' no corrupted TeX control characters');
    if(row.kind==='paper'){
@@ -49,14 +56,15 @@ function coverage(){
    all.push(row);
   }
  }
- equal(all.filter(r=>r.kind==='paper').length,360,'360 paper records');
+ equal(all.filter(r=>r.kind==='paper').length,metadata.paperCount,'exact catalog paper records');
  return all;
 }
 async function rendered(){
  const {catalog,render}=require('./build-reading.cjs');
  const targetAnchors=new Map();
  const report=JSON.parse(read('data/reading-build-report.json'));
- equal(report.length,372,'all 372 article/guide pages statically built');
+ exactRecords(report,metadata.pages.map(p=>p.key),'rendered pages','key');
+ equal(report.length,metadata.pageCount,'all catalog pages statically built');
  equal(report.flatMap(r=>r.unrenderedMath),[],'every formula parsed by KaTeX');
  for(const series of seriesNames){
   const {posts,map}=catalog(series);
@@ -100,13 +108,13 @@ async function rendered(){
  {
   const review=read('edition-review.html'),w=new Window({url:'https://mylog.test/edition-review.html',settings:{disableJavaScriptFileLoading:true,disableCSSFileLoading:true}}),d=w.document;
   d.write(review.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,''));
-  equal(d.querySelectorAll('.review-card').length,376,'review exposes all source records');
+  equal(d.querySelectorAll('.review-card').length,metadata.sourceCount,'review exposes all source records');
   const logic=[...review.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1];w.eval(logic);
   const series=d.getElementById('series');series.value='rl';series.dispatchEvent(new w.Event('change'));
-  equal([...d.querySelectorAll('.review-card')].filter(c=>!c.hidden).length,64,'review series filter');
+  equal([...d.querySelectorAll('.review-card')].filter(c=>!c.hidden).length,expected.rl,'review series filter');
   series.value='all';series.dispatchEvent(new w.Event('change'));const q=d.getElementById('query');q.value='this-phrase-has-no-record';q.dispatchEvent(new w.Event('input'));
   equal([...d.querySelectorAll('.review-card')].filter(c=>!c.hidden).length,0,'review search no-results');
-  q.value='';q.dispatchEvent(new w.Event('input'));equal([...d.querySelectorAll('.review-card')].filter(c=>!c.hidden).length,376,'review search reset');
+  q.value='';q.dispatchEvent(new w.Event('input'));equal([...d.querySelectorAll('.review-card')].filter(c=>!c.hidden).length,metadata.sourceCount,'review search reset');
   check(!/CONTRIBUTOR_CONTRACT|\/workspace\/shared|href=["'](?:\.\/)?research\//.test(review),'review contains no internal coordination paths');
   await w.happyDOM.close();
  }
@@ -120,4 +128,4 @@ async function rendered(){
  equal(attrFixture.math.length,1,'image alt text is not counted or rendered as prose math');check(attrFixture.html.includes('alt="Result $0.89\\pm0.06$ and **literal**"'),'quoted image alt remains exact');check(attrFixture.html.includes('data-tex="x+1"'),'actual figure caption formula still renders');
  const htmlCode=render('<code>$NOT_MATH$ **literal**</code>',{},'rl');equal(htmlCode.math.length,0,'HTML code is not interpreted as math');check(htmlCode.html.includes('$NOT_MATH$ **literal**'),'HTML code preserves literal emphasis');
 }
-(async()=>{let dep=process.env.HAPPY_DOM_PATH||'happy-dom';if(dep!=='happy-dom'&&fs.statSync(dep).isDirectory())dep=path.join(dep,'lib/index.js');({Window}=await import(dep));const rows=coverage();await rendered();console.log(`${checks} full-edition assertions passed; ${rows.length} reviewed sources, 360 papers, 372 rendered pages.`)})().catch(e=>{console.error(e);process.exitCode=1});
+(async()=>{let dep=process.env.HAPPY_DOM_PATH||'happy-dom';if(dep!=='happy-dom'&&fs.statSync(dep).isDirectory())dep=path.join(dep,'lib/index.js');({Window}=await import(dep));const rows=coverage();await rendered();console.log(`${checks} full-edition assertions passed; ${rows.length} reviewed sources, ${metadata.paperCount} papers, ${metadata.pageCount} rendered pages.`)})().catch(e=>{console.error(e);process.exitCode=1});

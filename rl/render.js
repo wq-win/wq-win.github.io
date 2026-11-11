@@ -49,8 +49,8 @@
                 return 'href="index.html"';
             }
             if (file && file.endsWith(".md")) {
-                if (file.indexOf("00-") === 0) return 'href="00-timeline.html"';
-                if (file.indexOf("61-") === 0) return 'href="61-epilogue.html"';
+                if (file === "00-强化学习发展时间线总览.md") return 'href="00-timeline.html"';
+                if (file === "61-系列收尾.md") return 'href="61-epilogue.html"';
                 return `href="${file.replace(/\.md$/, "")}.html"`;
             }
             return full;
@@ -114,8 +114,8 @@
 
     function postHref(post) {
         const slug = post.slug || "";
-        if (slug.indexOf("00-") === 0) return "00-timeline.html";
-        if (slug.indexOf("61-") === 0) return "61-epilogue.html";
+        if (slug === "00-强化学习发展时间线总览") return "00-timeline.html";
+        if (slug === "61-系列收尾") return "61-epilogue.html";
         return slug + ".html";
     }
 

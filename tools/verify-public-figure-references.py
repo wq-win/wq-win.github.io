@@ -7,6 +7,8 @@ def check(v,label):
  global checks
  assert v,label
  checks+=1
+from lib.reading_corpus import corpus
+metadata=corpus(ROOT,review=True)
 paths=set()
 for l in d['figure_ledgers']:
  series=l['series'];counts[series]={'figures':0,'inline':0,'unavailable':0,'rights-limited':0,'tables':0}
@@ -27,8 +29,9 @@ for l in d['figure_ledgers']:
   for f in a['new_figures']:
    p=ROOT/f['asset_path'];check(p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest()==f['sha256'],a['path']+' addition identity')
    check(f['attribution'] and f['license_status'],a['path']+' attribution and use basis')
-check(len(paths)==376,'all 360 papers and 16 auxiliary source pages')
+check(paths==set(metadata['sources']),'all catalog papers and auxiliary sources covered exactly')
 for r in d['coverage']:check(hashlib.sha256((ROOT/r['path']).read_bytes()).hexdigest()==r['source_sha256'],r['path']+' public audit agrees with source')
-check(sum(r['self_test_question_count'] for r in d['alignment'])==1020,'all 1020 historical end self-test records retained')
+created={r['path'] for r in d['coverage'] if r.get('change_type')=='created'}
+check(sum(r['self_test_question_count'] for r in d['alignment'] if r['path'] not in created)==1020,'all 1020 historical end self-test records retained')
 print(f'{checks} public figure-reference assertions passed. '+json.dumps(counts,ensure_ascii=False))
 print(f'{len(missing)} original-figure references retain explicit access/editorial gaps; links alone are not counted as fulfilled.')
