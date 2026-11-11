@@ -7,7 +7,7 @@ point for every paper so the renderer and independent preservation test can agre
 from pathlib import Path
 import re, json, hashlib
 ROOT=Path(__file__).resolve().parents[1]
-SERIES={'rl':60,'llm':100,'robot-learn':100,'robot-classic':100}
+from lib.reading_corpus import corpus
 SPECIAL={
  'llm/002-nnlm':'理解这篇最需要掌握',
  'llm/004-word2vec':'理解本篇需要区分',
@@ -58,10 +58,10 @@ def insertion_point(text,key,start):
  assert problem is not None,(key,'Missing the explicit problem-setting boundary')
  return min(problem.start(),start),'before-problem-setting'
 def main():
+ metadata=corpus(ROOT)
  rows=[]
- for series,n in SERIES.items():
-  ps=sorted(p for p in (ROOT/series/'posts').glob('*.md') if re.match(r'^\d{2,3}-',p.name) and 1<=int(p.name.split('-')[0])<=n)
-  assert len(ps)==n,(series,len(ps))
+ for series in metadata['series']:
+  ps=[ROOT/p['path'] for p in metadata['papers'] if p['series']==series]
   for p in ps:
    raw=p.read_bytes();text=raw.decode().replace('\r\n','\n');key=series+'/'+p.stem
    start,end,kind=locate(text,key)

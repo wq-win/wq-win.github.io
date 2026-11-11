@@ -6,6 +6,9 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),asse
 const root=path.resolve(__dirname,'..'),sha=b=>crypto.createHash('sha256').update(b).digest('hex');
 const manifest=JSON.parse(fs.readFileSync(path.join(root,'data/reading-prerequisites.json'))),report=JSON.parse(fs.readFileSync(path.join(root,'data/reading-build-report.json')));
 const {render,catalog}=require('./build-reading.cjs');
+const {corpus,exactRecords}=require('./lib/reading-corpus.cjs'),metadata=corpus(root);
+exactRecords(manifest,metadata.papers.map(p=>p.path),'prerequisites','source');
+exactRecords(report,metadata.pages.map(p=>p.key),'rendered pages','key');
 let checks=0;function check(test,msg){assert.ok(test,msg);checks++;}function equal(a,b,msg){assert.deepEqual(a,b,msg);checks++;}
 const sorted=a=>a.slice().sort(),squash=s=>s.replace(/\s/g,''),chars=s=>sorted(Array.from(squash(s))).join('');
 async function main(){
@@ -14,7 +17,7 @@ async function main(){
  const create=()=>new Window({url:'https://wq-win.github.io/',settings:{disableJavaScriptFileLoading:true,disableCSSFileLoading:true}});
  let w=create(),d=w.document;
  const counts={};let math=0,links=0;
- equal(manifest.length,360,'exactly360 papers');
+ equal(manifest.length,metadata.paperCount,'exact catalog paper count');
  for(const m of manifest){
   w=create();d=w.document;
   const raw=fs.readFileSync(path.join(root,m.source)),source=raw.toString().replaceAll('\r\n','\n'),key=m.key,series=key.split('/')[0];counts[series]=(counts[series]||0)+1;
@@ -48,7 +51,7 @@ async function main(){
   if(global.gc)global.gc();
  }
  w=create();d=w.document;
- equal(counts,{rl:60,llm:100,'robot-learn':100,'robot-classic':100},'series counts');equal(math,report.filter(r=>r.kind==='paper').reduce((n,r)=>n+r.mathExpressions,0),'all canonical paper formulas');
+ equal(counts,metadata.counts,'series counts');equal(math,report.filter(r=>r.kind==='paper').reduce((n,r)=>n+r.mathExpressions,0),'all canonical paper formulas');
  const glob={};vm.runInNewContext(fs.readFileSync(path.join(root,'js/glossary-data.js'),'utf8'),{window:glob});vm.runInNewContext(fs.readFileSync(path.join(root,'js/reading-symbols.js'),'utf8'),{window:glob});
  const ids=new Set();for(const t of glob.GLOSSARY){check(!ids.has(t.id),'unique term '+t.id);ids.add(t.id);check(t.zh&&t.en&&t.definition&&t.purpose,'complete bilingual term '+t.id);check(fs.existsSync(path.join(root,t.href.split(/[?#]/)[0])),'term target '+t.id);for(const ref of t.related||[])check(glob.GLOSSARY.some(x=>x.id===(typeof ref==='string'?ref:ref.id)),'related term '+t.id);}
  for(const [series,entries] of Object.entries(glob.READING_SYMBOLS)){for(const e of Array.isArray(entries)?entries:entries.entries){check(e.symbol&&e.meaning&&e.scope,'scoped symbol '+e.id);for(const s of e.articles||[])check(fs.existsSync(path.join(root,series,s+'.html')),'symbol article '+e.id);}}
@@ -60,7 +63,12 @@ async function main(){
   check(!fs.readFileSync(f,'utf8').includes('const currentSlug = "01-actor-critic"'),'guide identity '+series);
   for(const a of body.querySelectorAll('a[href]')){const href=a.getAttribute('href');if(/^(https?:|#)/.test(href))continue;const target=href.split(/[?#]/)[0],dest=target.startsWith('/')?path.join(root,target):path.resolve(root,series,target);check(fs.existsSync(dest),'guide local link '+href);if(href.includes('glossary.html')&&href.includes('#'))check(ids.has(href.split('#')[1]),'guide glossary anchor '+href);}
  }
- for(const file of fs.readdirSync(path.join(root,'game')).filter(f=>f.endsWith('.html'))){const relative='game/'+file;equal(sha(fs.readFileSync(path.join(root,relative))),JSON.parse(fs.readFileSync(path.join(root,'data/reading-public-baseline.json'),'utf8')).games[relative],'game page unchanged '+file);}
- await w.happyDOM.close();console.log(`${checks} assertions passed:360 canonical papers,${math} TeX expressions,${links} article links,4 guides,glossary/symbol destinations and game-page preservation.`);
+ // The preservation fixture is extracted from its named pre-change main commit,
+ // not from generated/current working-tree bytes. Check coverage as well as hashes.
+ const gameBaseline=JSON.parse(fs.readFileSync(path.join(root,'data/reading-public-baseline.json'),'utf8'));
+ const gamePages=fs.readdirSync(path.join(root,'game')).filter(f=>f.endsWith('.html')).map(f=>'game/'+f);
+ equal(sorted(gamePages),sorted(Object.keys(gameBaseline.games)),'exact pre-change game HTML coverage');
+ for(const relative of gamePages)equal(sha(fs.readFileSync(path.join(root,relative))),gameBaseline.games[relative],'game page unchanged '+relative);
+ await w.happyDOM.close();console.log(`${checks} assertions passed:${metadata.paperCount} canonical papers,${math} TeX expressions,${links} article links,4 guides,glossary/symbol destinations and game-page preservation.`);
 }
 main().catch(e=>{console.error(e);process.exit(1);});

@@ -807,17 +807,46 @@ window.RL_POSTS = [
     "eraLabel": "近期研究与 Agent"
   },
   {
+    "slug": "61-cpo",
+    "file": "61-cpo.md",
+    "title": "第 61 天｜CPO：追求更高回报时，怎样把代价预算写进每次更新",
+    "cardTitle": "CPO：追求更高回报时，怎样把代价预算写进每次更新",
+    "day": 61,
+    "year": 2017,
+    "kind": "paper",
+    "question": "如何提高回报，同时显式限制期望累计成本",
+    "excerpt": "考虑折扣约束马尔可夫决策过程（CMDP）。策略与环境交互得到奖励 R，同时产生一个或多个代价 Ci。目标是最大化期望回报，但每种期望累计代价不能超过预先给定的阈值 di：",
+    "eraId": "extension",
+    "eraYears": "",
+    "eraLabel": "专题进阶 · 安全与分布价值"
+  },
+  {
+    "slug": "62-qr-dqn",
+    "file": "62-qr-dqn.md",
+    "title": "第 62 天｜QR-DQN：固定概率、学习位置，把回报分布变成分位数回归",
+    "cardTitle": "QR-DQN：固定概率、学习位置，把回报分布变成分位数回归",
+    "day": 62,
+    "year": 2017,
+    "kind": "paper",
+    "question": "固定概率质量、学习分位点，怎样连接分布投影与随机梯度",
+    "excerpt": "固定支撑之外的回报会在C51投影时被裁到边界。让支撑位置移动可以避免这项人为裁剪，但必须给每个位置一个明确的统计目标。否则，多个网络输出只是多个数，并不自动组成有意义的分布近似。",
+    "eraId": "extension",
+    "eraYears": "",
+    "eraLabel": "专题进阶 · 安全与分布价值"
+  },
+  {
     "slug": "61-epilogue",
     "file": "61-系列收尾.md",
-    "title": "系列收尾｜把 60 篇论文连成可检验的理解",
+    "title": "系列收尾｜把 62 篇论文连成可检验的理解",
     "cardTitle": "系列收尾",
-    "day": 61,
+    "day": 101,
     "year": null,
     "question": "",
     "excerpt": "先确定实验单位。 经典控制可能按环境 step 或 frame 计；语言模型可能按 prompt、rollout、token 或 optimizer step 计；Agent 还可能有工具调用和中间状态重启。不同单位的“训练 100 步”没有直接可比性。",
     "eraId": "epilogue",
     "eraYears": "",
-    "eraLabel": "收尾"
+    "eraLabel": "收尾",
+    "kind": "epilogue"
   }
 ];
 window.RL_SLUG_MAP = {
@@ -883,5 +912,7 @@ window.RL_SLUG_MAP = {
   "59-ttpo.md": "59-ttpo",
   "60-draco.md": "60-draco",
   "61-系列收尾.md": "61-epilogue",
-  "00-reading-guide.md": "00-reading-guide"
+  "00-reading-guide.md": "00-reading-guide",
+  "61-cpo.md": "61-cpo",
+  "62-qr-dqn.md": "62-qr-dqn"
 };

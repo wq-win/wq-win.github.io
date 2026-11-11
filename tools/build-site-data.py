@@ -46,8 +46,8 @@ ALIASES = {
     "trpo": ["trpo"],
     "gae": ["gae"],
     "reinforce": ["reinforce"],
-    "q-learning": ["q-learning", "double-q", "double-dqn", "dqn", "dueling-dqn"],
-    "dqn": ["dqn", "double-dqn", "dueling-dqn", "rainbow", "per", "c51"],
+    "q-learning": ["q-learning", "double-q", "double-dqn", "dqn", "dueling-dqn", "qr-dqn"],
+    "dqn": ["dqn", "double-dqn", "dueling-dqn", "rainbow", "per", "c51", "qr-dqn"],
     "ddpg": ["dpg", "ddpg", "td3", "naf"],
     "sac": ["sac"],
     "her": ["her"],
@@ -89,6 +89,8 @@ ALIASES = {
 }
 
 EXTRA_EDGES = [
+    ("rl:61-cpo", "rl:14-trpo"),
+    ("rl:62-qr-dqn", "rl:28-c51"),
     ("rl:16-dqn", "game:rl-dqn"),
     ("rl:27-ppo", "game:rl-ppo"),
     ("llm:046-rope", "game:llm-rope"),
