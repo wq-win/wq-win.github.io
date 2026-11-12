@@ -550,7 +550,7 @@
                 </button>
             </div>
         </nav>
-        <div id="mobile-menu" class="mobile-menu fixed top-0 left-0 h-full w-3/4 max-w-xs bg-white shadow-lg z-50 p-4">
+        <div id="mobile-menu" role="navigation" aria-label="移动导航" aria-hidden="true" inert class="mobile-menu fixed top-0 left-0 h-full w-3/4 max-w-xs bg-white shadow-lg z-50 p-4">
             <div class="flex justify-between items-center mb-8">
                 <span class="text-xl font-bold text-primary">MyLog</span>
                 <button id="close-menu-button" aria-label="关闭菜单" class="text-gray-700 focus:outline-none">
@@ -719,9 +719,16 @@
         const backToTopButton = document.getElementById('back-to-top');
         const openMenu = document.getElementById('mobile-menu-button');
         const closeMenu = document.getElementById('close-menu-button');
-        const setMenuOpen = (open) => {
-            if (mobileMenu) mobileMenu.classList.toggle('open', open);
+        const setMenuOpen = (open, restoreFocus = true) => {
+            if (!mobileMenu || mobileMenu.classList.contains('open') === open) return;
+            const returnFocus = !open && restoreFocus && mobileMenu.contains(document.activeElement);
+            mobileMenu.classList.toggle('open', open);
             if (openMenu) openMenu.setAttribute('aria-expanded', String(open));
+            // Move focus before making the closing panel inert/aria-hidden.
+            if (returnFocus && openMenu) openMenu.focus();
+            mobileMenu.toggleAttribute('inert', !open);
+            mobileMenu.setAttribute('aria-hidden', String(!open));
+            if (open && closeMenu) closeMenu.focus();
         };
         if (openMenu && mobileMenu) {
             openMenu.addEventListener('click', () => setMenuOpen(true));
@@ -732,6 +739,17 @@
         if (mobileMenu) {
             mobileMenu.querySelectorAll('a').forEach((link) => {
                 link.addEventListener('click', () => setMenuOpen(false));
+            });
+            mobileMenu.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && mobileMenu.classList.contains('open')) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setMenuOpen(false);
+                }
+            });
+            // This navigation drawer is non-modal: Tab may leave it freely.
+            mobileMenu.addEventListener('focusout', (event) => {
+                if (event.relatedTarget && !mobileMenu.contains(event.relatedTarget)) setMenuOpen(false, false);
             });
         }
         const themeToggle = document.getElementById('theme-toggle');

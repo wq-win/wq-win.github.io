@@ -17,7 +17,7 @@ for (const initial of ['light', 'dark']) {
     const w = new Window({ url: 'https://example.test/', settings: { disableJavaScriptFileLoading: true, disableCSSFileLoading: true } });
     w.localStorage.setItem('mylog-theme', initial);
     w.SiteBackground = { getState: () => ({mode: 'static'}), sync() {}, init() {} };
-    w.document.write('<div id="site-header"></div><div id="site-footer"></div>');
+    w.document.write(`<style>${fs.readFileSync(path.join(root, 'css/style.css'), 'utf8')}</style><div id="site-header"></div><div id="site-footer"></div>`);
     w.eval(script);
     w.SeriesChrome.mount({root: ''});
     const doc = w.document;
@@ -42,15 +42,36 @@ for (const initial of ['light', 'dark']) {
     const assertMenu = (expanded) => {
         equal(menu.classList.contains('open'), expanded, 'menu visibility');
         equal(open.getAttribute('aria-expanded'), String(expanded), 'expanded state matches visibility');
+        equal(menu.getAttribute('aria-hidden'), String(!expanded), 'closed menu hidden from assistive technology');
+        equal(menu.hasAttribute('inert'), !expanded, 'closed menu excluded from keyboard interaction');
+        equal(w.getComputedStyle(menu).visibility, expanded ? 'visible' : 'hidden', 'closed menu hidden without inert support');
     };
     assertMenu(false);
+    equal(w.getComputedStyle(menu).overflowY, 'auto', 'long mobile menu can scroll');
+    open.focus();
     open.click(); assertMenu(true);
+    equal(doc.activeElement, close, 'opening moves keyboard focus into menu');
     open.click(); assertMenu(true);
     close.click(); assertMenu(false);
+    equal(doc.activeElement, open, 'close returns focus to opener');
+    open.click(); assertMenu(true);
+    close.dispatchEvent(new w.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+    assertMenu(false);
+    equal(doc.activeElement, open, 'Escape returns focus to opener');
     open.click(); assertMenu(true);
     const link = menu.querySelector('a');
     link.addEventListener('click', e => e.preventDefault());
+    link.focus();
     link.click(); assertMenu(false);
+    equal(doc.activeElement, open, 'link dismissal does not leave focus in hidden menu');
+    open.click(); assertMenu(true);
+    link.focus();
+    assertMenu(true);
+    toggle.focus();
+    assertMenu(false);
+    equal(doc.activeElement, toggle, 'leaving a non-modal menu keeps the chosen outside focus');
+    toggle.dispatchEvent(new w.KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+    equal(doc.activeElement, toggle, 'Escape on a closed menu does not steal focus');
     await w.happyDOM.close();
 }
 const w = new Window({settings: {disableJavaScriptFileLoading: true, disableCSSFileLoading: true, disableJavaScriptEvaluation: true}});
