@@ -1,6 +1,6 @@
 # 第 62 天｜QR-DQN：固定概率、学习位置，把回报分布变成分位数回归
 
-[系列首页](README.md) · [上一篇](61-cpo.md) · [系列收尾](61-系列收尾.md)
+[系列首页](README.md) · [上一篇](61-cpo.md) · [下一篇](63-iqn.md)
 
 **原论文与版本**：Will Dabney、Mark Rowland、Marc G. Bellemare、Rémi Munos，*Distributional Reinforcement Learning with Quantile Regression*。2017年预印本，AAAI 2018发表。[arXiv入口](https://arxiv.org/abs/1710.10044) · [本文核读的v1 PDF](https://arxiv.org/pdf/1710.10044v1) · [AAAI出版入口](https://ojs.aaai.org/index.php/AAAI/article/view/11791)。以下公式、图表和实验口径以2017-10-27的v1为准，未将出版页视为已核读的修订正文。
 
@@ -207,4 +207,4 @@ N控制概率轴而不是回报轴的分辨率。每个原子质量仍是1/N，�
 
 **参考答案**：复合算子的收缩定理针对固定策略、精确投影，并使用最大W∞度量；它没有覆盖贪心控制、神经网络优化与平滑损失的全部误差。原算法仍按近似分布均值选动作，没有另加风险准则或安全约束。
 
-[系列首页](README.md) · [上一篇](61-cpo.md) · [系列收尾](61-系列收尾.md)
+[系列首页](README.md) · [上一篇](61-cpo.md) · [下一篇](63-iqn.md)

@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script>try{if(localStorage.getItem('mylog-theme')==='dark')document.documentElement.classList.add('dark')}catch(e){}</script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 73 天｜R2D2：回放的不只是经验，还有可能过期的记忆 | MyLog</title>
+    <script src="/js/vendor/tailwind.js"></script>
+    <link href="/css/font-awesome.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">R2D2：回放的不只是经验，还有可能过期的记忆</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="9a6165da9a1f6748080c9ec3c6bf4f3cbcf0782647165fd6bf0d3da55550038c"><h1>第 73 天｜R2D2：回放的不只是经验，还有可能过期的记忆</h1>
+<p><a href="index.html">系列首页</a> · <a href="72-drqn.html">上一篇</a> · <a href="74-rudder.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：Steven Kapturowski、Georg Ostrovski、John Quan、Rémi Munos、Will Dabney，<em>Recurrent Experience Replay in Distributed Reinforcement Learning</em>，ICLR 2019。<a href="https://willdabney.com/publication/r2d2/">作者论文页</a>确认署名、会议与2019年5月；会议日期为<a href="https://iclr.cc/Conferences/2019">2019年5月6—9日</a>。2018年已公开流传有同期<a href="https://github.com/ray-project/ray/issues/3148">Ray issue，2018-10-27</a>旁证，精确首次公开日未核实。本文核读<a href="https://openreview.net/references/pdf?id=rknDUp-A7">OpenReview保存的17页匿名评审稿</a>，页眉为“Under review as a conference paper at ICLR 2019”，修订日期未标注。此前访问最终19页稿遇到验证页面，没有核读最终稿。以下页码、原图、超参数与协议统一指17页稿，尤其不混入最终稿的输入配置和DMLab比较。</p>
+<h3 id="先接住前作的问题">先接住前作的问题</h3>
+<p><a href="72-drqn.html">DRQN</a>让网络从观测序列中学习记忆，避免只能依赖固定长度的图像堆叠。但把LSTM放进DQN只是第一步：训练时通常从经验池中间随机切一段，行动时的记忆却从回合开头连续积累。这段训练序列应从哪一个隐藏状态开始？</p>
+<p>从零开始，可能忘掉片段之前拿过的钥匙；直接存下行动时的隐藏状态，又会遇到网络已经更新的事实。旧网络形成的内部表示，未必还能被新网络正确读取。R2D2把这个问题放进多actor、集中learner和优先经验回放的系统里研究，核心是让记忆的保存、重建和训练彼此兼容。</p>
+<p>本文要回答的不是“LSTM能不能记很久”，而是：<strong>当旧数据反复用于训练一个不断变化的记忆网络时，怎样避免从错误的内部状态学习？</strong></p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ul>
+<li>部分可观测：当前画面可能不足以决定正确动作；两段不同历史可以得到相同当前画面。</li>
+<li>循环状态：网络在前向计算中保存的内部记忆，既受输入历史影响，也受编码它的参数影响。</li>
+<li>经验回放：数据收集后多次用于更新，训练网络未必仍是采集网络。</li>
+<li>Double Q：在线网络选择后继动作，目标网络评价该动作，避免把选取与评价完全绑定。</li>
+<li>截断反向传播：只在有限时间窗口传播梯度；不等于推理时记忆只能保持这么久。</li>
+</ul>
+<p>三个容易混淆的术语描述不同层次：<strong>parameter lag</strong>是采集网络与训练网络相差多少次参数更新，既包含actor同步间隔，也包含数据等待时间；<strong>representational drift</strong>是参数变化后同一历史的编码发生改变；<strong>recurrent state staleness</strong>是旧参数生成的隐藏状态交给新参数继续计算，内部状态与当前网络不匹配。</p>
+<p>落后100次更新并不能直接推出隐藏状态误差有多大。若学习率很小或相关特征已稳定，漂移可能很轻；一次改变循环动力学的更新也可能影响很大。参数落后是风险来源，表示漂移是机制，状态陈旧是训练时的输入不一致。</p>
+<p>即使没有分布式actor，单机经验回放也存在这个问题。actor变多也不必让问题单调变坏：新数据写入更快，旧数据可能更早淘汰。本评审稿附录第12页中，actor从256降到64，平均参数落后从约1500次升到约5500次更新。结果依赖写入、抽样和learner吞吐，不能概括成“分布式一定比单机更陈旧”。</p>
+<h2 id="一问题设定参数落后表示漂移与隐藏状态陈旧">一、问题设定：参数落后、表示漂移与隐藏状态陈旧</h2>
+<p>令actor采集数据时使用参数θᵃ，learner现在使用θ。RNN内部状态记为z，包含LSTM的hidden state和cell state；观测记为o。递推关系为</p>
+<p><span class="reading-math" data-tex="z_{t+1}=F_\theta(z_t,o_t),\qquad Q_t(a)=q_\theta(z_t,o_t,a)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>z</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>=</mo><msub><mi>F</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>z</mi><mi>t</mi></msub><mo separator="true">,</mo><msub><mi>o</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><msub><mi>Q</mi><mi>t</mi></msub><mo stretchy="false">(</mo><mi>a</mi><mo stretchy="false">)</mo><mo>=</mo><msub><mi>q</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>z</mi><mi>t</mi></msub><mo separator="true">,</mo><msub><mi>o</mi><mi>t</mi></msub><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">z_{t+1}=F_\theta(z_t,o_t),\qquad Q_t(a)=q_\theta(z_t,o_t,a).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">F</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>这里把循环输入简写为o，具体实现若额外输入动作、奖励，必须一并保存；公式不允许丢失实际需要的历史输入。POMDP真实环境状态s没有直接提供给智能体，z只是可学习的历史摘要，不是保证充分的信念状态。</p>
+<h3 id="与普通off-policy的区别">与普通off-policy的区别</h3>
+<p>行为策略过时影响“数据由哪个策略产生”，隐藏状态陈旧影响“当前网络怎样解释数据”。重要性采样可以修正某些抽样或动作分布差异，却不会把旧向量自动翻译成新网络的坐标系统。优先回放权重不能替代记忆重建。</p>
+<p>目标网络又引入θ⁻。循环Double Q要求在线网络与目标网络各自沿同一观测序列展开，不能只算在线隐藏状态，再把它当成目标网络由历史自然得到的状态。即使两个状态维度一样，也不表示语义完全相同。</p>
+<h2 id="二四种初始化方式什么被保留什么仍然丢失">二、四种初始化方式：什么被保留，什么仍然丢失</h2>
+<h3 id="零状态把中间片段伪装成回合开头">零状态：把中间片段伪装成回合开头</h3>
+<p>每个抽样片段把z初始化为零，容易实现，也不用保存隐藏状态，但片段之前的信息全部消失。若当前画面无法判断钥匙是否已经获得，网络无法从零初态准确估计开门动作价值。</p>
+<p>更隐蔽的是训练压力：片段前几步预测错得很大，优化器可能反复惩罚循环记忆的使用，让网络转而依赖当前画面。测试时持续携带记忆，并不意味着训练教会了它可靠使用记忆。</p>
+<h3 id="整回合展开有真实起点但计算与采样成本高">整回合展开：有真实起点，但计算与采样成本高</h3>
+<p>从回合开头用当前参数重放完整历史，可以得到一致的当前网络状态。代价是回合长度不固定，长回合耗时和显存增加，整段数据相关性强。若只需要中间窗口的损失，前面很多计算只是重建上下文。这适合作为小规模一致性检查，却不容易直接替代大吞吐量的短序列训练。</p>
+<h3 id="stored-state携带旧记忆不是承诺它永远正确">Stored state：携带旧记忆，不是承诺它永远正确</h3>
+<p>actor把片段起点循环状态与序列一并存入replay，learner从该向量出发。这样可能保留窗口之前的关键事件，即使窗口没有再次出现钥匙；缺点是状态由θᵃ生成，之后却由θ读取。</p>
+<p>必须保存LSTM完整循环状态，不能只存hidden而漏掉cell。还要明确索引：若保存“读入第t个观测之前”的状态，训练应先输入第t个观测；保存之后状态却再读一次同一帧，会重复推进记忆。</p>
+<h3 id="burn-in先恢复上下文再要求网络负责">Burn-in：先恢复上下文，再要求网络负责</h3>
+<p>先用前缀只做前向展开，让当前网络从零状态或stored state进入较合适的状态，随后才在学习段计算损失。本评审稿第4页与第14页Table 2采用长度m=80的学习序列，另有l=20或40的前缀，主评估用l=40。不能写成“80步总长度里40步预热、40步训练”。</p>
+<p>前缀帮助状态适应当前网络，却不保证恢复前缀之外的事件。若钥匙发生在200步之前，40步前缀没有线索，纯零状态预热无法凭空重建它。stored state与burn-in互补：前者提供远处历史的近似摘要，后者让摘要经过当前动力学校正。</p>
+<p>教学实现可将前缀放在无梯度区，并在学习段边界detach状态，明确“前缀只用于恢复”。若只令前缀直接loss为零，但后面loss仍穿过前缀反传，梯度范围就不同。原稿描述前缀仅展开、不在其上更新；复现需明确实现边界，不能仅给张量起名burn_in。</p>
+<h3 id="一个小模型说明预热的条件">一个小模型说明预热的条件</h3>
+<p>考虑教学标量递推zₖ₊₁=ρzₖ+uₖ，两条路径用相同输入与当前参数，仅初始状态相差d₀。相减得dₖ₊₁=ρdₖ，所以l步后dₗ=ρˡd₀。若ρ=0.9，40步后初态差只剩约1.48%；若ρ=1，初态差原样保留；若ρ=1.01，40步后反而放大约1.49倍。这不是LSTM的收缩证明，而是在最简单情形中展示：预热有效需要动力学与输入支持，不是只要循环40次就自动校准。</p>
+<p>实际LSTM的门值依输入和状态变化，某些记忆维度可能刻意接近不遗忘。保持长期线索与消除错误初态之间因此存在张力：如果所有维度快速收缩，早期线索也容易消失。保存状态的意义，是不要把所有需要长记忆的任务都交给一个短前缀从零恢复。</p>
+<p>还有两个容易漏掉的采样问题。其一，80步学习片段重叠40步，意味着同一转移可能出现在多个回放条目中；“均匀抽序列”不等于对所有环境转移完全等概率。其二，按序列修正的重要性权重不能分别校正每个位置的出现次数。把PER的无偏措辞直接搬到重叠窗口和部分校正β上，会夸大数学保证。</p>
+<h2 id="三价值变换先回到奖励单位再做多步目标">三、价值变换：先回到奖励单位，再做多步目标</h2>
+<p>R2D2沿用分布式优先回放、dueling输出和n-step Double Q，本版本n=5。不裁剪奖励，而采用可逆值变换</p>
+<p><span class="reading-math" data-tex="h(x)=\operatorname{sgn}(x)(\sqrt{|x|+1}-1)+\varepsilon x."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>h</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="normal">sgn</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo stretchy="false">(</mo><msqrt><mrow><mi mathvariant="normal">∣</mi><mi>x</mi><mi mathvariant="normal">∣</mi><mo>+</mo><mn>1</mn></mrow></msqrt><mo>−</mo><mn>1</mn><mo stretchy="false">)</mo><mo>+</mo><mi>ε</mi><mi>x</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">h(x)=\operatorname{sgn}(x)(\sqrt{|x|+1}-1)+\varepsilon x.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">h</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.24em;vertical-align:-0.2561em;"></span><span class="mop"><span class="mord mathrm">sgn</span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mopen">(</span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9839em;"><span class="svg-align" style="top:-3.2em;"><span class="pstrut" style="height:3.2em;"></span><span class="mord" style="padding-left:1em;"><span class="mord">∣</span><span class="mord mathnormal">x</span><span class="mord">∣</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">1</span></span></span><span style="top:-2.9439em;"><span class="pstrut" style="height:3.2em;"></span><span class="hide-tail" style="min-width:1.02em;height:1.28em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.28em" viewBox="0 0 400000 1296" preserveAspectRatio="xMinYMin slice"><path d="M263,681c0.7,0,18,39.7,52,119
+c34,79.3,68.167,158.7,102.5,238c34.3,79.3,51.8,119.3,52.5,120
+c340,-704.7,510.7,-1060.3,512,-1067
+l0 -0
+c4.7,-7.3,11,-11,19,-11
+H40000v40H1012.3
+s-271.3,567,-271.3,567c-38.7,80.7,-84,175,-136,283c-52,108,-89.167,185.3,-111.5,232
+c-22.3,46.7,-33.8,70.3,-34.5,71c-4.7,4.7,-12.3,7,-23,7s-12,-1,-12,-1
+s-109,-253,-109,-253c-72.7,-168,-109.3,-252,-110,-252c-10.7,8,-22,16.7,-34,26
+c-22,17.3,-33.3,26,-34,26s-26,-26,-26,-26s76,-59,76,-59s76,-60,76,-60z
+M1001 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2561em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">ε</span><span class="mord mathnormal">x</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>ε为小的非负数；h单调递增，所以同一状态下对变换后的值取argmax与对其逆变换取argmax一致。εx项让大值区保留线性分量。ε不是行为探索率，本文也不从其他版本为本稿补一个未明确列出的数值。</p>
+<p>网络输出Q处在变换坐标中。n步内没有终止时，目标为</p>
+<p><span class="reading-math" data-tex="a^*=\arg\max_a Q_\theta(x_{t+n},a),"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>a</mi><mo>∗</mo></msup><mo>=</mo><mi>arg</mi><mo>⁡</mo><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>a</mi></munder><msub><mi>Q</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>x</mi><mrow><mi>t</mi><mo>+</mo><mi>n</mi></mrow></msub><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mo separator="true">,</mo></mrow><annotation encoding="application/x-tex">a^*=\arg\max_a Q_\theta(x_{t+n},a),</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7387em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.45em;vertical-align:-0.7em;"></span><span class="mop">ar<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.4306em;"><span style="top:-2.4em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">max</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mpunct">,</span></span></span></span></span></span>
+<span class="reading-math" data-tex="y_t=h\left(\sum_{k=0}^{n-1}\gamma^k r_{t+k}+\gamma^n h^{-1}\!\left(Q_{\theta^-}(x_{t+n},a^*)\right)\right)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>y</mi><mi>t</mi></msub><mo>=</mo><mi>h</mi><mrow><mo fence="true">(</mo><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>0</mn></mrow><mrow><mi>n</mi><mo>−</mo><mn>1</mn></mrow></munderover><msup><mi>γ</mi><mi>k</mi></msup><msub><mi>r</mi><mrow><mi>t</mi><mo>+</mo><mi>k</mi></mrow></msub><mo>+</mo><msup><mi>γ</mi><mi>n</mi></msup><msup><mi>h</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mtext> ⁣</mtext><mrow><mo fence="true">(</mo><msub><mi>Q</mi><msup><mi>θ</mi><mo>−</mo></msup></msub><mo stretchy="false">(</mo><msub><mi>x</mi><mrow><mi>t</mi><mo>+</mo><mi>n</mi></mrow></msub><mo separator="true">,</mo><msup><mi>a</mi><mo>∗</mo></msup><mo stretchy="false">)</mo><mo fence="true">)</mo></mrow><mo fence="true">)</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">y_t=h\left(\sum_{k=0}^{n-1}\gamma^k r_{t+k}+\gamma^n h^{-1}\!\left(Q_{\theta^-}(x_{t+n},a^*)\right)\right).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.1032em;vertical-align:-1.3021em;"></span><span class="mord mathnormal">h</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size4">(</span></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.8011em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mrel mtight">=</span><span class="mord mtight">0</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3021em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8991em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:-0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;">(</span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3419em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7027em;"><span style="top:-2.786em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mbin mtight">−</span></span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7387em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mbin mtight">∗</span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mclose delimcenter" style="top:0em;">)</span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size4">)</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>x概括该网络基于观测和循环状态的输入，奖励索引沿用原稿rₜ。终止在n步内发生时，于终止处截断奖励和，去掉之后自举项。目标网络的值先逆变换，回到奖励单位；再加累计奖励与折扣后继价值；最后整体变换。直接写“奖励＋γQ”会把真实奖励单位和压缩后价值单位混在一起。</p>
+<p>对ε&gt;0，令u=√(|x|+1)，则|y|=u−1+ε(u²−1)。解二次方程得</p>
+<p><span class="reading-math" data-tex="h^{-1}(y)=\operatorname{sgn}(y)\left[\left(\frac{\sqrt{1+4\varepsilon(|y|+1+\varepsilon)}-1}{2\varepsilon}\right)^2-1\right]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>h</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="normal">sgn</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo><mrow><mo fence="true">[</mo><msup><mrow><mo fence="true">(</mo><mfrac><mrow><msqrt><mrow><mn>1</mn><mo>+</mo><mn>4</mn><mi>ε</mi><mo stretchy="false">(</mo><mi mathvariant="normal">∣</mi><mi>y</mi><mi mathvariant="normal">∣</mi><mo>+</mo><mn>1</mn><mo>+</mo><mi>ε</mi><mo stretchy="false">)</mo></mrow></msqrt><mo>−</mo><mn>1</mn></mrow><mrow><mn>2</mn><mi>ε</mi></mrow></mfrac><mo fence="true">)</mo></mrow><mn>2</mn></msup><mo>−</mo><mn>1</mn><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">h^{-1}(y)=\operatorname{sgn}(y)\left[\left(\frac{\sqrt{1+4\varepsilon(|y|+1+\varepsilon)}-1}{2\varepsilon}\right)^2-1\right].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.6em;vertical-align:-1.55em;"></span><span class="mop"><span class="mord mathrm">sgn</span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen"><span class="delimsizing mult"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:2.05em;"><span style="top:-4.05em;"><span class="pstrut" style="height:5.6em;"></span><span style="width:0.667em;height:3.600em;"><svg xmlns="http://www.w3.org/2000/svg" width="0.667em" height="3.600em" viewBox="0 0 667 3600"><path d="M403 1759 V84 H666 V0 H319 V1759 v0 v1759 h347 v-84
+H403z M403 1759 V0 H319 V1759 v0 v1759 h84z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.55em;"><span></span></span></span></span></span></span><span class="minner"><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size4">(</span></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.63em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">2</span><span class="mord mathnormal">ε</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.695em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.935em;"><span class="svg-align" style="top:-3.2em;"><span class="pstrut" style="height:3.2em;"></span><span class="mord" style="padding-left:1em;"><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">4</span><span class="mord mathnormal">ε</span><span class="mopen">(</span><span class="mord">∣</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mord">∣</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord mathnormal">ε</span><span class="mclose">)</span></span></span><span style="top:-2.895em;"><span class="pstrut" style="height:3.2em;"></span><span class="hide-tail" style="min-width:1.02em;height:1.28em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.28em" viewBox="0 0 400000 1296" preserveAspectRatio="xMinYMin slice"><path d="M263,681c0.7,0,18,39.7,52,119
+c34,79.3,68.167,158.7,102.5,238c34.3,79.3,51.8,119.3,52.5,120
+c340,-704.7,510.7,-1060.3,512,-1067
+l0 -0
+c4.7,-7.3,11,-11,19,-11
+H40000v40H1012.3
+s-271.3,567,-271.3,567c-38.7,80.7,-84,175,-136,283c-52,108,-89.167,185.3,-111.5,232
+c-22.3,46.7,-33.8,70.3,-34.5,71c-4.7,4.7,-12.3,7,-23,7s-12,-1,-12,-1
+s-109,-253,-109,-253c-72.7,-168,-109.3,-252,-110,-252c-10.7,8,-22,16.7,-34,26
+c-22,17.3,-33.3,26,-34,26s-26,-26,-26,-26s76,-59,76,-59s76,-60,76,-60z
+M1001 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.305em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size4">)</span></span></span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:1.954em;"><span style="top:-4.2029em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">1</span><span class="mclose"><span class="delimsizing mult"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:2.05em;"><span style="top:-4.05em;"><span class="pstrut" style="height:5.6em;"></span><span style="width:0.667em;height:3.600em;"><svg xmlns="http://www.w3.org/2000/svg" width="0.667em" height="3.600em" viewBox="0 0 667 3600"><path d="M347 1759 V0 H0 V84 H263 V1759 v0 v1759 H0 v84 H347z
+M347 1759 V0 H263 V1759 v0 v1759 h84z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.55em;"><span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>ε=0时简化为sign(y)[(|y|+1)²−1]。工程上需注意ε很小时的数值相消；这里给的是代数式，不保证所有浮点精度下最稳定。</p>
+<p>h可逆不意味着随机环境中的训练目标毫无变化。非线性h一般满足E[h(Y)]≠h(E[Y])，拟合变换后样本目标改变误差权重。单调性支持给定数值的动作排序，但不能由此推出非线性Bellman采样、函数逼近和优化与原始Q学习完全等价。</p>
+<h2 id="四序列优先级不让关键错误被长序列平均掉">四、序列优先级：不让关键错误被长序列平均掉</h2>
+<p>设有效学习位置的绝对TD误差eᵢ=|yᵢ−Qᵢ|，序列优先级为</p>
+<p><span class="reading-math" data-tex="p=\eta\max_i e_i+(1-\eta)\frac1m\sum_{i=1}^{m}e_i,\qquad \eta=0.9."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>p</mi><mo>=</mo><mi>η</mi><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>i</mi></munder><msub><mi>e</mi><mi>i</mi></msub><mo>+</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>η</mi><mo stretchy="false">)</mo><mfrac><mn>1</mn><mi>m</mi></mfrac><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>m</mi></munderover><msub><mi>e</mi><mi>i</mi></msub><mo separator="true">,</mo><mspace width="2em"/><mi>η</mi><mo>=</mo><mn>0.9.</mn></mrow><annotation encoding="application/x-tex">p=\eta\max_i e_i+(1-\eta)\frac1m\sum_{i=1}^{m}e_i,\qquad \eta=0.9.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.311em;vertical-align:-0.7277em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">η</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.4306em;"><span style="top:-2.3723em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">max</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7277em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.9291em;vertical-align:-1.2777em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">η</span><span class="mclose">)</span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">m</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.6514em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">m</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">η</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.9.</span></span></span></span></span></span></p>
+<p>最大项突出关键位置，均值项保留整段难度。若80步只有拿钥匙的一步误差很大，纯均值会稀释它；纯最大值又容易受单点噪声支配。混合式是工程折中，不是对哪个时刻具有因果贡献的识别。</p>
+<p>抽样还需另施幂指数α：P(j)=pⱼ^α/Σₖpₖ^α，本版本α也为0.9。η决定max与mean混合，α决定采样分布尖锐程度，虽然数值相同，不能视作同一个参数。</p>
+<p>通常PER权重与[NP(j)]⁻ᵝ成正比，N为可采样序列数。本稿β=0.6，因此并未完全消除优先抽样相对均匀序列抽样的偏差。归一化权重、正优先级下限应另行记录；这个权重也不是修正多步行为策略的动作重要性比。</p>
+<h3 id="两组可手算的检查">两组可手算的检查</h3>
+<p>第一组为方便取ε=0，n=2、γ=0.9，奖励为2和3，目标网络选中动作输出Q⁻=3。由h⁻¹(3)=15，原奖励单位目标为</p>
+<p><span class="reading-math" data-tex="2+0.9\times3+0.9^2\times15=16.85."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mn>2</mn><mo>+</mo><mn>0.9</mn><mo>×</mo><mn>3</mn><mo>+</mo><mn>0.</mn><msup><mn>9</mn><mn>2</mn></msup><mo>×</mo><mn>15</mn><mo>=</mo><mn>16.85.</mn></mrow><annotation encoding="application/x-tex">2+0.9\times3+0.9^2\times15=16.85.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">0.9</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">3</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.9474em;vertical-align:-0.0833em;"></span><span class="mord">0.</span><span class="mord"><span class="mord">9</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">15</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">16.85.</span></span></span></span></span></span></p>
+<p>变换后y=√17.85−1≈3.224926。错误地直接加变换值会得2+2.7+0.81×3=7.13；即使再对7.13做h，也不正确。若第二步后真终止，则正确目标为h(4.7)=√5.7−1≈1.387467。</p>
+<p>第二组取误差A=(0,0,0,8)、B=(2,2,2,2)。两段均值都是2，混合后pA=7.4、pB=2。α=0.9时，P(A)≈0.7645，P(B)≈0.2355；β=0.6、最大权重归一化到1时，A权重约0.493，B为1。A仍较常被抽到，但每次损失贡献相应减小。数值是教学计算，不是训练结果。</p>
+<p>priority与loss还应使用一致误差单位。若有时在变换域更新priority，有时在原奖励域更新，就改变了抽样规则。terminal padding与burn-in位置不能冒充有效学习位置参与均值，否则只改padding长度便能改优先级。</p>
+<h2 id="五把actor回放与learner接起来">五、把actor、回放与learner接起来</h2>
+<p>以下是对应本稿机制的教学伪代码，省略设备通信与批处理调度，不声称逐行复刻作者程序。</p>
+<pre><code class="language-text">初始化在线参数θ、目标参数θ−、优先序列回放池
+各actor循环：
+    定期同步θa（本稿为400个环境步）
+    从回合起点携带完整循环状态，以行为策略行动
+    保存连续观测、动作、奖励、终止标志和片段起点循环状态
+    构造学习长度80、相邻学习片段重叠40的序列
+    为burn-in提供额外前缀，不跨回合边界
+    将带初始优先级的序列写入回放池
+learner循环：
+    按序列优先级抽样，计算序列重要性权重
+    在线网与目标网各自从保存状态展开前缀
+    在前缀/学习段边界停止前缀梯度
+    分别展开学习段，准备5步目标所需后继信息
+    在线网选后继动作，目标网评价
+    逆变换后组合奖励，再整体变换
+    只在有效学习位置计算TD损失，以序列权重加权
+    更新θ，并用本次有效TD误差刷新优先级
+    每2500次learner更新复制θ到θ−
+</code></pre>
+<p>序列末端需有足够后继信息支持5步目标，或者仅对有合法目标的位置计算损失。固定窗口结束不等于环境终止。真实回合结束时隐藏状态重置与目标截断同时生效；时间上限造成的截断是否自举，应与任务定义一致。</p>
+<p>同步参数不等于重建actor此前全部记忆。actor若在回合中途换参数，其携带状态也来自旧网络。R2D2提供经验有效的方案，没有宣称所有内部状态从此完全一致。</p>
+<h2 id="六原图改善初态失配不是证明记忆无误">六、原图：改善初态失配，不是证明记忆无误</h2>
+<figure class="reading-evidence-figure" id="rl-73-figure-1"><a href="/rl/assets/papers/73-r2d2-figure-1.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/73-r2d2-figure-1.png" width="810" height="384" alt="R2D2评审稿图1：同一网络读取不同循环状态的Q差异、初末状态柱状比较和四个DMLab任务的学习曲线" loading="lazy"></a><figcaption>原论文图形摘引｜R2D2匿名17页评审稿，OpenReview reference rknDUp-A7，PDF第4页Figure 1。<a href="https://openreview.net/references/pdf?id=rknDUp-A7#page=4">核对原文</a>。保留完整图形，作者及出版方保留版权；用于直接技术评论。</figcaption></figure>
+
+<p>图1(a)两条路径使用同一套当前网络参数，差别来自隐藏状态：一条使用训练时重建的状态，另一条输入actor在相应时刻存下的状态。若同时换参数与状态，就无法区分正常价值学习变化与状态失配。归一化指标为</p>
+<p><span class="reading-math" data-tex="\Delta Q_i=\frac{\|q_{\hat\theta}(o_i,\hat z_i)-q_{\hat\theta}(o_i,z_i^{\rm stored})\|_2}{|\max_{a,j}q_{\hat\theta}(o_j,\hat z_j,a)|}."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Δ</mi><msub><mi>Q</mi><mi>i</mi></msub><mo>=</mo><mfrac><mrow><mi mathvariant="normal">∥</mi><msub><mi>q</mi><mover accent="true"><mi>θ</mi><mo>^</mo></mover></msub><mo stretchy="false">(</mo><msub><mi>o</mi><mi>i</mi></msub><mo separator="true">,</mo><msub><mover accent="true"><mi>z</mi><mo>^</mo></mover><mi>i</mi></msub><mo stretchy="false">)</mo><mo>−</mo><msub><mi>q</mi><mover accent="true"><mi>θ</mi><mo>^</mo></mover></msub><mo stretchy="false">(</mo><msub><mi>o</mi><mi>i</mi></msub><mo separator="true">,</mo><msubsup><mi>z</mi><mi>i</mi><mrow><mi mathvariant="normal">s</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">o</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">d</mi></mrow></msubsup><mo stretchy="false">)</mo><msub><mi mathvariant="normal">∥</mi><mn>2</mn></msub></mrow><mrow><mi mathvariant="normal">∣</mi><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mrow><mi>a</mi><mo separator="true">,</mo><mi>j</mi></mrow></munder><msub><mi>q</mi><mover accent="true"><mi>θ</mi><mo>^</mo></mover></msub><mo stretchy="false">(</mo><msub><mi>o</mi><mi>j</mi></msub><mo separator="true">,</mo><msub><mover accent="true"><mi>z</mi><mo>^</mo></mover><mi>j</mi></msub><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo><mi mathvariant="normal">∣</mi></mrow></mfrac><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\Delta Q_i=\frac{\|q_{\hat\theta}(o_i,\hat z_i)-q_{\hat\theta}(o_i,z_i^{\rm stored})\|_2}{|\max_{a,j}q_{\hat\theta}(o_j,\hat z_j,a)|}.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord">Δ</span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.5765em;vertical-align:-1.0117em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.5648em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">∣</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop">max</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.3743em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9579em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord mtight">^</span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3257em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05724em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">a</span><span class="mclose">)</span><span class="mord">∣</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.7157em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">∥</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.3743em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9579em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord mtight">^</span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3257em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.04398em;">z</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.3743em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9579em;"><span style="top:-2.7em;"><span class="pstrut" style="height:2.7em;"></span><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span><span style="top:-2.9634em;"><span class="pstrut" style="height:2.7em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord mtight">^</span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3257em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">o</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.04398em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-2.4413em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">stored</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2587em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord"><span class="mord">∥</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.0117em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>分母帮助跨任务与阶段比较尺度，但近零时可能敏感。stored state只是参考，不是真实最优隐藏状态；ΔQ小不等于Q准确，也不等于恢复真实POMDP状态。</p>
+<p>图1(b)比较序列开始与末尾的差异；(c)横轴为learner更新次数，纵轴为平均回合回报，四面板为四个DMLab任务。蓝色为零初态，红色为stored state，深浅区分burn-in 0、20、40。曲线平均3个种子。保存状态与预热组合整体更稳，但各任务提升不同，不能读成每个游戏中更长前缀都严格更好。</p>
+<h3 id="版本与协议比一句超过人类更重要">版本与协议比一句“超过人类”更重要</h3>
+<p>本稿Atari采用4帧堆叠、18动作、不裁奖励、不把丢命视作回合结束；DMLab采用单张RGB。共用网络架构和超参数不是一套共同权重同时解决全部游戏。网络含512单元LSTM，learner每批64条学习序列，典型256个actor。</p>
+<p>第14页规定训练与评价回合封顶108000游戏帧，报告未折扣回合回报。R2D2采用最终成绩，部分对比方法用训练中最好成绩，跨方法排名还混有检查点、数据预算与硬件差异。</p>
+<figure class="reading-evidence-figure" id="rl-73-figure-2"><a href="/rl/assets/papers/73-r2d2-figure-2.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/73-r2d2-figure-2.png" width="818" height="376" alt="R2D2评审稿图2：左侧为Atari人类归一化中位数与训练小时，右侧为六个游戏中R2D2和Ape-X的墙钟学习曲线" loading="lazy"></a><figcaption>原论文图形摘引｜同一17页审稿版本，PDF第6页Figure 2。<a href="https://openreview.net/references/pdf?id=rknDUp-A7#page=6">核对原文</a>。完整左侧散点图与右侧六面板；图注注明左图改编扩展自Horgan等。原作者及相关出版方保留版权，用于协议与结果评论。</figcaption></figure>
+
+<p>第6页Figure 2左侧把不同方法的人类归一化中位数与训练时间放在一起，右侧是若干游戏随墙钟时间变化的分数。右侧R2D2曲线平均3种子，Ape-X为单种子，不能虚构相同置信区间。其时间优势和最终表现不等于相同交互量、相同机器条件下的纯算法比较。</p>
+<p><a href="https://openreview.net/references/pdf?id=rknDUp-A7#page=7">第7页Table 1</a>中，本稿R2D2的Atari人类归一化中位数为1686.9%，Ape-X为434.1%，比值约3.886，原文以“四倍”概括。两者相差1252.8个百分点；相对增长约288.6%，不能把“达到约四倍”说成“提高四倍”。R2D2均值3806.5%也不等于中位数，少数极高分游戏会改变均值。这里仅检查表内显示数的算术，不重新汇总57个游戏。</p>
+<p>该版本报告R2D2在52/57游戏超过人类参考，Ape-X和Rainbow为49/57。这个计数比仅看中位数更能反映弱项覆盖，但“人类参考成绩”不是最高人类纪录。仍未超过参考的任务也说明，高汇总成绩并不自动解决困难探索。以上数字是这份审稿版本的历史报告，不能将后续更改的评价协议无声地拼接进来。</p>
+<p>第15页Table 3承认DMLab比较中R2D2用改进动作集而IMPALA没有；IMPALA又采用更大ResNet及有利于语言任务的特殊奖励裁剪。因此不能用一个汇总分数宣称“纯粹加入记忆回放就超过IMPALA”，也不能与最终稿重新对照混写。</p>
+<p>这些结果支持循环价值学习可以在分布式回放中有效工作，而不证明全部收益来自burn-in。折扣、值变换、终止规则、网络结构和计算量共同参与。原稿第13页还指出，除前馈替代消融以外，其他选择都有个别游戏反例。</p>
+<h2 id="七边界记住过去与找到奖励仍是两回事">七、边界：记住过去与找到奖励仍是两回事</h2>
+<p>burn-in长度有限，无法保证恢复任意长依赖；stored state的远处信息也可能漂移。优先回放会强调大TD误差，噪声、错误终止标记和过时目标同样会制造大误差。更多actor改变数据流量、经验年龄、重用次数与资源成本，不能只按墙钟速度判断样本效率。</p>
+<p>RNN也不自动解决探索。本稿仍有困难探索游戏低于人类，说明记忆与发现数据是不同瓶颈。这是一套深度RL经验训练策略，没有给出任意POMDP、非线性网络和异步更新下的全局收敛保证。</p>
+<p>下一篇<a href="74-rudder.html">RUDDER</a>继续处理时间：从“训练时如何恢复记忆”转向“最终奖励应分配给历史中的哪些事件”。二者都用循环网络，一个主要改变状态与回放处理，一个用序列预测构造训练奖励，不能直接替代。</p>
+<h3 id="三个继续追问">三个继续追问</h3>
+<details><summary>1. 提高actor同步频率，能完全消除状态陈旧吗？</summary>
+
+<p>不能。同步只减少采集时的参数延迟，数据仍会在replay里等待；循环状态还编码更早历史，只换当前参数不会重算历史。应同时监控数据年龄、状态差异、经验重用率，并比较stored state与burn-in的组合。</p>
+</details>
+
+<details><summary>2. 为什么不把burn-in越设越长？</summary>
+
+<p>更长前缀增加重建机会，也增加前向与读取成本；有效记忆不保证单调改善，陈旧起点影响也未必收缩。总预算固定时还可能减少更新数，应该按任务需求和相同资源预算比较。</p>
+</details>
+
+<details><summary>3. ΔQ很小，是否可以不再看环境回报？</summary>
+
+<p>不可以。两种内部状态对应的输出可以一起错；完全忽略记忆也可能得到小ΔQ。应同时检查任务表现、明确需要记忆的测试以及初始化消融。</p>
+</details>
+
+<h2 id="自测两题">自测两题</h2>
+<p><strong>题1：</strong> 序列只有第1步误差10，其余9步误差0。η=0.9时priority是多少？能说抽中概率为0.91吗？</p>
+<p><strong>答案：</strong> 最大值10、均值1，priority=9.1。概率还需对全部序列p^α归一化，缺少其他序列就不能确定。η不是概率，β也不是指数α。</p>
+<p><strong>题2：</strong> 学习片段从第100步开始，钥匙在第20步获得，后续画面无线索。零初态加40步前缀是否保证恢复钥匙信息？</p>
+<p><strong>答案：</strong> 不保证。前缀只有第60—99步，没有所需事件。stored state可能携带信息，但要承担漂移；从回合起点重建能提供完整历史，却昂贵，且网络也未必学会记住它。</p>
+<p><a href="index.html">系列首页</a> · <a href="72-drqn.html">上一篇</a> · <a href="74-rudder.html">下一篇</a></p>
+</div><!-- READING:END -->
+            <!-- READING:PAGER:START --><div id="article-pager" class="flex justify-between gap-4 mt-8" data-static-pager="true"><a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="72-drqn.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">DRQN：让Q网络从连续观测中学会记忆</div></a><a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="74-rudder.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">RUDDER：把结尾的回报，重新分给真正改变预测的事件</div></a></div><!-- READING:PAGER:END -->
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" hidden readonly># 第 73 天｜R2D2：回放的不只是经验，还有可能过期的记忆
+
+[系列首页](README.md) · [上一篇](72-drqn.md) · [下一篇](74-rudder.md)
+
+**原论文与版本**：Steven Kapturowski、Georg Ostrovski、John Quan、Rémi Munos、Will Dabney，*Recurrent Experience Replay in Distributed Reinforcement Learning*，ICLR 2019。[作者论文页](https://willdabney.com/publication/r2d2/)确认署名、会议与2019年5月；会议日期为[2019年5月6—9日](https://iclr.cc/Conferences/2019)。2018年已公开流传有同期[Ray issue，2018-10-27](https://github.com/ray-project/ray/issues/3148)旁证，精确首次公开日未核实。本文核读[OpenReview保存的17页匿名评审稿](https://openreview.net/references/pdf?id=rknDUp-A7)，页眉为“Under review as a conference paper at ICLR 2019”，修订日期未标注。此前访问最终19页稿遇到验证页面，没有核读最终稿。以下页码、原图、超参数与协议统一指17页稿，尤其不混入最终稿的输入配置和DMLab比较。
+
+### 先接住前作的问题
+
+[DRQN](72-drqn.md)让网络从观测序列中学习记忆，避免只能依赖固定长度的图像堆叠。但把LSTM放进DQN只是第一步：训练时通常从经验池中间随机切一段，行动时的记忆却从回合开头连续积累。这段训练序列应从哪一个隐藏状态开始？
+
+从零开始，可能忘掉片段之前拿过的钥匙；直接存下行动时的隐藏状态，又会遇到网络已经更新的事实。旧网络形成的内部表示，未必还能被新网络正确读取。R2D2把这个问题放进多actor、集中learner和优先经验回放的系统里研究，核心是让记忆的保存、重建和训练彼此兼容。
+
+本文要回答的不是“LSTM能不能记很久”，而是：**当旧数据反复用于训练一个不断变化的记忆网络时，怎样避免从错误的内部状态学习？**
+
+## 一、问题设定：参数落后、表示漂移与隐藏状态陈旧
+
+令actor采集数据时使用参数θᵃ，learner现在使用θ。RNN内部状态记为z，包含LSTM的hidden state和cell state；观测记为o。递推关系为
+
+$$z_{t+1}=F_\theta(z_t,o_t),\qquad Q_t(a)=q_\theta(z_t,o_t,a).$$
+
+这里把循环输入简写为o，具体实现若额外输入动作、奖励，必须一并保存；公式不允许丢失实际需要的历史输入。POMDP真实环境状态s没有直接提供给智能体，z只是可学习的历史摘要，不是保证充分的信念状态。
+
+### 五个前置概念
+
+- 部分可观测：当前画面可能不足以决定正确动作；两段不同历史可以得到相同当前画面。
+- 循环状态：网络在前向计算中保存的内部记忆，既受输入历史影响，也受编码它的参数影响。
+- 经验回放：数据收集后多次用于更新，训练网络未必仍是采集网络。
+- Double Q：在线网络选择后继动作，目标网络评价该动作，避免把选取与评价完全绑定。
+- 截断反向传播：只在有限时间窗口传播梯度；不等于推理时记忆只能保持这么久。
+
+三个容易混淆的术语描述不同层次：**parameter lag**是采集网络与训练网络相差多少次参数更新，既包含actor同步间隔，也包含数据等待时间；**representational drift**是参数变化后同一历史的编码发生改变；**recurrent state staleness**是旧参数生成的隐藏状态交给新参数继续计算，内部状态与当前网络不匹配。
+
+落后100次更新并不能直接推出隐藏状态误差有多大。若学习率很小或相关特征已稳定，漂移可能很轻；一次改变循环动力学的更新也可能影响很大。参数落后是风险来源，表示漂移是机制，状态陈旧是训练时的输入不一致。
+
+即使没有分布式actor，单机经验回放也存在这个问题。actor变多也不必让问题单调变坏：新数据写入更快，旧数据可能更早淘汰。本评审稿附录第12页中，actor从256降到64，平均参数落后从约1500次升到约5500次更新。结果依赖写入、抽样和learner吞吐，不能概括成“分布式一定比单机更陈旧”。
+
+### 与普通off-policy的区别
+
+行为策略过时影响“数据由哪个策略产生”，隐藏状态陈旧影响“当前网络怎样解释数据”。重要性采样可以修正某些抽样或动作分布差异，却不会把旧向量自动翻译成新网络的坐标系统。优先回放权重不能替代记忆重建。
+
+目标网络又引入θ⁻。循环Double Q要求在线网络与目标网络各自沿同一观测序列展开，不能只算在线隐藏状态，再把它当成目标网络由历史自然得到的状态。即使两个状态维度一样，也不表示语义完全相同。
+
+## 二、四种初始化方式：什么被保留，什么仍然丢失
+
+### 零状态：把中间片段伪装成回合开头
+
+每个抽样片段把z初始化为零，容易实现，也不用保存隐藏状态，但片段之前的信息全部消失。若当前画面无法判断钥匙是否已经获得，网络无法从零初态准确估计开门动作价值。
+
+更隐蔽的是训练压力：片段前几步预测错得很大，优化器可能反复惩罚循环记忆的使用，让网络转而依赖当前画面。测试时持续携带记忆，并不意味着训练教会了它可靠使用记忆。
+
+### 整回合展开：有真实起点，但计算与采样成本高
+
+从回合开头用当前参数重放完整历史，可以得到一致的当前网络状态。代价是回合长度不固定，长回合耗时和显存增加，整段数据相关性强。若只需要中间窗口的损失，前面很多计算只是重建上下文。这适合作为小规模一致性检查，却不容易直接替代大吞吐量的短序列训练。
+
+### Stored state：携带旧记忆，不是承诺它永远正确
+
+actor把片段起点循环状态与序列一并存入replay，learner从该向量出发。这样可能保留窗口之前的关键事件，即使窗口没有再次出现钥匙；缺点是状态由θᵃ生成，之后却由θ读取。
+
+必须保存LSTM完整循环状态，不能只存hidden而漏掉cell。还要明确索引：若保存“读入第t个观测之前”的状态，训练应先输入第t个观测；保存之后状态却再读一次同一帧，会重复推进记忆。
+
+### Burn-in：先恢复上下文，再要求网络负责
+
+先用前缀只做前向展开，让当前网络从零状态或stored state进入较合适的状态，随后才在学习段计算损失。本评审稿第4页与第14页Table 2采用长度m=80的学习序列，另有l=20或40的前缀，主评估用l=40。不能写成“80步总长度里40步预热、40步训练”。
+
+前缀帮助状态适应当前网络，却不保证恢复前缀之外的事件。若钥匙发生在200步之前，40步前缀没有线索，纯零状态预热无法凭空重建它。stored state与burn-in互补：前者提供远处历史的近似摘要，后者让摘要经过当前动力学校正。
+
+教学实现可将前缀放在无梯度区，并在学习段边界detach状态，明确“前缀只用于恢复”。若只令前缀直接loss为零，但后面loss仍穿过前缀反传，梯度范围就不同。原稿描述前缀仅展开、不在其上更新；复现需明确实现边界，不能仅给张量起名burn_in。
+
+### 一个小模型说明预热的条件
+
+考虑教学标量递推zₖ₊₁=ρzₖ+uₖ，两条路径用相同输入与当前参数，仅初始状态相差d₀。相减得dₖ₊₁=ρdₖ，所以l步后dₗ=ρˡd₀。若ρ=0.9，40步后初态差只剩约1.48%；若ρ=1，初态差原样保留；若ρ=1.01，40步后反而放大约1.49倍。这不是LSTM的收缩证明，而是在最简单情形中展示：预热有效需要动力学与输入支持，不是只要循环40次就自动校准。
+
+实际LSTM的门值依输入和状态变化，某些记忆维度可能刻意接近不遗忘。保持长期线索与消除错误初态之间因此存在张力：如果所有维度快速收缩，早期线索也容易消失。保存状态的意义，是不要把所有需要长记忆的任务都交给一个短前缀从零恢复。
+
+还有两个容易漏掉的采样问题。其一，80步学习片段重叠40步，意味着同一转移可能出现在多个回放条目中；“均匀抽序列”不等于对所有环境转移完全等概率。其二，按序列修正的重要性权重不能分别校正每个位置的出现次数。把PER的无偏措辞直接搬到重叠窗口和部分校正β上，会夸大数学保证。
+
+## 三、价值变换：先回到奖励单位，再做多步目标
+
+R2D2沿用分布式优先回放、dueling输出和n-step Double Q，本版本n=5。不裁剪奖励，而采用可逆值变换
+
+$$h(x)=\operatorname{sgn}(x)(\sqrt{|x|+1}-1)+\varepsilon x.$$
+
+ε为小的非负数；h单调递增，所以同一状态下对变换后的值取argmax与对其逆变换取argmax一致。εx项让大值区保留线性分量。ε不是行为探索率，本文也不从其他版本为本稿补一个未明确列出的数值。
+
+网络输出Q处在变换坐标中。n步内没有终止时，目标为
+
+$$a^*=\arg\max_a Q_\theta(x_{t+n},a),$$
+$$y_t=h\left(\sum_{k=0}^{n-1}\gamma^k r_{t+k}+\gamma^n h^{-1}\!\left(Q_{\theta^-}(x_{t+n},a^*)\right)\right).$$
+
+x概括该网络基于观测和循环状态的输入，奖励索引沿用原稿rₜ。终止在n步内发生时，于终止处截断奖励和，去掉之后自举项。目标网络的值先逆变换，回到奖励单位；再加累计奖励与折扣后继价值；最后整体变换。直接写“奖励＋γQ”会把真实奖励单位和压缩后价值单位混在一起。
+
+对ε&gt;0，令u=√(|x|+1)，则|y|=u−1+ε(u²−1)。解二次方程得
+
+$$h^{-1}(y)=\operatorname{sgn}(y)\left[\left(\frac{\sqrt{1+4\varepsilon(|y|+1+\varepsilon)}-1}{2\varepsilon}\right)^2-1\right].$$
+
+ε=0时简化为sign(y)[(|y|+1)²−1]。工程上需注意ε很小时的数值相消；这里给的是代数式，不保证所有浮点精度下最稳定。
+
+h可逆不意味着随机环境中的训练目标毫无变化。非线性h一般满足E[h(Y)]≠h(E[Y])，拟合变换后样本目标改变误差权重。单调性支持给定数值的动作排序，但不能由此推出非线性Bellman采样、函数逼近和优化与原始Q学习完全等价。
+
+## 四、序列优先级：不让关键错误被长序列平均掉
+
+设有效学习位置的绝对TD误差eᵢ=|yᵢ−Qᵢ|，序列优先级为
+
+$$p=\eta\max_i e_i+(1-\eta)\frac1m\sum_{i=1}^{m}e_i,\qquad \eta=0.9.$$
+
+最大项突出关键位置，均值项保留整段难度。若80步只有拿钥匙的一步误差很大，纯均值会稀释它；纯最大值又容易受单点噪声支配。混合式是工程折中，不是对哪个时刻具有因果贡献的识别。
+
+抽样还需另施幂指数α：P(j)=pⱼ^α/Σₖpₖ^α，本版本α也为0.9。η决定max与mean混合，α决定采样分布尖锐程度，虽然数值相同，不能视作同一个参数。
+
+通常PER权重与[NP(j)]⁻ᵝ成正比，N为可采样序列数。本稿β=0.6，因此并未完全消除优先抽样相对均匀序列抽样的偏差。归一化权重、正优先级下限应另行记录；这个权重也不是修正多步行为策略的动作重要性比。
+
+### 两组可手算的检查
+
+第一组为方便取ε=0，n=2、γ=0.9，奖励为2和3，目标网络选中动作输出Q⁻=3。由h⁻¹(3)=15，原奖励单位目标为
+
+$$2+0.9\times3+0.9^2\times15=16.85.$$
+
+变换后y=√17.85−1≈3.224926。错误地直接加变换值会得2+2.7+0.81×3=7.13；即使再对7.13做h，也不正确。若第二步后真终止，则正确目标为h(4.7)=√5.7−1≈1.387467。
+
+第二组取误差A=(0,0,0,8)、B=(2,2,2,2)。两段均值都是2，混合后pA=7.4、pB=2。α=0.9时，P(A)≈0.7645，P(B)≈0.2355；β=0.6、最大权重归一化到1时，A权重约0.493，B为1。A仍较常被抽到，但每次损失贡献相应减小。数值是教学计算，不是训练结果。
+
+priority与loss还应使用一致误差单位。若有时在变换域更新priority，有时在原奖励域更新，就改变了抽样规则。terminal padding与burn-in位置不能冒充有效学习位置参与均值，否则只改padding长度便能改优先级。
+
+## 五、把actor、回放与learner接起来
+
+以下是对应本稿机制的教学伪代码，省略设备通信与批处理调度，不声称逐行复刻作者程序。
+
+```text
+初始化在线参数θ、目标参数θ−、优先序列回放池
+各actor循环：
+    定期同步θa（本稿为400个环境步）
+    从回合起点携带完整循环状态，以行为策略行动
+    保存连续观测、动作、奖励、终止标志和片段起点循环状态
+    构造学习长度80、相邻学习片段重叠40的序列
+    为burn-in提供额外前缀，不跨回合边界
+    将带初始优先级的序列写入回放池
+learner循环：
+    按序列优先级抽样，计算序列重要性权重
+    在线网与目标网各自从保存状态展开前缀
+    在前缀/学习段边界停止前缀梯度
+    分别展开学习段，准备5步目标所需后继信息
+    在线网选后继动作，目标网评价
+    逆变换后组合奖励，再整体变换
+    只在有效学习位置计算TD损失，以序列权重加权
+    更新θ，并用本次有效TD误差刷新优先级
+    每2500次learner更新复制θ到θ−
+```
+
+序列末端需有足够后继信息支持5步目标，或者仅对有合法目标的位置计算损失。固定窗口结束不等于环境终止。真实回合结束时隐藏状态重置与目标截断同时生效；时间上限造成的截断是否自举，应与任务定义一致。
+
+同步参数不等于重建actor此前全部记忆。actor若在回合中途换参数，其携带状态也来自旧网络。R2D2提供经验有效的方案，没有宣称所有内部状态从此完全一致。
+
+## 六、原图：改善初态失配，不是证明记忆无误
+
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-73-figure-1&quot;&gt;&lt;a href=&quot;/rl/assets/papers/73-r2d2-figure-1.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/73-r2d2-figure-1.png&quot; width=&quot;810&quot; height=&quot;384&quot; alt=&quot;R2D2评审稿图1：同一网络读取不同循环状态的Q差异、初末状态柱状比较和四个DMLab任务的学习曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜R2D2匿名17页评审稿，OpenReview reference rknDUp-A7，PDF第4页Figure 1。&lt;a href=&quot;https://openreview.net/references/pdf?id=rknDUp-A7#page=4&quot;&gt;核对原文&lt;/a&gt;。保留完整图形，作者及出版方保留版权；用于直接技术评论。&lt;/figcaption&gt;&lt;/figure&gt;
+
+图1(a)两条路径使用同一套当前网络参数，差别来自隐藏状态：一条使用训练时重建的状态，另一条输入actor在相应时刻存下的状态。若同时换参数与状态，就无法区分正常价值学习变化与状态失配。归一化指标为
+
+$$\Delta Q_i=\frac{\|q_{\hat\theta}(o_i,\hat z_i)-q_{\hat\theta}(o_i,z_i^{\rm stored})\|_2}{|\max_{a,j}q_{\hat\theta}(o_j,\hat z_j,a)|}.$$
+
+分母帮助跨任务与阶段比较尺度，但近零时可能敏感。stored state只是参考，不是真实最优隐藏状态；ΔQ小不等于Q准确，也不等于恢复真实POMDP状态。
+
+图1(b)比较序列开始与末尾的差异；(c)横轴为learner更新次数，纵轴为平均回合回报，四面板为四个DMLab任务。蓝色为零初态，红色为stored state，深浅区分burn-in 0、20、40。曲线平均3个种子。保存状态与预热组合整体更稳，但各任务提升不同，不能读成每个游戏中更长前缀都严格更好。
+
+### 版本与协议比一句“超过人类”更重要
+
+本稿Atari采用4帧堆叠、18动作、不裁奖励、不把丢命视作回合结束；DMLab采用单张RGB。共用网络架构和超参数不是一套共同权重同时解决全部游戏。网络含512单元LSTM，learner每批64条学习序列，典型256个actor。
+
+第14页规定训练与评价回合封顶108000游戏帧，报告未折扣回合回报。R2D2采用最终成绩，部分对比方法用训练中最好成绩，跨方法排名还混有检查点、数据预算与硬件差异。
+
+&lt;figure class=&quot;reading-evidence-figure&quot; id=&quot;rl-73-figure-2&quot;&gt;&lt;a href=&quot;/rl/assets/papers/73-r2d2-figure-2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/73-r2d2-figure-2.png&quot; width=&quot;818&quot; height=&quot;376&quot; alt=&quot;R2D2评审稿图2：左侧为Atari人类归一化中位数与训练小时，右侧为六个游戏中R2D2和Ape-X的墙钟学习曲线&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜同一17页审稿版本，PDF第6页Figure 2。&lt;a href=&quot;https://openreview.net/references/pdf?id=rknDUp-A7#page=6&quot;&gt;核对原文&lt;/a&gt;。完整左侧散点图与右侧六面板；图注注明左图改编扩展自Horgan等。原作者及相关出版方保留版权，用于协议与结果评论。&lt;/figcaption&gt;&lt;/figure&gt;
+
+第6页Figure 2左侧把不同方法的人类归一化中位数与训练时间放在一起，右侧是若干游戏随墙钟时间变化的分数。右侧R2D2曲线平均3种子，Ape-X为单种子，不能虚构相同置信区间。其时间优势和最终表现不等于相同交互量、相同机器条件下的纯算法比较。
+
+[第7页Table 1](https://openreview.net/references/pdf?id=rknDUp-A7#page=7)中，本稿R2D2的Atari人类归一化中位数为1686.9%，Ape-X为434.1%，比值约3.886，原文以“四倍”概括。两者相差1252.8个百分点；相对增长约288.6%，不能把“达到约四倍”说成“提高四倍”。R2D2均值3806.5%也不等于中位数，少数极高分游戏会改变均值。这里仅检查表内显示数的算术，不重新汇总57个游戏。
+
+该版本报告R2D2在52/57游戏超过人类参考，Ape-X和Rainbow为49/57。这个计数比仅看中位数更能反映弱项覆盖，但“人类参考成绩”不是最高人类纪录。仍未超过参考的任务也说明，高汇总成绩并不自动解决困难探索。以上数字是这份审稿版本的历史报告，不能将后续更改的评价协议无声地拼接进来。
+
+第15页Table 3承认DMLab比较中R2D2用改进动作集而IMPALA没有；IMPALA又采用更大ResNet及有利于语言任务的特殊奖励裁剪。因此不能用一个汇总分数宣称“纯粹加入记忆回放就超过IMPALA”，也不能与最终稿重新对照混写。
+
+这些结果支持循环价值学习可以在分布式回放中有效工作，而不证明全部收益来自burn-in。折扣、值变换、终止规则、网络结构和计算量共同参与。原稿第13页还指出，除前馈替代消融以外，其他选择都有个别游戏反例。
+
+## 七、边界：记住过去与找到奖励仍是两回事
+
+burn-in长度有限，无法保证恢复任意长依赖；stored state的远处信息也可能漂移。优先回放会强调大TD误差，噪声、错误终止标记和过时目标同样会制造大误差。更多actor改变数据流量、经验年龄、重用次数与资源成本，不能只按墙钟速度判断样本效率。
+
+RNN也不自动解决探索。本稿仍有困难探索游戏低于人类，说明记忆与发现数据是不同瓶颈。这是一套深度RL经验训练策略，没有给出任意POMDP、非线性网络和异步更新下的全局收敛保证。
+
+下一篇[RUDDER](74-rudder.md)继续处理时间：从“训练时如何恢复记忆”转向“最终奖励应分配给历史中的哪些事件”。二者都用循环网络，一个主要改变状态与回放处理，一个用序列预测构造训练奖励，不能直接替代。
+
+### 三个继续追问
+
+&lt;details&gt;&lt;summary&gt;1. 提高actor同步频率，能完全消除状态陈旧吗？&lt;/summary&gt;
+
+不能。同步只减少采集时的参数延迟，数据仍会在replay里等待；循环状态还编码更早历史，只换当前参数不会重算历史。应同时监控数据年龄、状态差异、经验重用率，并比较stored state与burn-in的组合。
+
+&lt;/details&gt;
+
+&lt;details&gt;&lt;summary&gt;2. 为什么不把burn-in越设越长？&lt;/summary&gt;
+
+更长前缀增加重建机会，也增加前向与读取成本；有效记忆不保证单调改善，陈旧起点影响也未必收缩。总预算固定时还可能减少更新数，应该按任务需求和相同资源预算比较。
+
+&lt;/details&gt;
+
+&lt;details&gt;&lt;summary&gt;3. ΔQ很小，是否可以不再看环境回报？&lt;/summary&gt;
+
+不可以。两种内部状态对应的输出可以一起错；完全忽略记忆也可能得到小ΔQ。应同时检查任务表现、明确需要记忆的测试以及初始化消融。
+
+&lt;/details&gt;
+
+## 自测两题
+
+**题1：** 序列只有第1步误差10，其余9步误差0。η=0.9时priority是多少？能说抽中概率为0.91吗？
+
+**答案：** 最大值10、均值1，priority=9.1。概率还需对全部序列p^α归一化，缺少其他序列就不能确定。η不是概率，β也不是指数α。
+
+**题2：** 学习片段从第100步开始，钥匙在第20步获得，后续画面无线索。零初态加40步前缀是否保证恢复钥匙信息？
+
+**答案：** 不保证。前缀只有第60—99步，没有所需事件。stored state可能携带信息，但要承担漂移；从回合起点重建能提供完整历史，却昂贵，且网络也未必学会记住它。
+
+[系列首页](README.md) · [上一篇](72-drqn.md) · [下一篇](74-rudder.md)
+</textarea>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js?v=06a1d162d84c"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="js/common.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script>
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "73-r2d2";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        if (pager.dataset.staticPager !== 'true') pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>

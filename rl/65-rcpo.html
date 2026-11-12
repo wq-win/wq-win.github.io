@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script>try{if(localStorage.getItem('mylog-theme')==='dark')document.documentElement.classList.add('dark')}catch(e){}</script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 65 天｜RCPO：用可自举的惩罚引导策略，用真实约束调节罚价 | MyLog</title>
+    <script src="/js/vendor/tailwind.js"></script>
+    <link href="/css/font-awesome.min.css" rel="stylesheet">
+    <link href="../js/vendor/katex/katex.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#f59e0b',
+                        dark: '#1e293b',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="alternate" type="application/rss+xml" title="MyLog RSS" href="../rss.xml">
+    <link id="reading-guide-style" rel="stylesheet" href="../css/reading-guide.css">
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="site-header"></div>
+    <main class="container mx-auto px-4 py-8">
+        <article class="article-content rl-body">
+            <div class="flex flex-wrap items-center gap-2 mb-6 text-sm">
+                <a href="../index.html" class="text-primary hover:underline">Home</a>
+                <span class="text-gray-400">/</span>
+                <a href="index.html" class="text-primary hover:underline">强化学习</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-500">RCPO：用可自举的惩罚引导策略，用真实约束调节罚价</span>
+            </div>
+            <div id="article-nav" class="flex flex-wrap gap-2 mb-6"></div>
+            <!-- READING:START --><div id="article-body" class="bg-white rounded-xl shadow-card p-6 md:p-10" data-static-reading="true" data-source-sha256="4cf556d9e10cef27868e408626690be263f42a0531b1a3cd3aab1d01e625ff8e"><h1>第 65 天｜RCPO：用可自举的惩罚引导策略，用真实约束调节罚价</h1>
+<p><a href="index.html">系列首页</a> · <a href="64-fqf.html">上一篇</a> · <a href="66-pid-lagrangian.html">下一篇</a></p>
+<p><strong>原论文与版本</strong>：Chen Tessler、Daniel J. Mankowitz、Shie Mannor，<em>Reward Constrained Policy Optimization</em>，ICLR 2019。首次预印本为<a href="https://arxiv.org/abs/1805.11074">2018-05-28的arXiv v1</a>，本文核读<a href="https://arxiv.org/pdf/1805.11074v3">2018-12-26的v3全文</a>，包括附录A—E。<a href="https://openreview.net/forum?id=SkfrvsA9FX">OpenReview出版入口</a>仅作出版入口；本文实际核读的是上述固定v3，不据出版入口声称核读另一个修订版本。编号按学习主题安排，不代表发表先后。</p>
+<h3 id="先接住cpo留下的问题">先接住CPO留下的问题</h3>
+<p><a href="61-cpo.html">CPO</a>把期望折扣代价放进每次策略更新的局部约束，希望训练中的策略也尽量可行。但约束有时不是与奖励同形的折扣累计量：例如“整个任务失败的概率”“每回合平均施加的力矩”。它们可能能在回合结束后计算，却不能直接写成原状态空间里的Bellman递推。</p>
+<p>RCPO的核心是把两件事分开：<strong>给actor和critic一个便于学习的逐步惩罚，给乘子一个忠于任务要求的完整约束统计。</strong> 这带来一个必须回答的问题：优化替代惩罚，为什么会改善真正约束？论文不是用“二者相关”四个字跳过去，而是明确提出局部极小点与可行集之间的包含假设。理解这个假设，才知道方法能用到哪里。</p>
+<p>上一篇FQF属于分布价值学习，这里返回安全约束路线。RCPO与CPO名称相近，但目标结构、更新方式和保证范围都不相同。</p>
+<h3 id="五个前置概念">五个前置概念</h3>
+<ol>
+<li><strong>CMDP</strong>：在最大化奖励之外，另有一个明确的期望代价预算。</li>
+<li><strong>轨迹统计</strong>：对一整段经历计算的C(τ)，未必能仅靠原状态写成逐步Bellman递推。</li>
+<li><strong>拉格朗日乘子</strong>：非负罚价λ，违规时增大，以交换奖励和成本的优化压力。</li>
+<li><strong>TD自举</strong>：用短段真实数据与后继价值估计结合，降低完整回合估计的等待与方差。</li>
+<li><strong>多时间尺度随机逼近</strong>：不同更新相对速度逐渐分离，让快变量跟踪慢变量近似静态时的解。</li>
+</ol>
+<h2 id="一问题设定一步代价轨迹统计与折扣代理不能混写">一、问题设定：一步代价、轨迹统计与折扣代理不能混写</h2>
+<h3 id="真实约束与指导代理">真实约束与指导代理</h3>
+<p>记策略为πθ，初始状态分布为μ，奖励目标为</p>
+<p><span class="reading-math" data-tex="J_R(\theta)=\mathbb E_{\tau\sim\pi_\theta}\left[\sum_{t=0}^{\infty}\gamma^t r_t\right]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>J</mi><mi>R</mi></msub><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>=</mo><msub><mi mathvariant="double-struck">E</mi><mrow><mi>τ</mi><mo>∼</mo><msub><mi>π</mi><mi>θ</mi></msub></mrow></msub><mrow><mo fence="true">[</mo><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>0</mn></mrow><mi mathvariant="normal">∞</mi></munderover><msup><mi>γ</mi><mi>t</mi></msup><msub><mi>r</mi><mi>t</mi></msub><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">J_R(\theta)=\mathbb E_{\tau\sim\pi_\theta}\left[\sum_{t=0}^{\infty}\gamma^t r_t\right].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:3.0171em;vertical-align:-1.2671em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.1132em;">τ</span><span class="mrel mtight">∼</span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.3488em;margin-left:-0.0359em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1512em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2559em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size4">[</span></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.6514em;"><span style="top:-1.8829em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mrel mtight">=</span><span class="mord mtight">0</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">∞</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2671em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8436em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size4">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>每步可以观测惩罚cₜ，但任务真正约束的是轨迹函数C(τ)：</p>
+<p><span class="reading-math" data-tex="J_C(\theta)=\mathbb E[C(\tau)],\qquad \max_\theta J_R(\theta)\quad\mathrm{s.t.}\quad J_C(\theta)\le\alpha."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>J</mi><mi>C</mi></msub><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="double-struck">E</mi><mo stretchy="false">[</mo><mi>C</mi><mo stretchy="false">(</mo><mi>τ</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo><mo separator="true">,</mo><mspace width="2em"/><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>θ</mi></munder><msub><mi>J</mi><mi>R</mi></msub><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mspace width="1em"/><mrow><mi mathvariant="normal">s</mi><mi mathvariant="normal">.</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">.</mi></mrow><mspace width="1em"/><msub><mi>J</mi><mi>C</mi></msub><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>≤</mo><mi>α</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">J_C(\theta)=\mathbb E[C(\tau)],\qquad \max_\theta J_R(\theta)\quad\mathrm{s.t.}\quad J_C(\theta)\le\alpha.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">C</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.5021em;vertical-align:-0.7521em;"></span><span class="mord mathbb">E</span><span class="mopen">[</span><span class="mord mathnormal" style="margin-right:0.07153em;">C</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.1132em;">τ</span><span class="mclose">)]</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.4306em;"><span style="top:-2.3479em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">max</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7521em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:1em;"></span><span class="mord"><span class="mord mathrm">s.t.</span></span><span class="mspace" style="margin-right:1em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">C</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>论文§2.2允许C是逐步惩罚序列的更一般聚合，而不仅是折扣和。若C是失败指示量，其期望是失败概率；若C是T步平均力矩，其期望是每回合平均量的期望。T随机时，E[总力矩/T]一般不等于E[总力矩]/E[T]，也不等于折扣和乘一个常数。</p>
+<div class="reading-table-scroll" tabindex="0" role="region" aria-label="可横向滚动的数据表"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>RCPO使用的对象</th>
+<th>主要用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>环境每步信号</td>
+<td>rₜ、cₜ</td>
+<td>构造修正奖励与TD样本</td>
+</tr>
+<tr>
+<td>折扣引导目标</td>
+<td>J_Cγ=E[Σγᵗcₜ]</td>
+<td>actor和critic实际学习的惩罚方向</td>
+</tr>
+<tr>
+<td>原约束统计</td>
+<td>J_C=E[C(τ)]</td>
+<td>检查预算、更新乘子</td>
+</tr>
+<tr>
+<td>最终要求</td>
+<td>J_C≤α</td>
+<td>期望约束可行性，不是每条轨迹零违规</td>
+</tr>
+</tbody></table></div>
+<p>失败概率不超过1%，仍允许少数失败轨迹；平均力矩不超过25%，也不限制每个瞬间的最大力矩。若真正需求是“任何动作都不能伤害设备”，就需要额外的动作限制、安全过滤或其他机制，不能靠重新命名平均量得到逐步保证。</p>
+<p>还有一个容易漏掉的前提：原约束虽然未必可自举，仍须能够从采样轨迹估计。RCPO没有解决“失败发生但记录不到”“成本标签系统性漏报”的观测问题，也没有从数据中自动发现用户遗漏的约束。</p>
+<h2 id="二从普通拉格朗日法走到三时间尺度">二、从普通拉格朗日法走到三时间尺度</h2>
+<h3 id="罚价为什么要自动更新">罚价为什么要自动更新</h3>
+<p>对奖励最大化问题，采用</p>
+<p><span class="reading-math" data-tex="L(\theta,\lambda)=J_R(\theta)-\lambda(J_C(\theta)-\alpha),\qquad\lambda\ge0."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>L</mi><mo stretchy="false">(</mo><mi>θ</mi><mo separator="true">,</mo><mi>λ</mi><mo stretchy="false">)</mo><mo>=</mo><msub><mi>J</mi><mi>R</mi></msub><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>−</mo><mi>λ</mi><mo stretchy="false">(</mo><msub><mi>J</mi><mi>C</mi></msub><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>−</mo><mi>α</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="2em"/><mi>λ</mi><mo>≥</mo><mn>0.</mn></mrow><annotation encoding="application/x-tex">L(\theta,\lambda)=J_R(\theta)-\lambda(J_C(\theta)-\alpha),\qquad\lambda\ge0.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">L</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">λ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">λ</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">C</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.02778em;">θ</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">λ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≥</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.</span></span></span></span></span></span></p>
+<p>θ沿奖励增大的方向更新，λ沿L减小的方向更新。因此</p>
+<p><span class="reading-math" data-tex="\lambda_{k+1}=\Gamma_\lambda\left[\lambda_k+\eta_\lambda(k)(\widehat J_C-\alpha)\right]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>λ</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>=</mo><msub><mi mathvariant="normal">Γ</mi><mi>λ</mi></msub><mrow><mo fence="true">[</mo><msub><mi>λ</mi><mi>k</mi></msub><mo>+</mo><msub><mi>η</mi><mi>λ</mi></msub><mo stretchy="false">(</mo><mi>k</mi><mo stretchy="false">)</mo><mo stretchy="false">(</mo><msub><mover accent="true"><mi>J</mi><mo stretchy="true">^</mo></mover><mi>C</mi></msub><mo>−</mo><mi>α</mi><mo stretchy="false">)</mo><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\lambda_{k+1}=\Gamma_\lambda\left[\lambda_k+\eta_\lambda(k)(\widehat J_C-\alpha)\right].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9028em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.8em;vertical-align:-0.65em;"></span><span class="mord"><span class="mord">Γ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">λ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size2">[</span></span><span class="mord"><span class="mord mathnormal">λ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03148em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">η</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">λ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mclose">)</span><span class="mopen">(</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9233em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.09618em;">J</span></span><span class="svg-align" style="width:calc(100% - 0.3333em);margin-left:0.3333em;top:-3.6833em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.24em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.24em" viewBox="0 0 1062 239" preserveAspectRatio="none"><path d="M529 0h5l519 115c5 1 9 5 9 10 0 1-1 2-1 3l-4 22
+c-1 5-5 9-11 9h-2L532 67 19 159h-2c-5 0-9-4-11-9l-5-22c-1-6 2-12 8-13z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">C</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mclose">)</span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size2">]</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></span></p>
+<p>超预算就涨价，低于预算就降价，投影防止负罚价。在固定λ下，λα不依赖θ，可以从actor目标中去掉；这不意味着α能从乘子更新中去掉。若把符号反过来，违规时降低惩罚，整个反馈会朝错误方向走。</p>
+<p>直接对L求策略梯度，原则上可以使用轨迹似然比乘以R(τ)−λC(τ)。问题是一般C未必能拆成当前状态上的递归价值，需要等待完整轨迹，还可能产生高方差。普通无约束actor-critic的优势，恰恰在于使用短段数据和critic自举。RCPO要保留这个接口。</p>
+<h3 id="内层换代理外层仍看真实指标">内层换代理，外层仍看真实指标</h3>
+<p>论文§4定义</p>
+<p><span class="reading-math" data-tex="\hat r_t=r_t-\lambda c_t,\qquad \hat V^{\pi}(\lambda,s)=V_R^{\pi}(s)-\lambda V_{C_\gamma}^{\pi}(s)."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi>r</mi><mo>^</mo></mover><mi>t</mi></msub><mo>=</mo><msub><mi>r</mi><mi>t</mi></msub><mo>−</mo><mi>λ</mi><msub><mi>c</mi><mi>t</mi></msub><mo separator="true">,</mo><mspace width="2em"/><msup><mover accent="true"><mi>V</mi><mo>^</mo></mover><mi>π</mi></msup><mo stretchy="false">(</mo><mi>λ</mi><mo separator="true">,</mo><mi>s</mi><mo stretchy="false">)</mo><mo>=</mo><msubsup><mi>V</mi><mi>R</mi><mi>π</mi></msubsup><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mo>−</mo><mi>λ</mi><msubsup><mi>V</mi><msub><mi>C</mi><mi>γ</mi></msub><mi>π</mi></msubsup><mo stretchy="false">(</mo><mi>s</mi><mo stretchy="false">)</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\hat r_t=r_t-\lambda c_t,\qquad \hat V^{\pi}(\lambda,s)=V_R^{\pi}(s)-\lambda V_{C_\gamma}^{\pi}(s).</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord mathnormal">λ</span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">λ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-2.453em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1943em;vertical-align:-0.4443em;"></span><span class="mord mathnormal">λ</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-2.453em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:-0.0715em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05556em;">γ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2819em;"><span></span></span></span></span></span></span></span></span></span><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4443em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>固定π、λ时，V̂满足标准Bellman关系：</p>
+<p><span class="reading-math" data-tex="\hat V^{\pi}(\lambda,s)=\mathbb E[\hat r_t+\gamma\hat V^{\pi}(\lambda,s_{t+1})\mid s_t=s]."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mover accent="true"><mi>V</mi><mo>^</mo></mover><mi>π</mi></msup><mo stretchy="false">(</mo><mi>λ</mi><mo separator="true">,</mo><mi>s</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="double-struck">E</mi><mo stretchy="false">[</mo><msub><mover accent="true"><mi>r</mi><mo>^</mo></mover><mi>t</mi></msub><mo>+</mo><mi>γ</mi><msup><mover accent="true"><mi>V</mi><mo>^</mo></mover><mi>π</mi></msup><mo stretchy="false">(</mo><mi>λ</mi><mo separator="true">,</mo><msub><mi>s</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">)</mo><mo>∣</mo><msub><mi>s</mi><mi>t</mi></msub><mo>=</mo><mi>s</mi><mo stretchy="false">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\hat V^{\pi}(\lambda,s)=\mathbb E[\hat r_t+\gamma\hat V^{\pi}(\lambda,s_{t+1})\mid s_t=s].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">λ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">s</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathbb">E</span><span class="mopen">[</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">π</span></span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">λ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">s</span><span class="mclose">]</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>于是可以用TD误差</p>
+<p><span class="reading-math" data-tex="\delta_t=r_t-\lambda c_t+\gamma(1-d_t)\hat V_v(s_{t+1})-\hat V_v(s_t)"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>δ</mi><mi>t</mi></msub><mo>=</mo><msub><mi>r</mi><mi>t</mi></msub><mo>−</mo><mi>λ</mi><msub><mi>c</mi><mi>t</mi></msub><mo>+</mo><mi>γ</mi><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><msub><mi>d</mi><mi>t</mi></msub><mo stretchy="false">)</mo><msub><mover accent="true"><mi>V</mi><mo>^</mo></mover><mi>v</mi></msub><mo stretchy="false">(</mo><msub><mi>s</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">)</mo><mo>−</mo><msub><mover accent="true"><mi>V</mi><mo>^</mo></mover><mi>v</mi></msub><mo stretchy="false">(</mo><msub><mi>s</mi><mi>t</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\delta_t=r_t-\lambda c_t+\gamma(1-d_t)\hat V_v(s_{t+1})-\hat V_v(s_t)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03785em;">δ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0379em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.02778em;">r</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0278em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord mathnormal">λ</span><span class="mord"><span class="mord mathnormal">c</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.05556em;">γ</span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1968em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9468em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span></span><span style="top:-3.2523em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">s</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span></span></p>
+<p>训练critic，并用δₜ或多步优势更新actor。这里dₜ表示真正终止；时间截断是否截断自举要按任务定义处理。原文Algorithm 1自举行的状态写作sₜ，本文依据Bellman定义和附录A的多步回报使用后继sₜ₊₁，不把这个下标问题解释成新算法。</p>
+<p>关键是：actor提升的目标变为J_R−λJ_Cγ，而乘子仍根据J_C−α更新。<strong>当J_Cγ与J_C不同时，这不是对同一个原始拉格朗日函数的两块精确梯度下降／上升。</strong> 因而不能直接搬用普通原始—对偶收敛结论，也不能把折扣成本估计器拿来代替回合结束后的真实约束统计。</p>
+<h3 id="快中慢是近似静态关系不是三个随便不同的学习率">“快、中、慢”是近似静态关系，不是三个随便不同的学习率</h3>
+<p>论文安排critic最快、actor居中、λ最慢。其直觉为：critic看到近似固定的策略和罚价；actor看到已跟上的critic与近似固定的罚价；乘子看到对当前罚价已经适应的策略。随机逼近中对应步长和发散、平方和收敛，以及相邻尺度比趋于零，例如</p>
+<p><span class="reading-math" data-tex="\frac{\eta_\lambda(k)}{\eta_\theta(k)}\to0,\qquad \frac{\eta_\theta(k)}{\eta_v(k)}\to0."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mfrac><mrow><msub><mi>η</mi><mi>λ</mi></msub><mo stretchy="false">(</mo><mi>k</mi><mo stretchy="false">)</mo></mrow><mrow><msub><mi>η</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>k</mi><mo stretchy="false">)</mo></mrow></mfrac><mo>→</mo><mn>0</mn><mo separator="true">,</mo><mspace width="2em"/><mfrac><mrow><msub><mi>η</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>k</mi><mo stretchy="false">)</mo></mrow><mrow><msub><mi>η</mi><mi>v</mi></msub><mo stretchy="false">(</mo><mi>k</mi><mo stretchy="false">)</mo></mrow></mfrac><mo>→</mo><mn>0.</mn></mrow><annotation encoding="application/x-tex">\frac{\eta_\lambda(k)}{\eta_\theta(k)}\to0,\qquad \frac{\eta_\theta(k)}{\eta_v(k)}\to0.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.363em;vertical-align:-0.936em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.427em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">η</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">η</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">λ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.936em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.363em;vertical-align:-0.936em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.427em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">η</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.03588em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mclose">)</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">η</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03148em;">k</span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.936em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.</span></span></span></span></span></span></p>
+<p>作为独立的数学示例，可以选ηv=k⁻⁰·⁶、ηθ=k⁻⁰·⁸、ηλ=k⁻¹，k从1开始。三者累积步长都发散，平方和都收敛，两个比值都是k⁻⁰·²。这个例子只核对步长条件，不证明某个神经网络实现收敛。</p>
+<p>实际训练还涉及每轮更新次数、Adam预条件、梯度大小、网络共享和采样频率。只看到配置中“乘子学习率更小”，不能说已经满足渐近时间尺度分离；论文附录B的深度实验配置也不应当成这些极限条件的逐项验证。</p>
+<pre><code class="language-text">初始化actor theta、修正奖励critic v、非负乘子lambda
+重复采样短段轨迹：
+  收集原始r、逐步c、状态、动作、终止标志
+  固定本段lambda，计算r_hat = r - lambda*c
+  用后继critic自举构造多步回报与优势
+  在快尺度拟合critic；在中尺度更新actor
+  累积原始约束所需统计，不把截断片段冒充完整回合
+  若获得完整C(tau)：
+    用若干完整回合估计J_C
+    在慢尺度更新lambda = projection(lambda + eta_lambda*(J_C-alpha))
+评价时分开报告奖励、真实约束、折扣代理与lambda
+</code></pre>
+<p>这个模板说明信息流，未复制论文某一具体训练实现。若复用历史数据，还要处理策略分布变化；“修正奖励只多一行”不等于off-policy校正也自动完成。</p>
+<h2 id="三替代惩罚可靠的条件以及一个能手算的反例">三、替代惩罚可靠的条件，以及一个能手算的反例</h2>
+<h3 id="定理要求的是集合包含不是平均相关性">定理要求的是集合包含，不是平均相关性</h3>
+<p>论文Theorem 2把真实可行集记为Θ={θ:J_C(θ)≤α}，把J_Cγ的局部极小点集合记为Θγ，关键假设为</p>
+<p><span class="reading-math" data-tex="\Theta_\gamma\subseteq\Theta."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="normal">Θ</mi><mi>γ</mi></msub><mo>⊆</mo><mi mathvariant="normal">Θ</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\Theta_\gamma\subseteq\Theta.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord">Θ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05556em;">γ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">⊆</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">Θ.</span></span></span></span></span></span></p>
+<p>意思是：沿代理成本下降即使停在局部低谷，也不能停在真实不可行的策略上。它比“在训练样本上，两个成本大致同涨同跌”强得多；它约束整个参数化策略类里的局部几何。某个零力矩策略同时最小化两个目标，只说明找到了一个好点，不能单凭它断定所有局部极小点都可行。</p>
+<p>§2.3还列出奖励价值有界，以及原约束的每个局部极小点均可行。附录E借助稳定迭代、噪声条件和三时间尺度分析：先让critic跟踪固定策略的值，再分析actor固定点，最后分析乘子；在指导代理的包含假设与乘子可提供足够惩罚等条件下，论文得到几乎必然收敛到可行固定点的结论。</p>
+<p>这里有三道边界。第一，结论是可行固定点，不是任意非凸神经策略类里的全局最高奖励。第二，“几乎必然”是随机过程的渐近结论，不是某个训练预算内违规概率为零。第三，附录以TD算子收缩推进critic论证，不能由此宣布任意非线性共享网络、Adam和有限批量都得到同等收敛保证。本文核读论证路径，但没有补证或重现一般非线性函数逼近情形。</p>
+<h3 id="教学例折扣可以偏爱晚发生的高成本">教学例：折扣可以偏爱晚发生的高成本</h3>
+<p>以下是独立构造，不是论文实验。回合固定两步，原约束为平均成本C=(c₀+c₁)/2，阈值α=1，γ=1/2。两种策略A、B的成本与奖励为：A的成本(2,0)，B的成本(0,3)；全部奖励在第一步给出，A得2，B得4。</p>
+<p>A的真实成本为1，正好可行；B为1.5，违规。折扣代理却是A的2、B的1.5。若以概率p选B，</p>
+<p><span class="reading-math" data-tex="J_R(p)=2+2p,\quad J_C(p)=1+0.5p,\quad J_{C_\gamma}(p)=2-0.5p."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>J</mi><mi>R</mi></msub><mo stretchy="false">(</mo><mi>p</mi><mo stretchy="false">)</mo><mo>=</mo><mn>2</mn><mo>+</mo><mn>2</mn><mi>p</mi><mo separator="true">,</mo><mspace width="1em"/><msub><mi>J</mi><mi>C</mi></msub><mo stretchy="false">(</mo><mi>p</mi><mo stretchy="false">)</mo><mo>=</mo><mn>1</mn><mo>+</mo><mn>0.5</mn><mi>p</mi><mo separator="true">,</mo><mspace width="1em"/><msub><mi>J</mi><msub><mi>C</mi><mi>γ</mi></msub></msub><mo stretchy="false">(</mo><mi>p</mi><mo stretchy="false">)</mo><mo>=</mo><mn>2</mn><mo>−</mo><mn>0.5</mn><mi>p</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">J_R(p)=2+2p,\quad J_C(p)=1+0.5p,\quad J_{C_\gamma}(p)=2-0.5p.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mord mathnormal">p</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">C</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0973em;vertical-align:-0.3473em;"></span><span class="mord">0.5</span><span class="mord mathnormal">p</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:-0.0715em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05556em;">γ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2819em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3473em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8389em;vertical-align:-0.1944em;"></span><span class="mord">0.5</span><span class="mord mathnormal">p</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>代理actor目标变成</p>
+<p><span class="reading-math" data-tex="J_R-\lambda J_{C_\gamma}=2-2\lambda+(2+0.5\lambda)p."><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>J</mi><mi>R</mi></msub><mo>−</mo><mi>λ</mi><msub><mi>J</mi><msub><mi>C</mi><mi>γ</mi></msub></msub><mo>=</mo><mn>2</mn><mo>−</mo><mn>2</mn><mi>λ</mi><mo>+</mo><mo stretchy="false">(</mo><mn>2</mn><mo>+</mo><mn>0.5</mn><mi>λ</mi><mo stretchy="false">)</mo><mi>p</mi><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">J_R-\lambda J_{C_\gamma}=2-2\lambda+(2+0.5\lambda)p.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0418em;vertical-align:-0.3473em;"></span><span class="mord mathnormal">λ</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.09618em;">J</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0962em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.07153em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1645em;"><span style="top:-2.357em;margin-left:-0.0715em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.05556em;">γ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2819em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3473em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mord mathnormal">λ</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">0.5</span><span class="mord mathnormal">λ</span><span class="mclose">)</span><span class="mord mathnormal">p</span><span class="mord">.</span></span></span></span></span></span></p>
+<p>对任何非负λ，p的系数都为正，actor都偏好p=1；外层发现违规不断涨价，反而进一步强化B相对A的优势。真实拉格朗日目标关于p的系数则是2−0.5λ，当λ&gt;4时会选择A。代理的全局低谷B本身不满足预算，正好违反Θγ⊆Θ。</p>
+<p>这不是说RCPO一定失败，而是精确展示为什么需要它的假设。短视代理可以把“少产生危险”换成“晚一点产生危险”。因此实现时仅画代理曲线下降是不够的，还要同时检查真实指标。λ一直上涨而真实成本不降，是代理失配、可行策略不可达或优化失败的诊断线索。</p>
+<h3 id="教学例两个统计量在同一次更新里的不同位置">教学例：两个统计量在同一次更新里的不同位置</h3>
+<p>仍取两步成本(0,3)，奖励(4,0)，λ=2。修正奖励为(4,−6)，折扣回报为4−3=1；它等于J_R−λJ_Cγ=4−2×1.5。若当前J_C估计是1.5、α=1、ηλ=0.1，新的乘子为2.05。</p>
+<p>把“平均成本1.5”塞进每个时间步扣除，会得到另一个目标；把折扣回报里的λα常数加回也不会修复上述代理方向问题。这个算例的用途是核对数据流和符号，不能替代策略训练。本文用精确分数独立核算了这些数值。</p>
+<h2 id="四看原始证据要把更快近似可行和严格可行分开">四、看原始证据：要把“更快”“近似可行”和“严格可行”分开</h2>
+<h3 id="mars-rover完整曲线比一句更安全有信息量">Mars Rover：完整曲线比一句“更安全”有信息量</h3>
+<figure id="rl-65-figure-2" class="reading-evidence-figure"><a href="/rl/assets/papers/65-rcpo-figure-2.png" target="_blank" rel="noopener noreferrer"><img src="/rl/assets/papers/65-rcpo-figure-2.png" width="1185" height="288" alt="RCPO原图2：两种失败阈值下的成功率、奖励和乘子，蓝色RCPO与橙色Lagrange作对照" loading="lazy"></a><figcaption>原论文图形摘引｜Tessler、Mankowitz、Mannor，arXiv:1805.11074v3，PDF第6页Figure 2。<a href="https://arxiv.org/pdf/1805.11074v3#page=6" target="_blank" rel="noopener noreferrer">核对原文</a> · 完整图形区域含图例，原版权保留。</figcaption></figure>
+
+<p>原图每组三栏依次为成功率、奖励、λ，左组α=0.01，右组α=0.5，黑色虚线为目标，蓝色为RCPO，橙色为直接Lagrange。蓝线在左组更早接近高成功率，右组奖励与乘子相对稳定；橙色有较大波动。图的纵轴明确写Success Rate，所以成功率应与1−α比较，不能照着图注的“at or below threshold”把成功率越低当成越可行。原图未给每个点的精确数值，本文不从曲线读取臆造的小数或显著性。</p>
+<p>环境是随机转移网格：短路更容易碰岩石，撞击终止，目标是尽快到终点且失败概率不超过α。附录B.1给出随机转移参数δ=0.05、每步奖励−0.01、终点奖励0、γ=0.99；采用A2C，另有随迭代衰减的随机起点安排以减轻探索问题。每5120回合评价1024回合，λ从0.6起，乘子学习率0.000025。</p>
+<p>这些设定说明比较同时处于一个特定探索与评价方案中；不能把曲线优势直接外推到任意初始分布或极稀有灾难。有限评价中的零失败也不等于真实失败概率为零，尤其α=0.01的任务需要关注估计误差。</p>
+<h3 id="roboticstable-2并没有支持六项全部严格达标">Robotics：Table 2并没有支持“六项全部严格达标”</h3>
+<p>机器人实验用PPO，比较自动调整λ和若干固定惩罚系数，约束是平均力矩。附录B.2报告每次训练100万样本、γ=0.99、GAE系数0.95，λ从0开始，乘子学习率5×10⁻⁷并衰减。论文§5.2明确把结果称为可行或接近可行，而不是全部严格可行。</p>
+<p><a href="https://arxiv.org/pdf/1805.11074v3#page=7">第7页Table 2</a>的门槛为25%。RCPO报告Swimmer 24%、Walker2d 25.2%、Hopper 26%、Humanoid 24.3%、HalfCheetah 26.7%、Ant 15.2%。按表内数值，三个超预算的项目是Walker2d、Hopper、HalfCheetah，分别高0.2、1和1.7个百分点。这些不是统计误差已被证明覆盖的偏差，不能擅自替作者四舍五入成合格。</p>
+<p>例如Swimmer的λ=0基线奖励94.4、力矩30.4%，RCPO奖励72.7、力矩24%。回报下降换来了预算满足，不能只比较94.4与72.7就说RCPO更差。反过来，Walker2d的λ=0基线力矩24.6%、奖励3364.1，而RCPO为25.2%、591.6；这是真正不利于RCPO的案例，不应藏掉。论文也指出Walker2d例外，并在脚注对Hopper的优势判断保留意见。</p>
+<p>固定λ=100也未让Humanoid达标，表中力矩仍30.5%。这提醒我们：神经训练里的巨大惩罚并不等于成功求解对应全局优化，策略可能落入不良局部解。文章未提供足以从这些表值独立重建置信区间的信息，本文不添加种子数、误差条定义或统计检验结果。</p>
+<h3 id="实验没有做的比较也要说清">实验没有做的比较也要说清</h3>
+<p>论文这组非折扣约束实验主要比较直接Monte Carlo拉格朗日法和固定reward shaping，不是CPO对RCPO的全面同协议竞赛。原文认为其所选约束不适合直接照搬折扣约束基线；这不意味着CPO在所有扩展表示或所有安全任务上都不能使用。把约束改写、扩展状态或换估计方法会改变实验设计，应当作为新实验说明。</p>
+<p>“reward agnostic”的合理理解是不用为每个奖励尺度手工固定最终罚价，λ可以适应。奖励整体乘正数时，理想最优策略不变，所需罚价尺度却会变化。有限时间下，同样的乘子步长、初始化和采样噪声不会因此自动产生相同学习曲线。下一篇PID Lagrangian正面讨论这类动态响应与尺度问题。</p>
+<h2 id="五实际使用时怎样判断是否适合rcpo">五、实际使用时怎样判断是否适合RCPO</h2>
+<p>先明确需求是什么统计量，再决定是否值得引入代理。如果真实约束本来就是折扣累计成本，J_Cγ与J_C可以一致，许多代理失配问题随之消失；这时RCPO的吸引力主要是简单的actor-critic组合，而不是“任意约束”的能力。</p>
+<p>如果真实约束是整段轨迹属性，应先找出哪些事件在时间上被折扣弱化，哪些早停行为会改变平均值分母，哪些参数化局部极小点可能不可行。检查应包括奖励、真实代价、代理代价和λ的联合轨迹，而不是最终一行奖励。对安全要求高的任务，还要独立报告每回合分布、峰值与罕见事件，避免用平均值掩盖尾部。</p>
+<p>最后，收敛到可行策略与可行训练是两个要求。RCPO可能需要经历超预算策略才能调出合适λ；惩罚过大又可能损害奖励学习。CPO关注每次更新的局部可行控制，RCPO关注易于自举的引导与渐近可行性，二者不是互换的名字。论文讨论将两者结合是未来方向，不能写成本文已经实现并证明的系统。</p>
+<h3 id="继续追问代理时间尺度与罚价">继续追问：代理、时间尺度与罚价</h3>
+<details>
+<summary>1. 我能把任何轨迹约束都随便选一个逐步c来替代吗？</summary>
+
+<p>不能。首先得能从真实轨迹估计C，否则外层不知道是否违规；其次代理的低谷要落在真实可行集内。本文两步例子说明，即使c就是原始成本，折扣方式不同也可能反向排序策略。对复杂约束可尝试扩展状态表示或直接使用完整轨迹梯度，但它们是另一些建模与估计选择，不由RCPO名称自动保证有效。</p>
+</details>
+
+<details>
+<summary>2. 把lambda更新得特别快，是不是就不会违规了？</summary>
+
+<p>这会破坏原分析中慢乘子看到近似收敛actor的条件。有限批量误差可能立刻变成大幅罚价摆动，critic又要追逐快速变化的修正奖励。慢更新存在响应迟缓，快更新存在振荡风险；该论文没有给出一个适用于所有任务的速度处方。下一篇通过控制器结构改善动态响应，而不是仅把学习率放大。</p>
+</details>
+
+<details>
+<summary>3. lambda到达上限而代价仍超标，应当直接增加上限吗？</summary>
+
+<p>先分清不可行预算、策略表达能力不足、代理失配、critic误差和训练未充分几种原因。增加上限只增加允许的惩罚强度，不会让错误代理变正确；在教学反例中反而更偏爱违规策略。有限上限时还可能稳定在边界，不能把投影后的固定点当成原约束已满足。应直接检查真实统计及其误差，再决定模型或优化修改。</p>
+</details>
+
+<h2 id="六沿着约束学习路线继续读">六、沿着约束学习路线继续读</h2>
+<ul>
+<li><a href="61-cpo.html">CPO</a>：比较信赖域里的约束更新与外层调罚价，注意每次更新保证和渐近结论的区别。</li>
+<li><a href="27-ppo.html">PPO</a>：理解实验所用策略优化器与RCPO约束机制是两个模块；PPO裁剪本身不提供成本预算。</li>
+<li><a href="66-pid-lagrangian.html">PID Lagrangian</a>：继续追问乘子为何振荡，如何让罚价更及时地响应代价与变化趋势。</li>
+</ul>
+<p><strong>原文定位</strong>：v3第3页§2.2—3定义与假设，第4—5页§3.1—4、式(5)—(11)、Theorem 2和Algorithm 1，第6页Figure 2，第7页Table 2，第12—13页附录A—B，第13—15页附录C—E。核读了这些章节与证明文本；未运行作者代码、重训策略或验证所有非线性收敛条件。</p>
+<h2 id="自测两题">自测两题</h2>
+<p><strong>问题1</strong>：成本A=(2,0)、B=(0,3)，γ=1/2，原约束为两步平均不超过1。为什么增大代理惩罚系数不一定把策略拉回可行区？</p>
+<p><strong>参考答案</strong>：A真实成本1、代理2；B真实成本1.5、代理1.5。代理更偏好违规的B。若奖励A=2、B=4，代理目标中选B概率p的系数为2+0.5λ，任何非负λ都推动p增加，包含假设不成立。</p>
+<p><strong>问题2</strong>：RCPO的critic、actor与乘子各用哪个目标？理论保证能否直接写成“整个训练过程安全且最终最优”？</p>
+<p><strong>参考答案</strong>：critic拟合折扣修正奖励，actor提升其价值，乘子依据真实J_C−α调节。论文在相关假设下得到渐近可行固定点，不保证任意神经实现的全局最优，也不保证每个训练策略或每条轨迹都安全。</p>
+<p><a href="index.html">系列首页</a> · <a href="64-fqf.html">上一篇</a> · <a href="66-pid-lagrangian.html">下一篇</a></p>
+</div><!-- READING:END -->
+            <!-- READING:PAGER:START --><div id="article-pager" class="flex justify-between gap-4 mt-8" data-static-pager="true"><a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="64-fqf.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">FQF：分位数值之外，连概率区间也一起学习</div></a><a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="66-pid-lagrangian.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">PID Lagrangian：把惩罚系数当控制器，减少训练中的违规振荡</div></a></div><!-- READING:PAGER:END -->
+        </article>
+    </main>
+    <div id="site-footer"></div>
+    <textarea id="md-source" hidden readonly># 第 65 天｜RCPO：用可自举的惩罚引导策略，用真实约束调节罚价
+
+[系列首页](README.md) · [上一篇](64-fqf.md) · [下一篇](66-pid-lagrangian.md)
+
+**原论文与版本**：Chen Tessler、Daniel J. Mankowitz、Shie Mannor，*Reward Constrained Policy Optimization*，ICLR 2019。首次预印本为[2018-05-28的arXiv v1](https://arxiv.org/abs/1805.11074)，本文核读[2018-12-26的v3全文](https://arxiv.org/pdf/1805.11074v3)，包括附录A—E。[OpenReview出版入口](https://openreview.net/forum?id=SkfrvsA9FX)仅作出版入口；本文实际核读的是上述固定v3，不据出版入口声称核读另一个修订版本。编号按学习主题安排，不代表发表先后。
+
+### 先接住CPO留下的问题
+
+[CPO](61-cpo.md)把期望折扣代价放进每次策略更新的局部约束，希望训练中的策略也尽量可行。但约束有时不是与奖励同形的折扣累计量：例如“整个任务失败的概率”“每回合平均施加的力矩”。它们可能能在回合结束后计算，却不能直接写成原状态空间里的Bellman递推。
+
+RCPO的核心是把两件事分开：**给actor和critic一个便于学习的逐步惩罚，给乘子一个忠于任务要求的完整约束统计。** 这带来一个必须回答的问题：优化替代惩罚，为什么会改善真正约束？论文不是用“二者相关”四个字跳过去，而是明确提出局部极小点与可行集之间的包含假设。理解这个假设，才知道方法能用到哪里。
+
+上一篇FQF属于分布价值学习，这里返回安全约束路线。RCPO与CPO名称相近，但目标结构、更新方式和保证范围都不相同。
+
+## 一、问题设定：一步代价、轨迹统计与折扣代理不能混写
+
+### 五个前置概念
+
+1. **CMDP**：在最大化奖励之外，另有一个明确的期望代价预算。
+2. **轨迹统计**：对一整段经历计算的C(τ)，未必能仅靠原状态写成逐步Bellman递推。
+3. **拉格朗日乘子**：非负罚价λ，违规时增大，以交换奖励和成本的优化压力。
+4. **TD自举**：用短段真实数据与后继价值估计结合，降低完整回合估计的等待与方差。
+5. **多时间尺度随机逼近**：不同更新相对速度逐渐分离，让快变量跟踪慢变量近似静态时的解。
+
+### 真实约束与指导代理
+
+记策略为πθ，初始状态分布为μ，奖励目标为
+
+$$J_R(\theta)=\mathbb E_{\tau\sim\pi_\theta}\left[\sum_{t=0}^{\infty}\gamma^t r_t\right].$$
+
+每步可以观测惩罚cₜ，但任务真正约束的是轨迹函数C(τ)：
+
+$$J_C(\theta)=\mathbb E[C(\tau)],\qquad \max_\theta J_R(\theta)\quad\mathrm{s.t.}\quad J_C(\theta)\le\alpha.$$
+
+论文§2.2允许C是逐步惩罚序列的更一般聚合，而不仅是折扣和。若C是失败指示量，其期望是失败概率；若C是T步平均力矩，其期望是每回合平均量的期望。T随机时，E[总力矩/T]一般不等于E[总力矩]/E[T]，也不等于折扣和乘一个常数。
+
+| 层次 | RCPO使用的对象 | 主要用途 |
+|---|---|---|
+| 环境每步信号 | rₜ、cₜ | 构造修正奖励与TD样本 |
+| 折扣引导目标 | J_Cγ=E[Σγᵗcₜ] | actor和critic实际学习的惩罚方向 |
+| 原约束统计 | J_C=E[C(τ)] | 检查预算、更新乘子 |
+| 最终要求 | J_C≤α | 期望约束可行性，不是每条轨迹零违规 |
+
+失败概率不超过1%，仍允许少数失败轨迹；平均力矩不超过25%，也不限制每个瞬间的最大力矩。若真正需求是“任何动作都不能伤害设备”，就需要额外的动作限制、安全过滤或其他机制，不能靠重新命名平均量得到逐步保证。
+
+还有一个容易漏掉的前提：原约束虽然未必可自举，仍须能够从采样轨迹估计。RCPO没有解决“失败发生但记录不到”“成本标签系统性漏报”的观测问题，也没有从数据中自动发现用户遗漏的约束。
+
+## 二、从普通拉格朗日法走到三时间尺度
+
+### 罚价为什么要自动更新
+
+对奖励最大化问题，采用
+
+$$L(\theta,\lambda)=J_R(\theta)-\lambda(J_C(\theta)-\alpha),\qquad\lambda\ge0.$$
+
+θ沿奖励增大的方向更新，λ沿L减小的方向更新。因此
+
+$$\lambda_{k+1}=\Gamma_\lambda\left[\lambda_k+\eta_\lambda(k)(\widehat J_C-\alpha)\right].$$
+
+超预算就涨价，低于预算就降价，投影防止负罚价。在固定λ下，λα不依赖θ，可以从actor目标中去掉；这不意味着α能从乘子更新中去掉。若把符号反过来，违规时降低惩罚，整个反馈会朝错误方向走。
+
+直接对L求策略梯度，原则上可以使用轨迹似然比乘以R(τ)−λC(τ)。问题是一般C未必能拆成当前状态上的递归价值，需要等待完整轨迹，还可能产生高方差。普通无约束actor-critic的优势，恰恰在于使用短段数据和critic自举。RCPO要保留这个接口。
+
+### 内层换代理，外层仍看真实指标
+
+论文§4定义
+
+$$\hat r_t=r_t-\lambda c_t,\qquad \hat V^{\pi}(\lambda,s)=V_R^{\pi}(s)-\lambda V_{C_\gamma}^{\pi}(s).$$
+
+固定π、λ时，V̂满足标准Bellman关系：
+
+$$\hat V^{\pi}(\lambda,s)=\mathbb E[\hat r_t+\gamma\hat V^{\pi}(\lambda,s_{t+1})\mid s_t=s].$$
+
+于是可以用TD误差
+
+$$\delta_t=r_t-\lambda c_t+\gamma(1-d_t)\hat V_v(s_{t+1})-\hat V_v(s_t)$$
+
+训练critic，并用δₜ或多步优势更新actor。这里dₜ表示真正终止；时间截断是否截断自举要按任务定义处理。原文Algorithm 1自举行的状态写作sₜ，本文依据Bellman定义和附录A的多步回报使用后继sₜ₊₁，不把这个下标问题解释成新算法。
+
+关键是：actor提升的目标变为J_R−λJ_Cγ，而乘子仍根据J_C−α更新。**当J_Cγ与J_C不同时，这不是对同一个原始拉格朗日函数的两块精确梯度下降／上升。** 因而不能直接搬用普通原始—对偶收敛结论，也不能把折扣成本估计器拿来代替回合结束后的真实约束统计。
+
+### “快、中、慢”是近似静态关系，不是三个随便不同的学习率
+
+论文安排critic最快、actor居中、λ最慢。其直觉为：critic看到近似固定的策略和罚价；actor看到已跟上的critic与近似固定的罚价；乘子看到对当前罚价已经适应的策略。随机逼近中对应步长和发散、平方和收敛，以及相邻尺度比趋于零，例如
+
+$$\frac{\eta_\lambda(k)}{\eta_\theta(k)}\to0,\qquad \frac{\eta_\theta(k)}{\eta_v(k)}\to0.$$
+
+作为独立的数学示例，可以选ηv=k⁻⁰·⁶、ηθ=k⁻⁰·⁸、ηλ=k⁻¹，k从1开始。三者累积步长都发散，平方和都收敛，两个比值都是k⁻⁰·²。这个例子只核对步长条件，不证明某个神经网络实现收敛。
+
+实际训练还涉及每轮更新次数、Adam预条件、梯度大小、网络共享和采样频率。只看到配置中“乘子学习率更小”，不能说已经满足渐近时间尺度分离；论文附录B的深度实验配置也不应当成这些极限条件的逐项验证。
+
+```text
+初始化actor theta、修正奖励critic v、非负乘子lambda
+重复采样短段轨迹：
+  收集原始r、逐步c、状态、动作、终止标志
+  固定本段lambda，计算r_hat = r - lambda*c
+  用后继critic自举构造多步回报与优势
+  在快尺度拟合critic；在中尺度更新actor
+  累积原始约束所需统计，不把截断片段冒充完整回合
+  若获得完整C(tau)：
+    用若干完整回合估计J_C
+    在慢尺度更新lambda = projection(lambda + eta_lambda*(J_C-alpha))
+评价时分开报告奖励、真实约束、折扣代理与lambda
+```
+
+这个模板说明信息流，未复制论文某一具体训练实现。若复用历史数据，还要处理策略分布变化；“修正奖励只多一行”不等于off-policy校正也自动完成。
+
+## 三、替代惩罚可靠的条件，以及一个能手算的反例
+
+### 定理要求的是集合包含，不是平均相关性
+
+论文Theorem 2把真实可行集记为Θ={θ:J_C(θ)≤α}，把J_Cγ的局部极小点集合记为Θγ，关键假设为
+
+$$\Theta_\gamma\subseteq\Theta.$$
+
+意思是：沿代理成本下降即使停在局部低谷，也不能停在真实不可行的策略上。它比“在训练样本上，两个成本大致同涨同跌”强得多；它约束整个参数化策略类里的局部几何。某个零力矩策略同时最小化两个目标，只说明找到了一个好点，不能单凭它断定所有局部极小点都可行。
+
+§2.3还列出奖励价值有界，以及原约束的每个局部极小点均可行。附录E借助稳定迭代、噪声条件和三时间尺度分析：先让critic跟踪固定策略的值，再分析actor固定点，最后分析乘子；在指导代理的包含假设与乘子可提供足够惩罚等条件下，论文得到几乎必然收敛到可行固定点的结论。
+
+这里有三道边界。第一，结论是可行固定点，不是任意非凸神经策略类里的全局最高奖励。第二，“几乎必然”是随机过程的渐近结论，不是某个训练预算内违规概率为零。第三，附录以TD算子收缩推进critic论证，不能由此宣布任意非线性共享网络、Adam和有限批量都得到同等收敛保证。本文核读论证路径，但没有补证或重现一般非线性函数逼近情形。
+
+### 教学例：折扣可以偏爱晚发生的高成本
+
+以下是独立构造，不是论文实验。回合固定两步，原约束为平均成本C=(c₀+c₁)/2，阈值α=1，γ=1/2。两种策略A、B的成本与奖励为：A的成本(2,0)，B的成本(0,3)；全部奖励在第一步给出，A得2，B得4。
+
+A的真实成本为1，正好可行；B为1.5，违规。折扣代理却是A的2、B的1.5。若以概率p选B，
+
+$$J_R(p)=2+2p,\quad J_C(p)=1+0.5p,\quad J_{C_\gamma}(p)=2-0.5p.$$
+
+代理actor目标变成
+
+$$J_R-\lambda J_{C_\gamma}=2-2\lambda+(2+0.5\lambda)p.$$
+
+对任何非负λ，p的系数都为正，actor都偏好p=1；外层发现违规不断涨价，反而进一步强化B相对A的优势。真实拉格朗日目标关于p的系数则是2−0.5λ，当λ&gt;4时会选择A。代理的全局低谷B本身不满足预算，正好违反Θγ⊆Θ。
+
+这不是说RCPO一定失败，而是精确展示为什么需要它的假设。短视代理可以把“少产生危险”换成“晚一点产生危险”。因此实现时仅画代理曲线下降是不够的，还要同时检查真实指标。λ一直上涨而真实成本不降，是代理失配、可行策略不可达或优化失败的诊断线索。
+
+### 教学例：两个统计量在同一次更新里的不同位置
+
+仍取两步成本(0,3)，奖励(4,0)，λ=2。修正奖励为(4,−6)，折扣回报为4−3=1；它等于J_R−λJ_Cγ=4−2×1.5。若当前J_C估计是1.5、α=1、ηλ=0.1，新的乘子为2.05。
+
+把“平均成本1.5”塞进每个时间步扣除，会得到另一个目标；把折扣回报里的λα常数加回也不会修复上述代理方向问题。这个算例的用途是核对数据流和符号，不能替代策略训练。本文用精确分数独立核算了这些数值。
+
+## 四、看原始证据：要把“更快”“近似可行”和“严格可行”分开
+
+### Mars Rover：完整曲线比一句“更安全”有信息量
+
+&lt;figure id=&quot;rl-65-figure-2&quot; class=&quot;reading-evidence-figure&quot;&gt;&lt;a href=&quot;/rl/assets/papers/65-rcpo-figure-2.png&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;&lt;img src=&quot;/rl/assets/papers/65-rcpo-figure-2.png&quot; width=&quot;1185&quot; height=&quot;288&quot; alt=&quot;RCPO原图2：两种失败阈值下的成功率、奖励和乘子，蓝色RCPO与橙色Lagrange作对照&quot; loading=&quot;lazy&quot;&gt;&lt;/a&gt;&lt;figcaption&gt;原论文图形摘引｜Tessler、Mankowitz、Mannor，arXiv:1805.11074v3，PDF第6页Figure 2。&lt;a href=&quot;https://arxiv.org/pdf/1805.11074v3#page=6&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;核对原文&lt;/a&gt; · 完整图形区域含图例，原版权保留。&lt;/figcaption&gt;&lt;/figure&gt;
+
+原图每组三栏依次为成功率、奖励、λ，左组α=0.01，右组α=0.5，黑色虚线为目标，蓝色为RCPO，橙色为直接Lagrange。蓝线在左组更早接近高成功率，右组奖励与乘子相对稳定；橙色有较大波动。图的纵轴明确写Success Rate，所以成功率应与1−α比较，不能照着图注的“at or below threshold”把成功率越低当成越可行。原图未给每个点的精确数值，本文不从曲线读取臆造的小数或显著性。
+
+环境是随机转移网格：短路更容易碰岩石，撞击终止，目标是尽快到终点且失败概率不超过α。附录B.1给出随机转移参数δ=0.05、每步奖励−0.01、终点奖励0、γ=0.99；采用A2C，另有随迭代衰减的随机起点安排以减轻探索问题。每5120回合评价1024回合，λ从0.6起，乘子学习率0.000025。
+
+这些设定说明比较同时处于一个特定探索与评价方案中；不能把曲线优势直接外推到任意初始分布或极稀有灾难。有限评价中的零失败也不等于真实失败概率为零，尤其α=0.01的任务需要关注估计误差。
+
+### Robotics：Table 2并没有支持“六项全部严格达标”
+
+机器人实验用PPO，比较自动调整λ和若干固定惩罚系数，约束是平均力矩。附录B.2报告每次训练100万样本、γ=0.99、GAE系数0.95，λ从0开始，乘子学习率5×10⁻⁷并衰减。论文§5.2明确把结果称为可行或接近可行，而不是全部严格可行。
+
+[第7页Table 2](https://arxiv.org/pdf/1805.11074v3#page=7)的门槛为25%。RCPO报告Swimmer 24%、Walker2d 25.2%、Hopper 26%、Humanoid 24.3%、HalfCheetah 26.7%、Ant 15.2%。按表内数值，三个超预算的项目是Walker2d、Hopper、HalfCheetah，分别高0.2、1和1.7个百分点。这些不是统计误差已被证明覆盖的偏差，不能擅自替作者四舍五入成合格。
+
+例如Swimmer的λ=0基线奖励94.4、力矩30.4%，RCPO奖励72.7、力矩24%。回报下降换来了预算满足，不能只比较94.4与72.7就说RCPO更差。反过来，Walker2d的λ=0基线力矩24.6%、奖励3364.1，而RCPO为25.2%、591.6；这是真正不利于RCPO的案例，不应藏掉。论文也指出Walker2d例外，并在脚注对Hopper的优势判断保留意见。
+
+固定λ=100也未让Humanoid达标，表中力矩仍30.5%。这提醒我们：神经训练里的巨大惩罚并不等于成功求解对应全局优化，策略可能落入不良局部解。文章未提供足以从这些表值独立重建置信区间的信息，本文不添加种子数、误差条定义或统计检验结果。
+
+### 实验没有做的比较也要说清
+
+论文这组非折扣约束实验主要比较直接Monte Carlo拉格朗日法和固定reward shaping，不是CPO对RCPO的全面同协议竞赛。原文认为其所选约束不适合直接照搬折扣约束基线；这不意味着CPO在所有扩展表示或所有安全任务上都不能使用。把约束改写、扩展状态或换估计方法会改变实验设计，应当作为新实验说明。
+
+“reward agnostic”的合理理解是不用为每个奖励尺度手工固定最终罚价，λ可以适应。奖励整体乘正数时，理想最优策略不变，所需罚价尺度却会变化。有限时间下，同样的乘子步长、初始化和采样噪声不会因此自动产生相同学习曲线。下一篇PID Lagrangian正面讨论这类动态响应与尺度问题。
+
+## 五、实际使用时怎样判断是否适合RCPO
+
+先明确需求是什么统计量，再决定是否值得引入代理。如果真实约束本来就是折扣累计成本，J_Cγ与J_C可以一致，许多代理失配问题随之消失；这时RCPO的吸引力主要是简单的actor-critic组合，而不是“任意约束”的能力。
+
+如果真实约束是整段轨迹属性，应先找出哪些事件在时间上被折扣弱化，哪些早停行为会改变平均值分母，哪些参数化局部极小点可能不可行。检查应包括奖励、真实代价、代理代价和λ的联合轨迹，而不是最终一行奖励。对安全要求高的任务，还要独立报告每回合分布、峰值与罕见事件，避免用平均值掩盖尾部。
+
+最后，收敛到可行策略与可行训练是两个要求。RCPO可能需要经历超预算策略才能调出合适λ；惩罚过大又可能损害奖励学习。CPO关注每次更新的局部可行控制，RCPO关注易于自举的引导与渐近可行性，二者不是互换的名字。论文讨论将两者结合是未来方向，不能写成本文已经实现并证明的系统。
+
+### 继续追问：代理、时间尺度与罚价
+
+&lt;details&gt;
+&lt;summary&gt;1. 我能把任何轨迹约束都随便选一个逐步c来替代吗？&lt;/summary&gt;
+
+不能。首先得能从真实轨迹估计C，否则外层不知道是否违规；其次代理的低谷要落在真实可行集内。本文两步例子说明，即使c就是原始成本，折扣方式不同也可能反向排序策略。对复杂约束可尝试扩展状态表示或直接使用完整轨迹梯度，但它们是另一些建模与估计选择，不由RCPO名称自动保证有效。
+
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;2. 把lambda更新得特别快，是不是就不会违规了？&lt;/summary&gt;
+
+这会破坏原分析中慢乘子看到近似收敛actor的条件。有限批量误差可能立刻变成大幅罚价摆动，critic又要追逐快速变化的修正奖励。慢更新存在响应迟缓，快更新存在振荡风险；该论文没有给出一个适用于所有任务的速度处方。下一篇通过控制器结构改善动态响应，而不是仅把学习率放大。
+
+&lt;/details&gt;
+
+&lt;details&gt;
+&lt;summary&gt;3. lambda到达上限而代价仍超标，应当直接增加上限吗？&lt;/summary&gt;
+
+先分清不可行预算、策略表达能力不足、代理失配、critic误差和训练未充分几种原因。增加上限只增加允许的惩罚强度，不会让错误代理变正确；在教学反例中反而更偏爱违规策略。有限上限时还可能稳定在边界，不能把投影后的固定点当成原约束已满足。应直接检查真实统计及其误差，再决定模型或优化修改。
+
+&lt;/details&gt;
+
+## 六、沿着约束学习路线继续读
+
+- [CPO](61-cpo.md)：比较信赖域里的约束更新与外层调罚价，注意每次更新保证和渐近结论的区别。
+- [PPO](27-ppo.md)：理解实验所用策略优化器与RCPO约束机制是两个模块；PPO裁剪本身不提供成本预算。
+- [PID Lagrangian](66-pid-lagrangian.md)：继续追问乘子为何振荡，如何让罚价更及时地响应代价与变化趋势。
+
+**原文定位**：v3第3页§2.2—3定义与假设，第4—5页§3.1—4、式(5)—(11)、Theorem 2和Algorithm 1，第6页Figure 2，第7页Table 2，第12—13页附录A—B，第13—15页附录C—E。核读了这些章节与证明文本；未运行作者代码、重训策略或验证所有非线性收敛条件。
+
+## 自测两题
+
+**问题1**：成本A=(2,0)、B=(0,3)，γ=1/2，原约束为两步平均不超过1。为什么增大代理惩罚系数不一定把策略拉回可行区？
+
+**参考答案**：A真实成本1、代理2；B真实成本1.5、代理1.5。代理更偏好违规的B。若奖励A=2、B=4，代理目标中选B概率p的系数为2+0.5λ，任何非负λ都推动p增加，包含假设不成立。
+
+**问题2**：RCPO的critic、actor与乘子各用哪个目标？理论保证能否直接写成“整个训练过程安全且最终最优”？
+
+**参考答案**：critic拟合折扣修正奖励，actor提升其价值，乘子依据真实J_C−α调节。论文在相关假设下得到渐近可行固定点，不保证任意神经实现的全局最优，也不保证每个训练策略或每条轨迹都安全。
+
+[系列首页](README.md) · [上一篇](64-fqf.md) · [下一篇](66-pid-lagrangian.md)
+</textarea>
+    <script src="../js/vendor/marked.js"></script>
+    <script src="../js/vendor/katex/katex.min.js"></script>
+    <script src="../js/vendor/katex/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="js/catalog.js?v=06a1d162d84c"></script>
+    <script src="../js/site-chrome.js"></script>
+    <script src="js/common.js"></script>
+    <script src="../js/md-render.js"></script>
+    <script>
+        if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        RLChrome.mountChrome({ root: '../' });
+        const currentSlug = "65-rcpo";
+        const source = document.getElementById('md-source').value;
+        RLRender.mountMarkdown(document.getElementById('article-body'), source, {
+            slugMap: window.RL_SLUG_MAP
+        });
+
+        const posts = RL_POSTS;
+        const index = posts.findIndex((item) => item.slug === currentSlug);
+        const current = posts[index];
+        const prev = index > 0 ? posts[index - 1] : null;
+        const next = index >= 0 && index < posts.length - 1 ? posts[index + 1] : null;
+
+        const nav = document.getElementById('article-nav');
+        const chips = [
+            `<a class="rl-nav-chip" href="index.html"><i class="fa fa-list"></i> 系列目录</a>`
+        ];
+        if (current && current.year) {
+            chips.push(`<span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">${current.year}</span>`);
+        }
+        if (current && current.eraLabel) {
+            chips.push(`<span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">${current.eraLabel}</span>`);
+        }
+        nav.innerHTML = chips.join('');
+
+        const pager = document.getElementById('article-pager');
+        if (pager.dataset.staticPager !== 'true') pager.innerHTML = `
+            ${prev ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover" href="${prev.slug}.html"><div class="text-xs text-gray-400 mb-1">上一篇</div><div class="font-medium text-gray-800">${prev.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+            ${next ? `<a class="flex-1 bg-white rounded-lg shadow-card p-4 hover:shadow-card-hover text-right" href="${next.slug}.html"><div class="text-xs text-gray-400 mb-1">下一篇</div><div class="font-medium text-gray-800">${next.cardTitle}</div></a>` : '<div class="flex-1"></div>'}
+        `;
+    </script>
+</body>
+</html>
