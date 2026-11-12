@@ -17,7 +17,7 @@ async function testRuntime(){
   w.SeriesChrome={mount(){}};w.tailwind={};
   for(const [,attrs,text] of scripts){
    const source=attrs.match(/\bsrc="([^"]+)"/);
-   if(source){let src=source[1];if(/https?:/.test(src)||src.endsWith('tailwind.js')||src.endsWith('site-chrome.js'))continue;let file=src.startsWith('/')?root+src:path.resolve(root,series,src);w.eval(fs.readFileSync(file,'utf8'));}
+   if(source){let src=source[1].split(/[?#]/)[0];if(/https?:/.test(src)||src.endsWith('tailwind.js')||src.endsWith('site-chrome.js'))continue;let file=src.startsWith('/')?root+src:path.resolve(root,series,src);w.eval(fs.readFileSync(file,'utf8'));}
    else w.eval(text);
   }
   assert.equal(d.getElementById('article-body').innerHTML,before,`${series}/${slug} runtime destroys static reading`);

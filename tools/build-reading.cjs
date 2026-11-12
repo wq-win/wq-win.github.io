@@ -10,6 +10,7 @@ const manifest=JSON.parse(fs.readFileSync(path.join(root,'data/reading-prerequis
 const byKey=new Map(manifest.map(x=>[x.key,x]));
 const esc=s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
 const hash=s=>crypto.createHash('sha256').update(s).digest('hex');
+const {staticPager}=require('./lib/reading-navigation.cjs');
 function move(text,m){
  if(!m)return text;
  // Python offsets count Unicode code points, not UTF-16 code units.
@@ -107,10 +108,26 @@ function build(){
    const file=path.join(root,key+'.html');
    const title=source.match(/^# (.+)$/m)?.[1]||post.title;
    const template=fs.readFileSync(file,'utf8').replace(/<title>[\s\S]*?<\/title>/,`<title>${esc(title)} | MyLog</title>`).replace(/(<span class="text-gray-500">)[\s\S]*?(<\/span>)/,`$1${esc(post.cardTitle||title)}$2`);
-   fs.writeFileSync(file,inject(template,body,source,sourceHash));
+   let output=inject(template,body,source,sourceHash);
+   if(series==='rl'){
+    const pager=staticPager(posts,post);
+    if(output.includes('<!-- READING:PAGER:START -->'))output=output.replace(/<!-- READING:PAGER:START -->[\s\S]*?<!-- READING:PAGER:END -->/,()=>`<!-- READING:PAGER:START -->${pager}<!-- READING:PAGER:END -->`);
+    else{
+     const slot=/<div id="article-pager"[^>]*><\/div>/;
+     if(!slot.test(output))throw new Error(key+' missing pager slot');
+     output=output.replace(slot,()=>`<!-- READING:PAGER:START -->${pager}<!-- READING:PAGER:END -->`);
+    }
+    // Stale catalog JavaScript must never replace the built, correct pager.
+    output=output.replace(/^([ \t]*)pager\.innerHTML = `/gm,"$1if (pager.dataset.staticPager !== 'true') pager.innerHTML = `");
+    const version=hash(fs.readFileSync(path.join(root,series,'js/catalog.js'))).slice(0,12);
+    output=output.replace(/src="js\/catalog\.js(?:\?v=[a-f0-9]+)?"/g,`src="js/catalog.js?v=${version}"`);
+   }
+   fs.writeFileSync(file,output);
    report.push({key,kind:m?'paper':post.kind||'auxiliary',sourceSha256:sourceHash,mathExpressions:math.length,unrenderedMath:math.filter(x=>x.html.includes('reading-math-source')).map(x=>x.tex)});
   }
  }
+ const rlHub=path.join(root,'rl/index.html'),version=hash(fs.readFileSync(path.join(root,'rl/js/catalog.js'))).slice(0,12);
+ fs.writeFileSync(rlHub,fs.readFileSync(rlHub,'utf8').replace(/src="js\/catalog\.js(?:\?v=[a-f0-9]+)?"/g,`src="js/catalog.js?v=${version}"`));
  fs.writeFileSync(path.join(root,'data/reading-build-report.json'),JSON.stringify(report,null,2)+'\n');
  console.log(`Built ${report.length} article and guide pages; rendered ${report.reduce((s,x)=>s+x.mathExpressions,0)} TeX expressions. Source render fallbacks: ${report.reduce((s,x)=>s+x.unrenderedMath.length,0)}.`);
 }

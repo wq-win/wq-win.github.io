@@ -15,7 +15,7 @@ The site is built with HTML, CSS, and JavaScript and hosted on GitHub Pages. Its
 
 | Series | Papers | Focus |
 | --- | ---: | --- |
-| [Reinforcement learning](https://wq-win.github.io/rl/) | 62 | Value estimation, policies, world models, and language-model RL |
+| [Reinforcement learning](https://wq-win.github.io/rl/) | 100 | Value estimation, policies, world models, and language-model RL |
 | [Large language models](https://wq-win.github.io/llm/) | 100 | Representations, pretraining, retrieval, alignment, and reasoning |
 | [Robot learning](https://wq-win.github.io/robot-learn/) | 100 | Demonstrations, interaction, motion primitives, and vision-language-action models |
 | [Classic robotics](https://wq-win.github.io/robot-classic/) | 100 | Geometry, estimation, planning, control, and SLAM |
@@ -125,7 +125,7 @@ These dependency-free tests exercise game logic and controllers in a simulated D
 
 ### Reading-layer checks
 
-The 362 paper pages and four Day 0 guides include static text and local KaTeX math, so the article remains readable without JavaScript. Shared scripts add the reading tools. See the [reading build and QA guide](tools/reading-qa.md) for source-preservation checks, regeneration commands and the original LSTM formula caveat.
+The 400 paper pages and four Day 0 guides include static text and local KaTeX math, so the article remains readable without JavaScript. Shared scripts add the reading tools. See the [reading build and QA guide](tools/reading-qa.md) for source-preservation checks, regeneration commands and the original LSTM formula caveat.
 
 ### GitHub Pages
 
