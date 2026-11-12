@@ -68,7 +68,10 @@ async function main(){
  const gameBaseline=JSON.parse(fs.readFileSync(path.join(root,'data/reading-public-baseline.json'),'utf8'));
  const gamePages=fs.readdirSync(path.join(root,'game')).filter(f=>f.endsWith('.html')).map(f=>'game/'+f);
  equal(sorted(gamePages),sorted(Object.keys(gameBaseline.games)),'exact pre-change game HTML coverage');
- for(const relative of gamePages)equal(sha(fs.readFileSync(path.join(root,relative))),gameBaseline.games[relative],'game page unchanged '+relative);
+ // Owner-requested game work has its own reviewed hashes; never rewrite the historical reading fixture.
+ const gameUpdates=JSON.parse(fs.readFileSync(path.join(root,'data/game-ui-updates.json'),'utf8'));
+ for(const relative of Object.keys(gameUpdates.games))check(gamePages.includes(relative),'game update belongs to preserved inventory '+relative);
+ for(const relative of gamePages)equal(sha(fs.readFileSync(path.join(root,relative))),gameUpdates.games[relative]||gameBaseline.games[relative],'game page matches reviewed baseline '+relative);
  await w.happyDOM.close();console.log(`${checks} assertions passed:${metadata.paperCount} canonical papers,${math} TeX expressions,${links} article links,4 guides,glossary/symbol destinations and game-page preservation.`);
 }
 main().catch(e=>{console.error(e);process.exit(1);});

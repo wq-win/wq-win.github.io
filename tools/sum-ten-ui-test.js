@@ -67,6 +67,21 @@ const { pathToFileURL } = require('node:url');
             generated.d.getElementById('result-restart').click(); assert.equal(generated.api.state.score, 0);
             assert.equal(generated.api.state.status, 'playing'); assert.ok(generated.api.state.board.every(n => n > 0));
         }
+        // Alternate one-thumb controls and interruption-safe manual pause.
+        const taps=boot();taps.d.getElementById('start').click();taps.api.load(fixture());
+        taps.d.getElementById('input-mode').click();assert.equal(taps.d.getElementById('input-mode').getAttribute('aria-pressed'),'true');
+        taps.d.querySelector('[data-cell="0"]').click();assert.equal(taps.d.getElementById('sum').textContent,'4');
+        taps.d.querySelector('[data-cell="1"]').click();assert.equal(taps.api.state.score,2);assert.equal(taps.d.getElementById('sum').textContent,'—');
+        taps.api.load(fixture());taps.d.querySelector('[data-cell="0"]').click();
+        taps.d.getElementById('pause').click();assert.equal(taps.d.getElementById('pause-card').hidden,false);assert.equal(taps.frames.size,0);assert.equal(taps.b.inert,true);
+        const pausedDeadline=taps.api.state.deadline;taps.advance(30000);taps.frame();taps.d.querySelector('[data-cell="1"]').click();assert.equal(taps.api.state.score,0);
+        Object.defineProperty(taps.d,'hidden',{value:true,configurable:true});taps.d.dispatchEvent(new taps.w.Event('visibilitychange'));taps.advance(10000);
+        Object.defineProperty(taps.d,'hidden',{value:false,configurable:true});taps.d.dispatchEvent(new taps.w.Event('visibilitychange'));assert.equal(taps.frames.size,0,'Returning to foreground does not dismiss manual pause');
+        taps.d.getElementById('resume').click();assert.equal(taps.api.state.deadline,pausedDeadline+40000);assert.equal(taps.frames.size,1);assert.equal(taps.b.inert,false);
+        taps.d.querySelector('[data-cell="1"]').click();assert.equal(taps.api.state.score,0,'Pause cancels the prior first corner');
+        taps.d.getElementById('input-mode').click();assert.equal(taps.d.getElementById('sum').textContent,'—');
+        drag(taps,{row:0,col:0},{row:0,col:1});assert.equal(taps.api.state.score,2);
+        taps.d.getElementById('pause').click();taps.d.getElementById('start').click();assert.equal(taps.d.getElementById('pause-card').hidden,true);assert.equal(taps.b.inert,false);assert.equal(taps.frames.size,1);
         assert.match(css, /touch-action:none/); assert.match(css, /button\{[^}]*touch-action:manipulation/); assert.match(css, /min-width:44px;min-height:44px/); assert.match(css, /orientation:portrait/); assert.match(css, /orientation:landscape/); assert.match(css, /max-height:375px/); assert.match(css, /prefers-reduced-motion:reduce/); assert.doesNotMatch(css, /@import|https?:\/\//);
         assert.doesNotMatch(fs.readFileSync(path.join(root, 'game/js/sum-ten.js'), 'utf8'), /setInterval/);
         console.log('sum-ten UI: real PointerEvent dispatch down/move/up, capture/release, all relevant cancellations, multi-touch isolation, live sums, score, keyboard, transposed directions, orientation/fullscreen preservation, explicit start, exact deadline, background pause/resume, no-moves/cleared results, restart cleanup and reduced-motion passed.');
