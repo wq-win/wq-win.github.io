@@ -5,6 +5,7 @@
   const roleClass = { guard: 'wood', fire: 'fire', troop: 'people' };
   const roleName = { guard: '护卫', fire: '火兵', troop: '战兵' }, laneNames = ['左', '中', '右'];
   const reduced = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  let paused = false;
   let state, selected = null, busy = false, generation = 0, soundOn = false, audio, best = {};
   const SETTINGS = 'ink-hanzi-settings-v1';
   try { const settings = JSON.parse(localStorage.getItem(SETTINGS) || '{}'); soundOn = settings.sound === true; best = settings.best && typeof settings.best === 'object' && !Array.isArray(settings.best) ? settings.best : {}; } catch (_) {}
@@ -94,6 +95,9 @@
     $('level-select').value = String(state.level); $('progress').textContent = state.completed.length + ' / 6 已破';
     renderBoard(); renderLanes();
     $('sound-toggle').textContent = soundOn ? '♪ 音效：开' : '♪ 音效：关'; $('sound-toggle').setAttribute('aria-pressed', String(soundOn));
+    $('pause-battle').hidden = state.phase !== 'battle';
+    $('pause-battle').textContent = paused ? '继续交锋 ▶' : '暂停交锋 Ⅱ';
+    $('pause-battle').setAttribute('aria-pressed',String(paused));
     $('march').disabled = state.phase !== 'prepare' || !state.army.some(Boolean) || busy;
     $('march').querySelector('span').textContent = state.phase === 'prepare' ? state.army.some(Boolean) ? '出 征' : '先部署，再出征' : state.phase === 'battle' ? '交 锋 中' : '本 阵 已 结';
     const finished = state.phase === 'won' || state.phase === 'lost'; $('result').hidden = !finished;
@@ -164,7 +168,7 @@
     });
   }
   function battleTurn() {
-    if (state.phase !== 'battle') return;
+    if (state.phase !== 'battle' || paused) return;
     if (document.hidden) return;
     const events = E.step(state);
     if (state.phase === 'won') best[state.level] = Math.max(Number(best[state.level]) || 0, state.gate.hp);
@@ -182,7 +186,7 @@
     selected = null; save(); render(); message('战斗开始。每回合同步攻击，留意各路血量。'); later(battleTurn, reduced() ? 0 : 440);
   }
   function restart(index, keepFormation) {
-    cancelPending(); const completed = state.completed.slice();
+    paused = false; cancelPending(); const completed = state.completed.slice();
     state = keepFormation ? E.restore(E.save(state)) : E.create(index);
     state.completed = completed; save(); render(); message(keepFormation ? '阵容已保留。点出征位撤回，调整后再出征。' : '点两个字合成，再点空阵位部署。');
   }
@@ -206,7 +210,8 @@
     if ($('help').open) { event.preventDefault(); event.stopImmediatePropagation(); closeHelp(); return; }
     if (selected !== null) { const previous = selected; selected = null; render(); message('已取消选字。'); focusSlot(previous); }
   });
+  $('pause-battle').addEventListener('click', () => { if(state.phase !== 'battle')return; paused=!paused;cancelPending();save();render();message(paused?'交锋已暂停，可以观察三路局势。':'继续交锋。');if(!paused&&!document.hidden)later(battleTurn,250); });
   $('sound-toggle').addEventListener('click', () => { soundOn = !soundOn; save(); render(); tone(550); });
-  document.addEventListener('visibilitychange', () => { if (state.phase !== 'battle') return; cancelPending(); render(); if (document.hidden) message('已暂停交锋，返回页面后继续。'); else later(battleTurn, 250); });
+  document.addEventListener('visibilitychange', () => { if (state.phase !== 'battle') return; cancelPending(); render(); if (document.hidden) message('已暂停交锋，返回页面后继续。'); else if(!paused) later(battleTurn, 250); });
   render();
 })();

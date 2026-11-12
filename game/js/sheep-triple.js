@@ -33,7 +33,23 @@ function updateMusic(s){
 }
 if(music){updateMusic(music.getState());$('music-toggle').addEventListener('click',()=>music.toggle());$('music-volume').addEventListener('input',()=>music.setVolume(Number($('music-volume').value)/100));}
 else{$('music-toggle').disabled=true;$('music-volume').disabled=true;$('music-status').textContent='音乐资源未加载，仍可继续游戏';}
-let state=E.create(0),busy=false;
+const SAVE_KEY='mylog-meadow-run-v1';
+let state=E.create(0),busy=false,steps=[],previousLayout=null,resumed=false;
+try {
+ const raw=localStorage.getItem(SAVE_KEY);
+ if(raw && raw.length<60000){
+  const saved=JSON.parse(raw);
+  if(saved.version!==1||!Number.isInteger(saved.level)||saved.level<0||saved.level>4||!Number.isInteger(saved.seed)||saved.seed<0||saved.seed>4294967295||!(saved.previousLayout===null||(Number.isInteger(saved.previousLayout)&&saved.previousLayout>=0&&saved.previousLayout<6))||!Array.isArray(saved.steps)||saved.steps.length>600)throw Error('Invalid save');
+  const restored=E.create(saved.level,saved.seed,saved.previousLayout);
+  for(const action of saved.steps){if(!Array.isArray(action)||action.length!==2||!(action[0]==='take'?Number.isInteger(action[1])&&E.take(restored,action[1]):action[0]==='tool'&&['undo','remove','shuffle'].includes(action[1])&&E.tool(restored,action[1])))throw Error('Invalid action');}
+  state=restored;steps=saved.steps;previousLayout=saved.previousLayout;resumed=true;
+ }
+}catch(_){}
+function saveRun(){
+ try{localStorage.setItem(SAVE_KEY,JSON.stringify({version:1,level:state.level,seed:state.seed,previousLayout,steps}));$('save-status').textContent='本局自动保存 · 随时回来继续';}
+ catch(_){$('save-status').textContent='当前浏览器无法保存，请勿关闭本局';}
+}
+
 function tileById(id){return state.tiles.find(t=>t.id===id);}
 function name(t){return E.TYPES[t.type]?.name||('图案 '+(t.type+1));}
 function message(text){$('message').textContent=text;}
@@ -54,12 +70,14 @@ function render(){
  document.querySelectorAll('.level').forEach((b,i)=>{if(i===level)b.setAttribute('aria-current','step');else b.removeAttribute('aria-current');});
  for(const tool of ['remove','undo','shuffle']){$('count-'+tool).textContent=state.counts[tool];$('tool-'+tool).disabled=state.counts[tool]<=0||state.status==='won'||(tool==='remove'&&(state.rack.length===0||state.holding.length>0))||(tool==='undo'&&state.history.length===0)||(tool==='shuffle'&&state.status==='lost');}
  $('result').hidden=state.status==='playing';if(state.status==='won'){$('result-title').textContent=level===4?'五关挑战完成':'牧场清空了！';$('result-text').textContent=level===4?'从五次帮助到最后一次，你完成了这场层叠挑战。':'下一关会生成新牌局，每种道具再减少一次。';$('next').hidden=level===4;message('全部卡牌已消除。');}else if(state.status==='lost'){$('result-title').textContent='收集槽装满了';$('result-text').textContent='试试可用的移出或撤回道具，或者重新开始调整顺序。';$('next').hidden=true;message('槽满了，仍可尝试移出或撤回。');}
+ const progress=$('clear-progress');progress.value=state.matched;progress.max=state.tiles.length;
+ $('clear-count').textContent='已消除 '+Math.round(state.matched/state.tiles.length*100)+'%';
  resize();
 }
-function pick(id){if(busy)return;busy=true;const before=state.matched;if(E.take(state,id)){render();if(state.status==='playing')message(state.matched>before?'三张配成一组，继续向下探索。':state.rack.length>=5?'收集槽快满了，留意已有的图案。':'找到同样的图案，再放入收集槽。');}busy=false;}
-function use(tool){if(busy)return;busy=true;if(E.tool(state,tool)){render();if(state.status==='playing')message(state.message||{remove:'已移入暂存区，点选卡牌可放回。',undo:'已撤回一步，换个顺序试试。',shuffle:'剩余卡牌已重新排列。'}[tool]);}else message(state.message||'现在不能使用这个道具。');busy=false;}
-function start(level){state=E.create(level,undefined,state.layout);render();message('先看看哪些卡牌没有被压住。');}
+function pick(id){if(busy)return;busy=true;const before=state.matched;if(E.take(state,id)){steps.push(['take',id]);saveRun();render();if(state.matched>before){$('rack').classList.remove('match-pop');void $('rack').offsetWidth;$('rack').classList.add('match-pop');}if(state.status==='playing')message(state.matched>before?'三张配成一组，继续向下探索。':state.rack.length>=5?'收集槽快满了，留意已有的图案。':'找到同样的图案，再放入收集槽。');}busy=false;}
+function use(tool){if(busy)return;busy=true;if(E.tool(state,tool)){steps.push(['tool',tool]);saveRun();render();if(state.status==='playing')message(state.message||{remove:'已移入暂存区，点选卡牌可放回。',undo:'已撤回一步，换个顺序试试。',shuffle:'剩余卡牌已重新排列。'}[tool]);}else message(state.message||'现在不能使用这个道具。');busy=false;}
+function start(level){previousLayout=state.layout;state=E.create(level,undefined,previousLayout);steps=[];saveRun();render();message('先看看哪些卡牌没有被压住。');}
 for(let i=0;i<5;i++){const b=document.createElement('button');b.className='level';b.innerHTML='<strong>0'+(i+1)+'</strong><small>道具各 '+(5-i)+' 次</small>';b.setAttribute('aria-label','第 '+(i+1)+' 关，每种道具 '+(5-i)+' 次');b.addEventListener('click',()=>start(i));$('levels').append(b);}
 for(const t of ['remove','undo','shuffle'])$('tool-'+t).addEventListener('click',()=>use(t));
-$('restart').addEventListener('click',()=>start(state.level));$('next').addEventListener('click',()=>start(Math.min(4,state.level+1)));$('help').addEventListener('click',()=>{if(!$('help-dialog').open)$('help-dialog').showModal();});for(const id of ['close-help','understood'])$(id).addEventListener('click',()=>$('help-dialog').close());window.addEventListener('resize',resize);if(window.ResizeObserver)new ResizeObserver(resize).observe(document.querySelector('.field'));render();
+$('restart').addEventListener('click',()=>start(state.level));$('next').addEventListener('click',()=>start(Math.min(4,state.level+1)));$('help').addEventListener('click',()=>{if(!$('help-dialog').open)$('help-dialog').showModal();});for(const id of ['close-help','understood'])$(id).addEventListener('click',()=>$('help-dialog').close());window.addEventListener('resize',resize);if(window.ResizeObserver)new ResizeObserver(resize).observe(document.querySelector('.field'));render();saveRun();if(resumed)message('已恢复上次的牌局，道具与撤回记录都保留。');
 })();

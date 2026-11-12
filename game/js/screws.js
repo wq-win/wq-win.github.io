@@ -31,5 +31,7 @@ const next=document.querySelector('.screw:not(:disabled)');if(state.status!=='pl
 }
 function start(n){clearTimeout(timer);token++;busy=false;history=[];state=E.create(n);save();$('status').textContent='先看下层：拆哪块板，才能把同色接上？';render();}
 $('undo').addEventListener('click',()=>{if(busy||!history.length)return;clearTimeout(timer);token++;history.pop();state=E.create(state.index);history.forEach(id=>E.take(state,id));save();render();$('status').textContent='已撤销一步，先为同色螺丝留出空位。';});
-E.levels.forEach((l,i)=>{const o=element('option','',String(i+1).padStart(2,'0')+' · '+l.name);o.value=String(i);$('level').append(o);});$('level').addEventListener('change',()=>start(Number($('level').value)));$('restart').addEventListener('click',()=>start(state.index));$('result-action').addEventListener('click',()=>start(state.status==='won'&&state.index<15?state.index+1:state.index));render();if(history.length&&state.status==='playing')$('status').textContent='已恢复上次拆解进度。';
+E.levels.forEach((l,i)=>{const o=element('option','',String(i+1).padStart(2,'0')+' · '+l.name);o.value=String(i);$('level').append(o);});const session=window.WorkshopSession&&window.WorkshopSession({rules:'① 点表层螺丝，收进五格托盘。\n② 三枚同色自动收走；拆空木板露出下层。\n③ 先看下层的颜色。失误后可撤销，不必重来。'});
+function requestStart(n){if(session&&(history.length||busy)&&state.status==='playing'){$('level').value=String(state.index);session.confirm(()=>start(n));}else start(n);}
+$('level').addEventListener('change',()=>requestStart(Number($('level').value)));$('restart').addEventListener('click',()=>requestStart(state.index));$('result-action').addEventListener('click',()=>start(state.status==='won'&&state.index<15?state.index+1:state.index));render();if(history.length&&state.status==='playing')$('status').textContent='已恢复上次拆解进度。';
 })();

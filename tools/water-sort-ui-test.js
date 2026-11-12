@@ -50,6 +50,13 @@ try{
  clickMove(racing,first);$(racing,'level-select').value='7';$(racing,'level-select').dispatchEvent(new racing.Event('change'));await delay(570);assert.equal(savedState(racing).level,7);assert.deepEqual(savedState(racing).bottles,E.create(7).bottles);assert.equal(racing.document.querySelectorAll('.pour-ghost').length,0);
  $(racing,'level-select').value='0';$(racing,'level-select').dispatchEvent(new racing.Event('change'));clickMove(racing,first);await delay(240);assert(racing.document.querySelector('.pour-stream'));await delay(320);assert.equal(savedState(racing).moves,1);assert.equal(racing.document.querySelectorAll('.pour-ghost,.pour-stream').length,0);
  const next=E.solve(savedState(racing))[0];clickMove(racing,next);racing.dispatchEvent(new racing.Event('resize'));assert.equal(savedState(racing).moves,2);assert.equal(racing.document.querySelectorAll('.pour-ghost').length,0);await delay(560);assert.equal(savedState(racing).moves,2);
+ // Hints point to a solver-verified continuation; they never perform a move.
+ const hints=setup();$(hints,'hint').click();assert.equal($(hints,'hint').disabled,true);await delay(50);
+ assert.equal(savedState(hints).moves,0);assert(hints.document.querySelector('.hint-target'));
+ const hintSource=Number(hints.document.querySelector('.bottle.selected').dataset.bottle),hintTarget=Number(hints.document.querySelector('.hint-target').dataset.bottle);
+ assert(E.inspect(savedState(hints).bottles,hintSource,hintTarget).ok);b(hints,hintTarget).click();assert.equal(savedState(hints).moves,1);assert.equal($(hints,'move-count').textContent,'1');
+ $(hints,'hint').click();$(hints,'restart').click();await delay(50);assert.equal(hints.document.querySelector('.hint-target'),null);assert.equal(savedState(hints).moves,0);assert.equal($(hints,'hint').disabled,false);
+ for(const m of E.solve(E.create()))clickMove(hints,m);assert.equal($(hints,'level-progress').value,5);assert.match($(hints,'win-detail').textContent,/步/);assert.equal(JSON.parse(hints.localStorage.getItem('cozy-water-sort-records-v1'))[0],savedState(hints).moves);
  const fsButton=w.document.querySelector('[data-game-fullscreen]');const before=E.save(savedState(w));fsButton.click();assert.equal(fsButton.getAttribute('aria-pressed'),'true');w.document.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape'}));assert.equal(fsButton.getAttribute('aria-pressed'),'false');assert.equal(E.save(savedState(w)),before);
  console.log('water-sort UI: all 8 wins, direct-final distinction, source cancel, invalid target, keyboard, restart/level/resize races, animation stream, blocked storage, resume and fullscreen PASS');
 }finally{for(const w of windows)await w.happyDOM.abort();}

@@ -5,16 +5,20 @@
     var feedback = d.getElementById('feedback'), result = d.getElementById('result'), startButton = d.getElementById('start'), fx = d.getElementById('fx-layer');
     var orientation = window.matchMedia('(orientation: landscape)'), reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
     var state = E.create(), landscape = orientation.matches, cells = [], cursor = 0, selection = null, drag = null, keyAnchor = null, frame = 0, epoch = 0, timers = new Set(), lastPhase = '', lastSecond = -1;
+    var manualPause = false, tapMode = false, tapAnchor = null;
     var pausedAt = null, best = 0, sound=window.CozyThirdFeedback;
     sound.attach(d.querySelector('.nav-actions'));
     try { best = Math.max(0,Math.min(48,Number(localStorage.getItem('cozy-sum-ten-best-v1'))||0)); } catch (_) {}
     var bestEl=d.createElement('span');bestEl.className='best-score';bestEl.textContent=' · 最高 '+best;scoreEl.parentElement.querySelector('span').append(bestEl);
     function now() { return pausedAt === null ? performance.now() : pausedAt; }
     function syncPause() {
-        var shouldPause=d.hidden || !!d.getElementById('rules-dialog').open;
+        var shouldPause=manualPause || d.hidden || !!d.getElementById('rules-dialog').open;
         if(shouldPause && state.status==='playing' && pausedAt===null){pausedAt=performance.now();cancelSelection();if(frame)cancelAnimationFrame(frame);frame=0;say('已暂停计时，返回游戏后继续。');}
         else if(!shouldPause && pausedAt!==null){if(state.status==='playing')state.deadline+=performance.now()-pausedAt;pausedAt=null;say('继续整理，计时已恢复。');tick();}
         app.dataset.paused=String(pausedAt!==null);
+        d.getElementById('pause-card').hidden=!manualPause;board.inert=manualPause;
+        d.getElementById('pause').setAttribute('aria-pressed',String(manualPause));
+        d.getElementById('pause').textContent=manualPause?'继续':'暂停';
         if(pausedAt===null)tick();
     }
     function pointFor(id) { return { row: Math.floor(id / E.COLS), col: id % E.COLS }; }
@@ -25,7 +29,7 @@
     function releaseCapture(pointerId) { try { if (board.hasPointerCapture(pointerId)) board.releasePointerCapture(pointerId); } catch (ignore) {} }
     function cancelSelection() {
         if (drag) { var id = drag.id; drag = null; releaseCapture(id); }
-        keyAnchor = null; selection = null; paintSelection();
+        tapAnchor = null; keyAnchor = null; selection = null; paintSelection();
     }
     function createCells() {
         for (var id = 0; id < E.ROWS * E.COLS; id++) {
@@ -52,6 +56,7 @@
     }
     function paintStatus() {
         var seconds = Math.ceil(E.remaining(state, now()) / 1000);
+        d.getElementById('pause').disabled = state.status !== 'playing';
         scoreEl.textContent = String(state.score); app.dataset.phase = state.status; app.dataset.score = state.score; app.dataset.reason = state.reason || ''; app.dataset.deadline = state.deadline === null ? '' : state.deadline;
         if (seconds !== lastSecond) { timeEl.textContent = String(seconds); lastSecond = seconds; }
         d.getElementById('time-fill').style.transform = 'scaleX(' + Math.min(1, E.remaining(state, now()) / E.DURATION) + ')'; d.querySelector('.clock-metric').classList.toggle('urgent', state.status === 'playing' && seconds <= 10);
@@ -75,7 +80,8 @@
     function start() {
         if (frame) cancelAnimationFrame(frame); frame = 0; cancelSelection(); clearEffects();
         if (state.status !== 'ready') state = E.create();
-        pausedAt=null; state = E.start(state, now()); cursor = 0; lastPhase = ''; lastSecond = -1; paintCells(); paintSelection(); say('拖出矩形，合计 10 就收下。'); tick(); cells[cursor].focus({ preventScroll: true });
+        manualPause=false;board.inert=false;app.dataset.paused='false';d.getElementById('pause-card').hidden=true;d.getElementById('pause').textContent='暂停';d.getElementById('pause').setAttribute('aria-pressed','false');
+        pausedAt=null; state = E.start(state, now()); cursor = 0; lastPhase = ''; lastSecond = -1; paintCells(); paintSelection(); say(tapMode?'先点一个角，再点对角，合计 10 就收下。':'拖出矩形，合计 10 就收下。'); tick(); cells[cursor].focus({ preventScroll: true });
     }
     function harvest(ids, values) {
         if (reduced.matches) return;
@@ -95,10 +101,19 @@
         return E.logical({ row: Math.min(rows - 1, Math.floor((event.clientY - rect.top) / rect.height * rows)), col: Math.min(cols - 1, Math.floor((event.clientX - rect.left) / rect.width * cols)) }, landscape);
     }
     board.addEventListener('pointerdown', function (event) {
-        if (drag || event.isPrimary === false || (event.pointerType === 'mouse' && event.button !== 0) || !live()) return;
+        if (tapMode || drag || event.isPrimary === false || (event.pointerType === 'mouse' && event.button !== 0) || !live()) return;
         var p = hit(event); if (!p) return; event.preventDefault(); cancelSelection(); cursor = idFor(p); drag = { id: event.pointerId, from: p }; keyAnchor = null;
         try { board.setPointerCapture(event.pointerId); } catch (ignore) {}
         cells[cursor].focus({ preventScroll: true }); paintCells(); selection = E.rectangle(state.board, p, p); paintSelection();
+    });
+    // Two-tap input keeps a finger from covering the live sum on small screens.
+    board.addEventListener('click', function(event) {
+        if(!tapMode || !live())return;
+        var cell=event.target.closest('[data-cell]');if(!cell)return;
+        var id=Number(cell.dataset.cell), p=pointFor(id);cursor=id;
+        if(tapAnchor){var from=tapAnchor;cancelSelection();commit(from,p);}
+        else {tapAnchor=p;selection=E.rectangle(state.board,p,p);paintSelection();say('起点已选。点矩形的对角，框内合计 10 就能收下。');}
+        paintCells();
     });
     board.addEventListener('pointermove', function (event) {
         if (!drag || drag.id !== event.pointerId) return; event.preventDefault(); if (!live()) return; var p = hit(event); selection = p ? E.rectangle(state.board, drag.from, p) : null; paintSelection();
@@ -123,6 +138,17 @@
         v.row = Math.max(0, Math.min(rows - 1, v.row + (event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0))); v.col = Math.max(0, Math.min(cols - 1, v.col + (event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0)));
         cursor = idFor(E.logical(v, landscape)); paintCells(); cells[cursor].focus({ preventScroll: true }); if (keyAnchor) { selection = E.rectangle(state.board, keyAnchor, pointFor(cursor)); paintSelection(); }
     });
+    d.getElementById('input-mode').addEventListener('click',function(){
+        cancelSelection();tapMode=!tapMode;this.setAttribute('aria-pressed',String(tapMode));this.textContent=tapMode?'操作：点两角':'操作：拖动框选';
+        board.setAttribute('aria-label',tapMode?'果园数字盘，先点起点再点对角凑成十':'果园数字盘，拖动矩形凑成十');
+        say(tapMode?'先点一个角，再点对角；空格也可以框进去。':'按住起点拖到对角，合计 10 时松手。');
+    });
+    function pauseGame(value){
+        if(state.status!=='playing')return;manualPause=value;syncPause();
+        if(value)d.getElementById('resume').focus({preventScroll:true});else cells[cursor].focus({preventScroll:true});
+    }
+    d.getElementById('pause').addEventListener('click',function(){pauseGame(!manualPause);});
+    d.getElementById('resume').addEventListener('click',function(){pauseGame(false);});
     startButton.addEventListener('click', start); d.getElementById('result-restart').addEventListener('click', start);
     function resize() { var next = orientation.matches; cancelSelection(); if (next !== landscape) { landscape = next; orderCells(); } tick(); }
     orientation.addEventListener('change', resize); window.addEventListener('resize', resize); app.addEventListener('gameviewchange', resize);

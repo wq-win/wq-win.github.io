@@ -73,11 +73,13 @@
     function render() {
         const level = E.levels[state.index], active = document.activeElement, focusId = active && active.dataset ? active.dataset.tile : undefined;
         $('wood-count').textContent = state.wood; $('troop-count').textContent = state.troops; $('action-count').textContent = state.budget - state.actions;
+        $('action-count').parentElement.classList.toggle('low-actions',state.budget-state.actions<=5);
         $('flag-count').replaceChildren(document.createTextNode(String(state.captured)), el('span', '', '/' + state.target));
         $('level-number').textContent = String(state.index + 1).padStart(2, '0'); $('level-name').textContent = level.name;
         $('mission-name').textContent = level.name; $('mission-hint').textContent = level.hint; $('rules-hint').textContent = '本关手记：' + level.hint;
         $('level-select').value = String(state.index); $('progress').textContent = completed.length + ' / 6'; $('progress').title = '已完成 ' + completed.length + ' 关';
         const map = $('frontier-map'); map.replaceChildren();
+        map.setAttribute('aria-label','岛屿地图，方向键移动焦点，回车执行；剩余 '+(state.budget-state.actions)+' 行动');
         state.tiles.forEach(tile => {
             const reachable = !tile.revealed && E.adjacent(state, tile.id);
             const b = el('button', 'tile ' + (tile.revealed ? 'terrain-' + tile.terrain : 'fog') + (reachable ? ' reachable' : '') + (tile.id === selected ? ' selected' : '') + (tile.terrain === 'outpost' && tile.revealed ? tile.owned ? ' owned-outpost' : ' enemy' : ''));
@@ -89,7 +91,15 @@
             if (tile.terrain === 'outpost' && tile.revealed) { const badge = el('span', 'tile-badge', tile.owned ? '⚑' : String(tile.guard)); badge.setAttribute('aria-hidden', 'true'); b.append(badge); }
             if (tile.building === 'mill') { const clock = el('span', 'mill-clock'); clock.setAttribute('aria-hidden', 'true'); for (let i = 0; i < 3; i++) clock.append(el('i', i < tile.age ? 'filled' : '')); b.append(clock); }
             if (tile.terrain === 'camp' || tile.building === 'barracks') { const label = el('span', 'tile-label', tile.terrain === 'camp' ? '营地' : '+2 兵'); label.setAttribute('aria-hidden', 'true'); b.append(label); }
-            b.addEventListener('click', () => choose(tile.id)); map.append(b);
+            b.addEventListener('click', () => choose(tile.id));
+            b.addEventListener('keydown', event => {
+                const delta={ArrowLeft:-1,ArrowRight:1,ArrowUp:-5,ArrowDown:5}[event.key];
+                if(delta===undefined)return;
+                event.preventDefault();
+                const next=tile.id+delta;
+                if(next<0||next>=25||(Math.abs(delta)===1&&Math.floor(next/5)!==Math.floor(tile.id/5)))return;
+                const target=map.querySelector('[data-tile="'+next+'"]');if(target)target.focus({preventScroll:true});
+            });map.append(b);
         });
         configureCommands();
         const left = state.budget - state.actions, pending = state.tiles.filter(t => t.revealed && t.terrain === 'outpost' && !t.owned).reduce((n, t) => n + t.guard, 0);
