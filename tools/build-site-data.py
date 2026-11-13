@@ -646,7 +646,9 @@ def write_sitemap(items):
 
 
 def write_rss(items):
-    papers = [item for item in items if item["kind"] == "paper"][:80]
+    # Keep the complete catalog: a fixed prefix silently excludes later series.
+    # Catalog order is stable; paper years are not site-publication dates.
+    papers = [item for item in items if item["kind"] == "paper"]
     entries = []
     for item in papers:
         entries.append(
