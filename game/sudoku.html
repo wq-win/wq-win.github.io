@@ -232,6 +232,7 @@
 
                     <div class="sudoku-tools">
                         <button type="button" id="new-game" class="sudoku-primary"><i class="fa fa-refresh" aria-hidden="true"></i> 新游戏</button>
+                        <button type="button" id="undo-input" disabled>↶ 撤销填数</button>
                         <button type="button" id="check-solution" class="sudoku-secondary"><i class="fa fa-check" aria-hidden="true"></i> 检查答案</button>
                         <button type="button" id="toggle-hints" class="bg-gold/20" title="显示或隐藏每格还能填哪些数"><i class="fa fa-eye" aria-hidden="true"></i> 候选数</button>
                         <button type="button" id="give-hint" title="标出当前最容易确定的一格"><i class="fa fa-magic" aria-hidden="true"></i> 提示一格</button>
@@ -305,6 +306,27 @@
                 hintsEnabled: true, // 是否显示候选数
                 hintCount: 0        // 本局已使用提示次数
             };
+
+            const inputHistory = [];
+            let hiddenSince = null;
+            function rememberInput() {
+                inputHistory.push({board:Sudoku.board.map(row=>row.slice()), hintCount:Sudoku.hintCount});
+                if(inputHistory.length>100) inputHistory.shift();
+                document.getElementById('undo-input').disabled=false;
+            }
+            document.getElementById('undo-input').addEventListener('click', () => {
+                if(!inputHistory.length) return;
+                const previous=inputHistory.pop(); Sudoku.board=previous.board; Sudoku.hintCount=previous.hintCount;
+                updateBoardUI(); document.getElementById('undo-input').disabled=!inputHistory.length;
+                statusMessage.textContent='已撤销上一次填数或清除';
+            });
+            document.addEventListener('visibilitychange', () => {
+                if(document.hidden) hiddenSince=Date.now();
+                else if(hiddenSince!==null) {
+                    if(Sudoku.startTime && Sudoku.timerInterval) Sudoku.startTime=new Date(+Sudoku.startTime+Date.now()-hiddenSince);
+                    hiddenSince=null;
+                }
+            });
 
             // DOM元素
             const boardElement = document.getElementById('sudoku-board');
@@ -485,20 +507,57 @@
                 if (difficulty === 'medium') cellsToRemove = 40;
                 if (difficulty === 'hard') cellsToRemove = 50;
                 
-                let removed = 0;
-                while (removed < cellsToRemove) {
-                    const row = Math.floor(Math.random() * 9);
-                    const col = Math.floor(Math.random() * 9);
-                    
-                    if (Sudoku.original[row][col] !== 0) {
-                        Sudoku.original[row][col] = 0;
-                        Sudoku.board[row][col] = 0;
-                        removed++;
-                    }
+                // 每个位置只尝试一次，避免随机重复；只接受仍有唯一解的挖空。
+                const positions = Array.from({ length: 81 }, (_, i) => i);
+                for (let i = positions.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [positions[i], positions[j]] = [positions[j], positions[i]];
                 }
-                
+                let removed = 0;
+                for (const position of positions) {
+                    if (removed >= cellsToRemove) break;
+                    const row = Math.floor(position / 9), col = position % 9;
+                    const value = Sudoku.original[row][col];
+                    Sudoku.original[row][col] = 0;
+                    if (countSolutions(Sudoku.original) === 1) removed++;
+                    else Sudoku.original[row][col] = value;
+                }
+                Sudoku.board = Sudoku.original.map(row => row.slice());
+
                 // 更新UI
                 updateBoardUI();
+            }
+
+            // 最少候选格优先，找到第二个解就停止；始终在副本上回溯。
+            function countSolutions(puzzle) {
+                const board = puzzle.map(row => row.slice());
+                function search() {
+                    let target = null, candidates = null;
+                    for (let row = 0; row < 9; row++) {
+                        for (let col = 0; col < 9; col++) {
+                            if (board[row][col]) continue;
+                            const values = [];
+                            for (let n = 1; n <= 9; n++) {
+                                if (isValidMove(board, row, col, n)) values.push(n);
+                            }
+                            if (!values.length) return 0;
+                            if (!candidates || values.length < candidates.length) {
+                                target = [row, col]; candidates = values;
+                            }
+                        }
+                    }
+                    if (!target) return 1;
+                    const [row, col] = target;
+                    let count = 0;
+                    for (const value of candidates) {
+                        board[row][col] = value;
+                        count += search();
+                        board[row][col] = 0;
+                        if (count >= 2) return 2;
+                    }
+                    return count;
+                }
+                return search();
             }
 
             // 创建数独解决方案
@@ -810,6 +869,7 @@
                 if (!Sudoku.gameStarted) startGame();
                 clearHintFocus();
                 selectCell(row, col);
+                rememberInput();
                 Sudoku.board[row][col] = num;
                 Sudoku.hintCount += 1;
                 updateBoardUI();
@@ -932,6 +992,7 @@
                 if (Sudoku.original[row][col] !== 0) return;
                 
                 // 更新棋盘
+                rememberInput();
                 Sudoku.board[row][col] = num;
                 updateBoardUI();
                 
@@ -958,6 +1019,7 @@
                 if (Sudoku.original[row][col] !== 0) return;
                 
                 // 清除单元格
+                rememberInput();
                 Sudoku.board[row][col] = 0;
                 
                 // 更新UI
@@ -1040,6 +1102,7 @@
 
             // 完成游戏
             function completeGame() {
+                inputHistory.length=0; document.getElementById('undo-input').disabled=true;
                 // 停止计时器
                 stopTimer();
                 
@@ -1085,6 +1148,7 @@
                 if (Sudoku.timerInterval) clearInterval(Sudoku.timerInterval);
                 
                 Sudoku.timerInterval = setInterval(() => {
+                    if(document.hidden) return;
                     Sudoku.elapsedTime = Math.floor((new Date() - Sudoku.startTime) / 1000);
                     updateTimerDisplay();
                 }, 1000);
@@ -1135,6 +1199,7 @@
 
             // 开始新游戏
             function startNewGame() {
+                inputHistory.length=0; document.getElementById('undo-input').disabled=true; hiddenSince=null;
                 // 重置游戏状态
                 stopTimer();
                 Sudoku.gameStarted = false;

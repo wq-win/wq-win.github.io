@@ -5,6 +5,8 @@ const DIRS={E:[1,0],SE:[Q,Q],S:[0,1],SW:[-Q,Q],W:[-1,0],NW:[-Q,-Q],N:[0,-1],NE:[
 const NAMES=Object.keys(DIRS),STEPS=[[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]],COUNT=16;
 // These are the visible rectangular bodies, not a point at the arrow tip.
 const LENGTH=1.8,WIDTH=.84,SPACING=2.1,EPS=1e-8;
+const COUNTS=[12,16,20,24,18,24,28,32,24,30,36,40,30,36,42,48];
+const SHORT_SEEDS=[5939,6850,7761,301,9583,10494,11405,12316,13227,328325,318,300,16871,318,300,300];
 const SEEDS=[5939,6850,7761,8672,9583,10494,11405,12316,13227,328325,15049,15960,16871,17782,228151,229062];
 function cells(c){const [dx,dy]=DIRS[c.dir];return [[c.x+dx*.5,c.y+dy*.5],[c.x-dx*.5,c.y-dy*.5]];}
 function corners(c){const [dx,dy]=DIRS[c.dir];return [-1,1].flatMap(a=>[-1,1].map(b=>[c.x+a*dx*LENGTH/2-b*dy*WIDTH/2,c.y+a*dy*LENGTH/2+b*dx*WIDTH/2]));}
@@ -45,8 +47,8 @@ function stats(level){
 // scattered exits seed interleaved paths; no concentric lanes or uniform rows.
 // Every new arrow has only already-removed cars ahead, proving a DAG. The
 // physical swept-body solver, not this lattice shortcut, validates gameplay.
-function generate(i){
- const count=50+20*i,side=Math.ceil(Math.sqrt(count*1.08));let seed=SEEDS[i];
+function generate(i,legacy=false){
+ const count=legacy?50+20*i:COUNTS[i],side=Math.ceil(Math.sqrt(count*1.08));let seed=(legacy?SEEDS:SHORT_SEEDS)[i];
  const rand=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
  const all=Array.from({length:side*side},(_,id)=>({col:id%side,row:Math.floor(id/side)}));
  const roots=[all[0],all[side-1],all[side*(side-1)],all[side*side-1]],pool=all.filter(c=>!roots.includes(c));
@@ -71,9 +73,26 @@ function generate(i){
  cars.forEach((c,id)=>c.id=id);return {size:side*SPACING,cars};
 }
 const LEVELS=Array.from({length:COUNT},(_,i)=>generate(i));
+const legacyLevels=new Map();
+function levelFor(state){if(state.catalog!=='legacy-v3')return LEVELS[state.level];if(!legacyLevels.has(state.level))legacyLevels.set(state.level,generate(state.level,true));return legacyLevels.get(state.level);}
 function create(level=0){level=Math.max(0,Math.min(COUNT-1,Number.isInteger(level)?level:0));return {level,remaining:LEVELS[level].cars.map(c=>c.id),completed:[],moves:0};}
-function act(state,id){const level=LEVELS[state.level];if(!state.remaining.includes(id))return {ok:false,blockers:[]};const blocks=blockers(level,state.remaining,id);if(blocks.length)return {ok:false,blockers:blocks};state.remaining=state.remaining.filter(x=>x!==id);state.moves++;if(!state.remaining.length&&!state.completed.includes(state.level))state.completed.push(state.level);return {ok:true,won:!state.remaining.length};}
-function save(state){return JSON.stringify({v:3,...state});}
-function restore(raw){try{const s=JSON.parse(raw);if(s.v===2&&Number.isInteger(s.level)&&s.level>=0&&s.level<COUNT&&Array.isArray(s.completed)){const fresh=create(s.level);fresh.completed=[...new Set(s.completed.filter(i=>Number.isInteger(i)&&i>=0&&i<COUNT))];return fresh;}if(s.v!==3||!Number.isInteger(s.level)||s.level<0||s.level>=COUNT||!Array.isArray(s.remaining)||!Array.isArray(s.completed))return create();const all=LEVELS[s.level].cars.map(c=>c.id);if(new Set(s.remaining).size!==s.remaining.length||s.remaining.some(id=>!all.includes(id)))return create();const possible=new Set(all),removed=new Set(all.filter(id=>!s.remaining.includes(id)));while(removed.size){let progress=false;for(const id of removed)if(!blockers(LEVELS[s.level],possible,id).length){possible.delete(id);removed.delete(id);progress=true;}if(!progress)return create();}return {level:s.level,remaining:s.remaining,completed:[...new Set(s.completed.filter(i=>Number.isInteger(i)&&i>=0&&i<COUNT))],moves:all.length-s.remaining.length};}catch(e){return create();}}
-const api={DIRS,LENGTH,WIDTH,LEVELS,cells,corners,intersects,blockers,solve,stats,generate,create,act,save,restore};if(typeof module!=='undefined')module.exports=api;else root.ParkingEngine=api;
+function act(state,id){const level=levelFor(state);if(!state.remaining.includes(id))return {ok:false,blockers:[]};const blocks=blockers(level,state.remaining,id);if(blocks.length)return {ok:false,blockers:blocks};state.remaining=state.remaining.filter(x=>x!==id);state.moves++;if(!state.remaining.length&&!state.completed.includes(state.level))state.completed.push(state.level);return {ok:true,won:!state.remaining.length};}
+function save(state){return JSON.stringify({v:4,...state});}
+function restore(raw){try{
+ const s=JSON.parse(raw);if(!Number.isInteger(s.level)||s.level<0||s.level>=COUNT||!Array.isArray(s.completed))return create();
+ const completed=[...new Set(s.completed.filter(i=>Number.isInteger(i)&&i>=0&&i<COUNT))];
+ if(s.v===2){const fresh=create(s.level);fresh.completed=completed;return fresh;}
+ if((s.v!==3&&s.v!==4)||!Array.isArray(s.remaining))return create();
+ if(s.v===4&&s.catalog!==undefined&&s.catalog!=='legacy-v3')return create();
+ // Keep an existing v3 run on its exact original board. It transitions to the
+ // short-session catalog only on the player's next-level/restart action.
+ const catalog=s.v===3||s.catalog==='legacy-v3'?'legacy-v3':undefined;
+ const context={level:s.level,...(catalog?{catalog}:{})},level=levelFor(context),all=level.cars.map(c=>c.id);
+ if(new Set(s.remaining).size!==s.remaining.length||s.remaining.some(id=>!all.includes(id)))return create();
+ const possible=new Set(all),removed=new Set(all.filter(id=>!s.remaining.includes(id)));
+ while(removed.size){let progress=false;for(const id of removed)if(!blockers(level,possible,id).length){possible.delete(id);removed.delete(id);progress=true;}if(!progress)return create();}
+ return {...context,remaining:s.remaining,completed,moves:all.length-s.remaining.length};
+}catch(e){return create();}}
+
+const api={COUNTS,levelFor,DIRS,LENGTH,WIDTH,LEVELS,cells,corners,intersects,blockers,solve,stats,generate,create,act,save,restore};if(typeof module!=='undefined')module.exports=api;else root.ParkingEngine=api;
 })(typeof window!=='undefined'?window:globalThis);

@@ -75,7 +75,8 @@ const settle = async () => { await Promise.resolve(); await Promise.resolve(); }
 
 (async function () {
   const env = setup(), { audio, doc, timers } = env;
-  assert.equal(FakeContext.instances.length, 0, 'no context before an explicit toggle');
+  assert.equal(audio.cue('win'),false);
+  assert.equal(FakeContext.instances.length, 0, 'no context before an explicit toggle or cue');
   assert.deepEqual(audio.getState(), {
     supported: true, enabled: false, playing: false, volume: 0.28, status: 'off', error: ''
   });
@@ -89,6 +90,12 @@ const settle = async () => { await Promise.resolve(); await Promise.resolve(); }
   assert.equal(timers.size, 1); assert(context.sources.size > 0);
   assert.equal(context.master.gain.value, 0.4 * 0.65);
 
+  const cueStarts=context.starts;
+  assert.equal(audio.cue('match'),true);assert.equal(context.starts,cueStarts+2);
+  for(let i=0;i<100;i++)assert.equal(audio.cue('tap'),false,'Burst taps are rate limited');
+  context.advance(.2);assert.equal(audio.cue('win'),true);
+  doc.hidden=true;assert.equal(audio.cue('tap'),false,'Hidden tabs cannot emit gameplay cues');doc.hidden=false;
+  context.advance(.3);
   // Exercise more than two complete 16-bar loops; ended voices stay bounded.
   let maxVoices = 0;
   for (let n = 0; n < 3000; n++) {

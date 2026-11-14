@@ -38,7 +38,7 @@
         return { require: state.opening ? { r: 0, s: 0 } : null, nextCount: state.hands[(seat + 1) % 3].length };
     }
 
-    function isMyTurn() { return state && state.turn === 0 && state.over === null && !thinking && !restartPending; }
+    function isMyTurn() { return state && state.turn === 0 && state.over === null && !thinking && !restartPending && !document.hidden; }
 
     function legalMoves() {
         if (!isMyTurn()) return [];
@@ -284,7 +284,7 @@
 
     function poke() {
         window.clearTimeout(timer);
-        if (!state || state.over !== null || restartPending) return;
+        if (!state || state.over !== null || restartPending || document.hidden) return;
         var round = state;
         var version = revision;
         var seat = state.turn;
@@ -304,7 +304,7 @@
         thinking = true;
         render();
         timer = window.setTimeout(function () {
-            if (state !== round || revision !== version || state.turn !== seat || state.over !== null) return;
+            if (state !== round || revision !== version || state.turn !== seat || state.over !== null || document.hidden) return;
             var move = PK.chooseMove(state.hands[seat], state.lead, ctx(seat));
             thinking = false;
             if (!move) return;
@@ -470,5 +470,9 @@
     dialog.addEventListener('close', resumeGame);
     document.getElementById('pdk-restart-cancel').addEventListener('click', function () { dialog.close(); resumeGame(); });
     document.getElementById('pdk-restart-confirm').addEventListener('click', function () { restartPending = false; dialog.close(); start(); });
+    document.addEventListener('visibilitychange', function () {
+        window.clearTimeout(timer); revision += 1; thinking = false; cancelGesture(); moveCache = null;
+        if (!state) return; render(); if (!document.hidden) poke();
+    });
     start();
 }());

@@ -26,7 +26,7 @@ function store() {
   $('saved').textContent = storageOK ? '进度自动保存' : '本次可玩 · 无法保存';
 }
 function cancelAnimation() {
-  epoch++; clearTimeout(hintTimer); hintTimer=null; $('hint').disabled=false; clearTimeout(timer); clearTimeout(effectTimer); timer = null; pending = null; layer.replaceChildren();
+  epoch++; clearTimeout(hintTimer); hintTimer=null; $('hint').disabled=false; clearTimeout(timer); clearTimeout(effectTimer); timer = null; pending = null; layer.replaceChildren();$('win-card').classList.remove('water-win-arrive');feedback.classList.remove('pour-feedback');
   board.querySelectorAll('.invalid,.completed-now,.pour-origin').forEach(el=>el.classList.remove('invalid','completed-now','pour-origin'));
 }
 function bottleLabel(bottle,index) {
@@ -57,7 +57,7 @@ function render(focusIndex) {
   const count = state.bottles.length, rowLength = count > 5 ? Math.ceil(count/2) : count;
   for(let i=0;i<count;i+=rowLength){const row=document.createElement('div');row.className='bottle-row';state.bottles.slice(i,i+rowLength).forEach((b,j)=>row.append(makeBottle(b,i+j)));board.append(row);}
   $('level-number').textContent = String(state.level+1).padStart(2,'0'); $('level-name').textContent = E.LEVELS[state.level].name;
-  $('level-select').value = state.level; $('sorted-count').textContent = state.bottles.filter(b=>E.same(b)&&b.length===4).length; $('color-count').textContent = ' / '+E.LEVELS[state.level].colors;
+  $('level-select').value = String(state.level); $('sorted-count').textContent = state.bottles.filter(b=>E.same(b)&&b.length===4).length; $('color-count').textContent = ' / '+E.LEVELS[state.level].colors;
   $('palette').replaceChildren();COLOURS.slice(0,E.LEVELS[state.level].colors).forEach(c=>{const chip=document.createElement('span');chip.className='palette-chip';chip.style.setProperty('--paint',c.paint);chip.textContent=c.symbol;chip.setAttribute('aria-label',c.name+' '+c.symbol);$('palette').append(chip);});
   const won = E.won(state.bottles); $('win-card').hidden = !won;
   board.inert = won;
@@ -87,28 +87,31 @@ function invalid(index,text) {
 }
 function finishPour() {
   if (!pending) return;
-  const result=pending;clearTimeout(timer);pending=null;layer.replaceChildren();state=result.state;selected=null;store();render(result.to);
-  sound.tone(result.won?'win':'tap');
-  if(result.won) message('所有颜色都分好了。','success');
+  const result=pending;clearTimeout(timer);pending=null;layer.replaceChildren();selected=null;render(result.to);
+  sound.tone(result.won?'win':E.same(state.bottles[result.to])&&state.bottles[result.to].length===4?'match':'tap');
+  if(result.won){message('所有颜色都分好了。','success');if(!reduced())$('win-card').classList.add('water-win-arrive');}
   else if(!E.legalMoves(state.bottles).length) message('没有可倒的位置了，可撤销一步重新规划。','error');
   else message(`${result.from+1} → ${result.to+1} 号瓶，倒入 ${result.amount} 段${COLOURS[result.color].name}。继续选一瓶。`,'success');
   const target=board.querySelector(`[data-bottle="${result.to}"]`);
+  if(!reduced()){target?.classList.add('poured-now');feedback.classList.add('pour-feedback');}
   if(target?.classList.contains('complete')){target.classList.add('completed-now');clearTimeout(effectTimer);effectTimer=setTimeout(()=>target.classList.remove('completed-now'),650);}
 }
 function animate(result) {
-  pending=result;$('undo').disabled=true;$('hint').disabled=true;const token=++epoch;
+  // Persist the accepted move immediately. Animation is presentation only.
+  state=result.state;store();pending=result;selected=null;$('undo').disabled=false;$('hint').disabled=true;$('move-count').textContent=state.moves;const token=++epoch;
   if(reduced()){finishPour();return;}
   const source=board.querySelector(`[data-bottle="${result.from}"]`),target=board.querySelector(`[data-bottle="${result.to}"]`),sceneRect=$('scene').getBoundingClientRect();
   const a=source.querySelector('.bottle-glass').getBoundingClientRect(),b=target.querySelector('.bottle-glass').getBoundingClientRect();
   const ghost=document.createElement('div');ghost.className='pour-ghost';ghost.style.cssText=`left:${a.left-sceneRect.left}px;top:${a.top-sceneRect.top}px;width:${a.width}px;height:${a.height}px;`;ghost.append(source.querySelector('.bottle-glass').cloneNode(true));layer.append(ghost);source.classList.add('pour-origin');
-  board.querySelectorAll('button').forEach(button=>button.disabled=true);message(`正在倒入 ${result.amount} 段${COLOURS[result.color].name}…`);
+  message(`正在倒入 ${result.amount} 段${COLOURS[result.color].name}…`);
   const direction=b.left>=a.left?1:-1, dx=b.left+b.width/2-a.left-a.width/2-direction*5,dy=b.top-a.top-20;
   // Layout is read before the transform so the glass visibly lifts, tilts, then pours.
   void ghost.offsetWidth;ghost.style.transform=`translate(${dx}px,${dy}px) rotate(${direction*62}deg)`;
   timer=setTimeout(()=>{if(token!==epoch||!pending)return;const stream=document.createElement('i');stream.className='pour-stream';stream.style.setProperty('--paint',COLOURS[result.color].paint);stream.style.left=(b.left+b.width/2-sceneRect.left-2)+'px';stream.style.top=(b.top-sceneRect.top-16)+'px';stream.style.height='30px';layer.append(stream);timer=setTimeout(()=>{if(token===epoch)finishPour();},300);},220);
 }
 function pick(index) {
-  if(pending||hintTimer!==null||E.won(state.bottles))return;
+  if(pending)finishPour();
+  if(hintTimer!==null||E.won(state.bottles))return;
   if(selected===index){selected=null;render(index);message('已取消选择。再选一只来源瓶。');return;}
   if(selected===null){if(!state.bottles[index].length){invalid(index,'这是空瓶。请先选一只有颜色的来源瓶。');return;}selected=index;render(index);message(`已选 ${index+1} 号瓶。点空瓶或顶色相同的瓶子；再点来源可取消。`);return;}
   const result=E.act(state,selected,index);
@@ -131,8 +134,26 @@ $('hint').addEventListener('click',()=>{
     message(`试试 ${move.from+1} → ${move.to+1} 号瓶。来源已选好，点亮框的目标瓶即可。`,'success');
   },30);
 });
-$('undo').addEventListener('click',()=>{if(pending||!state.history.length)return;cancelAnimation();selected=null;state=E.undo(state);store();render();message('已撤销上一步，换一种倒法试试。');});
-$('restart').addEventListener('click',()=>start(state.level));$('level-select').addEventListener('change',()=>start(Number($('level-select').value)));$('next-level').addEventListener('click',()=>start((state.level+1)%E.LEVELS.length));
+$('undo').addEventListener('click',()=>{if(pending)finishPour();if(!state.history.length)return;cancelAnimation();selected=null;state=E.undo(state);store();render();message('已撤销上一步，换一种倒法试试。');});
+const confirmDialog=$('water-confirm');let requestedLevel=null,returnFocus=null;
+function requestStart(level,trigger){
+  if(confirmDialog.open)return;
+  // Commit an already accepted pour before asking, so cancellation never loses it.
+  if(pending)finishPour();
+  clearTimeout(hintTimer);hintTimer=null;$('hint').disabled=E.won(state.bottles);
+  $('level-select').value=String(state.level);
+  if(!state.history.length||E.won(state.bottles)){start(level);return;}
+  requestedLevel=level;returnFocus=trigger;
+  $('water-confirm-title').textContent=level===state.level?'放下这局，重新开始？':'切换关卡，放下这一局？';
+  $('water-confirm-copy').textContent='第 '+(state.level+1)+' 关已走 '+state.moves+' 步。确认后当前瓶子和撤销记录会被替换；已完成关卡与最佳记录保留。';
+  $('water-replace').textContent=level===state.level?'确认重新开始':'确认切换到第 '+(level+1)+' 关';
+  confirmDialog.showModal();$('water-keep').focus();
+}
+function keepRun(){requestedLevel=null;confirmDialog.close();$('level-select').value=String(state.level);returnFocus?.focus();message('已保留这一局，继续整理。');}
+$('water-keep').addEventListener('click',keepRun);
+confirmDialog.addEventListener('cancel',event=>{event.preventDefault();keepRun();});
+$('water-replace').addEventListener('click',()=>{if(requestedLevel===null)return;const level=requestedLevel;requestedLevel=null;confirmDialog.close();start(level);returnFocus?.focus();});
+$('restart').addEventListener('click',()=>requestStart(state.level,$('restart')));$('level-select').addEventListener('change',()=>requestStart(Number($('level-select').value),$('level-select')));$('next-level').addEventListener('click',()=>start((state.level+1)%E.LEVELS.length));
 board.addEventListener('keydown',event=>{
   const button=event.target.closest('[data-bottle]');if(!button)return;
   if(event.key==='Escape'&&selected!==null){event.preventDefault();event.stopPropagation();selected=null;render(Number(button.dataset.bottle));message('已取消选择。');return;}

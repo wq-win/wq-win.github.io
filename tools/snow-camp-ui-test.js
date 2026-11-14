@@ -58,6 +58,12 @@ assert.notEqual(source,instrumented);
   c.$('result-restart').click();assert.equal(c.api.state.status,'ready');assert.equal(c.$('result-overlay').hidden,true);
   c.api.state.status='lost';c.api.state.reason='居民不足';c.api.state.residents.forEach(r=>r.alive=false);c.api.sync();assert.equal(c.$('value-food').textContent,'0%');assert.equal(c.$('value-warm').textContent,'0%');assert.match(c.$('result-title').textContent,/炉火/);
   c.$('result-restart').click();assert.equal(c.api.state.status,'ready');
+  assert.match(c.$('resource-outlook').textContent,/当前净变化/);
+  c.$('inspect-map').click();assert.equal(c.$('inspect-map').getAttribute('aria-pressed'),'true');
+  const planning=JSON.stringify(c.api.state);c.window.document.querySelector('[data-building="housing"]').click();c.canvasClick(510,255);c.window.document.querySelector('[data-dispatch="wood"]').click();
+  assert.equal(JSON.stringify(c.api.state),planning,'inspection mode never spends resources or changes staffing');
+  c.$('inspect-map').click();assert.equal(c.$('inspect-map').getAttribute('aria-pressed'),'false');
+  c.api.state.resources.food=0;c.api.state.jobs.cook=0;c.api.sync();assert.match(c.$('supply-advice').textContent,/餐食正在减少/);
   const saved=E.create();E.act(saved,{type:'start'});E.tick(saved,5);E.act(saved,{type:'heat',level:2});const savedWood=saved.resources.wood;const d=setup(E.save(saved));
   try{assert.equal(d.$('resume').hidden,false);d.$('resume').click();assert.equal(d.api.state.elapsed,5);assert.equal(d.api.state.status,'running');assert.equal(d.$('intro-overlay').hidden,true);assert.equal(d.api.state.resources.wood,savedWood);assert.equal(d.$('milestones').querySelectorAll('.done').length,1);d.api.sync();d.window.document.querySelector('[data-building="furnace"]').click();assert.equal(d.api.state.resources.wood,savedWood,'resume does not duplicate rewards');}finally{d.window.happyDOM.abort();}
   const bad=setup('{corrupt');try{assert.equal(bad.$('resume').hidden,true);bad.$('begin').click();assert.equal(bad.api.state.status,'running');}finally{bad.window.happyDOM.abort();}

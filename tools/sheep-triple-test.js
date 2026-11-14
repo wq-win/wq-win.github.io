@@ -1,19 +1,25 @@
 'use strict';
 const assert=require('node:assert/strict');const E=require('../game/js/sheep-triple-engine.js');
-function invariant(s){const gone=new Set(s.removed);assert.equal(gone.size,s.removed.length);assert.equal(s.tiles.length-s.removed.length+s.rack.length+s.holding.length+s.matched,288);assert.equal(new Set([...s.rack,...s.holding]).size,s.rack.length+s.holding.length);for(const id of [...s.rack,...s.holding])assert(gone.has(id));assert(s.holding.length<=3);assert(s.rack.length<=7);assert(s.matched%3===0);for(const n of Object.values(s.counts))assert(n>=0&&n<=5-s.level);const counts=Array(16).fill(0);s.tiles.forEach(t=>counts[t.type]++);assert.deepEqual(counts,Array(16).fill(18));}
+function invariant(s){const gone=new Set(s.removed);assert.equal(gone.size,s.removed.length);assert.equal(s.tiles.length-s.removed.length+s.rack.length+s.holding.length+s.matched,s.tiles.length);assert.equal(new Set([...s.rack,...s.holding]).size,s.rack.length+s.holding.length);for(const id of [...s.rack,...s.holding])assert(gone.has(id));assert(s.holding.length<=3);assert(s.rack.length<=7);assert(s.matched%3===0);for(const n of Object.values(s.counts))assert(n>=0&&n<=(s.boardVersion===1?5-s.level:E.LEVELS[s.level].tools));const counts=Array(16).fill(0);s.tiles.forEach(t=>counts[t.type]++);assert(counts.every(n=>n%3===0));if(s.boardVersion===1)assert.deepEqual(counts,Array(16).fill(18));else assert.equal(counts.filter(Boolean).length,E.LEVELS[s.level].types);}
 let solved=0,shuffled=0;
-for(let seed=0;seed<120;seed++){const s=E.create(seed%5,seed);assert.deepEqual(s.counts,{remove:5-s.level,undo:5-s.level,shuffle:5-s.level});assert.equal(s.tiles.length,288);assert.equal(new Set(s.tiles.map(t=>t.type)).size,16);s.tiles.forEach(t=>{assert(t.x>=0&&t.x+40<=360);assert(t.y>=0&&t.y+40<=375);});assert(E.verify(s,s.certificate).valid,`certificate ${seed}`);solved++;
-const path=s.certificate.slice();for(let n=0;n<80;n++){assert(E.take(s,path[n]));invariant(s);}const before=s.tiles.map(t=>t.type).sort(),rack=s.rack.slice(),holding=s.holding.slice();assert(E.tool(s,'shuffle'));assert.deepEqual(s.rack,rack);assert.deepEqual(s.holding,holding);assert.deepEqual(s.tiles.map(t=>t.type).sort(),before);assert(E.verify(s,s.certificate).valid,`shuffle cert ${seed}`);shuffled++;
+for(let seed=0;seed<120;seed++){const s=E.create(seed%5,seed);assert.deepEqual(s.counts,{remove:E.LEVELS[s.level].tools,undo:E.LEVELS[s.level].tools,shuffle:E.LEVELS[s.level].tools});assert.equal(s.tiles.length,E.LEVELS[s.level].cards);assert.equal(new Set(s.tiles.map(t=>t.type)).size,E.LEVELS[s.level].types);s.tiles.forEach(t=>{assert(t.x>=0&&t.x+40<=360);assert(t.y>=0&&t.y+40<=375);});assert(E.verify(s,s.certificate).valid,`certificate ${seed}`);solved++;
+const path=s.certificate.slice();for(let n=0;n<Math.min(20,s.tiles.length-3);n++){assert(E.take(s,path[n]));invariant(s);}const before=s.tiles.map(t=>t.type).sort(),rack=s.rack.slice(),holding=s.holding.slice();assert(E.tool(s,'shuffle'));assert.deepEqual(s.rack,rack);assert.deepEqual(s.holding,holding);assert.deepEqual(s.tiles.map(t=>t.type).sort(),before);assert(E.verify(s,s.certificate).valid,`shuffle cert ${seed}`);shuffled++;
 }
-// Same seed uses identical parameters across five levels; only tool budgets change.
-for(let level=1;level<5;level++)assert.deepEqual(E.create(level,123).tiles,E.create(0,123).tiles);
+// New levels genuinely progress in card count, type count and occlusion.
+assert.deepEqual(E.LEVELS.map(l=>l.cards),[36,54,72,96,120]);
+for(let level=1;level<5;level++){assert(E.create(level,123).tiles.length>E.create(level-1,123).tiles.length);assert(E.LEVELS[level].types>E.LEVELS[level-1].types);}
+// Version 1 stays byte-for-byte deterministic for previously saved actions.
+const crypto=require('node:crypto');
+for(const [level,seed,previousLayout,hash] of [[0,123,null,'cd7d77d1a4789151293d1964ad739ab35761640c3d5777e49e5d8d8b8cac0b4a'],[4,987654,3,'81e1c5903e9da598d9faf3b89d85178842a23d919da7b2c3d95bdc5f97e781ec'],[2,42,0,'12b036d644bc8c9950e01362b163c22297c0c9ddeb207561312c919655f8365a']]){
+ const legacy=E.create(level,seed,previousLayout,1);assert.equal(legacy.tiles.length,288);assert.equal(crypto.createHash('sha256').update(JSON.stringify(legacy.tiles)).digest('hex'),hash);assert(E.verify(legacy,legacy.certificate).valid);invariant(legacy);
+}
 assert.notDeepEqual(E.create(0,1).tiles.map(t=>[t.x,t.y]),E.create(0,2).tiles.map(t=>[t.x,t.y]));assert.notDeepEqual(E.create().tiles,E.create().tiles);
 // Undo refunds no tool count and repeated tool use stays bounded.
 let s=E.create(4,99),p=s.certificate.slice();E.take(s,p[0]);const id=s.rack[0];assert(E.tool(s,'undo'));assert.equal(s.counts.undo,0);assert.equal(s.removed.length,0);assert(!E.tool(s,'undo'));E.take(s,id);assert(E.tool(s,'remove'));assert.equal(s.counts.remove,0);assert.equal(s.holding[0],id);assert.equal(s.history.length,0);assert(!E.tool(s,'remove'));assert(E.tool(s,'shuffle'));assert(E.verify(s,s.certificate).valid);assert(!E.tool(s,'shuffle'));invariant(s);
 // Arbitrary legal choices, invalid taps, conservation, and successful shuffles.
 for(let seed=1000;seed<1040;seed++){let s=E.create(0,seed),steps=0;while(s.status==='playing'&&steps++<150){const opts=E.available(s).concat(s.holding);if(!opts.length)throw Error('Inaccessible remaining tiles');const id=opts[(seed+steps*17)%opts.length];assert(E.take(s,id));assert(!E.take(s,id));invariant(s);if(steps%13===0){const n=s.counts.shuffle;const ok=E.tool(s,'shuffle');assert.equal(s.counts.shuffle,n-(ok?1:0));if(ok){assert(E.verify(s,s.certificate).valid);shuffled++;}}if(s.status==='lost'){const ok=E.tool(s,'remove')||E.tool(s,'undo');if(ok)assert.equal(s.status,'playing');}}invariant(s);}
 // Explicit six-singleton state: shuffle must not charge for an impossible rescue.
-s=E.create(0,5);const ids=[];for(let t=0;t<6;t++)ids.push(s.tiles.find(a=>a.type===t).id);s.removed=ids.slice();s.rack=ids.slice();const n=s.counts.shuffle;assert(!E.tool(s,'shuffle'));assert.equal(s.counts.shuffle,n);assert(s.message.includes('未扣次数'));assert(E.tool(s,'remove'));assert(E.tool(s,'shuffle'));assert(E.verify(s,s.certificate).valid);
+s=E.create(2,5);const ids=[];for(let t=0;t<6;t++)ids.push(s.tiles.find(a=>a.type===t).id);s.removed=ids.slice();s.rack=ids.slice();const n=s.counts.shuffle;assert(!E.tool(s,'shuffle'));assert.equal(s.counts.shuffle,n);assert(s.message.includes('未扣次数'));assert(E.tool(s,'remove'));assert(E.tool(s,'shuffle'));assert(E.verify(s,s.certificate).valid);
 console.log(`sheep-triple: ${solved} initial certificates, ${shuffled} shuffled certificates, budgets, geometry, conservation, undo and rescue PASS`);
 
 // Distinct silhouettes, no same-layer overlap, and explicit no-repeat restarts.
@@ -25,3 +31,22 @@ for(let seed=0;seed<100;seed++){
 }
 assert.equal(families.size,6);
 console.log('sheep-triple geometry: six silhouettes, 100 non-repeating restarts, no same-layer overlap PASS');
+
+// A fixed local heuristic is a reproducible difficulty proxy, not a human win rate.
+const rates=[];
+for(let level=0;level<5;level++){
+ let wins=0;
+ for(let seed=0;seed<100;seed++){
+  const s=E.create(level,seed);
+  while(s.status==='playing'){
+   const ids=E.available(s),rack=Array(16).fill(0),exposed=Array(16).fill(0);
+   s.rack.forEach(id=>rack[s.tiles[id].type]++);ids.forEach(id=>exposed[s.tiles[id].type]++);
+   const score=id=>rack[s.tiles[id].type]*100+exposed[s.tiles[id].type];ids.sort((a,b)=>score(b)-score(a));
+   assert(E.take(s,ids[0]));
+  }
+  wins+=s.status==='won';
+ }
+ rates.push(wins);
+}
+assert(rates[0]>=90);assert(rates[4]<=30);for(let i=1;i<5;i++)assert(rates[i]<rates[i-1]);
+console.log('sheep-triple balance: fixed matching-first heuristic wins per 100 seeds '+rates.join('/')+'; full solve certificates remain independently verified.');

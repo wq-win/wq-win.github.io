@@ -20,7 +20,7 @@ const gameplay = [...page.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)]
 assert.ok(gameplay, 'gameplay script exists');
 const instrumented = gameplay
     .replace("document.addEventListener('DOMContentLoaded', () => {", '(() => {')
-    .replace('            // 初始化游戏\n', '            globalThis.__sudokuTest = { state: Sudoku, updateBoardUI };\n            // 初始化游戏\n')
+    .replace('            // 初始化游戏\n', '            globalThis.__sudokuTest = { state: Sudoku, updateBoardUI, generateSudoku, countSolutions };\n            // 初始化游戏\n')
     .replace(/\}\);\s*$/, '})();');
 let checks = 0;
 let failed = 0;
@@ -86,6 +86,31 @@ async function main() {
     try {
         const game = setup();
         const { document, state, find, cell, key, empty, view, fullscreen, snapshot } = game;
+        await test('all difficulty generators keep exactly one solution without changing clues', () => {
+            const api = game.window.__sudokuTest;
+            const empty = Array.from({length:9}, () => Array(9).fill(0));
+            assert.equal(api.countSolutions(empty), 2, 'ambiguous puzzle stops at two');
+            for (const difficulty of ['easy','medium','hard']) {
+                for (let sample = 0; sample < 12; sample++) {
+                    api.generateSudoku(difficulty);
+                    const before = clone(state.original);
+                    assert.equal(api.countSolutions(state.original), 1, difficulty);
+                    assert.deepEqual(clone(state.original), before, 'counter does not mutate puzzle');
+                    assert.deepEqual(clone(state.board), before);
+                    assert.ok(before.flat().includes(0));
+                    const solution = clone(state.solution);
+                    const valid = unit => assert.equal(new Set(unit).size, 9);
+                    solution.forEach(valid);
+                    for (let c = 0; c < 9; c++) valid(solution.map(row => row[c]));
+                    for (let r = 0; r < 9; r += 3) for (let c = 0; c < 9; c += 3)
+                        valid(solution.slice(r, r + 3).flatMap(row => row.slice(c, c + 3)));
+                    before.forEach((row,r) => row.forEach((value,c) => {
+                        if (value) assert.equal(value, state.solution[r][c]);
+                    }));
+                }
+            }
+            api.generateSudoku('easy');
+        });
         await test('initial board and every existing control are present', () => {
             assert.equal(find('sudoku-board').children.length, 81);
             assert.equal(state.original.flat().filter(value => !value).length, 30);
@@ -106,6 +131,31 @@ async function main() {
             assert.equal(state.board[row][col], 0);
             assert.equal(cell(row, col).querySelector('.cell-value').textContent, '');
             assert.ok(!cell(row, col).classList.contains('cell-conflict'));
+        });
+        await test('undo restores input and clear without touching clues; new game clears history', () => {
+            find('new-game').click(); assert.equal(find('undo-input').disabled,true);
+            const {row,col}=empty(); cell(row,col).click();
+            const value=state.solution[row][col]%9+1;
+            document.querySelectorAll('.num-btn')[value-1].click();
+            find('clear-btn').click(); assert.equal(state.board[row][col],0);
+            find('undo-input').click(); assert.equal(state.board[row][col],value);
+            find('undo-input').click(); assert.equal(state.board[row][col],0);
+            assert.equal(find('undo-input').disabled,true);
+            find('give-hint').click(); assert.equal(find('undo-input').disabled,false);
+            find('new-game').click(); assert.equal(find('undo-input').disabled,true);
+        });
+        await test('timer does not advance in a hidden tab', () => {
+            find('new-game').click(); const {row,col}=empty(); cell(row,col).click();
+            find('give-hint').click();
+            const before=state.elapsedTime;
+            Object.defineProperty(document,'hidden',{configurable:true,value:true});
+            document.dispatchEvent(new game.window.Event('visibilitychange'));
+            state.startTime=new Date(Date.now()-60000);
+            for(const callback of game.intervals.values()) callback.fn ? callback.fn() : callback();
+            assert.equal(state.elapsedTime,before);
+            Object.defineProperty(document,'hidden',{configurable:true,value:false});
+            document.dispatchEvent(new game.window.Event('visibilitychange'));
+            find('new-game').click();
         });
         await test('keyboard input, deletion, and correct-entry advance are preserved', () => {
             const { row, col } = empty();

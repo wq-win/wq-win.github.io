@@ -46,7 +46,7 @@
     let context = null, master = null, noise = null, timer = null;
     let enabled = false, playing = false, destroyed = false, volume = 0.28;
     let status = Context ? 'off' : 'unavailable', error = '', revision = 0;
-    let step = 0, nextTime = 0;
+    let step = 0, nextTime = 0, lastCue = -Infinity;
     const voices = new Set();
 
     function getState() {
@@ -238,6 +238,17 @@
 
     return {
       getState,
+      // Feedback shares the explicitly enabled music context and volume.
+      // No cue can create/resume audio, and rapid taps cannot build up voices.
+      cue: function (kind) {
+        if (!wanted() || !playing || !context || context.state !== 'running' || volume === 0 || voices.size > 16) return false;
+        const at=context.currentTime;
+        if(at-lastCue<0.055)return false;
+        const notes=({tap:[76],match:[79,84],win:[72,76,79,84],lost:[64,60],tool:[74,79]})[kind];
+        if(!notes)return false;
+        lastCue=at;
+        try{notes.forEach((note,i)=>tone(note,at+0.01+i*0.06,0.12,0.18,'sine'));return true;}catch(_){return false;}
+      },
       toggle: function () {
         if (destroyed || !Context) return Promise.resolve(getState());
         enabled = !enabled;

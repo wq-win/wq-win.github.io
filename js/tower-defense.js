@@ -3,6 +3,44 @@
     const E=window.ForestDefense,canvas=document.getElementById('battle'),ctx=canvas.getContext('2d');
     let state=E.create(),selectedType='arrow',selectedSlot=-1,paused=false,speed=1,last=0,accumulator=0,wasState='ready';
     const $=id=>document.getElementById(id);
+    const motionPreference=window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    const reducedMotion=()=>!!motionPreference?.matches;
+    const feedback=window.GameFeedback?.create({host:$('td-feedback'),key:'mylog-game-feedback-v1'});
+    function pulse(element) {
+        if(!element||reducedMotion()||!element.animate)return;
+        element.getAnimations?.().forEach(animation=>{animation.finished?.catch(()=>{});animation.cancel();});
+        const animation=element.animate([{opacity:.65,transform:'translateY(5px)'},{opacity:1,transform:'translateY(0)'}],{duration:260,easing:'ease-out'});
+        animation.finished?.catch(()=>{});
+    }
+    const SAVE_KEY='mylog-forest-defense-checkpoint-v2';
+    let restoredCheckpoint=false,legacyCheckpoint=false;
+    const mission=()=>E.mission(state.level);
+    let bestStars={};
+    try {const saved=JSON.parse(localStorage.getItem('mylog-forest-tactics-stars-v1')||'{}');if(saved&&typeof saved==='object'&&!Array.isArray(saved)){for(let i=1;i<=E.LEVEL_COUNT;i++)if(Number.isInteger(saved[i])&&saved[i]>=1&&saved[i]<=3)bestStars[i]=saved[i];}}catch(_){}
+    function recordStars(){const stars=E.rating(state);if(stars>(bestStars[state.level]||0)){bestStars[state.level]=stars;try{localStorage.setItem('mylog-forest-tactics-stars-v1',JSON.stringify(bestStars));}catch(_){}}}
+
+    function restoreCheckpoint(raw) {
+        if(typeof raw!=='string'||raw.length>5000)return null;
+        try {
+            const data=JSON.parse(raw),n=(v,min,max)=>Number.isInteger(v)&&v>=min&&v<=max;
+            if(data.version===1&&n(data.level,1,E.LEVEL_COUNT)){legacyCheckpoint=true;return E.create(data.level);}
+            if(data.version!==2||!n(data.level,1,E.LEVEL_COUNT)||!n(data.wave,0,E.WAVES_PER_LEVEL)||!n(data.gold,0,1000000)||!n(data.health,1,20)||!n(data.kills,0,1000000)||!n(data.built,0,1000000)||!n(data.leaks,0,1000000)||!['ready','cleared','won'].includes(data.state)||!Array.isArray(data.towers)||data.towers.length!==E.SLOTS.length)return null;
+            if((data.state==='ready'&&data.wave>=E.WAVES_PER_LEVEL)||(data.state==='cleared'&&(data.wave!==E.WAVES_PER_LEVEL||data.level===E.LEVEL_COUNT))||(data.state==='won'&&(data.wave!==E.WAVES_PER_LEVEL||data.level!==E.LEVEL_COUNT)))return null;
+            if(!data.towers.every(t=>t===null||(t&&Object.hasOwn(E.TYPES,t.type)&&n(t.level,1,3)&&(t.level<3||['power','reach'].includes(t.branch)))))return null;
+            const next=E.create(data.level);
+            Object.assign(next,{built:data.built,leaks:data.leaks,wave:data.wave,gold:data.gold,health:data.health,kills:data.kills,state:data.state,towers:data.towers.map(t=>t?{type:t.type,level:t.level,branch:t.branch,cooldown:0,angle:-Math.PI/2}:null)});
+            return next;
+        } catch(_){return null;}
+    }
+    try { const checkpoint=restoreCheckpoint(localStorage.getItem(SAVE_KEY)||localStorage.getItem('mylog-forest-defense-checkpoint-v1')); if(checkpoint){state=checkpoint;restoredCheckpoint=true;wasState=state.state;} } catch(_){}
+    function saveCheckpoint() {
+        if(!['ready','cleared','won'].includes(state.state))return;
+        try {
+            localStorage.setItem(SAVE_KEY,JSON.stringify({version:2,built:state.built,leaks:state.leaks,level:state.level,wave:state.wave,gold:state.gold,health:state.health,kills:state.kills,state:state.state,towers:state.towers.map(t=>t?{type:t.type,level:t.level,...(t.branch?{branch:t.branch}:{})}:null)}));
+            $('checkpoint-note').textContent='已保存备战点 · 可关闭后继续';
+        } catch(_) { $('checkpoint-note').textContent='无法保存 · 请勿关闭页面'; }
+    }
+
     const terrain=document.createElement('canvas');
     terrain.width=1000;
     terrain.height=600;
@@ -88,12 +126,14 @@
         c.strokeStyle='#d0d2b86b';c.lineWidth=.8;c.beginPath();c.moveTo(x-s*.62,y-s*.78);c.lineTo(x+s*.1,y-s*.95);c.stroke();
     }
     function distanceToPath(x,y) {
-        return Math.min(...E.PATH.slice(1).map((p,i)=> {
-            const a=E.PATH[i],dx=p[0]-a[0],dy=p[1]-a[1],t=Math.max(0,Math.min(1,((x-a[0])*dx+(y-a[1])*dy)/(dx*dx+dy*dy)));
+        return Math.min(...mission().path.slice(1).map((p,i)=> {
+            const a=mission().path[i],dx=p[0]-a[0],dy=p[1]-a[1],t=Math.max(0,Math.min(1,((x-a[0])*dx+(y-a[1])*dy)/(dx*dx+dy*dy)));
             return Math.hypot(x-a[0]-dx*t,y-a[1]-dy*t);
         }));
     }
     function drawTerrain() {
+        seed=73191+state.level*113;
+        g.clearRect(0,0,1000,600);
         const grad=g.createLinearGradient(0,0,0,600);
         grad.addColorStop(0,'#355f47');
         grad.addColorStop(.5,'#6b8a46');
@@ -138,7 +178,7 @@
         g.lineJoin='round';
         for(const [w,color] of [[91,'#354f3280'],[79,'#9c8e54'],[68,'#cfb57a'],[53,'#dec48b']]) {
             g.beginPath();
-            E.PATH.forEach((p,i)=>i?g.lineTo(...p):g.moveTo(...p));
+            mission().path.forEach((p,i)=>i?g.lineTo(...p):g.moveTo(...p));
             g.strokeStyle=color;
             g.lineWidth=w;
             g.stroke();
@@ -157,7 +197,7 @@
         const decor=[];
         for(let i=0; i<320; i++) {
             let x=rnd()*1000,y=rnd()*620;
-            let nearSlot=E.SLOTS.some(p=>Math.hypot(x-p[0],y-p[1])<65);
+            let nearSlot=mission().slots.some(p=>Math.hypot(x-p[0],y-p[1])<65);
             if(distanceToPath(x,y)<65||nearSlot||x>890&&y<300)continue;
             decor.push( {
                 x,y,s:35+rnd()*65,type:rnd()
@@ -166,7 +206,7 @@
         decor.sort((a,b)=>a.y-b.y).forEach(d=>d.type>.19?tree(g,d.x,d.y,d.s,d.type>.65):rock(g,d.x,d.y,d.s*.3));
         for(let i=0; i<180; i++) {
             let x=rnd()*970,y=rnd()*600;
-            if(distanceToPath(x,y)<45||E.SLOTS.some(p=>Math.hypot(x-p[0],y-p[1])<30))continue;
+            if(distanceToPath(x,y)<45||mission().slots.some(p=>Math.hypot(x-p[0],y-p[1])<30))continue;
             g.strokeStyle='#81a35b';
             g.beginPath();
             g.moveTo(x,y);
@@ -174,7 +214,7 @@
             g.stroke();
             ellipse(g,x+2,y-8,2.3,2.3,i%3?'#f4df8a':'#e9eee2');
         }
-        E.SLOTS.forEach(([x,y])=> {
+        mission().slots.forEach(([x,y])=> {
             ellipse(g,x,y+8,36,19,'#334b2d66');
             ellipse(g,x,y+3,31,17,'#adac7e');
             ellipse(g,x,y,27,14,'#c8c28f');
@@ -214,7 +254,7 @@
         poly(g,[[943,324],[949,316],[956,324]],'#9e4440');
     }
     function tower(c,t,x,y) {
-        const selected=selectedSlot===E.SLOTS.findIndex(p=>p[0]===x&&p[1]===y);
+        const selected=selectedSlot===mission().slots.findIndex(p=>p[0]===x&&p[1]===y);
         if(selected) {
             const st=E.stats(t);
             ellipse(c,x,y,st.range,st.range,'#92d6c21a');
@@ -301,12 +341,13 @@
             ellipse(c,29,0,5,11,'#172c32');
             c.restore();
         }
+        if(t.branch){c.strokeStyle=t.branch==='reach'?'#86ecf3':'#ffb263';c.lineWidth=3;c.beginPath();c.ellipse(x,y-40,32,16,0,0,Math.PI*2);c.stroke();}
         for(let k=0;
         k<t.level;
         k++)ellipse(c,x-((t.level-1)*5)+k*10,y+14,3,3,'#ffdf7f');
     }
     function enemy(c,e) {
-        const x=e.x,y=e.y,phase=Math.sin(state.time*11+e.id)*2,large=e.type==='brute'||e.type==='boss',s=e.type==='boss'?1.65:large?1.25:1;
+        const x=e.x,y=e.y,phase=reducedMotion()?0:Math.sin(state.time*11+e.id)*2,large=e.type==='brute'||e.type==='boss',s=e.type==='boss'?1.65:large?1.25:1;
         c.save();
         c.translate(x,y);
         c.scale(s,s);
@@ -348,22 +389,32 @@
         c.fillRect(-15,-44,30,5);
         c.fillStyle=e.type==='boss'?'#eebc65':'#ed8266';
         c.fillRect(-14,-43,28*Math.max(0,e.hp/e.maxHp),3);
+        if(e.flash>0&&!reducedMotion())ellipse(c,0,-15,15,24,'#fff8c744');
         c.restore();
     }
     function draw() {
         ctx.clearRect(0,0,1000,600);
         ctx.drawImage(terrain,0,0);
+        if(state.state==='ready'){
+            ctx.strokeStyle='#fff1a5aa';ctx.lineWidth=3;
+            const path=mission().path;
+            for(let i=1;i<path.length;i++){const a=path[i-1],b=path[i],angle=Math.atan2(b[1]-a[1],b[0]-a[0]),x=(a[0]+b[0])/2,y=(a[1]+b[1])/2;ctx.save();ctx.translate(x,y);ctx.rotate(angle);ctx.beginPath();ctx.moveTo(-8,-7);ctx.lineTo(0,0);ctx.lineTo(-8,7);ctx.stroke();ctx.restore();}
+        }
         const things=state.enemies.map(e=>( {
             y:e.y,draw:()=>enemy(ctx,e)
         }));
         state.towers.forEach((t,i)=> {
             if(t)things.push( {
-                y:E.SLOTS[i][1],draw:()=>tower(ctx,t,...E.SLOTS[i])
+                y:mission().slots[i][1],draw:()=>tower(ctx,t,...mission().slots[i])
             });
         });
         things.sort((a,b)=>a.y-b.y).forEach(o=>o.draw());
-        state.effects.forEach(e=> {
-            let f=1-e.life/e.max;
+        state.effects.slice(-64).forEach(e=> {
+            if(reducedMotion()&&e.type!=='breach')return;
+            let f=reducedMotion()?0:1-e.life/e.max;
+            if(e.type==='defeat'||e.type==='breach'){
+                ctx.globalAlpha=1-f;ctx.strokeStyle=e.type==='breach'?'#ff806d':'#ffdf86';ctx.lineWidth=3;ctx.beginPath();ctx.arc(e.x,e.y,8+f*30,0,Math.PI*2);ctx.stroke();ctx.fillStyle=ctx.strokeStyle;ctx.font='bold 20px system-ui';ctx.textAlign='center';ctx.fillText(e.type==='breach'?'防线受损':'✦',e.x,e.y-20-f*18);ctx.globalAlpha=1;return;
+            }
             ctx.globalAlpha=Math.min(1,e.life*8);
             ctx.strokeStyle=e.type==='magic'?'#99f5ff':e.type==='cannon'?'#ffce73':'#fff4bc';
             ctx.lineWidth=e.type==='magic'?3:2;
@@ -381,7 +432,7 @@
             ctx.globalAlpha=1;
         });
     }
-    const slotButtons=E.SLOTS.map(([x,y],i)=> {
+    const slotButtons=mission().slots.map(([x,y],i)=> {
         const b=document.createElement('button');
         b.className='td-slot';
         b.style.left=x/10+'%';
@@ -391,9 +442,10 @@
             if(paused||['cleared','won','lost'].includes(state.state))return;
             selectedSlot=i;
             if(!state.towers[i]) {
-                if(E.build(state,i,selectedType))announce(`${i+1} 号位建成${E.TYPES[selectedType].name}。`);
+                if(E.build(state,i,selectedType)){announce(`${i+1} 号位建成${E.TYPES[selectedType].name}。`);pulse(b);feedback?.play('success');}
                 else announce(`金币不足，${E.TYPES[selectedType].name}需要 ${E.TYPES[selectedType].cost} 金币。`);
             }
+            saveCheckpoint();
             sync();
         });
         $('slots').appendChild(b);
@@ -401,6 +453,7 @@
     });
     function announce(text) {
         $('announcement').textContent=text;
+        pulse($('announcement'));
     }
     function select(type) {
         selectedType=type;
@@ -410,6 +463,14 @@
     function sync() {
         const ended=['cleared','won','lost'].includes(state.state);
         $('level').textContent=state.level;
+        $('mission-title').textContent=mission().mapName+' · '+mission().name;
+        $('mission-goal').textContent=mission().goal+(bestStars[state.level]?' · 最佳 '+'★'.repeat(bestStars[state.level]):'');
+        $('mission-tip').textContent=mission().brief+' '+mission().tip;
+        $('map-name').textContent=mission().mapName;
+        $('wave-total').textContent='/'+E.WAVES_PER_LEVEL;
+        const plan=E.wavePlan(state.level,Math.min(E.WAVES_PER_LEVEL,state.wave+1));
+        $('wave-preview').textContent=ended?'本关结束 · 查看星级与下一关':(state.wave===E.WAVES_PER_LEVEL?'当前：':'下一波：')+plan.label+' · '+plan.queue.length+' 个敌人 · '+plan.tip;
+        document.querySelectorAll('[data-wave-step]').forEach((b,i)=>{const completed=['running','lost'].includes(state.state)?Math.max(0,state.wave-1):state.wave;b.classList.toggle('done',i<completed);b.classList.toggle('current',!ended&&i===completed);b.classList.toggle('failed',state.state==='lost'&&i===completed);const p=E.wavePlan(state.level,i+1);b.textContent=(i+1)+' '+({goblin:'♟',runner:'➶',brute:'⬟',boss:'♛'}[p.focus]);b.title=p.label+' · '+p.tip;b.setAttribute('aria-label','第 '+(i+1)+' 波 '+p.label+' · '+p.queue.length+' 个敌人');});
         $('health').textContent=state.health;
         $('gold').textContent=state.gold;
         $('wave').textContent=state.wave;
@@ -420,6 +481,7 @@
         });
         slotButtons.forEach((b,i)=> {
             const t=state.towers[i];
+            b.style.left=mission().slots[i][0]/10+'%';b.style.top=mission().slots[i][1]/6+'%';
             b.classList.toggle('built',!!t);
             b.classList.toggle('chosen',selectedSlot===i);
             b.disabled=paused||ended;
@@ -430,20 +492,28 @@
         $('selection-text').textContent=t?`伤害 ${Math.round(E.stats(t).damage)} · 射程 ${E.stats(t).range} · ${t.level===3?'已达最高等级':E.TYPES[t.type].description}`:E.TYPES[selectedType].description+'，点 + 建造。';
         $('upgrade').hidden=!t;
         $('upgrade').disabled=!t||t.level>=3||state.gold<E.upgradeCost(t)||paused||ended;
-        $('upgrade').textContent=t?(t.level>=3?'已满级':`升级 ◈ ${E.upgradeCost(t)} [U]`):'升级';
+        $('upgrade').textContent=t?(t.level>=3?'已满级':t.level===2?`强攻专精 ◈ ${E.upgradeCost(t)}`:`升级 ◈ ${E.upgradeCost(t)} [U]`):'升级';
+        $('specialize').hidden=!t||t.level!==2;
+        $('specialize').disabled=!t||state.gold<E.upgradeCost(t)||paused||ended;
+        $('specialize').textContent=t?`控场专精 ◈ ${E.upgradeCost(t)}`:'控场专精';
+        $('branch-hint').hidden=!t||t.level!==2;
+        $('sell').hidden=!t;
+        $('sell').disabled=!t||state.state!=='ready'||paused;
+        if(t&&t.level===3)$('selection-text').textContent+=(t.branch==='reach'?(' · 控场：长射程 / '+(t.type==='magic'?'强减速':t.type==='cannon'?'大范围':'较低伤害')):' · 强攻：高伤害 / 短射程');
         $('next-wave').disabled=state.state!=='ready'||paused;
         $('next-wave').textContent=state.state==='running'?`第 ${state.wave} 波 · 防守中`:(ended?'战斗结束':`第 ${state.wave+1} 波 · 开始防守 →`);
-        $('wave-hint').textContent=state.state==='running'?`剩余 ${state.queue.length+state.enemies.length} 个敌人`:state.wave===E.WAVES_PER_LEVEL-1?'最终波：首领即将出现':'准备时间不限 · 建好再出发';
+        $('wave-hint').textContent=state.state==='running'?`剩余 ${state.queue.length+state.enemies.length} 个敌人`:state.wave===E.WAVES_PER_LEVEL-1?'最终波：首领即将出现':'备战：可出售换阵 · 再决定迎敌';
         $('pause').disabled=ended;
         $('pause').textContent=paused?'继续':'暂停';
         $('pause').setAttribute('aria-pressed',paused);
         $('speed').textContent=speed+'×';
         $('speed').setAttribute('aria-label',`当前${speed}倍速，切换到${speed===1?2:1}倍速`);
         $('overlay').hidden=!paused&&!ended;
+        $('overlay').dataset.outcome=ended?state.state:'paused';
         if(paused||ended) {
-            $('result-icon').textContent=ended?(state.state==='lost'?'♜':'✦'):'Ⅱ';
+            $('result-icon').textContent=ended?(state.state==='lost'?'♜':'★'.repeat(E.rating(state))+'☆'.repeat(3-E.rating(state))):'Ⅱ';
             $('result-title').textContent=paused?'林地暂时宁静':state.state==='won'?'全部关卡通关！':state.state==='cleared'?`第 ${state.level} 关守卫成功！`:'防线失守';
-            $('result-text').textContent=paused?'准备好后，继续守护翡翠林地。':state.state==='won'?`你守住了全部 ${E.LEVEL_COUNT} 关！本关剩余 ${state.health} 点生命。`:state.state==='cleared'?`已守住本关 ${E.WAVES_PER_LEVEL} 波，剩余 ${state.health} 点生命。下一关敌人更强；生命、金币和建筑将重置。`:`第 ${state.level} 关 · 守到了第 ${state.wave} 波。试试在弯道集中火力，再搭配魔法塔减速。`;
+            $('result-text').textContent=paused?'准备好后，继续守护翡翠林地。':state.state==='won'?`你守住了全部 ${E.LEVEL_COUNT} 关！本关剩余 ${state.health} 点生命。`:state.state==='cleared'?`已守住本关 ${E.WAVES_PER_LEVEL} 波，剩余 ${state.health} 点生命。下一关更换战术与战场；生命、金币和建筑重置。`:`第 ${state.level} 关 · 守到了第 ${state.wave} 波。试试在弯道集中火力，再搭配魔法塔减速。`;
             $('result-action').textContent=paused?'继续守卫':state.state==='cleared'?`进入第 ${state.level+1} 关 →`:state.state==='won'?'从第 1 关再挑战':'重试本关';
         }
     }
@@ -458,20 +528,28 @@
         paused=false;
         selectedSlot=-1;
         wasState='ready';
+        drawTerrain();
         accumulator=0;
         announce(`第 ${state.level} 关已准备好。每关 ${E.WAVES_PER_LEVEL} 波，初始 300 金币，选择空地建造。`);
+        saveCheckpoint();
         sync();
     }
     document.querySelectorAll('[data-tower]').forEach(b=>b.addEventListener('click',()=>select(b.dataset.tower)));
     $('upgrade').addEventListener('click',()=> {
         if(!paused&&E.upgrade(state,selectedSlot)) {
             announce('塔楼升级成功，火力与射程提升。');
+            feedback?.play('success');pulse(slotButtons[selectedSlot]);
+            saveCheckpoint();
             sync();
         }
     });
+    $('specialize').addEventListener('click',()=>{if(!paused&&E.upgrade(state,selectedSlot,'reach')){feedback?.play('success');pulse(slotButtons[selectedSlot]);announce('控场专精：扩展射程，以较低伤害换取覆盖与控制。');saveCheckpoint();sync();}});
+    $('sell').addEventListener('click',()=>{if(!paused&&E.sell(state,selectedSlot)){feedback?.play('undo');announce('已回收 70% 投入金币，可重新布阵。');selectedSlot=-1;saveCheckpoint();sync();}});
     $('next-wave').addEventListener('click',()=> {
         if(!paused&&E.startWave(state)) {
+            feedback?.play('tap');
             announce(`第 ${state.level} 关 · 第 ${state.wave} 波来袭！战斗中也可以建造和升级。`);
+            $('checkpoint-note').textContent='战斗中 · 本波结束后保存，离开将从本波前重打';
             sync();
         }
     });
@@ -518,11 +596,14 @@
             }
         }
         if(state.state!==wasState) {
+            recordStars();
+            if(['cleared','won','lost'].includes(state.state))feedback?.play(state.state==='lost'?'error':'win');
             if(state.state==='ready'&&state.wave>0)announce(`第 ${state.wave} 波守住了！获得补给金币，准备好了再开始下一波。`);
             if(state.state==='cleared')announce(`第 ${state.level} 关的 ${E.WAVES_PER_LEVEL} 波已完成，可以进入下一关。`);
             if(state.state==='won')announce(`守卫成功！全部 ${E.LEVEL_COUNT} 关已完成。`);
             if(state.state==='lost')announce('防线失守。可重试当前关卡。');
             wasState=state.state;
+            saveCheckpoint();
             sync();
         }
         syncElapsed+=elapsed;
@@ -534,6 +615,9 @@
         requestAnimationFrame(frame);
     }
     drawTerrain();
+    if(legacyCheckpoint)announce('塔防已更新为六波短关，保留你的关卡编号，从本关重新布阵。旧版十五波存档不会套用到新规则。');
+    else if(restoredCheckpoint)announce(`已恢复第 ${state.level} 关的备战点。已守住 ${state.wave} 波，金币与塔楼保留；未结束的波次需要重打。`);
+    saveCheckpoint();
     sync();
     requestAnimationFrame(frame);
 })();
