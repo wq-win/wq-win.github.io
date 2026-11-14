@@ -9,7 +9,7 @@
     const positions = {furnace:[510,345],housing:[315,425],sawmill:[715,345],kitchen:[650,505],clinic:[350,235]};
     const hints = {wood:'木材 / 建筑升级',hunt:'生食 / 暴雪减产',coal:'煤炭 / 维持供暖',cook:'生食 → 餐食',build:'逐项完成施工',medic:'需先建医务站'};
     const tips = {furnace:'气温加上供暖与住所保温，就是居民的体感温度。低于 0°C 时寒冷会累积。',housing:'房屋升级为所有居民保温，每级增加 6°C。升级须由建造工完成。',sawmill:'锯木场每级让伐木产量增加 50%。木材可用于所有建筑升级。',kitchen:'厨房升级可提高加工速度与食材利用率。没有生食，厨师也无法做饭。',clinic:'医务站建成后，分配医护才能持续恢复居民健康。保暖和充足餐食仍然重要。'};
-    let feedbackUntil=0, previousMilestones=new Set();
+    let feedbackUntil=0, previousMilestones=new Set(), inspectMap=false;
     let storageHealthy = true;
     try { const raw=localStorage.getItem(STORAGE); if(raw) saved=E.restore(raw); }
     catch(e) { storageHealthy=false; $('save-note').textContent='存档不可用，可开始新营地'; }
@@ -21,6 +21,7 @@
         button.innerHTML='<span>'+names[key]+'</span><small id="pin-'+key+'"></small>';
         button.addEventListener('click',()=>{
             select(key);
+            if(inspectMap){feedback('已查看'+names[key]+'，可在设施面板确认操作。');return;}
             if(key==='furnace') action({type:'heat',level:state.furnace.level>=3?1:state.furnace.level+1});
             else action({type:'build',building:key});
         });$('building-pins').appendChild(button);
@@ -29,11 +30,12 @@
     Object.entries(resourceSpots).forEach(([job,[x,y,label]])=>{
         const button=document.createElement('button');button.className='building-pin resource-pin';button.dataset.dispatch=job;
         button.style.left=x/10+'%';button.style.top=y/6.4+'%';button.innerHTML='<span>'+label+' ＋</span><small id="spot-'+job+'"></small>';
-        button.setAttribute('aria-label','派一名居民去'+label);button.addEventListener('click',()=>action({type:'dispatch',job}));$('building-pins').appendChild(button);
+        button.setAttribute('aria-label','派一名居民去'+label);button.addEventListener('click',()=>{if(inspectMap){feedback(label+'岗位：请在人手安排中调整。');return;}action({type:'dispatch',job});});$('building-pins').appendChild(button);
     });
     $('camp-scene').addEventListener('click',event=>{
         if(intro||['won','lost'].includes(state.status))return;
         const r=$('camp-scene').getBoundingClientRect(),x=(event.clientX-r.left)/r.width*1000,y=(event.clientY-r.top)/r.height*640;
+        if(inspectMap){const anchors={furnace:[510,255],housing:[325,350],sawmill:[735,290],kitchen:[650,420],clinic:[370,210]};const hit=Object.entries(anchors).filter(([,p])=>Math.abs(x-p[0])<65&&Math.abs(y-p[1])<65).sort((a,b)=>Math.hypot(x-a[1][0],y-a[1][1])-Math.hypot(x-b[1][0],y-b[1][1]))[0];if(hit){select(hit[0]);feedback('已查看'+names[hit[0]]+'，可在设施面板确认操作。');}else feedback('查看模式：点建筑查看，派工请在人手安排中调整。');return;}
         if(x>825&&y>210&&y<460){action({type:'dispatch',job:'wood'});return;}
         if(x>715&&x<825&&y>145&&y<245){action({type:'dispatch',job:'coal'});return;}
         if(x>130&&x<260&&y>240&&y<340){action({type:'dispatch',job:'hunt'});return;}
@@ -63,6 +65,18 @@
     $('building-details').addEventListener('click',e=>{const h=e.target.closest('[data-heat]');if(h) action({type:'heat',level:Number(h.dataset.heat)});if(e.target.closest('#build'))action({type:'build',building:selected});});
     function sync(){
         const v=E.view(state),ended=['won','lost'].includes(state.status);
+        const signed=n=>(n>=0?'+':'−')+Math.abs(n*E.DAY_SECONDS).toFixed(1);
+        $('resource-outlook').textContent='当前净变化 / 天：煤 '+signed(v.rates.coal)+' · 餐食 '+signed(v.rates.food)+'（按当前生产估算）';
+        let warning='物资稳定时，记得为第三天暴雪提前保温。';
+        if(state.furnace.level>0&&!v.furnaceActive)warning='暖炉缺煤：增加采煤工，或暂时调低炉火档位。';
+        else if(v.rates.food<0&&state.resources.food<8)warning='餐食正在减少：安排狩猎与厨师，留意生食是否充足。';
+        else if(v.effectiveTemperature<0)warning='体感低于 0°C：提高供暖或升级住所，注意煤炭储备。';
+        else if(v.rates.coal<0&&state.resources.coal<8)warning='煤炭储备偏低：增加采煤工，避免夜里断火。';
+        if($('supply-advice').textContent!==warning)$('supply-advice').textContent=warning;
+        $('inspect-map').disabled=intro||ended;
+        $('inspect-map').setAttribute('aria-pressed',String(inspectMap));
+        $('inspect-map').textContent=inspectMap?'地图：只查看':'地图：直接操作';
+
         ['wood','coal','rawFood','food'].forEach(key=>{$(key).textContent=Math.floor(state.resources[key]);});
         $('population').textContent=v.population+' / 8';$('free-workers').textContent=v.freeWorkers;
         const hour=Math.floor(v.hour),minute=Math.floor((v.hour-hour)*60);
@@ -118,6 +132,7 @@
         if(state.status==='ready'||state.status==='paused')E.act(state,{type:'start'});
         renderDetails();sync();persist();$('pause').focus();
     }
+    $('inspect-map').addEventListener('click',()=>{inspectMap=!inspectMap;sync();feedback(inspectMap?'查看模式：点击地图不会花费物资或调派工人。':'操作模式：点击建筑建造/升级，点资源派工。');});
     $('begin').addEventListener('click',()=>enter(false));$('resume').addEventListener('click',()=>enter(true));
     $('pause').addEventListener('click',()=>{if(!intro){action({type:state.status==='running'?'pause':'start'});last=null;}});
     $('speed').addEventListener('click',()=>{speed=speed===1?2:speed===2?4:1;$('speed').textContent=speed+'× 速度';last=null;});

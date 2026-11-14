@@ -10,7 +10,7 @@ for (const slug of ['water-sort','sum-ten','tile-frontier','hanzi-battle','yarn'
   assert(nav.includes(`href: 'game/${slug}.html'`), `missing navigation: ${slug}`);
   const html = read(`game/${slug}.html`);
   for (const match of html.matchAll(/(?:src|href)="([^"#]+)"/g)) {
-    const link = match[1];
+    const link = match[1].split(/[?#]/)[0];
     if (/^(?:https?:|data:|mailto:)/.test(link)) continue;
     const target = link.startsWith('/') ? path.join(root, link) : path.resolve(root, 'game', link);
     assert(fs.existsSync(target), `${slug}: missing local asset ${link}`);

@@ -149,9 +149,31 @@
     }
 
     function suitCount() {
-        var stored = localStorage.getItem('mylog-spider-suits');
+        var stored; try { stored = localStorage.getItem('mylog-spider-suits'); } catch (_) {}
         var n = Number(stored || 1);
         return n === 2 || n === 4 ? n : 1;
+    }
+
+    var RUN_KEY = 'mylog-spider-run-v1';
+    function validRun(run) {
+        if (!run || ![1,2,4].includes(run.suits) || !Number.isInteger(run.done) || run.done<0 || run.done>8 || !Array.isArray(run.columns) || run.columns.length!==10 || !run.columns.every(Array.isArray) || !Array.isArray(run.stock) || run.stock.length>50 || run.stock.length%10) return false;
+        var cards = run.columns.flat().concat(run.stock), deck = buildDeck(run.suits), ids = new Set();
+        if (cards.length !== 104-run.done*13) return false;
+        return cards.every(function(card) {
+            if (!card || !Number.isInteger(card.id) || card.id<1 || card.id>104 || ids.has(card.id) || typeof card.up!=='boolean') return false;
+            ids.add(card.id); var expected=deck[card.id-1]; return card.r===expected.r && card.s===expected.s;
+        }) && run.columns.every(function(col){ return !col.length || col[col.length-1].up; });
+    }
+    function saveRun() {
+        try { localStorage.setItem(RUN_KEY, JSON.stringify({version:1,state:state,past:past})); } catch (_) {}
+    }
+    function restoreRun() {
+        try {
+            var raw=localStorage.getItem(RUN_KEY); if (!raw || raw.length>700000) return false;
+            var saved=JSON.parse(raw);
+            if(saved.version!==1 || !validRun(saved.state) || !Array.isArray(saved.past) || saved.past.length>80 || !saved.past.every(validRun)) return false;
+            state=saved.state; past=saved.past; selected=null; setMessage('已恢复上次牌局 · 撤销记录也保留'); render(); return true;
+        } catch (_) { return false; }
     }
 
     function setMessage(text) {
@@ -159,6 +181,7 @@
     }
 
     function render() {
+        saveRun();
         var cols = document.getElementById('spider-cols');
         var stock = document.getElementById('spider-stock');
         var done = document.getElementById('spider-done');
@@ -267,7 +290,7 @@
         state.won = true;
         var wins = readWins();
         wins[state.suits] = (wins[state.suits] || 0) + 1;
-        localStorage.setItem(winsKey(), JSON.stringify(wins));
+        try { localStorage.setItem(winsKey(), JSON.stringify(wins)); } catch (_) {}
         setMessage('这局收完了');
     }
 
@@ -340,9 +363,15 @@
         state = fresh(suits);
         past = [];
         selected = null;
-        localStorage.setItem('mylog-spider-suits', String(suits));
+        try { localStorage.setItem('mylog-spider-suits', String(suits)); } catch (_) {}
         setMessage('');
         render();
+    }
+
+    function requestStart(suits) {
+        // 即使刚载入且没有可撤销步骤，也不能无提示覆盖一局牌。
+        if (state && state.done < 8 && !window.confirm('重新开局会替换当前牌局和撤销记录，确定继续吗？')) return;
+        start(suits);
     }
 
     function undo() {
@@ -353,13 +382,13 @@
         render();
     }
 
-    document.getElementById('spider-new').addEventListener('click', function () { start(state.suits); });
+    document.getElementById('spider-new').addEventListener('click', function () { requestStart(state.suits); });
     document.getElementById('spider-undo').addEventListener('click', undo);
     document.getElementById('spider-hint').addEventListener('click', hint);
     document.querySelectorAll('[data-suits]').forEach(function (button) {
         button.addEventListener('click', function () {
-            start(Number(button.getAttribute('data-suits')));
+            requestStart(Number(button.getAttribute('data-suits')));
         });
     });
-    start(suitCount());
+    if (!restoreRun()) start(suitCount());
 }());

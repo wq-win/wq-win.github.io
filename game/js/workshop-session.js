@@ -34,6 +34,6 @@ root.WorkshopSession = function (options) {
   help.textContent = '玩法'; help.setAttribute('aria-label', '查看玩法说明');
   (options.nav || document.querySelector('nav')).append(help);
   help.addEventListener('click', () => open('三步上手', options.rules, '知道了'));
-  return { confirm(action) { open('要离开当前进度吗？', '重新开始或切换关卡会清除本局操作，已完成的关卡记录会保留。', '放弃本局并继续', action); } };
+  return { confirm(action) { open('要离开当前进度吗？', options.confirmText || '重新开始或切换关卡会清除本局操作，已完成的关卡记录会保留。', '放弃本局并继续', action); } };
 };
 })(window);

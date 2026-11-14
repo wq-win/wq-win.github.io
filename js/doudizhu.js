@@ -69,7 +69,7 @@
         hintTimer = 0;
     }
 
-    function canAct() { return !!state && state.turn === 'you' && !state.over && !thinking && !hinting && !paused; }
+    function canAct() { return !!state && state.turn === 'you' && !state.over && !thinking && !hinting && !paused && !document.hidden; }
     function clearHint() { hintText = ''; hintPass = false; }
     function selectedCounts() {
         var counts = emptyCounts();
@@ -264,14 +264,14 @@
     }
 
     function opponentTurn() {
-        if (!state || state.over || state.turn !== 'opp' || paused) return;
+        if (!state || state.over || state.turn !== 'opp' || paused || document.hidden) return;
         thinking = true;
         window.clearTimeout(aiTimer);
         var ticket = generation;
         var game = state;
         render();
         aiTimer = window.setTimeout(function () {
-            if (ticket !== generation || state !== game || paused || state.over || state.turn !== 'opp') return;
+            if (ticket !== generation || state !== game || paused || state.over || state.turn !== 'opp' || document.hidden) return;
             aiTimer = 0;
             var move;
             try {
@@ -455,6 +455,12 @@
                 }
             }
         });
+    });
+    document.addEventListener('visibilitychange', function () {
+        invalidateTimers(); thinking = false; hinting = false; clearHint();
+        if (!state) return;
+        render();
+        if (!document.hidden && !paused) opponentTurn();
     });
     if (LEVELS.length) load(0);
 }());

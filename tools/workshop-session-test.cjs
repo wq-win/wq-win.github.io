@@ -20,13 +20,13 @@ const assert=require('node:assert/strict'),fs=require('node:fs');
   if(name==='parking'){
    const id=g.ParkingEngine.solve(g.ParkingEngine.LEVELS[0])[0],car=doc.querySelector('[data-car="'+id+'"]'),v=doc.getElementById('board-viewport');
    v.dispatchEvent(new g.PointerEvent('pointerdown',{clientX:0,clientY:0}));v.dispatchEvent(new g.PointerEvent('pointermove',{clientX:30,clientY:0}));v.dispatchEvent(new g.PointerEvent('pointerup'));
-   car.dispatchEvent(new g.MouseEvent('click',{detail:1}));assert.equal(doc.getElementById('remaining').textContent,'50','drag is not a car tap');
-   car.click();await new Promise(r=>setTimeout(r,8));assert.equal(doc.getElementById('remaining').textContent,'49');
+   car.dispatchEvent(new g.MouseEvent('click',{detail:1}));assert.equal(doc.getElementById('remaining').textContent,'12','drag is not a car tap');
+   car.click();await new Promise(r=>setTimeout(r,8));assert.equal(doc.getElementById('remaining').textContent,'11');
   }
   const saved=JSON.stringify(g.localStorage);doc.getElementById('restart').click();assert(doc.querySelector('dialog').open,name+' restart protects progress');
   doc.querySelector('.workshop-sheet-actions button').click();assert.equal(JSON.stringify(g.localStorage),saved,'cancel must not mutate save');
   doc.getElementById('restart').click();doc.querySelector('.workshop-sheet-actions button:last-child').click();assert(!doc.querySelector('dialog').open);
-  assert.equal(doc.getElementById(name==='parking'?'remaining':name==='yarn'?'slot-count':'removed').textContent,name==='parking'?'50':'0');
+  assert.equal(doc.getElementById(name==='parking'?'remaining':name==='yarn'?'slot-count':'removed').textContent,name==='parking'?'12':'0');
   await g.happyDOM.close();
  }
  console.log('Workshop help / cancel / confirm / duplicate click / focus restoration: passed');

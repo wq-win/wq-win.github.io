@@ -311,6 +311,15 @@ function visible(element) {
 
 // Original rules are exercised through the exact production engine plus its
 // existing randomized regression suite, with browser-only `print` supplied.
+test('backgrounding cancels AI work and visible return resumes the same turn', () => {
+    const game=createGame(); game.fixture({turn:1}); game.api.poke();
+    const before=clone(game.api.state); assert.ok(game.timers.size);
+    game.document.hidden=true; game.document.dispatchEvent({type:'visibilitychange'});
+    assert.equal(game.timers.size,0); assert.deepEqual(clone(game.api.state),before);
+    game.document.hidden=false; game.document.dispatchEvent({type:'visibilitychange'});
+    assert.ok(game.timers.size); game.drainOne(); assert.notDeepEqual(clone(game.api.state),before);
+});
+
 test('original engine regression suite (40 games, 30 deals)', () => {
     const context = vm.createContext({ print() {} });
     vm.runInContext(engineSource, context);

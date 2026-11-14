@@ -3,8 +3,13 @@
     const engine = window.NetEngine;
     const $ = id => document.getElementById(id);
     const boardElement = $('net-board'), status = $('net-status');
-    let board, selected = 0, hinted = -1, hasWon = false;
+    const feedback = window.GameFeedback ? window.GameFeedback.create({host:$('net-feedback')}) : {play(){}};
+    let board, selected = 0, hinted = -1, hasWon = false, direction = 1, history = [];
+    const saveKey = "mylog-net-run-v1";
+    function save(){try { localStorage.setItem(saveKey,window.NetSession.encode(board)); $("save-status").textContent="本局自动保存 · 刷新可续玩"; } catch (_) { $("save-status").textContent="无法保存，请勿关闭本局"; }}
     const directionNames = ['上', '右', '下', '左'];
+    const session=window.WorkshopSession?window.WorkshopSession({confirmText:'重置会恢复本局开局，已用提示不返还；换关或换题会替换当前棋盘。取消可继续本局。',rules:'① 从金色光源向外连接，点击线路旋转。\n② 用顺/逆时针按钮选择方向，也可撤回最近旋转。\n③ 连通每格并消除悬空管口即可过关；提示不因撤回或重置返还。'}):null;
+    function protect(action){if(session&&board&&board.moves>0&&!hasWon)session.confirm(action);else action();}
     function seed() { if (window.crypto && window.crypto.getRandomValues) return window.crypto.getRandomValues(new Uint32Array(1))[0]; return Date.now() ^ Math.floor(Math.random() * 0xffffffff); }
     function tileSVG(mask, index, powered) {
         const endpoints = [[50, 0], [100, 50], [50, 100], [0, 50]];
@@ -43,6 +48,8 @@
         $('powered-count').textContent = state.powered.size;
         $('cell-total').textContent = board.masks.length;
         $('move-count').textContent = board.moves;
+        $('undo-board').disabled = history.length === 0 || state.solved;
+        save();
         $('hint-count').textContent = board.hintsLeft;
         $('hint-board').disabled = board.hintsLeft === 0 || state.solved;
         $('hint-board').setAttribute('aria-label', `提示：校准一格，剩余 ${board.hintsLeft} 次`);
@@ -55,9 +62,19 @@
         } else hasWon = false;
         if (message) status.textContent = message;
     }
-    function startBoard(next) { board = next; selected = board.source; hinted = -1; hasWon = false; $('board-scroll').scrollLeft = 0; $('board-scroll').scrollTop = 0; render(`第 ${board.level} / ${engine.LEVELS.length} 关，${board.width} × ${board.height}，共 ${board.masks.length} 格。从金色光源开始，连通所有线路。`); }
+    function startBoard(next) { history = []; board = next; selected = board.source; hinted = -1; hasWon = false; $('board-scroll').scrollLeft = 0; $('board-scroll').scrollTop = 0; render(`第 ${board.level} / ${engine.LEVELS.length} 关，${board.width} × ${board.height}，共 ${board.masks.length} 格。从金色光源开始，连通所有线路。`); }
     function newBoard() { startBoard(engine.generateLevel(Number($('board-level').value), seed())); }
-    function rotateAt(index, direction = 1) { if (engine.turn(board, index, direction)) { hinted = -1; selected = index; const state = engine.inspect(board.masks, board, board.source); render(`已${direction === 1 ? '顺' : '逆'}时针旋转。已点亮 ${state.litTerminals} / ${state.terminals.length} 个终点，${state.powered.size} / ${board.masks.length} 格通电。`); } }
+    function rotateAt(index, turn = direction) {
+        const before={index,mask:board.masks[index],moves:board.moves};
+        const prior = engine.inspect(board.masks,board,board.source);
+        if (engine.turn(board, index, turn)) {
+            history.push(before); if(history.length>100)history.shift(); hinted=-1;selected=index;
+            const state=engine.inspect(board.masks,board,board.source);
+            render(`已${turn === 1 ? '顺' : '逆'}时针旋转。已点亮 ${state.litTerminals} / ${state.terminals.length} 个终点，${state.powered.size} / ${board.masks.length} 格通电。`);
+            const tile=boardElement.children[index];tile.className += turn===1?' net-rotate-cw':' net-rotate-ccw';
+            feedback.play(state.solved?'win':state.litTerminals>prior.litTerminals?'success':'tap',state.solved?$('victory'):tile);
+        } else { status.textContent=hasWon?'本关已完成，可以进入下一关或重玩。':'这次操作没有改变线路。';feedback.play('error',boardElement.children[index]); }
+    }
     boardElement.addEventListener('click', event => { const cell = event.target.closest('[data-index]'); if (cell && boardElement.contains(cell)) rotateAt(Number(cell.dataset.index)); });
     boardElement.addEventListener('focusin', event => { const cell = event.target.closest('[data-index]'); if (!cell) return; selected = Number(cell.dataset.index); Array.from(boardElement.children).forEach((el, n) => { el.tabIndex = n === selected ? 0 : -1; }); });
     boardElement.addEventListener('keydown', event => {
@@ -67,13 +84,16 @@
         else if (event.key.toLowerCase() === 'r') { event.preventDefault(); rotateAt(i, -1); }
         // Enter and Space use the native button's click, avoiding double rotations.
     });
-    $('reset-board').addEventListener('click', () => { engine.reset(board); hinted = -1; hasWon = false; render(`已恢复本局开局。还剩 ${board.hintsLeft} 次提示。`); });
-    $('hint-board').addEventListener('click', () => { const i = engine.hint(board); if (i < 0) return; hinted = i; selected = i; render(`已校准第 ${Math.floor(i / board.width) + 1} 行第 ${i % board.width + 1} 列，以金色虚线标记。还剩 ${board.hintsLeft} 次提示。`); boardElement.children[i].focus(); });
-    $('new-board').addEventListener('click', newBoard);
+    $('reset-board').addEventListener('click', () => protect(()=>{ history=[]; engine.reset(board); hinted = -1; hasWon = false; render(`已恢复本局开局。还剩 ${board.hintsLeft} 次提示。`); }));
+    $('hint-board').addEventListener('click', () => { const i = engine.hint(board); if (i < 0) { status.textContent=hasWon?'本关已完成，不需要提示。':'本局提示已用完，可以继续旋转或撤回。';feedback.play('error',$('hint-board'));return; } history=[]; hinted = i; selected = i; render(`已校准第 ${Math.floor(i / board.width) + 1} 行第 ${i % board.width + 1} 列，以金色虚线标记。还剩 ${board.hintsLeft} 次提示。`); boardElement.children[i].focus();feedback.play(hasWon?'win':'success',hasWon?$('victory'):boardElement.children[i]); });
+    $('new-board').addEventListener('click',()=>protect(newBoard));
     $('play-again').addEventListener('click', () => { newBoard(); boardElement.children[selected].focus(); });
     $('next-level').addEventListener('click', () => { const next = engine.nextLevel(board, seed()); if (!next) return; startBoard(next); boardElement.children[selected].focus(); });
     engine.LEVELS.forEach(level => { const option = document.createElement('option'); option.value = String(level.level); option.textContent = `第 ${level.level} 关 · ${level.width} × ${level.height} · ${level.width * level.height} 格`; $('board-level').appendChild(option); });
     $('board-level').value = '1';
-    $('board-level').addEventListener('change', newBoard);
-    newBoard();
+    $('board-level').addEventListener('change',()=>{const level=Number($('board-level').value);$('board-level').value=String(board.level);protect(()=>startBoard(engine.generateLevel(level,seed())));});
+    $('undo-board').addEventListener('click',()=>{if(!history.length||hasWon)return;const prior=history.pop();board.masks[prior.index]=prior.mask;board.moves=prior.moves;selected=prior.index;hinted=-1;render('已撤回一次旋转。提示次数不变。');boardElement.children[selected].focus();feedback.play('undo',boardElement.children[selected]);});
+    $('turn-direction').addEventListener('click',()=>{direction=-direction;$('turn-direction').setAttribute('aria-pressed',String(direction===-1));$('turn-direction').textContent=direction===1?'顺时针 ↻':'逆时针 ↺';status.textContent=direction===1?'点击线路顺时针旋转。':'点击线路逆时针旋转，少点两次。';});
+    let restored=null;try{restored=window.NetSession.restore(localStorage.getItem(saveKey),engine);}catch(_){}
+    if(restored){startBoard(restored);status.textContent='已恢复上次的第 '+board.level+' 关，旋转与提示次数均保留。';}else newBoard();
 }());

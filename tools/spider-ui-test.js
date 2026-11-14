@@ -192,10 +192,11 @@ function createGame(options = {}) {
         console, document, Math: random,
         CustomEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
         localStorage: {
-            getItem(name) { return storage[name] ?? null; },
-            setItem(name, value) { storage[name] = String(value); }
+            getItem(name) { if(options.blockStorage) throw Error('Storage blocked'); return storage[name] ?? null; },
+            setItem(name, value) { if(options.blockStorage) throw Error('Storage blocked'); storage[name] = String(value); }
         }
     };
+    sandbox.confirm = options.confirm || (() => true);
     sandbox.window = sandbox;
     sandbox.addEventListener = document.addEventListener.bind(document);
     const context = vm.createContext(sandbox);
@@ -244,6 +245,40 @@ function assertDeck(game, suits) {
         for (let r = 1; r <= 13; r++) assert.equal(cards.filter(c => c.s === s && c.r === r).length, 8 / suits);
     }
 }
+
+test('cancelled restart and difficulty change preserve saved game, history and selection', () => {
+    let prompts = 0, accept = false;
+    const g = createGame({confirm: () => { prompts++; return accept; }});
+    g.get('spider-deal').click();
+    g.card(0, g.snap().columns[0].length - 1).click();
+    const selection = g.selection();
+    const before = g.snap(), saved = g.storage['mylog-spider-run-v1'];
+    for (const button of [g.get('spider-new'), g.document.querySelector('[data-suits="4"]')]) {
+        button.click();
+        assert.deepEqual(g.snap(), before);
+        assert.equal(g.api.history(), 1);
+        assert.deepEqual(g.selection(), selection);
+        assert.equal(g.storage['mylog-spider-run-v1'], saved);
+    }
+    assert.equal(prompts, 2);
+    accept = true;
+    g.document.querySelector('[data-suits="4"]').click();
+    assertDeck(g, 4); assert.equal(g.snap().stock.length, 50);
+    assert.equal(g.api.history(), 0);
+    const restored = createGame({storage:g.storage});
+    assert.deepEqual(restored.snap(), g.snap());
+});
+
+test('saved game restores cards and undo history; malformed saves fall back safely', () => {
+    const unavailable=createGame({blockStorage:true}); assertDeck(unavailable,1); unavailable.get('spider-deal').click();
+    const game=createGame(); game.get('spider-deal').click();
+    const after=game.snap(); assert.equal(game.api.history(),1);
+    const restored=createGame({storage:game.storage});
+    assert.deepEqual(restored.snap(),after); assert.equal(restored.api.history(),1);
+    restored.get('spider-undo').click(); assert.equal(restored.snap().stock.length,50);
+    const broken=JSON.parse(game.storage['mylog-spider-run-v1']); broken.state.columns[0][0].r=99;
+    const fresh=createGame({storage:{'mylog-spider-run-v1':JSON.stringify(broken)}}); assertDeck(fresh,1);
+});
 
 test('page connects shared view controls and keeps all actions outside the horizontal board', () => {
     const g = createGame();

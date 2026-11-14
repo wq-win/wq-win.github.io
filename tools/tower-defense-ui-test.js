@@ -12,7 +12,7 @@ const root = path.resolve(__dirname, '..');
 const E = require('../js/tower-defense-engine.js');
 const page = fs.readFileSync(path.join(root, 'game/tower-defense.html'), 'utf8');
 const controller = fs.readFileSync(path.join(root, 'js/tower-defense.js'), 'utf8');
-const instrumented = controller.replace(/\}\)\(\);\s*$/, '\nwindow.__tdTest = { get state() { return state; }, sync };\n})();');
+const instrumented = controller.replace(/\}\)\(\);\s*$/, '\nwindow.__tdTest = { get state() { return state; }, sync, restoreCheckpoint };\n})();');
 assert.notEqual(instrumented, controller, 'Test-only state instrumentation installed');
 const clone = value => JSON.parse(JSON.stringify(value));
 
@@ -44,6 +44,11 @@ async function main() {
         let now = 1000;
         window.requestAnimationFrame = callback => { frameCallback = callback; return 1; };
         window.confirm = () => true;
+        let motionReduced=false,animations=0;const feedbackCalls=[];
+        window.matchMedia=()=>({get matches(){return motionReduced;}});
+        window.Element.prototype.animate=()=>{animations++;return {finished:Promise.resolve()};};
+        window.Element.prototype.getAnimations=()=>[];
+        window.GameFeedback={create:({host})=>{assert.equal(host.id,'td-feedback');return {play:type=>feedbackCalls.push(type)};}};
         window.ForestDefense = E;
         window.eval(instrumented);
         const api = window.__tdTest;
@@ -64,7 +69,35 @@ async function main() {
             assert.equal(find('upgrade').hidden, true);
             assert.equal(window.document.querySelectorAll('.td-slot.built').length, 0);
         };
+        const css=fs.readFileSync(path.join(root,'css/tower-defense.css'),'utf8');
+        assert.match(css,/grid-template-areas:\s*"top" "brief" "battle" "bottom" "note" "help"/);
+        assert.match(css,/grid-template-rows:auto auto minmax\(0,1fr\) auto auto auto/);
+        assert.match(css,/grid-template-areas:\s*"top top" "battle brief" "battle bottom" "note note" "help help"/);
+        for(const [selector,area] of [['td-top','top'],['td-mission','brief'],['td-battle-scroll','battle'],['td-bottom','bottom']])assert.ok(css.includes(`.${selector}{grid-area:${area}}`));
         assertReset(1);
+        const steps=()=>Array.from(window.document.querySelectorAll('[data-wave-step]'));
+        seed(1,'running',1);assert.equal(steps().filter(b=>b.classList.contains('done')).length,0);assert.equal(steps()[0].classList.contains('current'),true);
+        seed(1,'ready',1);assert.equal(steps().filter(b=>b.classList.contains('done')).length,1);assert.equal(steps()[1].classList.contains('current'),true);
+        seed(1,'running',6);assert.equal(steps().filter(b=>b.classList.contains('done')).length,5);assert.equal(steps()[5].classList.contains('current'),true);
+        seed(1,'lost',6);assert.equal(steps().filter(b=>b.classList.contains('done')).length,5);assert.equal(steps()[5].classList.contains('failed'),true);
+        seed(1,'cleared',6);assert.equal(steps().filter(b=>b.classList.contains('done')).length,6);assert.equal(steps().filter(b=>b.classList.contains('current')).length,0);
+        seed(1,'ready',0);
+        motionReduced=true;const animationsBefore=animations;
+        window.document.querySelector('.td-slot').click();
+        assert.equal(animations,animationsBefore,'Reduced motion suppresses feedback movement');
+        assert.equal(feedbackCalls.at(-1),'success');motionReduced=false;
+        const checkpoint=api.restoreCheckpoint(window.localStorage.getItem('mylog-forest-defense-checkpoint-v2'));
+        assert.equal(checkpoint.gold,210);assert.equal(checkpoint.towers[0].type,'arrow');assert.equal(checkpoint.state,'ready');
+        const badCheckpoint=JSON.parse(window.localStorage.getItem('mylog-forest-defense-checkpoint-v2'));
+        badCheckpoint.towers[0].type='__proto__';assert.equal(api.restoreCheckpoint(JSON.stringify(badCheckpoint)),null);
+        badCheckpoint.towers[0].type='arrow';badCheckpoint.health=-1;assert.equal(api.restoreCheckpoint(JSON.stringify(badCheckpoint)),null);
+        assert.equal(api.restoreCheckpoint('{bad'),null);
+        const legacy=api.restoreCheckpoint(JSON.stringify({version:1,level:9,wave:14}));assert.equal(legacy.level,9);assert.equal(legacy.wave,0);
+        api.state.gold=1000;find('upgrade').click();assert.equal(find('specialize').hidden,false);find('specialize').click();assert.equal(api.state.towers[0].branch,'reach');
+        const specialized=api.restoreCheckpoint(window.localStorage.getItem('mylog-forest-defense-checkpoint-v2'));assert.equal(specialized.towers[0].branch,'reach');
+        const beforeCancel=clone(api.state);window.confirm=()=>false;find('restart').click();assert.deepEqual(clone(api.state),beforeCancel);window.confirm=()=>true;
+        find('sell').click();assert.equal(api.state.towers[0],null);assert.equal(api.state.built,1);
+        find('restart').click();assertReset(1);
         for (let level = 1; level < E.LEVEL_COUNT; level++) {
             seed(level, 'running', E.WAVES_PER_LEVEL);
             Object.assign(api.state, { gold: 999, health: 3, kills: 200 });
@@ -73,19 +106,25 @@ async function main() {
             frame(); frame();
             assert.equal(api.state.state, 'cleared');
             assert.equal(find('overlay').hidden, false);
+            assert.equal(feedbackCalls.at(-1),'win');
+            assert.equal(find('overlay').dataset.outcome,'cleared');
             assert.match(find('result-title').textContent, new RegExp(`第 ${level} 关`));
             assert.match(find('result-action').textContent, new RegExp(`第 ${level + 1} 关`));
             assert.equal(find('next-wave').disabled, true);
             assert.equal(find('pause').disabled, true);
             find('result-action').click();
             assertReset(level + 1);
+            assert.equal(find('mission-title').textContent,E.mission(level+1).mapName+' · '+E.mission(level+1).name);
+            assert.equal(window.document.querySelector('.td-slot').style.left,E.mission(level+1).slots[0][0]/10+'%');
             // A queued second click must not skip another level or reset again.
             const stateAfterFirstClick = api.state;
             find('result-action').click();
             assert.equal(api.state, stateAfterFirstClick);
             assertReset(level + 1);
+            assert.equal(find('mission-title').textContent,E.mission(level+1).mapName+' · '+E.mission(level+1).name);
+            assert.equal(window.document.querySelector('.td-slot').style.left,E.mission(level+1).slots[0][0]/10+'%');
         }
-        seed(20, 'lost', 8);
+        seed(20, 'lost', 6);
         api.state.health = 0;
         api.sync();
         assert.equal(find('result-action').textContent, '重试本关');
@@ -95,7 +134,7 @@ async function main() {
         find('result-action').click();
         assert.equal(api.state, retried);
 
-        seed(20, 'running', 15);
+        seed(20, 'running', 6);
         frame();
         assert.equal(api.state.state, 'won');
         assert.equal(find('result-title').textContent, '全部关卡通关！');
@@ -106,17 +145,17 @@ async function main() {
         find('result-action').click();
         assert.equal(api.state, restarted);
 
-        seed(2, 'ready', 13);
+        seed(2, 'ready', 4);
         assert.doesNotMatch(find('wave-hint').textContent, /首领/);
-        seed(2, 'ready', 14);
+        seed(2, 'ready', 5);
         assert.match(find('wave-hint').textContent, /最终波.*首领/);
-        assert.match(find('next-wave').textContent, /第 15 波/);
+        assert.match(find('next-wave').textContent, /第 6 波/);
         find('next-wave').click();
-        assert.equal(api.state.wave, 15);
+        assert.equal(api.state.wave, 6);
         assert.equal(api.state.queue.filter(type => type === 'boss').length, 1);
         const queueLength = api.state.queue.length;
         find('next-wave').click();
-        assert.equal(api.state.wave, 15);
+        assert.equal(api.state.wave, 6);
         assert.equal(api.state.queue.length, queueLength);
 
         find('pause').click();
@@ -132,8 +171,8 @@ async function main() {
         frame();
         assert.ok(api.state.time > pausedState.time, 'Resume continues the current wave');
         assert.equal(api.state.level, 2);
-        assert.equal(api.state.wave, 15);
-        console.log('Tower defense UI: level clears/reset, retry, final victory, double-click guards, pause/resume and wave-15 hint passed.');
+        assert.equal(api.state.wave, 6);
+        console.log('Tower defense UI: level clears/reset, retry, final victory, double-click guards, pause/resume and wave-6 hint passed.');
     } finally {
         await window.happyDOM.close();
     }

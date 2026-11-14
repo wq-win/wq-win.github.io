@@ -30,7 +30,7 @@ try{
  const dead=setup();$(dead,'level-select').value='0';$(dead,'level-select').dispatchEvent(new dead.Event('change'));
  for(const [from,to] of analyze(E.create(0).bottles).deadPath)clickMove(dead,{from,to});
  assert.match($(dead,'feedback').textContent,/没有可倒的位置.*撤销一步.*重新规划/);assert.equal($(dead,'win-card').hidden,true);
- const deadResume=setup({saved:dead.localStorage.getItem('cozy-water-sort-v1')});assert.match($(deadResume,'feedback').textContent,/没有可倒的位置/);const trappedMoves=savedState(deadResume).moves;$(deadResume,'undo').click();assert.equal(savedState(deadResume).moves,trappedMoves-1);assert(E.legalMoves(savedState(deadResume).bottles).length);$(dead,'restart').click();assert(E.legalMoves(savedState(dead).bottles).length);
+ const deadResume=setup({saved:dead.localStorage.getItem('cozy-water-sort-v1')});assert.match($(deadResume,'feedback').textContent,/没有可倒的位置/);const trappedMoves=savedState(deadResume).moves;$(deadResume,'undo').click();assert.equal(savedState(deadResume).moves,trappedMoves-1);assert(E.legalMoves(savedState(deadResume).bottles).length);$(dead,'restart').click();assert.equal($(dead,'water-confirm').open,true);$(dead,'water-replace').click();assert(E.legalMoves(savedState(dead).bottles).length);
  const different=setup();clickMove(different,E.solve(E.create())[0]);
  const mixed=savedState(different).bottles;let mismatch;
  for(let from=0;from<mixed.length;from++)for(let to=0;to<mixed.length;to++)if(E.inspect(mixed,from,to).reason==='color')mismatch={from,to};
@@ -44,10 +44,10 @@ try{
  assert.deepEqual(savedState(legacy),E.create(3,[0,2]));assert.equal($(legacy,'level-number').textContent,'04');assert.equal(JSON.parse(legacy.localStorage.getItem('cozy-water-sort-v1')).v,2);
  const bad=setup({saved:'{broken'});assert.equal(bad.document.querySelectorAll('.bottle').length,7);
  const denied=setup({denied:true});clickMove(denied,E.solve(E.create())[0]);assert.equal(denied.document.querySelectorAll('.liquid').length,20);assert.match($(denied,'saved').textContent,/无法保存/);
- // During real-duration animation, repeated input is ignored; restart/selection cancel it.
- const racing=setup({reduced:false});const first=E.solve(E.create())[0];clickMove(racing,first);assert(racing.document.querySelector('.pour-ghost'));assert(b(racing,0).disabled);b(racing,2).click();assert.equal(savedState(racing).moves,0);
- $(racing,'restart').click();assert.equal(racing.document.querySelectorAll('.pour-ghost').length,0);await delay(570);assert.deepEqual(savedState(racing).bottles,E.create().bottles);assert(!b(racing,0).disabled);
- clickMove(racing,first);$(racing,'level-select').value='7';$(racing,'level-select').dispatchEvent(new racing.Event('change'));await delay(570);assert.equal(savedState(racing).level,7);assert.deepEqual(savedState(racing).bottles,E.create(7).bottles);assert.equal(racing.document.querySelectorAll('.pour-ghost').length,0);
+ // Accepted moves save immediately; new input settles presentation without waiting.
+ const racing=setup({reduced:false});const first=E.solve(E.create())[0];clickMove(racing,first);assert(racing.document.querySelector('.pour-ghost'));assert(!b(racing,0).disabled);assert.equal(savedState(racing).moves,1,'Accepted move saved before animation completes');b(racing,2).click();assert.equal(savedState(racing).moves,1);assert.equal(racing.document.querySelector('.pour-ghost'),null,'A new input settles the old effect');
+ $(racing,'restart').click();assert.equal($(racing,'water-confirm').open,true);assert.equal(savedState(racing).moves,1,'Accepted pour survives pending confirmation');$(racing,'water-replace').click();assert.equal(racing.document.querySelectorAll('.pour-ghost').length,0);await delay(570);assert.deepEqual(savedState(racing).bottles,E.create().bottles);assert(!b(racing,0).disabled);
+ clickMove(racing,first);$(racing,'level-select').value='7';$(racing,'level-select').dispatchEvent(new racing.Event('change'));assert.equal($(racing,'water-confirm').open,true);$(racing,'water-replace').click();await delay(570);assert.equal(savedState(racing).level,7);assert.deepEqual(savedState(racing).bottles,E.create(7).bottles);assert.equal(racing.document.querySelectorAll('.pour-ghost').length,0);
  $(racing,'level-select').value='0';$(racing,'level-select').dispatchEvent(new racing.Event('change'));clickMove(racing,first);await delay(240);assert(racing.document.querySelector('.pour-stream'));await delay(320);assert.equal(savedState(racing).moves,1);assert.equal(racing.document.querySelectorAll('.pour-ghost,.pour-stream').length,0);
  const next=E.solve(savedState(racing))[0];clickMove(racing,next);racing.dispatchEvent(new racing.Event('resize'));assert.equal(savedState(racing).moves,2);assert.equal(racing.document.querySelectorAll('.pour-ghost').length,0);await delay(560);assert.equal(savedState(racing).moves,2);
  // Hints point to a solver-verified continuation; they never perform a move.
@@ -55,8 +55,19 @@ try{
  assert.equal(savedState(hints).moves,0);assert(hints.document.querySelector('.hint-target'));
  const hintSource=Number(hints.document.querySelector('.bottle.selected').dataset.bottle),hintTarget=Number(hints.document.querySelector('.hint-target').dataset.bottle);
  assert(E.inspect(savedState(hints).bottles,hintSource,hintTarget).ok);b(hints,hintTarget).click();assert.equal(savedState(hints).moves,1);assert.equal($(hints,'move-count').textContent,'1');
- $(hints,'hint').click();$(hints,'restart').click();await delay(50);assert.equal(hints.document.querySelector('.hint-target'),null);assert.equal(savedState(hints).moves,0);assert.equal($(hints,'hint').disabled,false);
+ $(hints,'hint').click();$(hints,'restart').click();$(hints,'water-replace').click();await delay(50);assert.equal(hints.document.querySelector('.hint-target'),null);assert.equal(savedState(hints).moves,0);assert.equal($(hints,'hint').disabled,false);
  for(const m of E.solve(E.create()))clickMove(hints,m);assert.equal($(hints,'level-progress').value,5);assert.match($(hints,'win-detail').textContent,/步/);assert.equal(JSON.parse(hints.localStorage.getItem('cozy-water-sort-records-v1'))[0],savedState(hints).moves);
+ // Undo is available during pouring; stale callbacks cannot reapply the move.
+ const immediate=setup({reduced:false});clickMove(immediate,E.solve(E.create())[0]);assert.equal(savedState(immediate).moves,1);assert.equal($(immediate,'undo').disabled,false);$(immediate,'undo').click();assert.equal(savedState(immediate).moves,0);await delay(570);assert.equal(savedState(immediate).moves,0);assert.equal(immediate.document.querySelector('.pour-ghost'),null);
+ // Reduced motion never creates particles or outcome animation classes.
+ assert.equal(all.document.querySelector('.pour-ghost,.poured-now,.water-win-arrive'),null);
+ // Cancellation, Escape and repeated requests keep the exact active run.
+ const protectedRun=setup();clickMove(protectedRun,E.solve(E.create())[0]);const protectedSave=protectedRun.localStorage.getItem('cozy-water-sort-v1');
+ $(protectedRun,'restart').click();assert.equal($(protectedRun,'water-confirm').open,true);assert.equal(protectedRun.document.activeElement.id,'water-keep');
+ $(protectedRun,'water-keep').click();assert.equal(protectedRun.localStorage.getItem('cozy-water-sort-v1'),protectedSave);assert.equal(protectedRun.document.activeElement.id,'restart');
+ $(protectedRun,'level-select').value='3';$(protectedRun,'level-select').dispatchEvent(new protectedRun.Event('change'));assert.equal($(protectedRun,'level-select').value,'0');
+ $(protectedRun,'water-confirm').dispatchEvent(new protectedRun.Event('cancel',{cancelable:true}));assert.equal($(protectedRun,'water-confirm').open,false);assert.equal(protectedRun.localStorage.getItem('cozy-water-sort-v1'),protectedSave);
+ $(protectedRun,'level-select').value='3';$(protectedRun,'level-select').dispatchEvent(new protectedRun.Event('change'));$(protectedRun,'restart').click();$(protectedRun,'water-replace').click();assert.equal(savedState(protectedRun).level,3);assert.equal(savedState(protectedRun).moves,0);$(protectedRun,'water-replace').click();assert.equal(savedState(protectedRun).level,3);
  const fsButton=w.document.querySelector('[data-game-fullscreen]');const before=E.save(savedState(w));fsButton.click();assert.equal(fsButton.getAttribute('aria-pressed'),'true');w.document.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape'}));assert.equal(fsButton.getAttribute('aria-pressed'),'false');assert.equal(E.save(savedState(w)),before);
  console.log('water-sort UI: all 8 wins, direct-final distinction, source cancel, invalid target, keyboard, restart/level/resize races, animation stream, blocked storage, resume and fullscreen PASS');
 }finally{for(const w of windows)await w.happyDOM.abort();}

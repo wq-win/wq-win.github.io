@@ -350,6 +350,15 @@ function pendingOpponent(game) {
 const STORAGE_KEY = 'mylog-doudizhu-cleared-v2';
 
 // Level contents and rule implementation must remain unchanged by a UI refresh.
+test('backgrounding cancels opponent work and resumes only when visible', () => {
+    const game=createGame(); game.fixture({turn:'opp'}); game.api.opponentTurn();
+    assert.ok(game.timers.size); const before=clone(game.api.state);
+    game.document.hidden=true; game.document.dispatchEvent({type:'visibilitychange'});
+    assert.equal(game.timers.size,0); assert.deepEqual(clone(game.api.state),before);
+    game.document.hidden=false; game.document.dispatchEvent({type:'visibilitychange'});
+    assert.ok(game.timers.size); game.drainOne(); assert.notDeepEqual(clone(game.api.state),before);
+});
+
 test('original engine remains byte-for-byte unchanged', () => {
     assert.equal(crypto.createHash('sha256').update(engineSource).digest('hex'), '50f034fdea65f512e751b8264f5ab3e0e70c1d81514bea0e75b56b41187fa09b');
 });
