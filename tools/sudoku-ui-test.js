@@ -304,6 +304,33 @@ async function main() {
             assert.ok(!view.classList.contains('is-expanded'));
             assert.deepEqual(snapshot(), before);
         });
+        await test('final hint stops timer and celebrates exactly once; ordinary hint remains undoable', () => {
+            const g = setup();
+            g.find('give-hint').click();
+            assert.equal(g.state.hintCount, 1);
+            g.find('undo-input').click();
+            assert.equal(g.state.hintCount, 0);
+            const { row, col } = g.empty();
+            g.state.board = clone(g.state.solution);
+            g.state.board[row][col] = 0;
+            g.window.__sudokuTest.updateBoardUI();
+            g.find('give-hint').click();
+            assert.equal(g.state.hintCount, 1);
+            assert.deepEqual(clone(g.state.board), clone(g.state.solution));
+            assert.equal(g.intervals.size, 0, 'final hint stops active timer');
+            assert.equal([...g.timeouts.values()].filter(t => t.delay === 1500).length, 2);
+            g.find('check-solution').click(); g.find('check-solution').click();
+            assert.equal([...g.timeouts.values()].filter(t => t.delay === 1500).length, 2, 'completion is one-shot');
+            g.find('new-game').click();
+            assert.equal(g.timeouts.size, 0, 'old victory cannot animate the new board');
+            assert.equal(g.state.hintCount, 0);
+            const last = g.empty();
+            g.state.board = clone(g.state.solution); g.state.board[last.row][last.col] = 0;
+            g.window.__sudokuTest.updateBoardUI(); g.cell(last.row,last.col).click();
+            g.key(String(g.state.solution[last.row][last.col]));
+            assert.equal(g.intervals.size, 0);
+            assert.equal([...g.timeouts.values()].filter(t => t.delay === 1500).length, 2, 'new puzzle can complete');
+        });
         await test('completion modal and play-again preserve the existing restart flow', () => {
             state.board = clone(state.solution);
             state.gameStarted = true;
