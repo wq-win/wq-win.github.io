@@ -68,7 +68,9 @@
             item.title, item.cardTitle, item.question, item.excerpt,
             item.seriesLabel, item.year, item.era, item.kind
         ].join(' '));
-        let score = 0;
+        // An exact series-name query should lead to its reading directory.
+        const isSeriesHub = item.kind === 'page' && item.id === item.series + ':index';
+        let score = isSeriesHub && q === normalize(item.seriesLabel) ? 200 : 0;
         if (hay.includes(q)) score += 120;
         if (normalize(item.cardTitle).includes(q)) score += 80;
         if (normalize(item.title).includes(q)) score += 50;

@@ -490,6 +490,18 @@ def collect_items():
     items = []
     for series in SERIES:
         posts = extract_json_array((ROOT / series["catalog"]).read_text(), series["marker"])
+        # Series landing pages are navigation destinations, not paper/RSS nodes.
+        paper_count = sum(normalize_kind(post) == "paper" for post in posts)
+        items.append({
+            "id": f"{series['id']}:index", "series": series["id"],
+            "seriesLabel": series["label"], "slug": "index",
+            "url": f"{series['dir']}/index.html",
+            "title": f"{series['label']} 系列目录",
+            "cardTitle": f"{series['label']} 系列目录",
+            "question": f"浏览全部 {paper_count} 篇论文，选择阅读起点。",
+            "excerpt": f"{series['label']}论文精读总目录，包含入门导读、发展时间线和系列收尾。",
+            "year": None, "era": "系列目录", "kind": "page", "token": "",
+        })
         for post in posts:
             slug = post["slug"]
             items.append(
