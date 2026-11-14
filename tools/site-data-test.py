@@ -43,6 +43,40 @@ class RssTests(unittest.TestCase):
         self.assertFalse(ET.fromstring(content).findall('.//pubDate'))
         self.assertLess(len(content), 1024 * 1024)
 
+    def test_series_hubs_in_search_and_sitemap(self):
+        import json
+        items = builder.collect_items()
+        search = json.loads((ROOT / 'data/search-index.json').read_text())
+        urls = [item['url'] for item in search]
+        self.assertEqual(len(urls), len(set(urls)))
+        self.assertEqual(len(items), len(search))
+        self.assertEqual(len({item['id'] for item in items}), len(items))
+        related = builder.build_related(items)
+        sitemap = ET.parse(ROOT / 'sitemap.xml')
+        locations = [loc.text for loc in sitemap.findall('.//{*}loc')]
+        self.assertEqual(len(locations), len(set(locations)))
+        for series in builder.SERIES:
+            url = f"{series['dir']}/index.html"
+            hub = next(item for item in search if item['url'] == url)
+            self.assertEqual(hub['kind'], 'page')
+            self.assertTrue((ROOT / url).is_file())
+            self.assertEqual(urls.count(url), 1)
+            self.assertEqual(locations.count(builder.ORIGIN + '/' + url), 1)
+            self.assertNotIn(hub['id'], related)
+            count = sum(item['series'] == series['id'] and item['kind'] == 'paper' for item in items)
+            self.assertIn(str(count), hub['question'])
+        with tempfile.TemporaryDirectory() as directory:
+            original = builder.ROOT
+            try:
+                builder.ROOT = Path(directory)
+                builder.write_sitemap(items)
+                first = (builder.ROOT / 'sitemap.xml').read_bytes()
+                builder.write_sitemap(items)
+                self.assertEqual(first, (builder.ROOT / 'sitemap.xml').read_bytes())
+                self.assertEqual(first, (ROOT / 'sitemap.xml').read_bytes())
+            finally:
+                builder.ROOT = original
+
     def test_xml_escaping_and_nonpaper_exclusion(self):
         paper = dict(kind='paper', seriesLabel='学习 & 实践', cardTitle='<标题> "测试"',
                      url='rl/example.html', excerpt='A < B & C > D', question='fallback')
