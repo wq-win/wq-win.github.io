@@ -46,7 +46,7 @@ for(let index=0;index<8;index++){
   assert(E.won(deadState.bottles),'BFS shortest trace replays through the real action engine');
   console.log(`level ${index+1}: ${level.colors} colours; shortest ${graph.shortest}, solver ${trace.length} pours; ${graph.nodes.length} states, ${graph.losing} losing, ${graph.dead.length} dead ends; greedy ${greedy}/200 wins; both spare buffers required`);
 }
-assert(lengths.every((n,i)=>n>=[16,17,19,20,21,22,23,24][i]));
+assert(lengths.every((n,i)=>n===[16,17,19,20,21,22,23,24][i]));
 assert.equal(E.inspect([[0,1,1,1],[1,1,1]],0,1).amount,1,'capacity limits top run');
 assert.equal(E.inspect([[0,1,1,1],[]],0,1).amount,3,'maximal top run pours');
 assert.equal(E.inspect([[0,1,1,1],[1]],0,1).amount,3);
@@ -68,3 +68,41 @@ console.log(`water-sort engine: ${transitions} tested transitions, 8 exhaustive 
 
 // Undo reconstructs the previous legal state and preserves earned completion.
 { let s=E.create(); const start=E.save(s); assert.equal(E.undo(s),s); const path=E.solve(s); for(const m of path)s=E.act(s,m.from,m.to).state;const u=E.undo(s);assert.equal(u.moves,s.moves-1);assert.equal(E.won(u.bottles),false);assert(u.completed.includes(0));assert.equal(E.act(u,...s.history.at(-1)).won,true);let first=E.act(E.create(),path[0].from,path[0].to).state;assert.equal(E.save(E.undo(first)),start); }
+
+// Recompute the actual hint on every turn, including after reload and undo.
+// Distances come from the independent exhaustive graph, not the production BFS.
+let checkedHints=0, worstHintMs=0;
+for(let level=0;level<8;level++) {
+  const graph=analyze(E.create(level).bottles),distance=new Map(),queue=[];
+  graph.nodes.forEach((n,i)=>{if(E.won(n.bottles)){distance.set(i,0);queue.push(i);}});
+  for(let h=0;h<queue.length;h++)for(const p of graph.nodes[queue[h]].parents)if(!distance.has(p)){distance.set(p,distance.get(queue[h])+1);queue.push(p);}
+  const byKey=new Map(graph.nodes.map((n,i)=>[signature(n.bottles),i]));
+  const check=board=>{
+    const before=JSON.stringify(board),start=performance.now(),path=E.solve(board,{maxStates:20000,maxDepth:100});
+    worstHintMs=Math.max(worstHintMs,performance.now()-start);assert.equal(JSON.stringify(board),before);
+    const d=distance.get(byKey.get(signature(board)));
+    if(d===undefined){assert.equal(path,null);return null;}
+    assert.equal(path.length,d,'hint is shortest, independently verified');
+    if(d){const m=path[0],next=E.pour(board,m.from,m.to);assert(next.ok);assert.equal(distance.get(byKey.get(signature(next.bottles))),d-1);checkedHints++;}
+    return path;
+  };
+  let state=E.create(level,[7]);const seen=new Set();
+  while(!E.won(state.bottles)){
+    const k=signature(state.bottles);assert(!seen.has(k),'consecutive hints never loop');seen.add(k);
+    const path=check(state.bottles),previous=state;state=E.act(state,path[0].from,path[0].to).state;
+    assert.deepEqual(E.undo(state).bottles,previous.bottles);
+    state=E.restore(E.save(state));assert(state.completed.includes(7));
+  }
+  // Include off-solution states and losing branches, real bottle permutations,
+  // and empty/full-bottle relocations that the old solver pruned.
+  for(let i=0;i<graph.nodes.length;i+=Math.max(1,Math.floor(graph.nodes.length/40))){
+    const board=graph.nodes[i].bottles;check(board);check([...board].reverse());
+  }
+}
+let regression=E.create();for(const [from,to] of [[0,5],[4,0],[2,4]])regression=E.act(regression,from,to).state;
+const originalSave=E.save(regression);for(let i=0;i<40&&!E.won(regression.bottles);i++){const [m]=E.solve(regression);regression=E.act(regression,m.from,m.to).state;}
+assert(E.won(regression.bottles),'reported level-one trace now reaches victory');
+assert.deepEqual(E.restore(originalSave).history,[[0,5],[4,0],[2,4]],'existing v2 save is unchanged');
+assert.equal(E.solve(E.create(),{maxStates:1}),null);assert.equal(E.solve(E.create(),{maxDepth:0}),null);
+assert.equal(E.solve(E.create(),{maxDepth:15}),null);assert.equal(E.solve(E.create(),{maxDepth:16}).length,16);
+console.log(`recomputed hints: ${checkedHints} strict distance decreases, all 8 hint-only wins, off-path/permuted/losing states; slowest ${worstHintMs.toFixed(1)} ms PASS`);

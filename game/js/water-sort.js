@@ -125,8 +125,8 @@ $('hint').addEventListener('click',()=>{
   const token=epoch;
   hintTimer=setTimeout(()=>{
     hintTimer=null;if(token!==epoch)return;
-    // Bounded search runs only on request; never blocks normal bottle input.
-    const solution=E.solve(state,{maxStates:5000,maxDepth:100});
+    // Bounded shortest-path search runs only on request; no greedy fallback.
+    const solution=E.solve(state,{maxStates:20000,maxDepth:100});
     $('hint').disabled=false;
     if(!solution||!solution.length){message('暂未找到完整解法。可撤销一步，再重新规划。');return;}
     const move=solution[0];selected=move.from;render(move.from);

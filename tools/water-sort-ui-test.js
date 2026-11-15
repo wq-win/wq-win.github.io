@@ -57,6 +57,25 @@ try{
  assert(E.inspect(savedState(hints).bottles,hintSource,hintTarget).ok);b(hints,hintTarget).click();assert.equal(savedState(hints).moves,1);assert.equal($(hints,'move-count').textContent,'1');
  $(hints,'hint').click();$(hints,'restart').click();$(hints,'water-replace').click();await delay(50);assert.equal(hints.document.querySelector('.hint-target'),null);assert.equal(savedState(hints).moves,0);assert.equal($(hints,'hint').disabled,false);
  for(const m of E.solve(E.create()))clickMove(hints,m);assert.equal($(hints,'level-progress').value,5);assert.match($(hints,'win-detail').textContent,/步/);assert.equal(JSON.parse(hints.localStorage.getItem('cozy-water-sort-records-v1'))[0],savedState(hints).moves);
+ // Follow freshly requested hints through all levels, not a single cached trace.
+ const guided=setup();
+ for(let level=0;level<8;level++){
+   const seen=new Set();let steps=0;
+   while(!E.won(savedState(guided).bottles)){
+     const oldSave=guided.localStorage.getItem('cozy-water-sort-v1'),key=JSON.stringify(savedState(guided).bottles);
+     assert(!seen.has(key),'UI hint loop');seen.add(key);assert(++steps<40);
+     $(guided,'hint').click();$(guided,'hint').click();await delay(50);
+     assert.equal(guided.localStorage.getItem('cozy-water-sort-v1'),oldSave,'hint alone never changes save/history');
+     const target=guided.document.querySelector('.hint-target');assert(target);target.click();
+   }
+   assert.equal($(guided,'win-card').hidden,false);if(level<7)$(guided,'next-level').click();
+ }
+ let old=E.create();for(const m of [[0,5],[4,0],[2,4]])old=E.act(old,...m).state;
+ const resumedHints=setup({saved:E.save(old)});$(resumedHints,'hint').click();await delay(50);
+ const firstTarget=resumedHints.document.querySelector('.hint-target');assert(firstTarget);firstTarget.click();
+ $(resumedHints,'undo').click();assert.deepEqual(savedState(resumedHints),old);$(resumedHints,'hint').click();await delay(50);assert(resumedHints.document.querySelector('.hint-target'));
+ const html=fs.readFileSync(path.join(root,'game/water-sort.html'),'utf8');
+ assert(html.includes('js/water-sort-engine.js?v=20261115-hints'));assert(html.includes('js/water-sort.js?v=20261115-hints'));
  // Undo is available during pouring; stale callbacks cannot reapply the move.
  const immediate=setup({reduced:false});clickMove(immediate,E.solve(E.create())[0]);assert.equal(savedState(immediate).moves,1);assert.equal($(immediate,'undo').disabled,false);$(immediate,'undo').click();assert.equal(savedState(immediate).moves,0);await delay(570);assert.equal(savedState(immediate).moves,0);assert.equal(immediate.document.querySelector('.pour-ghost'),null);
  // Reduced motion never creates particles or outcome animation classes.
