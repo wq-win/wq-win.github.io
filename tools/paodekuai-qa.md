@@ -62,3 +62,21 @@ Implementation verification (2026-10-17):
 - Real-browser visual, Fullscreen API and physical touch QA must be recorded separately; this suite does not claim those checks passed.
 
 Actual Chromium viewport and fullscreen results: [four-game responsive QA](game-responsive-qa.md).
+
+## Wing-selection regression (2026-11-15)
+
+The hint/AI generator now matches the unchanged manual classifier: each wing rank
+may contribute at most two cards, and any mandatory opening card is reserved
+before filling the remaining slots. Triple-body ranks remain excluded. This
+constructs an alternative when one exists rather than simply filtering an invalid
+lowest-wing choice, which could incorrectly force a pass. Generated candidates
+are also reclassified through the same rules used by manual Play. The existing
+last-hand exception, mandatory spade three, next-player-single rule and statistics
+storage are unchanged.
+
+`node tools/paodekuai-ui-test.js` includes seeds 6936 and 343 through the production
+controller (hint enables Play and the expected ten cards are committed), plus an
+exhaustive subset oracle across 46 full/partial fixture hands and 138 contexts.
+The oracle checks 2,834,770 subsets, compares every available type/body/wing-count
+with generated answers, and checks actual card membership and uniqueness. These
+are VM/engine tests, not seeded real-browser or physical-phone measurements.

@@ -177,12 +177,26 @@
         return out;
     }
 
+    // Wings may contain pairs, but never a third card of a rank: classify()
+    // treats every such rank as part of the consecutive triple body. Pick the
+    // lowest legal multiset, reserving the mandatory opening card first.
+    // A per-rank cap of two is complete, not merely a filter of one bad choice.
     function lowest(hand, blocked, n, prefer) {
         var pool = hand.filter(function (card) { return !blocked[card.r]; });
+        var out = [];
+        var used = countsOf([]);
         pool.sort(function (a, b) { return a.r - b.r || a.s - b.s; });
-        if (pool.length < n) return null;
-        if (prefer && !blocked[prefer.r]) return take(pool, n, prefer);
-        return pool.slice(0, n);
+        if (prefer && hasCard(pool, prefer)) {
+            out.push(pool.filter(function (card) { return cardKey(card) === cardKey(prefer); })[0]);
+            used[prefer.r] += 1;
+        }
+        pool.forEach(function (card) {
+            if (out.length < n && used[card.r] < 2 && !hasCard(out, card)) {
+                out.push(card);
+                used[card.r] += 1;
+            }
+        });
+        return out.length === n ? out : null;
     }
 
     function generate(hand, prefer) {
@@ -289,6 +303,8 @@
         if (finish) moves.unshift(finish);
         moves.forEach(function (move) {
             var key;
+            // Hints, AI and manually selected cards share one source of truth.
+            move = classify(move.cards, move.cards.length === hand.length, !!lead);
             if (!allowed(move, hand, lead, ctx)) return;
             key = move.t + ':' + move.r + ':' + move.n + ':' + move.wings + ':' + move.cards.map(cardKey).join(',');
             if (seen[key]) return;

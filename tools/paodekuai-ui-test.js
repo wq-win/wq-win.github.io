@@ -1110,5 +1110,64 @@ test('12 complete UI games conserve every card and update public counts every tu
     }
 });
 
+test('seed 6936 hint remains playable rather than rejecting a valid plane answer', () => {
+    const game=createGame({seed:6936});
+    while(game.api.state.turn!==0 || game.api.thinking)game.drainOne();
+    const before=clone(game.api.state),answers=game.PK.answerMoves(before.hands[0],before.lead,rule(game,0));
+    assert.equal(before.lead.t,'plane');assert.equal(answers.length,1);
+    game.click('pdk-hint');assert.equal(game.el('pdk-play').disabled,false);
+    assert.equal(game.api.playable().t,'plane');assert.equal(game.api.playable().r,5);
+    assert.equal(game.api.state.hands[0].length,16,'hint does not play cards');
+    game.click('pdk-play');assert.equal(game.api.state.hands[0].length,6);
+    assert.equal(game.api.state.lead.t,'plane');assert.equal(game.api.state.lead.r,5);
+});
+
+test('seed 343 opening hint and AI use legal wings and retain spade three', () => {
+    const game=createGame({seed:343});
+    assert.equal(game.api.state.turn,0);game.click('pdk-hint');
+    assert.equal(game.el('pdk-play').disabled,false);assert(game.PK.spadeThree(game.api.selectedCards()));
+    const ai=game.PK.chooseMove(game.api.state.hands[0],null,rule(game,0));
+    const parsed=game.PK.classify(ai.cards,false,false);assert(parsed);assert.equal(parsed.t,'plane');
+    assert(game.PK.spadeThree(ai.cards));game.click('pdk-play');assert.equal(game.api.state.hands[0].length,6);
+});
+
+test('exhaustive subset oracle: generated move types are legal and none are falsely omitted', () => {
+    const PK=createGame().PK;
+    const type=m=>[m.t,m.r,m.n,m.wings].join(':');
+    let subsets=0,contexts=0;
+    const hands=[];
+    for(const seed of [6936,343,...Array.from({length:40},(_,i)=>10007+i*7919)])hands.push(...PK.deal(seeded(seed)).slice(0,1));
+    // Three consecutive triple bodies, spare quads, pairs, mandatory wing card,
+    // and partial last hands supplement the independently shuffled deals.
+    for(const ranks of [[0,0,0,1,1,1,4,4,4,5,5,5,8,9,10,12],[0,0,0,0,5,5,5,6,6,6,8,9,10,11],[0,0,0,1,1,1,2],[3,3,3,4,4,4,7,7]]){
+        const counts={};hands.push(ranks.map(r=>card(r,counts[r]=(counts[r]??-1)+1)));
+    }
+    const lead=PK.classify([card(0),card(0,1),card(0,2),card(1),card(1,1),card(1,2),card(8),card(9),card(10),card(12)],false,true);
+    for(const hand of hands){
+        const options=[{lead:null,ctx:{nextCount:8}},{lead:null,ctx:{require:hand.find(c=>c.r===0&&c.s===0)||hand[0],nextCount:1}},{lead,ctx:{nextCount:8}}];
+        const expected=options.map(()=>new Set());
+        for(let mask=1;mask<(1<<hand.length);mask++){
+            const selected=hand.filter((_,i)=>mask&(1<<i));subsets++;
+            for(let c=0;c<options.length;c++){
+                const {lead,ctx}=options[c],m=PK.classify(selected,selected.length===hand.length,!!lead);
+                if(!m || lead&&!PK.beats(m,lead) || ctx.require&&!PK.hasCard(selected,ctx.require) || ctx.nextCount===1&&m.t==='single'&&m.r<PK.maxRank(hand))continue;
+                expected[c].add(type(m));
+            }
+        }
+        options.forEach(({lead,ctx},i)=>{
+            const moves=PK.answerMoves(hand,lead,ctx),actual=new Set();contexts++;
+            for(const m of moves){
+                const parsed=PK.classify(m.cards,m.cards.length===hand.length,!!lead);assert(parsed);assert.equal(type(parsed),type(m));
+                assert.equal(new Set(m.cards.map(PK.cardKey)).size,m.cards.length);assert(m.cards.every(c=>PK.hasCard(hand,c)));
+                assert(!lead||PK.beats(parsed,lead));assert(!ctx.require||PK.hasCard(m.cards,ctx.require));actual.add(type(m));
+            }
+            assert.deepEqual([...actual].sort(),[...expected[i]].sort(),'every legal type/body/wing-count has a representative');
+            const ai=PK.chooseMove(hand,lead,ctx);
+            if(expected[i].size){assert(ai&&!ai.pass);assert(actual.has(type(ai)));}else assert(!ai||ai.pass);
+        });
+    }
+    console.log(`subset oracle: ${subsets} subsets, ${contexts} contexts, no illegal hint/AI move or false pass`);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 if (failed) process.exitCode = 1;
