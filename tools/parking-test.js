@@ -39,3 +39,36 @@ console.table(metrics);console.log(`PASS: 16 exact-count eight-direction levels;
 for(let i=0;i<16;i++){const legacy=E.generate(i,true),path=E.solve(legacy),remaining=legacy.cars.map(c=>c.id).filter(id=>!path.slice(0,7).includes(id));const restored=E.restore(JSON.stringify({v:3,level:i,remaining,completed:[0,2],moves:7}));assert.equal(restored.catalog,'legacy-v3');assert.deepEqual(E.levelFor(restored),legacy);assert.deepEqual(restored.remaining,remaining);assert.deepEqual(restored.completed,[0,2]);assert.deepEqual(E.restore(E.save(restored)),restored);for(const id of path.slice(7))assert(E.act(restored,id).ok);assert(!restored.remaining.length);assert.equal(E.create(i).catalog,undefined);}
 assert.equal(E.COUNTS.reduce((a,b)=>a+b),460,'total mandatory departures reduced from 3200 to 460');
 console.log('PASS: all 16 original v3 runs preserve board/IDs/removals/completions and remain completable');
+
+// Catalog v5 removes an accidental duplicate without rewriting an active v4 run.
+const boardKey=level=>JSON.stringify(level.cars.map(({x,y,dir})=>[x,y,dir]).sort());
+assert.equal(new Set(E.LEVELS.map(boardKey)).size,16,'all levels have distinct geometry, regardless of car IDs');
+const old14=E.generate(13,false,318);
+assert.equal(boardKey(old14),boardKey(E.LEVELS[10]),'regression fixture is the former duplicate');
+assert.notEqual(boardKey(old14),boardKey(E.LEVELS[13]));
+for(let i=0;i<16;i++){
+ const board=i===13?old14:E.LEVELS[i],path=E.solve(board),all=board.cars.map(c=>c.id);
+ const initialExits=all.filter(id=>!E.blockers(board,all,id).length);
+ const removals=[[],...initialExits.map(id=>[id]),path.slice(0,17),path];
+ for(const removed of removals){
+  const remaining=all.filter(id=>!removed.includes(id));
+  const raw=JSON.stringify({v:4,level:i,remaining,completed:[0,2,10],moves:removed.length});
+  let state=E.restore(raw);assert.equal(state.level,i);assert.deepEqual(state.remaining,remaining);
+  assert.deepEqual(state.completed,[0,2,10]);assert.deepEqual(E.levelFor(state),board);
+  if(i===13)assert.equal(state.catalog,'legacy-v4');
+  for(let reload=0;reload<3;reload++){state=E.restore(E.save(state));assert.deepEqual(E.levelFor(state),board);assert.deepEqual(state.remaining,remaining);}
+  while(state.remaining.length){const id=state.remaining.find(id=>!E.blockers(board,state.remaining,id).length);assert.notEqual(id,undefined);assert(E.act(state,id).ok);}
+  if(remaining.length)assert(state.completed.includes(i));assert.deepEqual(E.levelFor(E.restore(E.save(state))),board);
+ }
+ // Old v4 saves could themselves contain an original v3 board.
+ const legacy=E.generate(i,true),remaining=legacy.cars.map(c=>c.id);
+ const oldV3=E.restore(JSON.stringify({v:4,catalog:'legacy-v3',level:i,remaining,completed:[0,2]}));
+ assert.deepEqual(E.levelFor(E.restore(E.save(oldV3))),legacy);
+}
+const fresh14=E.create(13);assert.equal(JSON.parse(E.save(fresh14)).v,5);
+assert.deepEqual(E.levelFor(E.restore(E.save(fresh14))),E.LEVELS[13]);
+for(const badCatalog of ['unknown','legacy-v4']){
+ const raw=JSON.stringify({v:5,level:0,catalog:badCatalog,remaining:E.create().remaining,completed:[]});
+ assert.deepEqual(E.restore(raw),E.create(),'reject unsupported catalog context');
+}
+console.log('PASS: 16 unique layouts; v4 one-move/midgame/completed and v3-in-v4 saves retain exact boards across reloads; v5 uses new board');
