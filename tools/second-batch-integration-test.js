@@ -12,7 +12,8 @@ for (const slug of ['tile-frontier','hanzi-battle','yarn','parking','screws']) {
   for (const match of html.matchAll(/(?:src|href)="([^"#]+)"/g)) {
     const link = match[1];
     if (/^(?:https?:|data:|mailto:)/.test(link)) continue;
-    const target = link.startsWith('/') ? path.join(root, link) : path.resolve(root, 'game', link);
+    const pathname = link.split(/[?#]/)[0]; // URL cache versions/fragments are not filesystem names.
+    const target = pathname.startsWith('/') ? path.join(root, pathname) : path.resolve(root, 'game', pathname);
     assert(fs.existsSync(target), `${slug}: missing local asset ${link}`);
   }
 }
