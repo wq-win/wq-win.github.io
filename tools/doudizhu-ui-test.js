@@ -359,8 +359,8 @@ test('backgrounding cancels opponent work and resumes only when visible', () => 
     assert.ok(game.timers.size); game.drainOne(); assert.notDeepEqual(clone(game.api.state),before);
 });
 
-test('original engine remains byte-for-byte unchanged', () => {
-    assert.equal(crypto.createHash('sha256').update(engineSource).digest('hex'), '50f034fdea65f512e751b8264f5ab3e0e70c1d81514bea0e75b56b41187fa09b');
+test('card generation and beating rules remain byte-for-byte unchanged', () => {
+    assert.equal(crypto.createHash('sha256').update(engineSource.slice(0, engineSource.indexOf('    // Cache only'))).digest('hex'), '9406f78ebe203aee4f7e5af7adb00df0603415f2feedccb2112f99c52e9c1ca8');
 });
 
 test('the first 11 levels stay, and five later levels add other patterns', () => {
@@ -1402,6 +1402,49 @@ test('view changes preserve pending hints and opponent timers', () => {
         game.drainOne();
         assert.equal(game.timers.size, 0);
     }
+});
+
+test('per-search generation cache preserves every authored hint/AI decision and budget', () => {
+    function engine(cached) {
+        const sandbox={};const context=vm.createContext(sandbox);
+        let source=engineSource.replace('function generateMoves(counts) {','function generateMoves(counts) { root.__generated += 1;');
+        if(!cached)source=source.replace('return { hands: Object.create(null), size: 0 };','return null;');
+        vm.runInContext('globalThis.__generated=0;'+source,context);return sandbox;
+    }
+    const cached=engine(true),plain=engine(false),levels=(()=>{const c={};vm.runInNewContext(levelsSource,c);return c.DOUDIZHU_LEVELS;})();
+    let decisions=0;
+    function compare(method,hand,opp,lead,limit=2000000){
+        const before=JSON.stringify([hand,opp,lead]);const budgets=[{n:0,limit},{n:0,limit}];
+        const a=cached.Doudizhu[method](hand,opp,lead,budgets[0]),b=plain.Doudizhu[method](hand,opp,lead,budgets[1]);
+        assert.deepEqual(clone(a),clone(b),method+' exact ordered moves');assert.equal(budgets[0].n,budgets[1].n,'identical search budget accounting');
+        assert.equal(JSON.stringify([hand,opp,lead]),before,'search inputs unchanged');decisions++;return a;
+    }
+    for(const level of levels){
+        let you=level.you.slice(),opp=level.opp.slice(),lead=null,turn=0,steps=0;
+        compare('uniqueWinningMove',you,opp,null);
+        while(cached.Doudizhu.sum(you)&&cached.Doudizhu.sum(opp)){
+            assert(++steps<100);const hand=turn?opp:you,other=turn?you:opp;
+            const m=turn?compare('chooseMove',hand,other,lead):compare('winningMoves',hand,other,lead,150000)[0];
+            assert(m,'authored winning path remains available');
+            assert(cached.Doudizhu.legalMoves(hand,lead).some(x=>JSON.stringify(x)===JSON.stringify(m)));
+            if(m.pass)lead=null;else{const next=cached.Doudizhu.apply(hand,m);if(turn)opp=next;else you=next;lead=m;}
+            turn=1-turn;
+        }
+        assert.equal(cached.Doudizhu.sum(you),0,'all 16 authored hint paths still win');
+    }
+    // Real reduction, not a timing assertion sensitive to CI hardware.
+    cached.__generated=0;plain.__generated=0;const l=levels[8];
+    const wins=compare('winningMoves',l.you,l.opp,null,150000);
+    assert.deepEqual(clone(wins[0].cards),[5,5]);assert(cached.__generated<plain.__generated/10);
+    console.log(`L9 generation calls: ${plain.__generated} uncached → ${cached.__generated} cached; ${decisions} exact search comparisons`);
+    // Escaped move objects and caller-owned memo/budget cannot retain cache state.
+    wins[0].cards[0]=14;assert.deepEqual(clone(compare('winningMoves',l.you,l.opp,null,150000)[0].cards),[5,5]);
+    for(const api of [cached.Doudizhu,plain.Doudizhu]){
+        const budget={n:0,limit:10},memo={};assert.throws(()=>api.winningMoves(l.you,l.opp,null,budget,memo),e=>e.code==='budget');
+        assert.equal(budget.n,11);assert.deepEqual(Object.keys(budget),['n','limit']);assert(Object.values(memo).every(x=>typeof x==='boolean'));
+        const recovered=api.winningMoves(l.you,l.opp,null,{n:0,limit:150000},memo);assert.deepEqual(clone(recovered[0].cards),[5,5]);
+    }
+    assert.match(engineSource,/cache\.size < 4096/,'bounded cache retention');
 });
 
 console.log('\n' + passed + ' passed; ' + failed + ' failed');

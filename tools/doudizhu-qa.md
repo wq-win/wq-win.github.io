@@ -75,3 +75,26 @@ The VM and source-arithmetic tests do not implement CSS layout, image decoding, 
 10. Check screen-reader card names, pressed selection state, disabled controls, hint announcements, result announcements and reduced-motion behavior.
 
 Actual Chromium viewport and fullscreen results: [four-game responsive QA](game-responsive-qa.md).
+
+## Scoped search-generation cache (2026-11-15)
+
+Generated moves are cached by remaining rank counts only within a single search,
+with at most 4,096 retained hands. Lead filtering, pass insertion and sorting use a
+fresh array. Caller memo/budget objects and future searches do not retain this
+cache; changing an escaped returned move cannot contaminate later calls. Search
+order, node accounting, budget fallback, authored puzzles and rules are unchanged.
+
+L9 opening generation calls fall from 58,091 to 449, with 83,012 recursive calls
+and the same winning pair 88. An independent six-pair local Node benchmark had a
+182.9 ms old / 136.5 ms cached median (about 25% faster). This is not a phone or
+browser long-task measurement. Computation remains synchronous; a timer does not
+make it nonblocking. A smaller time budget was deliberately not introduced because
+it can replace the sole winning hint with a merely legal fallback. Worker/time-
+slicing work is separate if measured browser interaction requires it.
+
+The UI regression suite checks 207 exact ordered hint/AI/unique-move comparisons
+through all 16 winning paths, identical budget counts, tiny-budget exception and
+recovery, caller input immutability and escaped-result isolation. Existing
+restart, level-navigation, visibility and pending-hint cancellation tests remain.
+The earlier whole-engine byte hash is narrowed to the unchanged generation/rule
+prefix; behavior equivalence now covers the intentionally optimized search.

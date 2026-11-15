@@ -177,8 +177,24 @@
         return { pass: true, t: 'pass', r: -1, n: 0, kick: [], cards: [] };
     }
 
-    function legalMoves(counts, lead) {
-        var all = generateMoves(counts).filter(function (move) { return beats(move, lead); });
+    // Cache only lead-independent generation, and only for this search. Never
+    // attach it to the caller's memo/budget or retain returned move objects.
+    // The cap bounds retention even when a future puzzle exhausts its budget.
+    function newMoveCache() { return { hands: Object.create(null), size: 0 }; }
+
+    function legalMoves(counts, lead, cache) {
+        var signature = countKey(counts);
+        var generated = cache && cache.hands[signature];
+        if (!generated) {
+            generated = generateMoves(counts);
+            if (cache && cache.size < 4096) {
+                cache.hands[signature] = generated;
+                cache.size += 1;
+            }
+        }
+        // filter creates a fresh array: neither sorting nor adding pass changes
+        // the shared generated candidates, which are read-only during search.
+        var all = generated.filter(function (move) { return beats(move, lead); });
         if (lead) all.push(passMove());
         all.sort(function (a, b) {
             var byLen = (b.cards ? b.cards.length : 0) - (a.cards ? a.cards.length : 0);
@@ -212,7 +228,8 @@
         return move.t + ':' + move.r + ':' + move.n + ':' + move.kick.join(',');
     }
 
-    function canForce(hand, opp, lead, memo, budget) {
+    function canForce(hand, opp, lead, memo, budget, cache) {
+        cache = cache || newMoveCache();
         if (sum(hand) === 0) return true;
         budget.n += 1;
         if (budget.n > budget.limit) {
@@ -222,19 +239,19 @@
         }
         var key = countKey(hand) + '|' + countKey(opp) + '|' + moveKey(lead);
         if (Object.prototype.hasOwnProperty.call(memo, key)) return memo[key];
-        var moves = legalMoves(hand, lead);
+        var moves = legalMoves(hand, lead, cache);
         var i;
         for (i = 0; i < moves.length; i += 1) {
             var move = moves[i];
             if (move.pass) {
-                if (!canForce(opp, hand, null, memo, budget)) {
+                if (!canForce(opp, hand, null, memo, budget, cache)) {
                     memo[key] = true;
                     return true;
                 }
                 continue;
             }
             var next = apply(hand, move);
-            if (sum(next) === 0 || !canForce(opp, next, move, memo, budget)) {
+            if (sum(next) === 0 || !canForce(opp, next, move, memo, budget, cache)) {
                 memo[key] = true;
                 return true;
             }
@@ -243,30 +260,32 @@
         return false;
     }
 
-    function moveWins(hand, opp, move, memo, budget) {
-        if (move.pass) return !canForce(opp, hand, null, memo, budget);
+    function moveWins(hand, opp, move, memo, budget, cache) {
+        if (move.pass) return !canForce(opp, hand, null, memo, budget, cache);
         var next = apply(hand, move);
-        return sum(next) === 0 || !canForce(opp, next, move, memo, budget);
+        return sum(next) === 0 || !canForce(opp, next, move, memo, budget, cache);
     }
 
     function winningMoves(hand, opp, lead, budget, memo) {
+        var cache = newMoveCache();
         var memory = memo || {};
-        var moves = legalMoves(hand, lead);
+        var moves = legalMoves(hand, lead, cache);
         var wins = [];
         var i;
         for (i = 0; i < moves.length; i += 1) {
-            if (moveWins(hand, opp, moves[i], memory, budget)) wins.push(moves[i]);
+            if (moveWins(hand, opp, moves[i], memory, budget, cache)) wins.push(moves[i]);
         }
         return wins;
     }
 
     function uniqueWinningMove(hand, opp, lead, budget, memo) {
+        var cache = newMoveCache();
         var memory = memo || {};
-        var moves = legalMoves(hand, lead);
+        var moves = legalMoves(hand, lead, cache);
         var found = null;
         var i;
         for (i = 0; i < moves.length; i += 1) {
-            if (!moveWins(hand, opp, moves[i], memory, budget)) continue;
+            if (!moveWins(hand, opp, moves[i], memory, budget, cache)) continue;
             if (found) return null;
             found = moves[i];
         }
@@ -274,11 +293,12 @@
     }
 
     function chooseMove(hand, opp, lead, budget, memo) {
+        var cache = newMoveCache();
         var memory = memo || {};
-        var moves = legalMoves(hand, lead);
+        var moves = legalMoves(hand, lead, cache);
         var i;
         for (i = 0; i < moves.length; i += 1) {
-            if (moveWins(hand, opp, moves[i], memory, budget)) return moves[i];
+            if (moveWins(hand, opp, moves[i], memory, budget, cache)) return moves[i];
         }
         return moves[0] || null;
     }
