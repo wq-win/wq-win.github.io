@@ -52,32 +52,36 @@ function undo(state) {
   return previous;
 }
 function key(bottles) { return bottles.map(b=>b.join('')).sort().join('|'); }
-/* Symmetric bottles share a search key. Moving a uniform bottle into an empty one
-   is a label swap, so the solver skips it; the player is still allowed to do it. */
+/* Breadth-first search returns a shortest continuation. Re-solving after each
+   pour therefore decreases the remaining distance by exactly one; a fresh
+   heuristic depth-first search can choose a different path and oscillate.
+   Bottle permutations share a key, but nodes keep real bottle indices. */
 function solve(input, options = {}) {
   const bottles = Array.isArray(input) ? input : input.bottles;
   if (won(bottles)) return [];
-  const limit = options.maxStates || 300000, seen = new Set([key(bottles)]);
-  let visited = 0;
-  function search(board, depth) {
-    if (++visited > limit || depth > (options.maxDepth || 180)) return null;
-    if (won(board)) return [];
-    const moves = legalMoves(board).filter(m => !(same(board[m.from]) && !board[m.to].length) && !(same(board[m.from]) && board[m.from].length === CAPACITY));
-    moves.sort((a,b)=>score(b,board)-score(a,board));
-    for (const move of moves) {
-      const next = pour(board,move.from,move.to).bottles, signature = key(next);
+  const limit = options.maxStates ?? 20000, maxDepth = options.maxDepth ?? 180;
+  const nodes = [{board:bottles,parent:-1,depth:0}], seen = new Set([key(bottles)]);
+  for (let head = 0; head < nodes.length; head++) {
+    const node = nodes[head];
+    if (node.depth >= maxDepth) continue;
+    for (const move of legalMoves(node.board)) {
+      const next = pour(node.board,move.from,move.to).bottles, signature = key(next);
       if (seen.has(signature)) continue;
+      // Never return an unproved partial route when the search budget expires.
+      if (nodes.length >= limit) return null;
       seen.add(signature);
-      const result = search(next,depth+1);
-      if (result) return [{from:move.from,to:move.to,amount:move.amount,color:move.color},...result];
-      if (visited > limit) return null;
+      const child = {board:next,parent:head,depth:node.depth+1,move};
+      nodes.push(child);
+      if (won(next)) {
+        const path = [];
+        for (let n = child; n.parent >= 0; n = nodes[n.parent]) {
+          const {from,to,amount,color} = n.move; path.push({from,to,amount,color});
+        }
+        return path.reverse();
+      }
     }
-    return null;
   }
-  return search(bottles,0);
-}
-function score(m,b) {
-  return (b[m.to].length ? 10 : 0) + (b[m.to].length + m.amount === CAPACITY && same(b[m.to]) ? 20 : 0) + (m.amount === b[m.from].length ? 7 : 0) + m.amount;
+  return null;
 }
 function save(state) { return JSON.stringify({v:2,level:state.level,history:state.history,completed:state.completed}); }
 function restore(raw) {

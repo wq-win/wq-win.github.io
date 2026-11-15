@@ -64,7 +64,7 @@ Browser globals: `WaterSortLevels`, then `WaterSortEngine`.
 - `E.act(state, from, to)` returns `{ ok, state, ...move }`, including recorded history and updated completion IDs.
 - `E.legalMoves(bottles)` enumerates all legal player moves.
 - `E.won(bottles)` and `E.same(bottle)` inspect completion/uniformity.
-- `E.solve(stateOrBottles, options)` returns a legal trace `[{ from, to, amount, color }, ...]`, `[]` if already won, or `null` if no solution is found within search limits. Optional `maxStates` (default 300,000) and `maxDepth` (default 180). It uses symmetry pruning and is not a shortest-path claim.
+- `E.solve(stateOrBottles, options)` returns a legal trace `[{ from, to, amount, color }, ...]`, `[]` if already won, or `null` if no solution is found within search limits. Optional `maxStates` (default 20,000) and `maxDepth` (default 180). It uses breadth-first search with bottle-permutation keys and returns a shortest path; each followed hint strictly reduces remaining solution distance. A bounded failure returns null, never an unproved move. The UI uses maxStates 20,000 and maxDepth 100. All eight complete reachable graphs have at most 6,503 canonical states. Search is synchronous after a short UI timer; this is not a worker and mobile latency is not inferred from Node timings.
 - `E.save(state)` / `E.restore(raw)` serialize and replay the legal history.
 
 ## Delivery files
