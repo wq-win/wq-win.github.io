@@ -331,6 +331,57 @@ async function main() {
             assert.equal(g.intervals.size, 0);
             assert.equal([...g.timeouts.values()].filter(t => t.delay === 1500).length, 2, 'new puzzle can complete');
         });
+        await test('a won puzzle cannot be edited before or after dismissing celebration', () => {
+            const g = setup(390, 660);
+            const { row, col } = g.empty();
+            const editable = g.cell(row, col);
+            const correct = g.state.solution[row][col];
+            const wrong = correct === 9 ? 1 : correct + 1;
+            const wrongButton = [...g.document.querySelectorAll('.num-btn')]
+                .find(button => Number(button.textContent) === wrong);
+            g.state.board = clone(g.state.solution);
+            g.state.board[row][col] = 0;
+            g.window.__sudokuTest.updateBoardUI();
+            editable.click();
+            g.find('give-hint').click();
+            const solved = g.snapshot();
+            const status = g.find('status-message').textContent;
+            const actions = () => {
+                g.find('clear-btn').click();
+                assert.deepEqual(g.snapshot(), solved, 'Clear cannot change the won board');
+                wrongButton.click();
+                g.key('Delete');
+                g.key('Backspace');
+                g.key(String(wrong));
+                g.key('H');
+                g.find('give-hint').click();
+                g.find('undo-input').click();
+                g.find('check-solution').click();
+                assert.deepEqual(g.snapshot(), solved, 'other edit paths cannot change the won board');
+                assert.equal(g.find('status-message').textContent, status);
+                assert.equal(g.intervals.size, 0);
+            };
+            actions();
+            for (const timer of g.timeouts.values()) if (timer.delay === 1500) timer.fn();
+            assert.ok(!g.find('celebration-modal').classList.contains('pointer-events-none'));
+            g.find('close-celebration').click();
+            assert.ok(g.find('celebration-modal').classList.contains('pointer-events-none'));
+            actions();
+            for (const button of [wrongButton, g.find('clear-btn'), g.find('give-hint'), g.find('check-solution')]) {
+                assert.equal(button.disabled, true);
+            }
+            g.find('new-game').click();
+            for (const button of [wrongButton, g.find('clear-btn'), g.find('give-hint'), g.find('check-solution')]) {
+                assert.equal(button.disabled, false);
+            }
+            const next = g.empty();
+            g.cell(next.row, next.col).click();
+            const nextNumber = String(g.state.solution[next.row][next.col]);
+            [...g.document.querySelectorAll('.num-btn')]
+                .find(button => button.textContent.trim() === nextNumber).click();
+            assert.equal(g.state.board[next.row][next.col], Number(nextNumber));
+            assert.equal(g.intervals.size, 1);
+        });
         await test('completion modal and play-again preserve the existing restart flow', () => {
             state.board = clone(state.solution);
             state.gameStarted = true;
