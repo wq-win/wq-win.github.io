@@ -6,7 +6,7 @@ const { pathToFileURL } = require('node:url');
     const root = path.resolve(__dirname, '..'), html = fs.readFileSync(path.join(root, 'game/sum-ten.html'), 'utf8'), css = fs.readFileSync(path.join(root, 'game/assets/sum-ten.css'), 'utf8'), windows = [];
     function boot({ landscape = false, motion = false } = {}) {
         const w = new Window({ url: 'https://example.test/game/sum-ten.html', settings: { disableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } }); windows.push(w);
-        w.document.write(html.replace(/<script[\s\S]*?<\/script>/g, '')); let time = 1000, nextFrame = 0; const frames = new Map(), captured = new Set(), captureCalls = [], media = new Map();
+        w.document.write(html.replace(/<script[\s\S]*?<\/script>/g, '')); let time = 1000, nextFrame = 0; const notes = []; w.AudioContext = class { constructor(){this.currentTime=10;this.state='running';this.destination={};} createOscillator(){const osc={frequency:{value:0},connect(){},start(at){notes.push({hz:osc.frequency.value,at});},stop(){}};return osc;} createGain(){return {connect(){},gain:{setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){}}};} }; const frames = new Map(), captured = new Set(), captureCalls = [], media = new Map();
         w.matchMedia = query => { if (!media.has(query)) { const target = new w.EventTarget(); target.matches = query.includes('orientation') ? landscape : !motion; media.set(query, target); } return media.get(query); };
         Object.defineProperty(w.performance, 'now', { value: () => time, configurable: true }); w.requestAnimationFrame = fn => { frames.set(++nextFrame, fn); return nextFrame; }; w.cancelAnimationFrame = id => frames.delete(id);
         const b = w.document.getElementById('ten-board'), shell = w.document.getElementById('board-shell');
@@ -17,7 +17,7 @@ const { pathToFileURL } = require('node:url');
         ['third-games-feedback.js', 'sum-ten-engine.js', 'sum-ten.js'].forEach(file => { let source = fs.readFileSync(path.join(root, 'game/js', file), 'utf8'); if (file === 'sum-ten.js') source = source.replace(/\}\(\)\);\s*$/, 'window.__tenTest={get state(){return state},get drag(){return drag},get timers(){return timers},get epoch(){return epoch},get frame(){return frame},load:function(b){cancelSelection();clearEffects();state=E.start(E.create(b),now());lastPhase="";paintCells();tick();},tick:tick};}());'); w.eval(source); });
         w.document.querySelectorAll('[data-cell]').forEach(cell => { cell.getBoundingClientRect = () => bounds(40 + Number(cell.dataset.visualCol) * 47, 80 + Number(cell.dataset.visualRow) * 47, 44, 44); });
         w.eval(fs.readFileSync(path.join(root, 'js/game-view.js'), 'utf8'));
-        return { w, d: w.document, api: w.__tenTest, b, media, frames, captured, captureCalls, time: value => { time = value; }, advance: ms => { time += ms; }, frame: () => { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(fn => fn(time)); } };
+        return { notes, w, d: w.document, api: w.__tenTest, b, media, frames, captured, captureCalls, time: value => { time = value; }, advance: ms => { time += ms; }, frame: () => { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(fn => fn(time)); } };
     }
     function coords(ctx, p) { const visual = ctx.w.SumTenDebug.visual(p); return { clientX: 40 + visual.col * 47 + 22, clientY: 80 + visual.row * 47 + 22 }; }
     function pointer(ctx, type, p, options = {}) { ctx.b.dispatchEvent(new ctx.w.PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 7, pointerType: 'touch', isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, ...coords(ctx, p), ...options })); }
@@ -82,6 +82,39 @@ const { pathToFileURL } = require('node:url');
         taps.d.getElementById('input-mode').click();assert.equal(taps.d.getElementById('sum').textContent,'—');
         drag(taps,{row:0,col:0},{row:0,col:1});assert.equal(taps.api.state.score,2);
         taps.d.getElementById('pause').click();taps.d.getElementById('start').click();assert.equal(taps.d.getElementById('pause-card').hidden,true);assert.equal(taps.b.inert,false);assert.equal(taps.frames.size,1);
+        // Exercise the actual controller and shared audio helper, not a tone spy.
+        for (const enabled of [false, true]) {
+            const audio = boot();
+            assert.equal(audio.d.querySelector('.cozy-sound').textContent, '音效：关');
+            if (enabled) audio.d.querySelector('.cozy-sound').click();
+            audio.notes.length = 0;
+            for (const outcome of ['match', 'no-moves', 'cleared', 'time', 'late-release']) {
+                const b = fixture();
+                if (outcome === 'cleared') { b[40] = 0; b[41] = 0; }
+                if (outcome === 'no-moves') b[41] = 0;
+                audio.api.load(b); audio.notes.length = 0;
+                const deadline = audio.api.state.deadline;
+                if (outcome === 'time') { audio.time(deadline); audio.frame(); }
+                else if (outcome === 'late-release') {
+                    pointer(audio, 'pointerdown', {row:0,col:0});
+                    audio.time(deadline); pointer(audio, 'pointerup', {row:0,col:1});
+                } else drag(audio, {row:0,col:0}, {row:0,col:1});
+                const expected = !enabled || ['time','late-release'].includes(outcome) ? [] : outcome === 'cleared' ? [523,784] : [660,880];
+                assert.deepEqual(audio.notes.map(n=>n.hz), expected, outcome + ' enabled=' + enabled);
+                assert.equal(audio.api.state.deadline, deadline);
+                assert.equal(audio.api.state.score, ['time','late-release'].includes(outcome) ? 0 : 2);
+                assert.equal(audio.api.state.reason || '', outcome === 'match' ? '' : outcome === 'late-release' ? 'time' : outcome);
+                const count = audio.notes.length;
+                audio.api.tick(); audio.w.dispatchEvent(new audio.w.Event('resize'));
+                assert.equal(audio.notes.length, count, 'Repeated render must not replay outcome');
+            }
+            assert.equal(audio.w.localStorage.getItem('cozy-sum-ten-best-v1'), '2');
+            if(enabled) {
+                audio.d.querySelector('.cozy-sound').click(); audio.notes.length=0;
+                const b=fixture();b[40]=b[41]=0;audio.api.load(b);drag(audio,{row:0,col:0},{row:0,col:1});
+                assert.deepEqual(audio.notes, [], 'Switching mute on suppresses victory');
+            }
+        }
         assert.match(css, /touch-action:none/); assert.match(css, /button\{[^}]*touch-action:manipulation/); assert.match(css, /min-width:44px;min-height:44px/); assert.match(css, /orientation:portrait/); assert.match(css, /orientation:landscape/); assert.match(css, /max-height:375px/); assert.match(css, /prefers-reduced-motion:reduce/); assert.doesNotMatch(css, /@import|https?:\/\//);
         assert.doesNotMatch(fs.readFileSync(path.join(root, 'game/js/sum-ten.js'), 'utf8'), /setInterval/);
         console.log('sum-ten UI: real PointerEvent dispatch down/move/up, capture/release, all relevant cancellations, multi-touch isolation, live sums, score, keyboard, transposed directions, orientation/fullscreen preservation, explicit start, exact deadline, background pause/resume, no-moves/cleared results, restart cleanup and reduced-motion passed.');
