@@ -460,6 +460,27 @@
         selectedSlot=-1;
         sync();
     }
+    // Preview and confirmation use the engine's actual stats, not duplicated balance constants.
+    const statNumber = value => String(Number(value.toFixed(2)));
+    function upgradeDetails(t, branch='power') {
+        const before=E.stats(t),next={...t,level:t.level+1};
+        if(next.level===3)next.branch=branch;
+        const after=E.stats(next);
+        const parts=[`伤害 ${statNumber(before.damage)}→${statNumber(after.damage)}`,`射程 ${statNumber(before.range)}→${statNumber(after.range)}`];
+        if(t.type==='magic'&&before.slow!==after.slow)parts.push(`减速 ${statNumber(before.slow)}→${statNumber(after.slow)}秒`);
+        if(t.type==='cannon'&&before.splash!==after.splash)parts.push(`爆炸半径 ${statNumber(before.splash)}→${statNumber(after.splash)}`);
+        return parts.join(' · ');
+    }
+    function purchaseUpgrade(branch='power') {
+        const t=state.towers[selectedSlot];
+        if(paused||!t||t.level>=3)return;
+        const label=t.level===1?'升级成功':branch==='reach'?'控场专精':'强攻专精';
+        const details=upgradeDetails(t,branch);
+        if(!E.upgrade(state,selectedSlot,branch))return;
+        announce(`${label}：${details}。`);
+        feedback?.play('success');pulse(slotButtons[selectedSlot]);
+        saveCheckpoint();sync();
+    }
     function sync() {
         const ended=['cleared','won','lost'].includes(state.state);
         $('level').textContent=state.level;
@@ -489,17 +510,18 @@
         });
         const t=state.towers[selectedSlot];
         $('selection-title').textContent=t?`${selectedSlot+1} 号 · ${E.TYPES[t.type].name} Lv.${t.level}`:E.TYPES[selectedType].name+' · 选择空地建造';
-        $('selection-text').textContent=t?`伤害 ${Math.round(E.stats(t).damage)} · 射程 ${E.stats(t).range} · ${t.level===3?'已达最高等级':E.TYPES[t.type].description}`:E.TYPES[selectedType].description+'，点 + 建造。';
+        $('selection-text').textContent=t?`伤害 ${statNumber(E.stats(t).damage)} · 射程 ${E.stats(t).range} · ${t.level===3?'已达最高等级':E.TYPES[t.type].description}`:E.TYPES[selectedType].description+'，点 + 建造。';
         $('upgrade').hidden=!t;
         $('upgrade').disabled=!t||t.level>=3||state.gold<E.upgradeCost(t)||paused||ended;
         $('upgrade').textContent=t?(t.level>=3?'已满级':t.level===2?`强攻专精 ◈ ${E.upgradeCost(t)}`:`升级 ◈ ${E.upgradeCost(t)} [U]`):'升级';
         $('specialize').hidden=!t||t.level!==2;
         $('specialize').disabled=!t||state.gold<E.upgradeCost(t)||paused||ended;
         $('specialize').textContent=t?`控场专精 ◈ ${E.upgradeCost(t)}`:'控场专精';
-        $('branch-hint').hidden=!t||t.level!==2;
+        $('branch-hint').hidden=!t||t.level>=3;
+        $('branch-hint').textContent=t&&t.level<3?(t.level===1?'升级：'+upgradeDetails(t):'强攻：'+upgradeDetails(t)+'\n控场：'+upgradeDetails(t,'reach')):'';
         $('sell').hidden=!t;
         $('sell').disabled=!t||state.state!=='ready'||paused;
-        if(t&&t.level===3)$('selection-text').textContent+=(t.branch==='reach'?(' · 控场：长射程 / '+(t.type==='magic'?'强减速':t.type==='cannon'?'大范围':'较低伤害')):' · 强攻：高伤害 / 短射程');
+        if(t&&t.level===3)$('selection-text').textContent+=(t.branch==='reach'?(' · 控场：长射程 / '+(t.type==='magic'?'强减速':t.type==='cannon'?'大范围':'伤害低于强攻')):' · 强攻：高伤害 / 短射程');
         $('next-wave').disabled=state.state!=='ready'||paused;
         $('next-wave').textContent=state.state==='running'?`第 ${state.wave} 波 · 防守中`:(ended?'战斗结束':`第 ${state.wave+1} 波 · 开始防守 →`);
         $('wave-hint').textContent=state.state==='running'?`剩余 ${state.queue.length+state.enemies.length} 个敌人`:state.wave===E.WAVES_PER_LEVEL-1?'最终波：首领即将出现':'备战：可出售换阵 · 再决定迎敌';
@@ -535,15 +557,8 @@
         sync();
     }
     document.querySelectorAll('[data-tower]').forEach(b=>b.addEventListener('click',()=>select(b.dataset.tower)));
-    $('upgrade').addEventListener('click',()=> {
-        if(!paused&&E.upgrade(state,selectedSlot)) {
-            announce('塔楼升级成功，火力与射程提升。');
-            feedback?.play('success');pulse(slotButtons[selectedSlot]);
-            saveCheckpoint();
-            sync();
-        }
-    });
-    $('specialize').addEventListener('click',()=>{if(!paused&&E.upgrade(state,selectedSlot,'reach')){feedback?.play('success');pulse(slotButtons[selectedSlot]);announce('控场专精：扩展射程，以较低伤害换取覆盖与控制。');saveCheckpoint();sync();}});
+    $('upgrade').addEventListener('click',()=>purchaseUpgrade('power'));
+    $('specialize').addEventListener('click',()=>purchaseUpgrade('reach'));
     $('sell').addEventListener('click',()=>{if(!paused&&E.sell(state,selectedSlot)){feedback?.play('undo');announce('已回收 70% 投入金币，可重新布阵。');selectedSlot=-1;saveCheckpoint();sync();}});
     $('next-wave').addEventListener('click',()=> {
         if(!paused&&E.startWave(state)) {

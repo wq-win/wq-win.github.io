@@ -41,3 +41,19 @@ for(const [level,mode] of [[4,0],[8,0],[12,0],[16,0],[20,0]]) {
  assert.equal(E.rating(s),3,`Five-tower challenge on ${level} is feasible`);
 }
 console.log('All five limited-build three-star challenges have deterministic valid solutions.');
+
+// 双湾哨站 slot 3: a power upgrade gives up a real sliver of route coverage.
+{
+ const m=E.mission(2),slot=m.slots[2],corner=m.path[3];
+ const nearest=Math.hypot(slot[0]-corner[0],slot[1]-corner[1]);
+ assert.ok(nearest>185&&nearest<190);
+ const prefix=m.path.slice(1,4).reduce((sum,p,i)=>sum+Math.hypot(p[0]-m.path[i][0],p[1]-m.path[i][1]),0);
+ for(const branch of [null,'power','reach']) {
+  const s=E.create(2);s.gold=1000;E.build(s,2,'arrow');E.upgrade(s,2);if(branch)E.upgrade(s,2,branch);
+  s.state='running';s.wave=1;s.spawn=999;
+  const enemy=E.spawn(s,'brute');enemy.distance=prefix+1;enemy.speed=0;Object.assign(enemy,E.position(enemy.distance,m.path));
+  const hp=enemy.hp;E.tick(s,1/60);
+  assert.equal(enemy.hp<hp,branch!=='power',`Slot 3 targeting matches ${branch||'level two'} coverage`);
+ }
+ console.log('Double-bay slot 3 geometric and actual engine-targeting regression passed.');
+}
