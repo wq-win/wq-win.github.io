@@ -97,3 +97,9 @@ Natural 90-second expiry was observed without clock injection: phase finished, r
 - DOM regression completes generated boards through actual PointerEvent dispatch in portrait and transposed landscape, verifies score 48 / cleared, and restarts into a new full board. Existing exact-deadline, pause/resume, keyboard, input cancellation, best score and reduced-motion regressions still pass. Rendered Chromium layout verification remains the parent integration pass; no browser-render claim is inferred from Happy DOM.
 - The existing 90-second score mode is unchanged. No timer penalty, undo feature, new mode, shuffled refill, or extra control was introduced.
 - Changed files for this redesign: `game/js/sum-ten-engine.js`, `tools/sum-ten-test.js`, `tools/sum-ten-ui-test.js`, and this QA note.
+
+## 2026-11-16 outcome audio regression
+
+Only a cleared board requests the victory cue. Its final match does not also request the match cue. A valid match leaving no moves keeps the normal match cue; timeout is intentionally quiet. Shared audio, engine, score, deadline, best-score key and result copy are unchanged.
+
+The UI suite executes the actual controller and shared audio helper with a mock AudioContext: default mute, opt-in sound, match, no-moves, clear, frame timeout, deadline pointer release, repeated repaint and switching mute back on. Enabled clear schedules only 523/784 Hz, non-clearing matches only 660/880 Hz, and timeout schedules none. These are scheduling tests, not physical-speaker or real-phone verification.

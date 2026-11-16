@@ -65,7 +65,7 @@
             lastPhase = state.status; paintCells(); result.hidden = state.status !== 'finished';
             if (state.status === 'finished') {
                 cancelSelection(); if (frame) cancelAnimationFrame(frame); frame = 0;
-                best=Math.max(best,state.score);try{localStorage.setItem('cozy-sum-ten-best-v1',String(best));}catch(_){}bestEl.textContent=' · 最高 '+best;sound.tone('win');
+                best=Math.max(best,state.score);try{localStorage.setItem('cozy-sum-ten-best-v1',String(best));}catch(_){}bestEl.textContent=' · 最高 '+best;if(state.reason==='cleared')sound.tone('win');
                 var title = state.reason === 'time' ? '时间到，收好这一篮' : state.reason === 'cleared' ? '整座果园，收空了！' : '这一盘，已经没有十了';
                 d.getElementById('result-title').textContent = title; d.getElementById('result-kicker').textContent = state.reason === 'cleared' ? '48 颗，满满一篮' : '这一篮，收好了'; d.getElementById('result-copy').textContent = '收获 ' + state.score + ' 颗果实，得到 ' + state.score + ' 分。'; say(title + '。本局 ' + state.score + ' 分。');
                 if (!d.getElementById('rules-dialog').open) d.getElementById('result-restart').focus({ preventScroll: true });
@@ -91,7 +91,7 @@
     }
     function commit(from, to) {
         var before = state.board, outcome = E.select(state, from, to, now()); state = outcome.state;
-        if (outcome.accepted) { sound.tone('match'); harvest(outcome.removed, before); say('刚好 10！收获 ' + outcome.removed.length + ' 颗，+' + outcome.removed.length + ' 分。'); paintCells(); }
+        if (outcome.accepted) { if(state.reason!=='cleared')sound.tone('match'); harvest(outcome.removed, before); say('刚好 10！收获 ' + outcome.removed.length + ' 颗，+' + outcome.removed.length + ' 分。'); paintCells(); }
         else if (state.status === 'playing') say('合计 ' + (outcome.rectangle ? outcome.rectangle.sum : 0) + '，再圈一个刚好 10 的框。');
         paintStatus();
     }
