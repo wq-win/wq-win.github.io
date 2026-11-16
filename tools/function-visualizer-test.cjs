@@ -481,12 +481,14 @@ function renderHarness(width = 900) {
   return {
     ui: ui.renderTest, ids, matching,
     select(id, params = {}) {
-      ui.renderTest.selectFunction(id);
-      for (const [key, value] of Object.entries(params)) {
-        const p = ui.renderTest.state().current.params.find(p => p.id === key);
-        ui.renderTest.updateParameter(p, String(value), 'number');
-      }
-      ui.renderTest.draw();
+      ui.selection = {id, params};
+      // A render-loop regression must fail the test, not hang the test runner.
+      vm.runInContext(`renderTest.selectFunction(selection.id);
+        for (const [key, value] of Object.entries(selection.params)) {
+          const p = renderTest.state().current.params.find(p => p.id === key);
+          renderTest.updateParameter(p, String(value), 'number');
+        }
+        renderTest.draw();`, ui, {timeout: 1000});
     }
   };
 }
@@ -555,6 +557,31 @@ test('bivariate rendering uses genuine density ellipses and switches cleanly to 
   assert.equal(harness.matching(n => n.tag === 'circle').length, 2);
   harness.select('beta', {alpha:.5,beta:.5});
   assert.match(harness.ids.get('plot-note').textContent, /无穷/);
+});
+test('tangent precision fallback is bounded and recovers after large phases', () => {
+  const h = renderHarness();
+  for (const w of [1, -1, 1000, -1000, 0]) for (const phi of [0, .5, -.5, 100, -100]) {
+    h.select('tangent', {A: 1, w, phi});
+    assert.ok(h.ui.viewRange(h.ui.state().current, h.ui.state().values));
+    assert.equal(h.matching(n => n.attributes.id === 'function-curve').length, 1);
+    const poles = h.matching(n => n.attributes.class === 'asymptote');
+    assert.ok(poles.length <= 100);
+    if (w === 0) assert.equal(poles.length, 0);
+    else assert.ok(poles.length > 0);
+  }
+  for (const w of [1, -1, 1000, -1000]) for (const phi of [1e20, -1e20, 1e308, -1e308]) {
+    h.select('tangent', {A: 1, w, phi});
+    assert.equal(h.ui.state().values.phi, phi, 'finite phase retained, not silently clamped');
+    assert.equal(h.ui.viewRange(h.ui.state().current, h.ui.state().values), null);
+    assert.ok(h.matching(n => n.textContent.includes('浮点精度')).length);
+    assert.equal(h.matching(n => n.attributes.id === 'function-curve' || n.attributes.class === 'asymptote').length, 0);
+    h.select('tangent', {w: 1, phi: 0});
+    assert.equal(h.matching(n => n.attributes.id === 'function-curve').length, 1);
+    assert.equal(h.matching(n => n.textContent.includes('浮点精度')).length, 0);
+    assert.equal(h.matching(n => n.attributes.class === 'asymptote').length, 4);
+  }
+  h.select('sine');
+  assert.equal(h.matching(n => n.attributes.id === 'function-curve').length, 1);
 });
 test('game hub and shared site catalog expose the published page', () => {
   const hub = fs.readFileSync(path.join(root, 'game/index.html'), 'utf8');
