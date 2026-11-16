@@ -98,6 +98,41 @@ async function main() {
         const beforeCancel=clone(api.state);window.confirm=()=>false;find('restart').click();assert.deepEqual(clone(api.state),beforeCancel);window.confirm=()=>true;
         find('sell').click();assert.equal(api.state.towers[0],null);assert.equal(api.state.built,1);
         find('restart').click();assertReset(1);
+        // Every branch previews the same actual stats that its purchase announces.
+        const number=value=>String(Number(value.toFixed(2)));
+        for(const type of ['arrow','magic','cannon'])for(const branch of ['power','reach']) {
+            seed(2,'ready',0);api.state.gold=1000;
+            window.document.querySelector(`[data-tower="${type}"]`).click();
+            window.document.querySelectorAll('.td-slot')[2].click();
+            const tower=api.state.towers[2],levelOne=E.stats(tower);
+            assert.equal(find('branch-hint').hidden,false);
+            const ordinaryPreview=find('branch-hint').textContent.replace('升级：','');
+            window.document.dispatchEvent(new window.KeyboardEvent('keydown',{key:'u'}));
+            assert.equal(tower.level,2);
+            assert.equal(find('announcement').textContent,'升级成功：'+ordinaryPreview+'。');
+            assert.equal(E.stats(tower).range,levelOne.range+15);
+            const previews=find('branch-hint').textContent.split('\n');
+            const label=branch==='power'?'强攻':'控场';
+            const preview=previews.find(p=>p.startsWith(label+'：')).slice(label.length+1);
+            const before=E.stats(tower),beforeGold=api.state.gold,cost=E.upgradeCost(tower);
+            const control=find(branch==='power'?'upgrade':'specialize');
+            find('pause').click();const pausedCopy=clone(api.state);control.click();assert.deepEqual(clone(api.state),pausedCopy);find('pause').click();
+            api.state.gold=0;api.sync();assert.equal(control.disabled,true);control.click();assert.equal(tower.level,2);api.state.gold=beforeGold;api.sync();
+            control.click();const after=E.stats(tower);
+            assert.equal(tower.level,3);assert.equal(tower.branch,branch);assert.equal(api.state.gold,beforeGold-cost);
+            assert.equal(after.range-before.range,branch==='power'?-5:70);
+            assert.ok(after.damage>before.damage,'Both level-three choices increase damage over level two');
+            assert.ok(preview.includes(`伤害 ${number(before.damage)}→${number(after.damage)}`));
+            assert.ok(preview.includes(`射程 ${number(before.range)}→${number(after.range)}`));
+            if(type==='magic'&&branch==='reach')assert.ok(preview.includes(`减速 ${number(before.slow)}→${number(after.slow)}秒`));
+            if(type==='cannon'&&branch==='reach')assert.ok(preview.includes(`爆炸半径 ${before.splash}→${after.splash}`));
+            assert.equal(find('announcement').textContent,label+'专精：'+preview+'。');
+            assert.equal(find('branch-hint').hidden,true);
+            const capped=clone(api.state);control.click();assert.deepEqual(clone(api.state),capped);
+            const restored=api.restoreCheckpoint(window.localStorage.getItem('mylog-forest-defense-checkpoint-v2'));assert.equal(restored.towers[2].branch,branch);assert.equal(restored.gold,api.state.gold);
+            find('restart').click();
+        }
+        seed(1,'ready',0);
         for (let level = 1; level < E.LEVEL_COUNT; level++) {
             seed(level, 'running', E.WAVES_PER_LEVEL);
             Object.assign(api.state, { gold: 999, health: 3, kills: 200 });
