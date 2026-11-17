@@ -100,6 +100,36 @@ const { pathToFileURL } = require('node:url');
     await test('blocked storage does not prevent a playable new game', () => {
       const blocked = boot(null, true, true); blocked.document.querySelector('[data-slot="0"]').click(); blocked.document.querySelector('[data-slot="1"]').click(); assert.equal(blocked.__test.state.board[0], '林'); blocked.happyDOM.abort();
     });
+    await test('battle Pause is reachable; Help and background hold the same round without overriding manual Pause', async () => {
+      for (const motion of [true, false]) {
+        const q = boot(undefined, motion), doc = q.document, qa = q.__test;
+        const bar = id => doc.getElementById(id);
+        try {
+          assert.equal(bar('pause-battle').hidden, true);
+          doc.querySelector('[data-slot="0"]').click(); doc.querySelector('[data-army="0"]').click();
+          bar('march').click();
+          assert.equal(bar('pause-battle').closest('dialog'), null);
+          assert.equal(bar('pause-battle').hidden, false);
+          assert.equal(doc.activeElement.id, 'pause-battle');
+          bar('help-open').click(); const round = qa.state.round;
+          assert.equal(doc.activeElement.id, 'help-close');
+          assert.equal(qa.timers, 0);
+          assert.match(bar('phase-label').textContent, /暂停/);
+          Object.defineProperty(doc, 'hidden', {configurable:true, value:true}); doc.dispatchEvent(new q.Event('visibilitychange'));
+          Object.defineProperty(doc, 'hidden', {configurable:true, value:false}); doc.dispatchEvent(new q.Event('visibilitychange'));
+          assert.equal(qa.timers, 0);
+          await pause(110); assert.equal(qa.state.round, round);
+          doc.dispatchEvent(new q.KeyboardEvent('keydown', {key:'Escape'}));
+          assert.equal(doc.activeElement.id, 'help-open'); assert.equal(qa.timers, 1);
+          bar('pause-battle').click(); assert.equal(bar('pause-battle').getAttribute('aria-pressed'), 'true');
+          bar('help-open').click(); bar('help-close').click();
+          assert.equal(qa.timers, 0); assert.equal(qa.state.round, round);
+          assert.equal(bar('pause-battle').getAttribute('aria-pressed'), 'true');
+          bar('pause-battle').click();
+          await until(() => qa.state.round === round + 1, 'one resumed battle round');
+        } finally { q.happyDOM.abort(); }
+      }
+    });
     await test('selection shows lane forecast; sound preference persists; hidden battle pauses then resumes', async () => {
       const q = boot(), qa=q.__test, doc=q.document;
       doc.querySelector('[data-slot="0"]').click(); assert.match(doc.getElementById('feedback').textContent,/首轮预估.*左.*中.*右/);

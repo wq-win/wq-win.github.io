@@ -6,6 +6,8 @@
   const roleName = { guard: '护卫', fire: '火兵', troop: '战兵' }, laneNames = ['左', '中', '右'];
   const reduced = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   let paused = false;
+  const helpOpen = () => $('help').open;
+  const suspended = () => paused || document.hidden || helpOpen();
   let state, selected = null, busy = false, generation = 0, soundOn = false, audio, best = {};
   const SETTINGS = 'ink-hanzi-settings-v1';
   try { const settings = JSON.parse(localStorage.getItem(SETTINGS) || '{}'); soundOn = settings.sound === true; best = settings.best && typeof settings.best === 'object' && !Array.isArray(settings.best) ? settings.best : {}; } catch (_) {}
@@ -89,7 +91,7 @@
     $('chapter').textContent = '第 ' + String(state.level + 1).padStart(2, '0') + ' 阵 · ' + level.subtitle;
     $('level-name').textContent = level.title; $('level-hint').textContent = level.hint;
     $('round-number').textContent = state.phase === 'prepare' ? '准备' : String(state.round).padStart(2, '0') + ' 回合';
-    $('phase-label').textContent = { prepare: '整军待发', battle: '交锋之中', won: '破阵成功', lost: '城门失守' }[state.phase];
+    $('phase-label').textContent = { prepare: '整军待发', battle: suspended() ? '交锋暂停' : '交锋之中', won: '破阵成功', lost: '城门失守' }[state.phase];
     $('gate-value').textContent = state.gate.hp + ' / ' + state.gate.maxHp; $('gate-fill').style.width = state.gate.hp / state.gate.maxHp * 100 + '%';
     $('gate').setAttribute('aria-label', '城门生命 ' + state.gate.hp + '，上限 ' + state.gate.maxHp);
     $('level-select').value = String(state.level); $('progress').textContent = state.completed.length + ' / 6 已破';
@@ -98,6 +100,7 @@
     $('pause-battle').hidden = state.phase !== 'battle';
     $('pause-battle').textContent = paused ? '继续交锋 ▶' : '暂停交锋 Ⅱ';
     $('pause-battle').setAttribute('aria-pressed',String(paused));
+    $('march').hidden = state.phase === 'battle';
     $('march').disabled = state.phase !== 'prepare' || !state.army.some(Boolean) || busy;
     $('march').querySelector('span').textContent = state.phase === 'prepare' ? state.army.some(Boolean) ? '出 征' : '先部署，再出征' : state.phase === 'battle' ? '交 锋 中' : '本 阵 已 结';
     const finished = state.phase === 'won' || state.phase === 'lost'; $('result').hidden = !finished;
@@ -168,8 +171,7 @@
     });
   }
   function battleTurn() {
-    if (state.phase !== 'battle' || paused) return;
-    if (document.hidden) return;
+    if (state.phase !== 'battle' || suspended()) return;
     const events = E.step(state);
     if (state.phase === 'won') best[state.level] = Math.max(Number(best[state.level]) || 0, state.gate.hp);
     tone(state.phase === 'won' ? 880 : 330); effects(events);
@@ -178,12 +180,12 @@
       const gateDamage = events.filter(e => e.type === 'gate').reduce((n, e) => n + e.amount, 0), fallen = events.filter(e => e.type === 'defeat' && e.side === 'enemy').length;
       message(state.phase === 'won' ? '敌阵全破，城门守住了。' : state.phase === 'lost' ? '城门归零。保留阵容，换个站位再试试。' : '第 ' + state.round + ' 回合 · ' + (fallen ? fallen + ' 路墨兽退场。' : '双方同步交锋。') + (gateDamage ? '城门受到 ' + gateDamage + ' 点伤害。' : '城门安好。'));
       if (state.phase === 'battle') later(battleTurn, reduced() ? 65 : 470);
-      else $('result-action').focus({ preventScroll: true });
+      else if (!helpOpen() && !document.hidden) $('result-action').focus({ preventScroll: true });
     }, reduced() ? 0 : 410);
   }
   function march() {
-    if (busy) return; const result = E.start(state); if (!result.ok) { message(result.error); return; }
-    selected = null; save(); render(); message('战斗开始。每回合同步攻击，留意各路血量。'); later(battleTurn, reduced() ? 0 : 440);
+    if (busy || helpOpen()) return; const result = E.start(state); if (!result.ok) { message(result.error); return; }
+    selected = null; save(); render(); message('战斗开始。每回合同步攻击，留意各路血量。'); later(battleTurn, reduced() ? 0 : 440); $('pause-battle').focus({ preventScroll: true });
   }
   function restart(index, keepFormation) {
     paused = false; cancelPending(); const completed = state.completed.slice();
@@ -196,8 +198,35 @@
   $('level-select').addEventListener('change', () => restart(Number($('level-select').value), false));
   $('result-action').addEventListener('click', () => { if (state.phase === 'won' && state.level < 5) restart(state.level + 1, false); else restart(state.level, true); });
   $('rearrange').addEventListener('click', () => restart(state.level, true));
-  $('help-open').addEventListener('click', () => { if (typeof $('help').showModal === 'function') $('help').showModal(); else $('help').setAttribute('open', ''); });
-  function closeHelp() { if (typeof $('help').close === 'function') $('help').close(); else $('help').removeAttribute('open'); $('help-open').focus({ preventScroll: true }); }
+  function syncBattle() {
+    if (state.phase !== 'battle') return;
+    cancelPending(); save(); render();
+    if (paused) message('交锋已暂停，可以观察三路局势。');
+    else if (helpOpen()) message('查看玩法时暂停交锋。');
+    else if (document.hidden) message('已暂停交锋，返回页面后继续。');
+    else { message('继续交锋。'); later(battleTurn, 250); }
+  }
+  const help = $('help'), fallbackInert = new Map();
+  $('help-open').addEventListener('click', () => {
+    if (helpOpen()) return;
+    if (typeof help.showModal === 'function') help.showModal();
+    else {
+      help.setAttribute('open', '');
+      for (const el of help.parentElement.children) {
+        if (el === help) continue;
+        fallbackInert.set(el, el.inert); el.inert = true;
+      }
+    }
+    syncBattle(); $('help-close').focus({ preventScroll: true });
+  });
+  function closeHelp() {
+    if (!helpOpen()) return;
+    if (typeof help.close === 'function') help.close(); else help.removeAttribute('open');
+    for (const [el, inert] of fallbackInert) el.inert = inert;
+    fallbackInert.clear();
+    syncBattle(); $('help-open').focus({ preventScroll: true });
+  }
+  help.addEventListener('cancel', event => { event.preventDefault(); closeHelp(); });
   $('help-close').addEventListener('click', closeHelp);
   $('help').addEventListener('click', event => { if (event.target === $('help')) { const bounds = $('help').getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeHelp(); } });
   $('character-board').addEventListener('keydown', event => {
@@ -210,8 +239,11 @@
     if ($('help').open) { event.preventDefault(); event.stopImmediatePropagation(); closeHelp(); return; }
     if (selected !== null) { const previous = selected; selected = null; render(); message('已取消选字。'); focusSlot(previous); }
   });
-  $('pause-battle').addEventListener('click', () => { if(state.phase !== 'battle')return; paused=!paused;cancelPending();save();render();message(paused?'交锋已暂停，可以观察三路局势。':'继续交锋。');if(!paused&&!document.hidden)later(battleTurn,250); });
+  $('pause-battle').addEventListener('click', () => {
+    if (state.phase !== 'battle' || helpOpen() || document.hidden) return;
+    paused = !paused; syncBattle();
+  });
   $('sound-toggle').addEventListener('click', () => { soundOn = !soundOn; save(); render(); tone(550); });
-  document.addEventListener('visibilitychange', () => { if (state.phase !== 'battle') return; cancelPending(); render(); if (document.hidden) message('已暂停交锋，返回页面后继续。'); else if(!paused) later(battleTurn, 250); });
+  document.addEventListener('visibilitychange', syncBattle);
   render();
 })();
