@@ -86,7 +86,7 @@ function render(){
  const level=state.level;$('level-name').textContent='第 '+(level+1)+' 关 · '+(state.boardVersion===1?'旧版续玩':E.LEVELS[level].name);$('remaining').textContent=(state.tiles.length-state.matched)+' 张待消除';$('allowance').textContent=(state.boardVersion===1?'旧版 288 张 · ':'')+'每种道具初始 '+(state.boardVersion===1?5-level:E.LEVELS[level].tools)+' 次';
  document.querySelectorAll('.level').forEach((b,i)=>{if(i===level)b.setAttribute('aria-current','step');else b.removeAttribute('aria-current');});
  for(const tool of ['remove','undo','shuffle']){$('count-'+tool).textContent=state.counts[tool];$('tool-'+tool).disabled=state.counts[tool]<=0||state.status==='won'||(tool==='remove'&&(state.rack.length===0||state.holding.length>0))||(tool==='undo'&&state.history.length===0)||(tool==='shuffle'&&state.status==='lost');}
- $('result').hidden=state.status==='playing';if(state.status==='won'){$('result-title').textContent=level===4?'五关挑战完成':'牧场清空了！';$('result-text').textContent=level===4?'从小果篮到层叠田野，五关全部完成。':'下一关 '+E.LEVELS[Math.min(4,level+1)].cards+' 张牌、'+E.LEVELS[Math.min(4,level+1)].types+' 种图案，挑战更深一层。';$('next').hidden=level===4;message('全部卡牌已消除。');}else if(state.status==='lost'){$('result-title').textContent='收集槽装满了';$('result-text').textContent='试试可用的移出或撤回道具，或者重新开始调整顺序。';$('next').hidden=true;message('槽满了，仍可尝试移出或撤回。');}
+ $('result').hidden=state.status==='playing';if(state.status==='won'){$('result-title').textContent=level===4?'第 5 关完成':'牧场清空了！';$('result-text').textContent=level===4?'第 5 关的卡牌已全部消除。':'下一关 '+E.LEVELS[Math.min(4,level+1)].cards+' 张牌、'+E.LEVELS[Math.min(4,level+1)].types+' 种图案，挑战更深一层。';$('next').hidden=level===4;message('全部卡牌已消除。');}else if(state.status==='lost'){$('result-title').textContent='收集槽装满了';$('result-text').textContent='试试可用的移出或撤回道具，或者重新开始调整顺序。';$('next').hidden=true;message('槽满了，仍可尝试移出或撤回。');}
  const progress=$('clear-progress');progress.value=state.matched;progress.max=state.tiles.length;
  $('clear-count').textContent='已消除 '+Math.round(state.matched/state.tiles.length*100)+'%';
  resize();
@@ -94,7 +94,24 @@ function render(){
 function pick(id){if(busy)return;busy=true;const before=state.matched,tile=tileById(id),fromBoard=!state.holding.includes(id);if(E.take(state,id)){steps.push(['take',id]);saveRun();render();const kind=state.status==='won'?'win':state.status==='lost'?'lost':state.matched>before?'match':'tap';cue(kind,fromBoard?tile:null);if(state.status==='playing')message(state.matched>before?'＋3！三张配成一组，继续向下探索。':state.rack.length>=5?'收集槽快满了，留意已有的图案。':'已收进卡槽，再找相同的图案。');}busy=false;}
 function use(tool){if(busy)return;busy=true;if(E.tool(state,tool)){steps.push(['tool',tool]);saveRun();render();cue('tool');if(state.status==='playing')message(state.message||{remove:'已移入暂存区，点选卡牌可放回。',undo:'已撤回一步，换个顺序试试。',shuffle:'剩余卡牌已重新排列。'}[tool]);}else message(state.message||'现在不能使用这个道具。');busy=false;}
 function start(level){clearFeedback();$('message').removeAttribute('data-feedback');$('result').classList.remove('result-won','result-lost');$('rack').classList.remove('rack-warning','match-pop');previousLayout=state.layout;state=E.create(level,undefined,previousLayout);steps=[];saveRun();render();message('先看看哪些卡牌没有被压住。');}
-for(let i=0;i<5;i++){const b=document.createElement('button');b.className='level';b.innerHTML='<strong>0'+(i+1)+'</strong><small>'+E.LEVELS[i].cards+' 张 · '+E.LEVELS[i].types+' 种</small>';b.setAttribute('aria-label','第 '+(i+1)+' 关，'+E.LEVELS[i].cards+' 张，'+E.LEVELS[i].types+' 种图案，每种道具 '+E.LEVELS[i].tools+' 次');b.addEventListener('click',()=>start(i));$('levels').append(b);}
+const leaveDialog=$('leave-dialog');
+let pendingLevel=null,leaveTrigger=null;
+function requestStart(level,trigger){
+ if(leaveDialog.open)return;
+ if(!steps.length||state.status==='won'){start(level);return;}
+ pendingLevel=level;leaveTrigger=trigger;
+ $('leave-confirm').textContent=level===state.level?'放弃并重新开始':'放弃并切换关卡';
+ leaveDialog.showModal();$('leave-cancel').focus({preventScroll:true});
+}
+function closeLeave(confirmed){
+ const level=pendingLevel,trigger=leaveTrigger;pendingLevel=null;leaveTrigger=null;
+ leaveDialog.close();if(confirmed&&level!==null)start(level);
+ trigger?.focus({preventScroll:true});
+}
+$('leave-cancel').addEventListener('click',()=>closeLeave(false));
+$('leave-confirm').addEventListener('click',()=>closeLeave(true));
+leaveDialog.addEventListener('cancel',event=>{event.preventDefault();closeLeave(false);});
+for(let i=0;i<5;i++){const b=document.createElement('button');b.className='level';b.innerHTML='<strong>0'+(i+1)+'</strong><small>'+E.LEVELS[i].cards+' 张 · '+E.LEVELS[i].types+' 种</small>';b.setAttribute('aria-label','第 '+(i+1)+' 关，'+E.LEVELS[i].cards+' 张，'+E.LEVELS[i].types+' 种图案，每种道具 '+E.LEVELS[i].tools+' 次');b.addEventListener('click',()=>{if(i!==state.level)requestStart(i,b);});$('levels').append(b);}
 for(const t of ['remove','undo','shuffle'])$('tool-'+t).addEventListener('click',()=>use(t));
-$('restart').addEventListener('click',()=>start(state.level));$('next').addEventListener('click',()=>start(Math.min(4,state.level+1)));$('help').addEventListener('click',()=>{if(!$('help-dialog').open)$('help-dialog').showModal();});for(const id of ['close-help','understood'])$(id).addEventListener('click',()=>$('help-dialog').close());window.addEventListener('resize',resize);if(window.ResizeObserver)new ResizeObserver(resize).observe(document.querySelector('.field'));render();saveRun();if(resumed)message(state.boardVersion===1?'已恢复旧版 288 张牌局，道具与撤回记录都保留；下次新开局使用短局关卡。':'已恢复上次的牌局，道具与撤回记录都保留。');
+$('restart').addEventListener('click',()=>requestStart(state.level,$('restart')));$('next').addEventListener('click',()=>start(Math.min(4,state.level+1)));$('help').addEventListener('click',()=>{if(!$('help-dialog').open)$('help-dialog').showModal();});for(const id of ['close-help','understood'])$(id).addEventListener('click',()=>$('help-dialog').close());window.addEventListener('resize',resize);if(window.ResizeObserver)new ResizeObserver(resize).observe(document.querySelector('.field'));render();saveRun();if(resumed)message(state.boardVersion===1?'已恢复旧版 288 张牌局，道具与撤回记录都保留；下次新开局使用短局关卡。':'已恢复上次的牌局，道具与撤回记录都保留。');
 })();
