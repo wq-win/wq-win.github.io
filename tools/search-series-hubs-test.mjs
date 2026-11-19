@@ -23,10 +23,20 @@ for (const [path, root] of [['/', './'], ['/rl/27-ppo.html', '../']]) {
   const input = d.getElementById('site-search-input');
   input.value = 'PPO'; input.dispatchEvent(new w.Event('input'));
   assert.ok([...d.querySelectorAll('.site-search-hit')].some(a => a.href.endsWith('/rl/27-ppo.html')));
+  for (const [name, url] of [
+    ['牧场叠叠消', '/game/sheep-triple.html'],
+    ['今天吃什么', '/game/life/food.html'],
+    ['强化学习演示', '/game/rl/index.html'],
+  ]) {
+    input.value = name;
+    input.dispatchEvent(new w.Event('input'));
+    assert.ok([...d.querySelectorAll('.site-search-hit')].some(a => new URL(a.href).pathname === url),
+      name + ' discoverable from ' + path);
+  }
   input.value = ''; input.dispatchEvent(new w.Event('input'));
   assert.equal(d.querySelectorAll('.site-search-hit').length, 0);
   d.dispatchEvent(new w.KeyboardEvent('keydown', {key:'Escape'}));
   assert.ok(d.getElementById('site-search-modal').classList.contains('hidden'));
   await w.happyDOM.close();
 }
-console.log('Series hub search: four top results, root/nested links, repeated queries, article search and dismissal passed.');
+console.log('Series hub search: four top results, root/nested links, repeated queries, article and lobby search, and dismissal passed.');

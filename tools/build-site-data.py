@@ -445,6 +445,48 @@ STATIC_PAGES = [
     },
 ]
 
+# Public lobby destinations that are not already registered above. Keep this list
+# explicit so fixtures and unlisted game files never enter search or the sitemap.
+LOBBY_PAGES = [
+    ("sheep-triple", "sheep-triple.html", "牧场叠叠消", "游戏小筑",
+     "三消 层叠卡牌", "在七格卡槽中凑齐三张同类卡牌，挑战五关随机牌局。"),
+    ("water-sort", "water-sort.html", "倒水分色", "游戏小筑",
+     "颜色分类 玻璃瓶", "在玻璃瓶之间倒水，让每种颜色各归其位。"),
+    ("sum-ten", "sum-ten.html", "框选凑十", "游戏小筑",
+     "数字消除 加法", "滑动框选合计为十的数字，九十秒内尽可能多地消除。"),
+    ("tile-frontier", "tile-frontier.html", "翻格筑城", "游戏小筑",
+     "策略 迷雾 岛屿", "翻开迷雾、采木建营，规划行动并夺下六座岛屿的据点。"),
+    ("hanzi-battle", "hanzi-battle.html", "字阵出征", "游戏小筑",
+     "汉字 合字 布阵", "组合汉字并布阵，让纸上小兵守住城门。"),
+    ("screws", "screws.html", "拧螺丝", "游戏小筑",
+     "颜色分类 木板", "收集同色螺丝，腾出五格托盘，拆开层叠的木板机关。"),
+    ("parking", "parking.html", "挪车出库", "游戏小筑",
+     "停车场 益智", "看清车头朝向，按顺序给堵在一起的小车让路。"),
+    ("yarn", "yarn.html", "拆毛线", "游戏小筑",
+     "织物 颜色分类", "找出露在外面的线头，收齐同色线团，拆开彩色织物。"),
+    ("snow-camp", "snow-camp.html", "雪境营地", "游戏小筑",
+     "生存 资源管理", "分配居民、采集燃料、维持暖炉，带领营地挺过五日寒潮。"),
+    ("tower-defense", "tower-defense.html", "迷你塔防", "游戏小筑",
+     "箭塔 魔法塔 炮塔", "建造和升级防御塔，挑战二十个战术关卡。"),
+    ("net", "net.html", "接线谜题", "游戏小筑",
+     "旋转 电路 益智", "旋转线路点亮每个终点，挑战逐步扩大的二十关棋盘。"),
+    ("life-dream", "life/dream.html", "解梦", "生活趣玩",
+     "梦境 自我反思 本地 AI", "写下梦境，在支持 WebGPU 的设备上获取本地 AI 生成的反思灵感。"),
+    ("life-fortune", "life/fortune.html", "今日运势", "生活趣玩",
+     "每日运势 幸运元素 本地 AI", "用本地 AI 探索每日运势和幸运元素，纯属娱乐。"),
+    ("life-food", "life/food.html", "今天吃什么", "生活趣玩",
+     "菜单 食材 外卖", "随机选外卖，或用现有食材搭配今日菜单。"),
+    ("rl-index", "rl/index.html", "强化学习演示", "精读演示",
+     "迷宫 价值迭代 倒立摆 悬崖 Dyna-Q DQN PPO", "用七个交互演示观察价值传播、策略更新与探索。"),
+    ("llm-index", "llm/index.html", "大语言模型演示", "精读演示",
+     "注意力 位置编码 Softmax BPE LoRA RoPE KV Cache", "动手探索分词、注意力、位置编码、采样和参数更新。"),
+    ("classic-index", "robot-classic/index.html", "机器人经典演示", "精读演示",
+     "A* RRT Kalman 势场 PID ICP PRM RRT* MPC", "动手探索路径规划、状态估计、反馈控制和点云配准。"),
+    ("learn-index", "robot-learn/index.html", "机器人学习演示", "精读演示",
+     "DMP DAgger 域随机化 ProMP HER Diffusion Policy", "动手探索轨迹表示、模仿学习、重标记目标和扩散策略。"),
+]
+
+
 TOKEN_RE = re.compile(r"^\d+-")
 
 
@@ -521,7 +563,15 @@ def collect_items():
                     "token": token_of(slug),
                 }
             )
-    for page in STATIC_PAGES:
+    lobby_pages = [
+        {
+            "id": f"game:{slug}", "url": f"game/{path}", "series": "game",
+            "seriesLabel": label, "title": title, "cardTitle": title,
+            "question": keywords, "excerpt": summary,
+        }
+        for slug, path, title, label, keywords, summary in LOBBY_PAGES
+    ]
+    for page in STATIC_PAGES + lobby_pages:
         items.append(
             {
                 "id": page.get("id") or f"site:{page['url']}",
