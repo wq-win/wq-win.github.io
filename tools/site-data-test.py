@@ -1,15 +1,55 @@
 #!/usr/bin/env python3
-"""RSS coverage, stable subscriber identity, and XML regression checks."""
+"""Regression checks for search, sitemap, and RSS."""
+from html.parser import HTMLParser
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
+from urllib.parse import urljoin, urlsplit
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location('site_data', ROOT / 'tools/build-site-data.py')
 builder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(builder)
+
+
+class LobbyCards(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.paths = set()
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag != 'a' or 'article-card' not in attrs.get('class', '').split():
+            return
+        url = urlsplit(urljoin(builder.ORIGIN + '/game/index.html', attrs['href']))
+        if f'{url.scheme}://{url.netloc}' == builder.ORIGIN and url.path.startswith('/game/'):
+            self.paths.add(url.path.lstrip('/'))
+
+
+class LobbyDiscoveryTests(unittest.TestCase):
+    def test_public_lobby_cards_are_discoverable(self):
+        lobby = LobbyCards()
+        lobby.feed((ROOT / 'game/index.html').read_text())
+        self.assertTrue(lobby.paths, 'No public destination cards found in the game lobby')
+        search = {item['url']: item for item in json.loads((ROOT / 'data/search-index.json').read_text())}
+        sitemap = {loc.text for loc in ET.parse(ROOT / 'sitemap.xml').findall('.//{*}loc')}
+        items = builder.collect_items()
+        game_urls = {item['url'] for item in items if item['series'] == 'game'}
+        related = builder.build_related(items)
+        for url in sorted(lobby.paths):
+            with self.subTest(url=url):
+                target = ROOT / (url + 'index.html' if url.endswith('/') else url)
+                self.assertTrue(target.is_file())
+                self.assertIn(url, game_urls)
+                self.assertIn(url, search)
+                self.assertIn(builder.ORIGIN + '/' + url, sitemap)
+                entry = search[url]
+                self.assertEqual(entry['kind'], 'page')
+                self.assertTrue(entry['title'] and entry['excerpt'])
+                self.assertNotIn(entry['id'], related)
 
 
 class RssTests(unittest.TestCase):
@@ -44,7 +84,6 @@ class RssTests(unittest.TestCase):
         self.assertLess(len(content), 1024 * 1024)
 
     def test_series_hubs_in_search_and_sitemap(self):
-        import json
         items = builder.collect_items()
         search = json.loads((ROOT / 'data/search-index.json').read_text())
         urls = [item['url'] for item in search]
