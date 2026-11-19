@@ -15,7 +15,7 @@
 
 | 系列 | 论文数量 | 主要内容 |
 | --- | ---: | --- |
-| [强化学习](https://wq-win.github.io/rl/) | 62 | 价值估计、策略、世界模型与语言模型强化学习 |
+| [强化学习](https://wq-win.github.io/rl/) | 100 | 价值估计、策略、世界模型与语言模型强化学习 |
 | [大语言模型](https://wq-win.github.io/llm/) | 100 | 表示、预训练、检索、对齐与推理 |
 | [机器人学习](https://wq-win.github.io/robot-learn/) | 100 | 示范、交互、运动基元与视觉语言动作模型 |
 | [机器人经典基础](https://wq-win.github.io/robot-classic/) | 100 | 几何、估计、规划、控制与 SLAM |
@@ -125,7 +125,7 @@ git diff --check
 
 ### 阅读层检查
 
-362 篇论文与四篇 Day 0 已包含静态正文及本地 KaTeX 公式，关闭 JavaScript 仍可阅读；共享脚本再添加阅读工具。源码保留检查、重新生成命令及既有 LSTM 公式的原文问题，见[阅读层构建与验收说明](tools/reading-qa.md)。
+400 篇论文与四篇 Day 0 已包含静态正文及本地 KaTeX 公式，关闭 JavaScript 仍可阅读；共享脚本再添加阅读工具。源码保留检查、重新生成命令及既有 LSTM 公式的原文问题，见[阅读层构建与验收说明](tools/reading-qa.md)。
 
 ### GitHub Pages
 

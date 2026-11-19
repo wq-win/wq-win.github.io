@@ -95,7 +95,7 @@ $$\min_{K,d,\{R_i,t_i\}}\sum_{i,j}\|m_{ij}-\pi(K,d,R_i,t_i,M_j)\|^2,$$
 
 ## 四、读远近图案对照，分开焦距和畸变信息
 
-<figure class="reading-evidence-figure"><a href="/robot-classic/assets/papers/042-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/042-evidence.png" width="1020" height="263" alt="Table 1：分别比较近距离图像组 A、远距离组 B 与合并组 A+B 的参数，关注图案覆盖改变后的差异" loading="lazy"></a><figcaption>原论文结果图／表摘引：Zhengyou Zhang（2000），Table 1，PDF 第 5 页；<a href="https://web.cecs.pdx.edu/~mperkows/CLASS_479/S2006/zhang_camera_calibration.pdf#page=5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
+<figure id="rc-42-table-1" class="reading-evidence-figure"><a href="/robot-classic/assets/papers/042-evidence.png" target="_blank" rel="noopener noreferrer"><img src="/robot-classic/assets/papers/042-evidence.png" width="1020" height="263" alt="Table 1：分别比较近距离图像组 A、远距离组 B 与合并组 A+B 的参数，关注图案覆盖改变后的差异" loading="lazy"></a><figcaption>原论文结果图／表摘引：Zhengyou Zhang（2000），Table 1，PDF 第 5 页；<a href="https://web.cecs.pdx.edu/~mperkows/CLASS_479/S2006/zhang_camera_calibration.pdf#page=5" target="_blank" rel="noopener noreferrer">核对原文</a>。原版权保留。</figcaption></figure>
 
 读图：分别比较近距离图像组 A、远距离组 B 与合并组 A+B 的参数，关注图案覆盖改变后的差异。低重投影残差并不能单独保证所有内参和畸变参数都准确。
 

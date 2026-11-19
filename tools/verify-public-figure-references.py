@@ -9,13 +9,26 @@ def check(v,label):
  checks+=1
 from lib.reading_corpus import corpus
 metadata=corpus(ROOT,review=True)
+pages={p['path']:p['key']+'.html' for p in metadata['pages']}
+review=(ROOT/'figure-review.html').read_text()
+def has_anchor(document,anchor):
+ return bool(re.search(r'\bid=["\']'+re.escape(anchor)+r'["\']',document))
 paths=set()
 for l in d['figure_ledgers']:
  series=l['series'];counts[series]={'figures':0,'inline':0,'unavailable':0,'rights-limited':0,'tables':0}
  for a in l['articles']:
   check(a['path'] not in paths,'unique source '+a['path']);paths.add(a['path']);source=(ROOT/a['path']).read_text()
   for r in a['references']:
-   if r['kind']=='table':counts[series]['tables']+=1;continue
+   if r['kind']=='table':
+    counts[series]['tables']+=1
+    if r['status'].startswith('inline-'):
+     anchor=r['anchor']
+     label=a['path']+' inline table '+r['id']
+     check(bool(anchor) and has_anchor(source,anchor),label+' source anchor')
+     page=pages.get(a['path'],series+'/index.html')
+     check(f'href="{page}#{anchor}"' in review,label+' review jump')
+     check(has_anchor((ROOT/page).read_text(),anchor),label+' published anchor')
+    continue
    counts[series]['figures']+=1
    check(r['status'] in ['inline-existing','inline-added','unavailable','rights-limited'],a['path']+' figure has terminal editorial status '+r['id'])
    check(r['source_url'].startswith(('https://','http://')) and r['source_version'],a['path']+' identifiable source/version')
