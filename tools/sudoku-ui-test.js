@@ -230,11 +230,27 @@ async function main() {
                 assert.deepEqual(clone(state.board), clone(state.original));
             }
         });
+        await test('closed overlays are inert and a hidden victory action cannot reset an unfinished board', () => {
+            const g = setup();
+            g.find('give-hint').click();
+            assert.equal(g.find('undo-input').disabled, false);
+            assert.ok(g.find('rules-modal').hasAttribute('inert'));
+            assert.ok(g.find('celebration-modal').hasAttribute('inert'));
+            const before = g.snapshot();
+            g.find('new-game-after-win').click();
+            assert.deepEqual(g.snapshot(), before);
+            assert.equal(g.find('undo-input').disabled, false);
+        });
         await test('rules dialog can open and close repeatedly', () => {
             for (const close of ['close-rules', 'close-rules-btn']) {
                 find('show-rules').click();
                 assert.ok(!find('rules-modal').classList.contains('pointer-events-none'));
+                assert.equal(find('rules-modal').hasAttribute('inert'), false);
+                assert.equal(document.activeElement, find('close-rules'));
+                find(close).focus();
                 find(close).click();
+                assert.ok(find('rules-modal').hasAttribute('inert'));
+                assert.equal(document.activeElement, find('show-rules'));
                 assert.ok(find('rules-modal').classList.contains('pointer-events-none'));
             }
         });
@@ -338,7 +354,11 @@ async function main() {
             find('check-solution').click();
             for (const timer of game.timeouts.values()) if (timer.delay === 1500) timer.fn();
             assert.ok(!find('celebration-modal').classList.contains('pointer-events-none'));
+            assert.equal(find('celebration-modal').hasAttribute('inert'), false);
+            find('new-game-after-win').focus();
             find('new-game-after-win').click();
+            assert.ok(find('celebration-modal').hasAttribute('inert'));
+            assert.equal(document.activeElement, find('new-game'));
             assert.ok(find('celebration-modal').classList.contains('pointer-events-none'));
             assert.equal(state.gameStarted, false);
             assert.equal(state.selectedCell, null);
