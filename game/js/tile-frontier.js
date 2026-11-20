@@ -1,16 +1,36 @@
 (function () {
     'use strict';
-    const E = window.TileFrontier, $ = id => document.getElementById(id), KEY = 'tiny-frontier-progress-v1';
-    let completed = [], index = 0, selected = 22, epoch = 0, savedOK = true, timers = new Set(), state, resumed = null, best = {}, soundOn = false, audio;
-    try {
-        const raw = JSON.parse(localStorage.getItem(KEY) || '{}');
-        if (raw && typeof raw === 'object') {
-            completed = Array.isArray(raw.completed) ? [...new Set(raw.completed.filter(n => Number.isInteger(n) && n >= 0 && n < E.levels.length))] : [];
-            resumed = E.restore(raw.run);
-            best = raw.best && typeof raw.best === 'object' && !Array.isArray(raw.best) ? raw.best : {};
-            soundOn = raw.sound === true;
-            index = Number.isInteger(raw.index) && E.levels[raw.index] ? raw.index : 0;
+    const E = window.TileFrontier, $ = id => document.getElementById(id);
+    const KEY = 'tiny-frontier-progress-v1', SOUND_KEY = 'tiny-frontier-sound-v1';
+    let completed = [], index = 0, selected = 22, epoch = 0, savedOK = true, timers = new Set(), state, resumed = null, best = {}, soundOn = false, soundUnsaved = false, audio;
+    function readProgress() {
+        const value = localStorage.getItem(KEY);
+        try {
+            const raw = JSON.parse(value);
+            return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+        } catch (_) { return {}; }
+    }
+    function mergeProgress(raw) {
+        if (Array.isArray(raw.completed)) {
+            completed = [...new Set([...completed, ...raw.completed.filter(n => Number.isInteger(n) && n >= 0 && n < E.levels.length)])];
         }
+        if (raw.best && typeof raw.best === 'object' && !Array.isArray(raw.best)) {
+            E.levels.forEach((level, i) => {
+                const count = raw.best[i];
+                if (Number.isInteger(count) && count > 0 && count <= level.budget && count < (best[i] ?? Infinity)) best[i] = count;
+            });
+        }
+    }
+    function readSound(raw) {
+        const preference = localStorage.getItem(SOUND_KEY);
+        return preference === 'on' || (preference !== 'off' && raw.sound === true);
+    }
+    try {
+        const raw = readProgress();
+        mergeProgress(raw);
+        resumed = E.restore(raw.run);
+        index = Number.isInteger(raw.index) && E.levels[raw.index] ? raw.index : 0;
+        soundOn = readSound(raw);
     } catch (_) { savedOK = false; }
     const svg = body => '<svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">' + body + '</svg>';
     const ground = '<ellipse cx="48" cy="73" rx="33" ry="10" fill="#637f4b" opacity=".16"/>';
@@ -37,9 +57,15 @@
     function later(callback, delay) { const ownEpoch = epoch; const timer = setTimeout(() => { timers.delete(timer); if (ownEpoch === epoch) callback(); }, delay); timers.add(timer); return timer; }
     function reduced() { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
     function save() {
-        try { localStorage.setItem(KEY, JSON.stringify({ index: state.index, completed, run: E.save(state), best, sound: soundOn })); savedOK = true; }
-        catch (_) { savedOK = false; }
-        $('save-status').textContent = savedOK ? '本局与完成进度自动保存在当前浏览器。' : '此浏览器暂时无法保存进度，仍可正常游玩。';
+        try {
+            const raw = readProgress();
+            // Milestones are shared, but the board and its replay must come from one tab.
+            mergeProgress(raw);
+            const sound = readSound(raw);
+            if (!soundUnsaved) soundOn = sound;
+            localStorage.setItem(KEY, JSON.stringify({ index: state.index, completed, run: E.save(state), best, sound }));
+            savedOK = true;
+        } catch (_) { savedOK = false; }
     }
     function tileName(tile) {
         if (!tile.revealed) return '未知土地';
@@ -71,6 +97,7 @@
         }
     }
     function render() {
+        $('save-status').textContent = savedOK ? '本局与完成进度自动保存在当前浏览器。' : '此浏览器暂时无法保存进度，仍可正常游玩。';
         const level = E.levels[state.index], active = document.activeElement, focusId = active && active.dataset ? active.dataset.tile : undefined;
         $('wood-count').textContent = state.wood; $('troop-count').textContent = state.troops; $('action-count').textContent = state.budget - state.actions;
         $('action-count').parentElement.classList.toggle('low-actions',state.budget-state.actions<=5);
@@ -142,7 +169,7 @@
         const result = E.act(state, action);
         if (!result.ok) { $('feedback').textContent = result.reason; return false; }
         selected = action.id;
-        if (state.status === 'won') { if (!completed.includes(state.index)) completed.push(state.index); best[state.index] = Math.min(Number(best[state.index]) || Infinity, state.actions); }
+        if (state.status === 'won') { if (!completed.includes(state.index)) completed.push(state.index); best[state.index] = Math.min(best[state.index] ?? Infinity, state.actions); }
         save(); tone(result.type === 'attack' ? 660 : 440);
         render(); $('feedback').textContent = announce(result); animate(result);
         if (state.status !== 'playing') $('result-action').focus({ preventScroll: true });
@@ -179,6 +206,16 @@
     $('result-action').addEventListener('click', () => start(state.status === 'won' && state.index < E.levels.length - 1 ? state.index + 1 : state.index));
     $('rules-open').addEventListener('click', openRules); $('rules-close').addEventListener('click', closeRules); $('rules-done').addEventListener('click', closeRules);
     $('rules-dialog').addEventListener('cancel', event => { event.preventDefault(); closeRules(); });
-    $('sound-toggle').addEventListener('click', () => { soundOn = !soundOn; save(); render(); tone(550); });
-    if (resumed && resumed.index === index) { state = resumed; selected = E.levels[index].camp; render(); save(); $('feedback').textContent = '已恢复上次的规划，剩余 ' + (state.budget - state.actions) + ' 次行动。'; } else start(index);
+    $('sound-toggle').addEventListener('click', () => {
+        soundOn = !soundOn;
+        try { localStorage.setItem(SOUND_KEY, soundOn ? 'on' : 'off'); soundUnsaved = false; }
+        catch (_) { soundUnsaved = true; }
+        render(); tone(550);
+        if (soundUnsaved) $('feedback').textContent = '音效设置仅在此页面生效，无法保存。';
+    });
+    const restoring = resumed && resumed.index === index;
+    state = restoring ? resumed : E.create(index);
+    selected = E.levels[index].camp;
+    render();
+    $('feedback').textContent = restoring ? '已恢复上次的规划，剩余 ' + (state.budget - state.actions) + ' 次行动。' : E.levels[index].briefing;
 }());

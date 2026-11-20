@@ -4,8 +4,9 @@ const { pathToFileURL } = require('node:url');
 (async () => {
     const { Window } = await import(pathToFileURL(require.resolve('happy-dom')).href);
     const root = path.resolve(__dirname, '..'), html = fs.readFileSync(path.join(root, 'game/sum-ten.html'), 'utf8'), css = fs.readFileSync(path.join(root, 'game/assets/sum-ten.css'), 'utf8'), windows = [];
-    function boot({ landscape = false, motion = false } = {}) {
+    function boot({ landscape = false, motion = false, storage } = {}) {
         const w = new Window({ url: 'https://example.test/game/sum-ten.html', settings: { disableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } }); windows.push(w);
+        if (storage) Object.defineProperty(w, "localStorage", { value: storage });
         w.document.write(html.replace(/<script[\s\S]*?<\/script>/g, '')); let time = 1000, nextFrame = 0; const notes = []; w.AudioContext = class { constructor(){this.currentTime=10;this.state='running';this.destination={};} createOscillator(){const osc={frequency:{value:0},connect(){},start(at){notes.push({hz:osc.frequency.value,at});},stop(){}};return osc;} createGain(){return {connect(){},gain:{setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){}}};} }; const frames = new Map(), captured = new Set(), captureCalls = [], media = new Map();
         w.matchMedia = query => { if (!media.has(query)) { const target = new w.EventTarget(); target.matches = query.includes('orientation') ? landscape : !motion; media.set(query, target); } return media.get(query); };
         Object.defineProperty(w.performance, 'now', { value: () => time, configurable: true }); w.requestAnimationFrame = fn => { frames.set(++nextFrame, fn); return nextFrame; }; w.cancelAnimationFrame = id => frames.delete(id);
@@ -25,6 +26,18 @@ const { pathToFileURL } = require('node:url');
     function key(ctx, value, repeat = false) { ctx.d.activeElement.dispatchEvent(new ctx.w.KeyboardEvent('keydown', { key: value, repeat, bubbles: true, cancelable: true })); }
     function fixture() { const b = Array(48).fill(0); b[0] = 4; b[1] = 6; b[40] = 1; b[41] = 9; return b; }
     try {
+        const bestKey = 'cozy-sum-ten-best-v1';
+        const scores = new Map([[bestKey, '1']]);
+        const shared = { getItem: k => scores.get(k) ?? null, setItem: (k,v) => scores.set(k,String(v)) };
+        const stale = boot({storage:shared}), newer = boot({storage:shared});
+        for (const tab of [stale,newer]) tab.api.load(fixture());
+        drag(newer, {row:0,col:0}, {row:0,col:1});
+        newer.time(newer.api.state.deadline); newer.frame();
+        assert.equal(shared.getItem(bestKey), '2');
+        stale.time(stale.api.state.deadline); stale.frame();
+        assert.equal(shared.getItem(bestKey), '2', 'an older tab cannot erase the newer best');
+        assert.match(stale.d.querySelector('.best-score').textContent, /最高 2/);
+        assert.equal(stale.api.state.score, 0, 'best refresh does not change this round score');
         const c = boot(), { d, api, w } = c;
         assert.equal(d.querySelectorAll('[data-cell]').length, 48); assert.equal(w.SumTenDebug.layout().rows, 8); assert.equal(api.state.status, 'ready'); assert.equal(c.frames.size, 0); assert.equal(d.getElementById('time').textContent, '90');
         c.advance(900000); c.frame(); d.dispatchEvent(new w.Event('visibilitychange')); assert.equal(api.state.status, 'ready'); assert.equal(api.state.deadline, null);

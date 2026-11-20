@@ -15,10 +15,11 @@ assert.notEqual(source,instrumented);
  let dependency=process.env.HAPPY_DOM_PATH||require.resolve('happy-dom');
  if(fs.statSync(dependency).isDirectory())dependency=path.join(dependency,'lib/index.js');
  const {Window}=await import(pathToFileURL(path.resolve(dependency)).href);
- function setup(saved){
+ function setup(saved, storage){
   const window=new Window({url:'https://example.test/game/snow-camp.html',settings:{disableJavaScriptEvaluation:true,disableJavaScriptFileLoading:true,disableCSSFileLoading:true}});
   const setter=Object.getOwnPropertyDescriptor(window.Element.prototype,'textContent');Object.defineProperty(window.Element.prototype,'textContent',{...setter,set(value){setter.set.call(this,value==null?'':String(value));}});
   window.document.write(html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,''));
+  if(storage)Object.defineProperty(window,'localStorage',{value:storage});
   if(saved)window.localStorage.setItem('mylog-snow-camp-v1',saved);
   window.SnowCamp=E;window.SnowCampScene={draw(){}};let callback,now=0;
   window.requestAnimationFrame=fn=>{callback=fn;return 1;};window.confirm=()=>true;window.eval(instrumented);
@@ -67,6 +68,58 @@ assert.notEqual(source,instrumented);
   const saved=E.create();E.act(saved,{type:'start'});E.tick(saved,5);E.act(saved,{type:'heat',level:2});const savedWood=saved.resources.wood;const d=setup(E.save(saved));
   try{assert.equal(d.$('resume').hidden,false);d.$('resume').click();assert.equal(d.api.state.elapsed,5);assert.equal(d.api.state.status,'running');assert.equal(d.$('intro-overlay').hidden,true);assert.equal(d.api.state.resources.wood,savedWood);assert.equal(d.$('milestones').querySelectorAll('.done').length,1);d.api.sync();d.window.document.querySelector('[data-building="furnace"]').click();assert.equal(d.api.state.resources.wood,savedWood,'resume does not duplicate rewards');}finally{d.window.happyDOM.abort();}
   const bad=setup('{corrupt');try{assert.equal(bad.$('resume').hidden,true);bad.$('begin').click();assert.equal(bad.api.state.status,'running');}finally{bad.window.happyDOM.abort();}
+  const key='mylog-snow-camp-v1';
+  let raw=null,writes=0,blocked=false;
+  const storage={
+   getItem(){if(blocked)throw Error('storage blocked');return raw;},
+   setItem(k,v){assert.equal(k,key);if(blocked)throw Error('storage blocked');raw=v;writes++;}
+  };
+  const a=setup(null,storage), b=setup(null,storage), late=[];
+  try{
+   a.$('begin').click();a.$('pause').click();
+   const old=setup(null,storage);late.push(old);
+   old.$('resume').click();old.$('pause').click();
+   const w=writes;old.frame(24);old.window.dispatchEvent(new old.window.Event('pagehide'));
+   assert.equal(writes,w,'an unchanged single-tab camp is not written again');
+   a.$('pause').click();a.frame(49);
+   a.window.document.querySelector('[data-building="furnace"]').click();
+   a.window.document.querySelector('[data-building="housing"]').click();
+   const advanced=raw;
+   old.frame(24);old.window.dispatchEvent(new old.window.Event('pagehide'));
+   assert.equal(raw,advanced,'idle and pagehide from stale pause leave newer coherent save intact');
+   old.window.document.querySelector('[data-building="furnace"]').click();
+   assert.equal(raw,advanced,'ordinary writes from stale dirty tab are rejected');
+   assert.match(old.$('save-note').textContent,/此营地未保存/);
+   const cache=setup(null,storage);late.push(cache);
+   a.frame(7);const dirtyElapsed=a.api.state.elapsed;
+   a.window.dispatchEvent(new a.window.Event('pagehide'));
+   const checkpoint=E.restore(raw);assert.equal(checkpoint.elapsed,dirtyElapsed);
+   assert.equal(checkpoint.furnace.level,2);
+   assert.equal(checkpoint.queue[0].building,'housing');
+   cache.$('resume').click();assert.equal(cache.api.state.elapsed,dirtyElapsed,'resume re-reads storage');
+   assert.equal(cache.api.state.queue[0].building,'housing');
+   old.api.state.status='won';old.api.state.reason='获救';old.api.sync();
+   old.window.confirm=()=>false;old.$('result-restart').click();
+   assert.equal(old.api.state.status,'won','stale result restart asks before discarding new slot');
+   const beforeConfirmation=raw;
+   old.window.confirm=()=>{a.$('reset').click();return true;};
+   old.$('result-restart').click();
+   assert.notEqual(raw,beforeConfirmation);
+   assert.equal(old.api.state.status,'won','confirmation cannot authorize an even newer replacement');
+   a.$('pause').click();a.frame(9);a.window.dispatchEvent(new a.window.Event('pagehide'));
+   const beforeRestart=E.restore(raw);assert.ok(beforeRestart.elapsed>0);
+   old.window.confirm=()=>true;old.$('result-restart').click();
+   assert.equal(E.restore(raw).elapsed,0,'explicitly authorized restart can replace higher elapsed');
+   b.window.confirm=()=>false;b.$('begin').click();
+   assert.equal(b.$('intro-overlay').hidden,false,'page originally opened with no slot prompts for a later checkpoint');
+   blocked=true;
+   const offline=setup(null,storage);late.push(offline);
+   offline.$('begin').click();assert.equal(offline.api.state.status,'running');
+   assert.match(offline.$('save-note').textContent,/无法存档/);
+   blocked=false;offline.window.dispatchEvent(new offline.window.Event('pagehide'));
+   assert.equal(E.restore(raw).elapsed,0);
+   assert.match(offline.$('save-note').textContent,/此营地未保存/);
+  }finally{[a,b,...late].forEach(tab=>tab.window.happyDOM.abort());}
   console.log('snow-camp-ui: onboarding, pause, assignments, builds, heat, speed, reset, end states, save/resume, corrupt-save recovery passed');
  }finally{c.window.happyDOM.abort();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
