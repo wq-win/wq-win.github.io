@@ -3,18 +3,31 @@
     const E = window.SnowCamp, Scene = window.SnowCampScene;
     const $ = id => document.getElementById(id);
     const STORAGE = 'mylog-snow-camp-v1';
-    let state = E.create(), saved = null, speed = 1, selected = 'furnace', last = null, lastPaint = -1, lastSave = 0, intro = true;
+    let state = E.create(), speed = 1, selected = 'furnace', last = null, lastPaint = -1, lastSave = 0, intro = true;
     const names = {furnace:'中央暖炉',housing:'保温住所',sawmill:'锯木场',kitchen:'厨房',clinic:'医务站'};
     const icons = {furnace:'♨',housing:'⌂',sawmill:'▰',kitchen:'◒',clinic:'✚'};
     const positions = {furnace:[510,345],housing:[315,425],sawmill:[715,345],kitchen:[650,505],clinic:[350,235]};
     const hints = {wood:'木材 / 建筑升级',hunt:'生食 / 暴雪减产',coal:'煤炭 / 维持供暖',cook:'生食 → 餐食',build:'逐项完成施工',medic:'需先建医务站'};
     const tips = {furnace:'气温加上供暖与住所保温，就是居民的体感温度。低于 0°C 时寒冷会累积。',housing:'房屋升级为所有居民保温，每级增加 6°C。升级须由建造工完成。',sawmill:'锯木场每级让伐木产量增加 50%。木材可用于所有建筑升级。',kitchen:'厨房升级可提高加工速度与食材利用率。没有生食，厨师也无法做饭。',clinic:'医务站建成后，分配医护才能持续恢复居民健康。保暖和充足餐食仍然重要。'};
     let feedbackUntil=0, previousMilestones=new Set(), inspectMap=false;
-    let storageHealthy = true;
-    try { const raw=localStorage.getItem(STORAGE); if(raw) saved=E.restore(raw); }
-    catch(e) { storageHealthy=false; $('save-note').textContent='存档不可用，可开始新营地'; }
-    $('resume').hidden=!saved;
-    if(saved) $('resume').textContent='继续上次的营地 · 第 '+E.view(saved).day+' 天';
+    // Exact storage bytes, not elapsed time: a deliberate restart can be newer at time zero.
+    let checkpoint;
+    function readSlot(){
+        try{return {ok:true,raw:localStorage.getItem(STORAGE)};}
+        catch(e){return {ok:false,raw:undefined};}
+    }
+    function showSaveNote(message){const note=$('save-note');if(note.textContent!==message)note.textContent=message;}
+    function conflict(){showSaveNote('另一页面更新了存档 · 此营地未保存');}
+    function loadIntro(slot){
+        let saved=null;
+        if(slot.ok&&slot.raw){try{saved=E.restore(slot.raw);}catch(e){/* Invalid saves cannot resume. */}}
+        $('resume').hidden=!saved;
+        if(saved)$('resume').textContent='继续上次的营地 · 第 '+E.view(saved).day+' 天';
+        return saved;
+    }
+    const initialSlot=readSlot();
+    if(!initialSlot.ok)showSaveNote('存档不可用，可开始新营地');
+    loadIntro(initialSlot);
     Object.keys(names).forEach(key=>{
         const button=document.createElement('button'); button.className='building-pin'; button.dataset.building=key;
         button.style.left=positions[key][0]/10+'%'; button.style.top=positions[key][1]/6.4+'%';
@@ -50,7 +63,32 @@
         const row=document.createElement('div');row.className='need-row';row.innerHTML='<span>'+label+'</span><div class="need-track" role="meter" aria-label="居民平均'+label+'" aria-valuemin="0" aria-valuemax="100" id="meter-'+key+'"><i id="need-'+key+'"></i></div><em id="value-'+key+'">100%</em>';$('needs-list').appendChild(row);
     });
     $('job-list').addEventListener('click',e=>{const b=e.target.closest('button[data-job]');if(b) action({type:'assign',job:b.dataset.job,delta:Number(b.dataset.delta)});});
-    function persist(){if(intro)return;try{localStorage.setItem(STORAGE,E.save(state));storageHealthy=true;$('save-note').textContent='已自动保存 · 本机';}catch(e){storageHealthy=false;$('save-note').textContent='无法存档 · 请勿关闭页面';}}
+    function persist(){
+        if(intro)return;
+        const slot=readSlot();
+        if(!slot.ok){showSaveNote('无法存档 · 请勿关闭页面');return;}
+        if(checkpoint===undefined&&slot.raw===null)checkpoint=null;
+        if(slot.raw!==checkpoint){conflict();return;}
+        try{
+            const snapshot=E.save(state);
+            if(snapshot!==checkpoint){localStorage.setItem(STORAGE,snapshot);checkpoint=snapshot;}
+            showSaveNote('已自动保存 · 本机');
+        }catch(e){showSaveNote('无法存档 · 请勿关闭页面');}
+    }
+    function replacementSlot(message,alwaysConfirm=false){
+        const slot=readSlot();
+        if(!slot.ok){
+            if(alwaysConfirm&&!window.confirm(message))return null;
+            return slot; // Local play is still possible, but not an authorized overwrite.
+        }
+        if((alwaysConfirm||slot.raw!==null)&&!window.confirm(message))return null;
+        const latest=readSlot();
+        if(!latest.ok||latest.raw!==slot.raw){
+            if(intro)loadIntro(latest);
+            conflict();return null;
+        }
+        return slot;
+    }
     function feedback(message,ok=true){$('scene-feedback').textContent=message;$('scene-feedback').classList.toggle('error',!ok);$('scene-feedback').hidden=false;feedbackUntil=performance.now()+4200;}
     function action(a){const result=E.act(state,a);$('action-message').textContent=result.message;feedback(result.message,result.ok);sync();persist();return result;}
     function select(key){selected=key;$('action-message').textContent='';renderDetails();sync();}
@@ -127,8 +165,12 @@
     }
     function enter(resume){
         if(!intro)return;
-        if(!resume&&saved&&!window.confirm('开始新营地会覆盖本机的旧存档。确定开始吗？'))return;
-        state=resume?saved:E.create();previousMilestones=new Set(E.milestones?E.milestones(state).filter(m=>m.done).map(m=>m.id):[]);saved=null;intro=false;last=null;$('intro-overlay').hidden=true;
+        const slot=resume?readSlot():replacementSlot('开始新营地会覆盖本机的旧存档。确定开始吗？');
+        if(!slot)return;
+        const saved=resume?loadIntro(slot):null;
+        if(resume&&!saved){showSaveNote('没有可继续的存档 · 可开始新营地');$('begin').focus();return;}
+        checkpoint=slot.raw;
+        state=resume?saved:E.create();previousMilestones=new Set(E.milestones?E.milestones(state).filter(m=>m.done).map(m=>m.id):[]);intro=false;last=null;$('intro-overlay').hidden=true;
         if(state.status==='ready'||state.status==='paused')E.act(state,{type:'start'});
         renderDetails();sync();persist();$('pause').focus();
     }
@@ -137,8 +179,16 @@
     $('pause').addEventListener('click',()=>{if(!intro){action({type:state.status==='running'?'pause':'start'});last=null;}});
     $('speed').addEventListener('click',()=>{speed=speed===1?2:speed===2?4:1;$('speed').textContent=speed+'× 速度';last=null;});
     function restart(){state=E.create();previousMilestones=new Set();feedbackUntil=0;$('scene-feedback').hidden=true;$('scene-feedback').classList.remove('error');speed=1;selected='furnace';$('speed').textContent='1× 速度';last=null;intro=false;$('result-overlay').hidden=true;$('intro-overlay').hidden=true;renderDetails();sync();persist();$('pause').focus();}
-    $('reset').addEventListener('click',()=>{if(window.confirm('确定重新开始？当前营地进度将被新营地覆盖。'))restart();});
-    $('result-restart').addEventListener('click',()=>{if(['won','lost'].includes(state.status))restart();});
+    function requestRestart(fromResult){
+        const slot=readSlot();
+        if(fromResult&&slot.ok&&slot.raw===checkpoint){restart();return;}
+        const approved=replacementSlot('确定重新开始？本机保存的营地将被新营地覆盖。',true);
+        if(!approved)return;
+        checkpoint=approved.raw;
+        restart();
+    }
+    $('reset').addEventListener('click',()=>requestRestart(false));
+    $('result-restart').addEventListener('click',()=>{if(['won','lost'].includes(state.status))requestRestart(true);});
     document.addEventListener('visibilitychange',()=>{last=null;if(document.hidden&&state.status==='running'){E.act(state,{type:'pause'});sync();persist();}});
     window.addEventListener('pagehide',persist);
     document.addEventListener('keydown',e=>{
@@ -147,7 +197,10 @@
     });
     function frame(now){
         const dt=last===null?0:Math.min((now-last)/1000,.25);last=now;
-        if(!intro&&state.status==='running')E.tick(state,dt*speed);
+        if(!intro&&state.status==='running'){
+            E.tick(state,dt*speed);
+            if(state.status==='won'||state.status==='lost')persist();
+        }
         if(now-lastPaint>100||lastPaint<0){Scene.draw($('camp-scene'),state,state.elapsed+state.remainder);sync();lastPaint=now;}
         if(now-lastSave>5000){persist();lastSave=now;}
         window.requestAnimationFrame(frame);

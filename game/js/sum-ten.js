@@ -6,9 +6,12 @@
     var orientation = window.matchMedia('(orientation: landscape)'), reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
     var state = E.create(), landscape = orientation.matches, cells = [], cursor = 0, selection = null, drag = null, keyAnchor = null, frame = 0, epoch = 0, timers = new Set(), lastPhase = '', lastSecond = -1;
     var manualPause = false, tapMode = false, tapAnchor = null;
-    var pausedAt = null, best = 0, sound=window.CozyThirdFeedback;
+    var pausedAt = null, best = 0, sound=window.CozyThirdFeedback, bestKey = 'cozy-sum-ten-best-v1';
     sound.attach(d.querySelector('.nav-actions'));
-    try { best = Math.max(0,Math.min(48,Number(localStorage.getItem('cozy-sum-ten-best-v1'))||0)); } catch (_) {}
+    function refreshBest() {
+        try { best = Math.max(best, Math.min(48, Number(localStorage.getItem(bestKey)) || 0)); } catch (_) {}
+    }
+    refreshBest();
     var bestEl=d.createElement('span');bestEl.className='best-score';bestEl.textContent=' · 最高 '+best;scoreEl.parentElement.querySelector('span').append(bestEl);
     function now() { return pausedAt === null ? performance.now() : pausedAt; }
     function syncPause() {
@@ -65,7 +68,13 @@
             lastPhase = state.status; paintCells(); result.hidden = state.status !== 'finished';
             if (state.status === 'finished') {
                 cancelSelection(); if (frame) cancelAnimationFrame(frame); frame = 0;
-                best=Math.max(best,state.score);try{localStorage.setItem('cozy-sum-ten-best-v1',String(best));}catch(_){}bestEl.textContent=' · 最高 '+best;if(state.reason==='cleared')sound.tone('win');
+                refreshBest();
+                if (state.score > best) {
+                    best = state.score;
+                    try { localStorage.setItem(bestKey, String(best)); } catch (_) {}
+                }
+                bestEl.textContent = ' · 最高 ' + best;
+                if(state.reason==='cleared')sound.tone('win');
                 var title = state.reason === 'time' ? '时间到，收好这一篮' : state.reason === 'cleared' ? '整座果园，收空了！' : '这一盘，已经没有十了';
                 d.getElementById('result-title').textContent = title; d.getElementById('result-kicker').textContent = state.reason === 'cleared' ? '48 颗，满满一篮' : '这一篮，收好了'; d.getElementById('result-copy').textContent = '收获 ' + state.score + ' 颗果实，得到 ' + state.score + ' 分。'; say(title + '。本局 ' + state.score + ' 分。');
                 if (!d.getElementById('rules-dialog').open) d.getElementById('result-restart').focus({ preventScroll: true });

@@ -2,9 +2,10 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const E=require('../game/js/water-sort-engine');const {analyze}=require('./water-sort-analysis');const root=path.resolve(__dirname,'..');
 (async()=>{const {Window}=await import('happy-dom');const windows=[];
-function setup({saved,reduced=true,denied=false}={}){
+function setup({saved,reduced=true,denied=false,shared}={}){
  const w=new Window({url:'https://example.test/game/water-sort.html',settings:{disableJavaScriptEvaluation:true,disableJavaScriptFileLoading:true,disableCSSFileLoading:true}});windows.push(w);
  w.document.write(fs.readFileSync(path.join(root,'game/water-sort.html'),'utf8'));w.matchMedia=()=>({matches:reduced});
+ if(shared)Object.defineProperty(w,'localStorage',{value:shared});
  if(saved)w.localStorage.setItem('cozy-water-sort-v1',saved);
  if(denied)Object.defineProperty(w,'localStorage',{get(){throw new Error('Denied');}});
  for(const f of ['game/js/water-sort-levels.js','game/js/water-sort-engine.js','game/js/third-games-feedback.js','game/js/water-sort.js','js/game-view.js'])w.eval(fs.readFileSync(path.join(root,f),'utf8'));
@@ -75,7 +76,46 @@ try{
  const firstTarget=resumedHints.document.querySelector('.hint-target');assert(firstTarget);firstTarget.click();
  $(resumedHints,'undo').click();assert.deepEqual(savedState(resumedHints),old);$(resumedHints,'hint').click();await delay(50);assert(resumedHints.document.querySelector('.hint-target'));
  const html=fs.readFileSync(path.join(root,'game/water-sort.html'),'utf8');
- assert(html.includes('js/water-sort-engine.js?v=20261115-hints'));assert(html.includes('js/water-sort.js?v=20261115-hints'));
+ assert(html.includes('js/water-sort-engine.js?v=20261115-hints'));assert(html.includes('js/water-sort.js?v=20261119-progress-merge'));
+ // Model two tabs without storage events: completion data is shared, active boards are not.
+ const slots=new Map(), shared={getItem:k=>slots.get(k)??null,setItem:(k,v)=>slots.set(k,String(v))};
+ const tabA=setup({shared}),tabB=setup({shared});
+ $(tabB,'level-select').value='1';$(tabB,'level-select').dispatchEvent(new tabB.Event('change'));
+ for(const m of E.solve(E.create(0)))clickMove(tabA,m);
+ assert.deepEqual(savedState(tabA).completed,[0]);
+ for(const m of E.solve(E.create(1)))clickMove(tabB,m);
+ assert.deepEqual([...savedState(tabB).completed].sort(),[0,1],'B finishing later cannot erase A’s completed level');
+ assert.deepEqual(JSON.parse(shared.getItem('cozy-water-sort-records-v1')),{0:16,1:17});
+ const reload=setup({shared});const level2=E.create(1);
+ assert.equal(savedState(reload).level,1);assert.equal(savedState(reload).history.length,17);
+ assert.match($(reload,'win-detail').textContent,/2 \/ 8/);
+ assert.match($(reload,'personal-best').textContent,/17 步/);
+ assert.deepEqual(savedState(reload).bottles,E.solve(level2).reduce((run,m)=>E.act(run,m.from,m.to).state,level2).bottles);
+ // A stale, slower replay cannot overwrite a faster run in a different tab.
+ slots.clear();
+ const fast=setup({shared}),slow=setup({shared}), firstLevel=E.create(0);
+ const detour=E.legalMoves(firstLevel.bottles).find(m=>E.solve(E.act(firstLevel,m.from,m.to).state)?.length>=16);
+ assert(detour);const longer=E.solve(E.act(firstLevel,detour.from,detour.to).state);
+ for(const m of E.solve(firstLevel))clickMove(fast,m);
+ for(const m of [detour,...longer])clickMove(slow,m);
+ assert(savedState(slow).moves>16);assert.match($(slow,'personal-best').textContent,/16 步/);
+ assert.equal(JSON.parse(shared.getItem('cozy-water-sort-records-v1'))[0],16);
+ // A legacy snapshot contributes valid completions but never replaces the current trace.
+ slots.clear();const stale=setup({shared});
+ shared.setItem('cozy-water-sort-v1',JSON.stringify({v:1,level:3,history:[[0,4]],completed:[2,2,99,'0']}));
+ shared.setItem('cozy-water-sort-records-v1','{malformed');
+ clickMove(stale,E.solve(E.create())[0]);
+ const kept=savedState(stale);assert.deepEqual(kept.completed,[2]);assert.equal(kept.level,0);assert.equal(kept.history.length,1);
+ const undone=setup({shared});$(undone,'undo').click();
+ assert.deepEqual(savedState(undone),E.create(0,[2]));
+ // An accepted winning pour saves its best immediately, not after presentation.
+ const pathToWin=E.solve(firstLevel);
+ const almost=pathToWin.slice(0,-1).reduce((run,m)=>E.act(run,m.from,m.to).state,firstLevel);
+ const winningAnimation=setup({saved:E.save(almost),reduced:false});
+ clickMove(winningAnimation,pathToWin.at(-1));
+ assert(winningAnimation.document.querySelector('.pour-ghost'));
+ assert.equal(savedState(winningAnimation).moves,16);
+ assert.equal(JSON.parse(winningAnimation.localStorage.getItem('cozy-water-sort-records-v1'))[0],16);
  // Undo is available during pouring; stale callbacks cannot reapply the move.
  const immediate=setup({reduced:false});clickMove(immediate,E.solve(E.create())[0]);assert.equal(savedState(immediate).moves,1);assert.equal($(immediate,'undo').disabled,false);$(immediate,'undo').click();assert.equal(savedState(immediate).moves,0);await delay(570);assert.equal(savedState(immediate).moves,0);assert.equal(immediate.document.querySelector('.pour-ghost'),null);
  // Reduced motion never creates particles or outcome animation classes.

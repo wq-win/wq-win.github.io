@@ -8,6 +8,7 @@ const { pathToFileURL } = require('node:url');
     function boot(saved, options = {}) {
         const w = new Window({ url: 'https://example.test/game/tile-frontier.html', settings: { disableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } }); windows.push(w);
         w.document.write(html.replace(/<script[\s\S]*?<\/script>/g, ''));
+        if (options.storage) Object.defineProperty(w, 'localStorage', { value: options.storage });
         if (saved !== undefined) w.localStorage.setItem(key, saved);
         if (options.storageFailure) Object.defineProperty(w, 'localStorage', { get() { throw new Error('Storage disabled'); } });
         w.matchMedia = () => ({ matches: !options.motion });
@@ -46,6 +47,43 @@ const { pathToFileURL } = require('node:url');
         const restored = boot(w.localStorage.getItem(key)); assert.equal(restored.__frontierTest.state.index, 0); assert.equal(restored.document.getElementById('progress').textContent, '6 / 6');
         for (const saved of ['null', '[]', '5', '{"index":999,"completed":[-1,0,0,2,2.2,7,"3"]}', '{"index":2.5,"completed":{}}']) { const clean = boot(saved); assert.equal(clean.__frontierTest.state.index, 0); assert.equal(clean.__frontierTest.state.actions, 0); }
         const blockedStorage = boot(undefined, { storageFailure: true }); assert.match(blockedStorage.document.getElementById('save-status').textContent, /无法保存/); for (const action of blockedStorage.TileFrontier.solution(0)) play(blockedStorage, action); assert.equal(blockedStorage.__frontierTest.state.status, 'won'); assert.match(blockedStorage.document.getElementById('feedback').textContent, /无法保存/);
+        const values = new Map(), storage = { getItem: k => values.get(k) ?? null, setItem: (k, v) => values.set(k, String(v)) };
+        const tabA = boot(undefined, {storage}), tabB = boot(undefined, {storage}), older = boot(undefined, {storage});
+        for (const action of tabA.TileFrontier.solution(0)) play(tabA, action);
+        const stageOne = storage.getItem(key);
+        assert.deepEqual(JSON.parse(stageOne).completed, [0]);
+        assert.equal(JSON.parse(stageOne).best[0], 6);
+        tabB.document.getElementById('sound-toggle').click();
+        assert.deepEqual(JSON.parse(storage.getItem(key)).completed, [0], 'A stale sound toggle must preserve the clear');
+        assert.equal(storage.getItem(key), stageOne, 'A preference-only change must not rewrite gameplay');
+        const reload = boot(undefined, {storage});
+        assert.equal(reload.__frontierTest.state.status, 'won');
+        assert.equal(reload.__frontierTest.state.actions, 6);
+        assert.equal(reload.document.getElementById('progress').textContent, '1 / 6');
+        assert.equal(reload.document.getElementById('sound-toggle').getAttribute('aria-pressed'), 'true');
+        assert.equal(storage.getItem(key), stageOne, 'Reloading must not rewrite gameplay');
+        changeLevel(tabB, 1);
+        for (const action of tabB.TileFrontier.solution(1)) play(tabB, action);
+        assert.deepEqual(JSON.parse(storage.getItem(key)).completed, [0, 1]);
+        for (const action of [{type:'reveal',id:23}, ...older.TileFrontier.solution(0)]) play(older, action);
+        const final = JSON.parse(storage.getItem(key)), finalReload = boot(undefined, {storage});
+        assert.deepEqual([...final.completed].sort(), [0, 1]);
+        assert.deepEqual(final.best, {0:6,1:tabB.TileFrontier.solution(1).length}, 'A slower clear cannot replace the better action count');
+        assert.equal(final.sound, true, 'A stale gameplay save must retain newer audio in the legacy field');
+        assert.equal(finalReload.__frontierTest.state.actions, 7);
+        assert.equal(JSON.stringify(finalReload.__frontierTest.state), JSON.stringify(older.__frontierTest.state));
+        assert.equal(finalReload.document.getElementById('sound-toggle').getAttribute('aria-pressed'), 'true');
+        const legacy = boot(JSON.stringify({index:0, completed:[0], best:{0:6}, sound:true}));
+        assert.equal(legacy.document.getElementById('sound-toggle').getAttribute('aria-pressed'), 'true');
+        const deniedAudio = boot(undefined, {storage:{
+            getItem:k=>storage.getItem(k),
+            setItem:(k,v)=>{if(k==='tiny-frontier-sound-v1') throw new Error('Blocked preference write'); storage.setItem(k,v);}
+        }});
+        deniedAudio.document.getElementById('sound-toggle').click();
+        deniedAudio.document.getElementById('restart').click();
+        assert.equal(deniedAudio.document.getElementById('sound-toggle').getAttribute('aria-pressed'), 'false', 'Keep the locally changed sound when only preference writes fail');
+        assert.equal(JSON.parse(storage.getItem(key)).sound, true, 'Do not save an unpersisted preference via gameplay');
+
         const animated = boot(undefined, { motion: true }), ad = animated.document, aa = animated.__frontierTest;
         play(animated, { type: 'reveal', id: 17 }); assert.ok(ad.querySelector('.flip')); assert.ok(ad.querySelector('.flying-wood')); assert.ok(aa.timers.size);
         const epoch = aa.epoch; ad.getElementById('restart').click(); assert.equal(aa.epoch, epoch + 1); assert.equal(aa.timers.size, 0); assert.equal(ad.querySelector('.flying-wood'), null); assert.equal(aa.state.wood, 2); assert.equal(aa.state.actions, 0);
@@ -56,7 +94,7 @@ const { pathToFileURL } = require('node:url');
         { const resume = boot(); play(resume, {type:'reveal',id:17});
         const resumeState = JSON.stringify(resume.__frontierTest.state);
         resume.document.getElementById('sound-toggle').click();
-        const savedResume = resume.localStorage.getItem(key), restored = boot(savedResume);
+        const savedResume = resume.localStorage.getItem(key), restored = boot(savedResume, { storage: resume.localStorage });
         assert.equal(JSON.stringify(restored.__frontierTest.state), resumeState);
         assert.equal(restored.document.getElementById('sound-toggle').getAttribute('aria-pressed'), 'true');
         assert.match(restored.document.getElementById('feedback').textContent, /已恢复/);

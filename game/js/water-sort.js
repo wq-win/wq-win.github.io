@@ -14,15 +14,48 @@ const COLOURS = [
 const $ = id => document.getElementById(id);
 const board = $('water-board'), feedback = $('feedback'), layer = $('pour-layer');
 const STORAGE_KEY = 'cozy-water-sort-v1';
+const RECORDS_KEY = 'cozy-water-sort-records-v1';
 let records = {};
-try { const savedRecords = JSON.parse(localStorage.getItem('cozy-water-sort-records-v1')); if(savedRecords && typeof savedRecords==='object') records=savedRecords; } catch (_) {}
+function readJSON(raw) {
+  try { return JSON.parse(raw); } catch (_) { return null; }
+}
+function readCompleted(raw) {
+  const saved = readJSON(raw);
+  if (!saved || ![1,2].includes(saved.v) || !Number.isInteger(saved.level) ||
+      saved.level < 0 || saved.level >= E.LEVELS.length || !Array.isArray(saved.history) ||
+      saved.history.length > 10000 || !Array.isArray(saved.completed)) return [];
+  return saved.completed.filter(i=>Number.isInteger(i)&&i>=0&&i<E.LEVELS.length);
+}
+function readRecords(raw) {
+  const saved=readJSON(raw), valid={};
+  if (saved && typeof saved==='object' && !Array.isArray(saved)) {
+    E.LEVELS.forEach((_,i)=>{
+      if (Number.isSafeInteger(saved[i]) && saved[i]>0) valid[i]=saved[i];
+    });
+  }
+  return valid;
+}
 let hintTimer = null;
 let state, selected = null, pending = null, timer = null, effectTimer = null, epoch = 0, storageOK = true;
 try { state = E.restore(localStorage.getItem(STORAGE_KEY)); } catch (_) { state = E.create(); storageOK = false; }
 const reduced = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const message = (text,type='') => { feedback.textContent = text; feedback.className = 'feedback' + (type ? ' '+type : ''); };
 function store() {
-  try { localStorage.setItem(STORAGE_KEY,E.save(state)); } catch (_) { storageOK = false; }
+  const won = E.won(state.bottles);
+  if (won && state.moves>0 && state.moves<(records[state.level]??Infinity)) records[state.level]=state.moves;
+  try {
+    // Combine only durable progress; each saved board/history must be one run.
+    const completed = readCompleted(localStorage.getItem(STORAGE_KEY));
+    state.completed = [...new Set([...completed,...state.completed])];
+    const savedRecords = readRecords(localStorage.getItem(RECORDS_KEY));
+    E.LEVELS.forEach((_,i)=>{
+      if (savedRecords[i]<(records[i]??Infinity)) records[i]=savedRecords[i];
+    });
+    localStorage.setItem(STORAGE_KEY,E.save(state));
+    if (Object.keys(records).some(i=>records[i]!==savedRecords[i])) {
+      localStorage.setItem(RECORDS_KEY,JSON.stringify(records));
+    }
+  } catch (_) { storageOK = false; }
   $('saved').textContent = storageOK ? '进度自动保存' : '本次可玩 · 无法保存';
 }
 function cancelAnimation() {
@@ -63,11 +96,6 @@ function render(focusIndex) {
   board.inert = won;
   if (won) {
     const all = state.completed.length===E.LEVELS.length;
-    if(state.moves>0 && (!Number.isInteger(records[state.level]) || state.moves<records[state.level])) {
-      records[state.level]=state.moves;
-      try { localStorage.setItem('cozy-water-sort-records-v1',JSON.stringify(records)); } catch (_) {}
-    }
-    $('personal-best').textContent=' · 最佳 '+records[state.level]+' 步';
     $('win-title').textContent = all ? '八份色彩，都收好啦。' : state.level===E.LEVELS.length-1 ? '最后一份色彩，收好了。' : '这一瓶，刚刚好。';
     $('win-detail').textContent = all ? '8 关已全部完成，随时回来再整理一次。' : `第 ${state.level+1} 关完成 · 已完成 ${state.completed.length} / 8 关`;
     $('win-detail').textContent += ' · 本次 '+state.moves+' 步';
@@ -161,7 +189,7 @@ board.addEventListener('keydown',event=>{
   if(Object.hasOwn(offsets,event.key)){event.preventDefault();const next=(Number(button.dataset.bottle)+offsets[event.key]+state.bottles.length)%state.bottles.length;board.querySelector(`[data-bottle="${next}"]`).focus();}
 });
 window.addEventListener('resize',()=>{if(pending)finishPour();});document.querySelector('[data-game-view]').addEventListener('gameviewchange',()=>{if(pending)finishPour();});
-render();store();
+store();render();
 if(state.moves)message('已接上上次进度 · 第 '+(state.level+1)+' 关，已走 '+state.moves+' 步。');
 if(E.won(state.bottles))message('这一关已完成，可以继续下一关。','success');else if(!E.legalMoves(state.bottles).length)message('没有可倒的位置了，可撤销一步重新规划。','error');
 })();

@@ -16,7 +16,7 @@
     <main class="container mx-auto px-4 py-10 max-w-5xl">
         <p class="text-sm text-gray-500 mb-3"><a href="../index.html" class="text-primary">演示</a> / <a href="index.html" class="text-primary">机器人经典</a> / A*</p>
         <h1 class="text-3xl font-bold mb-3">A* 与 Dijkstra</h1>
-        <p class="text-gray-600 mb-4">墙把直线堵死了。A* 用曼哈顿启发，展开的格子会偏向终点；Dijkstra 把启发关掉，展开得更圆。点格子改墙，Shift+点改终点。启发权重大于 1 会更贪心、不一定最优。</p>
+        <p class="text-gray-600 mb-4">墙把直线堵死了。A* 用曼哈顿启发，展开的格子会偏向终点；Dijkstra 把启发关掉，展开得更圆。点格子改墙，Shift+点改终点。启发权重在开始搜索时确定，大于 1 会更贪心、不一定最优。</p>
         <div class="demo-toolbar">
             <button id="astar" class="bg-primary text-white">A*</button>
             <button id="dijkstra" class="border">Dijkstra</button>
@@ -43,7 +43,14 @@
         const W = 900, H = 540, view = DemoKit.setupCanvas(document.getElementById('c'), W, H), ctx = view.ctx;
         const cell = Math.min((W - 36) / maze.width, (H - 36) / maze.height);
         const ox = (W - maze.width * cell) / 2, oy = (H - maze.height * cell) / 2;
-        let paint = {}, path = [], searching = false;
+        let paint = {}, searching = false, searchGeneration = 0;
+        const status = document.getElementById('status');
+        function clearSearch() {
+            searchGeneration += 1;
+            searching = false;
+            paint = {};
+            status.textContent = '';
+        }
         function key(x, y) { return x + ',' + y; }
         function draw() {
             DemoKit.drawPanel(ctx, W, H);
@@ -65,12 +72,15 @@
             ctx.fillStyle = '#86efac';
             ctx.beginPath(); ctx.arc(ox + (maze.goal.x + 0.5) * cell, oy + (maze.goal.y + 0.5) * cell, cell * 0.24, 0, Math.PI * 2); ctx.fill();
         }
-        function h(x, y, useH) { return useH ? DemoKit.rangeValue('hw') * (Math.abs(x - maze.goal.x) + Math.abs(y - maze.goal.y)) : 0; }
+        function h(x, y, weight) { return weight * (Math.abs(x - maze.goal.x) + Math.abs(y - maze.goal.y)); }
         async function search(useH) {
             if (searching) return;
             searching = true;
-            paint = {}; path = [];
-            const open = [{ x: maze.start.x, y: maze.start.y, g: 0, f: h(maze.start.x, maze.start.y, useH) }];
+            const generation = ++searchGeneration;
+            const weight = useH ? DemoKit.rangeValue('hw') : 0; // Keep queued priorities consistent.
+            paint = {};
+            status.textContent = '';
+            const open = [{ x: maze.start.x, y: maze.start.y, g: 0, f: h(maze.start.x, maze.start.y, weight) }];
             const came = {}, gScore = { [key(maze.start.x, maze.start.y)]: 0 }, seen = new Set();
             let expanded = 0;
             while (open.length) {
@@ -85,7 +95,7 @@
                     let p = ck;
                     while (came[p]) { paint[p] = 'path'; p = came[p]; }
                     paint[key(maze.start.x, maze.start.y)] = 'path';
-                    document.getElementById('status').textContent = (useH ? 'A*' : 'Dijkstra') + ' 扩展 ' + expanded + ' 格 · 路径 ' + cur.g;
+                    status.textContent = (useH ? 'A*' : 'Dijkstra') + ' 扩展 ' + expanded + ' 格 · 路径 ' + cur.g;
                     draw();
                     searching = false;
                     return;
@@ -96,14 +106,15 @@
                     const g = cur.g + 1;
                     if (g < (gScore[nk] === undefined ? Infinity : gScore[nk])) {
                         gScore[nk] = g; came[nk] = ck;
-                        open.push({ x: nx, y: ny, g, f: g + h(nx, ny, useH) });
+                        open.push({ x: nx, y: ny, g, f: g + h(nx, ny, weight) });
                         if (!seen.has(nk)) paint[nk] = 'open';
                     }
                 });
                 draw();
                 await new Promise((r) => setTimeout(r, DemoKit.frameDelay(16)));
+                if (generation !== searchGeneration) return;
             }
-            document.getElementById('status').textContent = '无路径';
+            status.textContent = '无路径';
             searching = false;
             draw();
         }
@@ -112,21 +123,21 @@
             const x = Math.floor((p.x - ox) / cell), y = Math.floor((p.y - oy) / cell);
             if (x <= 0 || y <= 0 || x >= maze.width - 1 || y >= maze.height - 1) return;
             if (x === maze.start.x && y === maze.start.y) return;
+            if (x === maze.goal.x && y === maze.goal.y) return;
             if (event.shiftKey && !maze.walls.has(key(x, y))) {
                 maze.goal = { x: x, y: y };
-                paint = {}; draw();
+                clearSearch(); draw();
                 return;
             }
-            if (x === maze.goal.x && y === maze.goal.y) return;
             const k = key(x, y);
             if (maze.walls.has(k)) maze.walls.delete(k); else maze.walls.add(k);
-            paint = {}; draw();
+            clearSearch(); draw();
         };
         document.getElementById('astar').onclick = () => search(true);
         document.getElementById('dijkstra').onclick = () => search(false);
         document.getElementById('reset').onclick = () => {
             const fresh = DemoKit.parseMaze(DemoKit.DETOUR_MAZE);
-            maze.walls = fresh.walls; paint = {}; draw();
+            Object.assign(maze, fresh); clearSearch(); draw();
         };
         draw();
     </script>

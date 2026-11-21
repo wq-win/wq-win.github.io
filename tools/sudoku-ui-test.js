@@ -254,6 +254,41 @@ async function main() {
                 assert.ok(find('rules-modal').classList.contains('pointer-events-none'));
             }
         });
+        await test('open Rules isolates puzzle keys; ordinary keys work again after close', () => {
+            const g = setup(), { row, col } = g.empty();
+            const digit = String(g.state.solution[row][col] % 9 + 1);
+            const event = (target, key, modifiers = {}) =>
+                target.dispatchEvent(new g.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...modifiers }));
+            g.cell(row, col).click();
+            g.find('show-rules').click();
+            assert.equal(g.document.activeElement, g.find('close-rules'));
+            const untouched = g.snapshot();
+            for (const shortcut of [digit, 'h', 'Backspace', 'Delete', 'ArrowRight']) {
+                event(g.document.activeElement, shortcut);
+                assert.deepEqual(g.snapshot(), untouched, shortcut + ' must not affect the puzzle');
+                assert.equal(g.find('undo-input').disabled, true);
+            }
+            g.find('close-rules').click();
+            assert.equal(g.document.activeElement, g.find('show-rules'));
+            for (const shortcut of [{ctrlKey:true}, {metaKey:true}, {altKey:true}]) {
+                event(g.document.activeElement, 'h', shortcut);
+                assert.deepEqual(g.snapshot(), untouched, 'browser modifiers do not request a puzzle hint');
+            }
+            event(g.document.activeElement, digit);
+            assert.equal(g.state.board[row][col], Number(digit));
+            assert.equal(g.find('undo-input').disabled, false);
+            g.find('show-rules').click();
+            event(g.document.activeElement, 'Backspace');
+            assert.equal(g.state.board[row][col], Number(digit), 'Backspace cannot clear a filled cell behind Rules');
+            g.find('close-rules-btn').click();
+            event(g.document.activeElement, 'Backspace');
+            assert.equal(g.state.board[row][col], 0);
+            event(g.document.activeElement, 'h');
+            assert.equal(g.state.hintCount, 1);
+            g.cell(row, col).click();
+            event(g.document.activeElement, 'ArrowRight');
+            assert.notDeepEqual(clone(g.state.selectedCell), {row, col});
+        });
         await test('fallback fullscreen and repeated exit retain the same running puzzle', () => {
             const { row, col } = empty();
             cell(row, col).click();
