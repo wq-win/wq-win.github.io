@@ -46,7 +46,8 @@
             { x: 640, y: 310, w: 40, h: 170 }
         ];
         const circles = [{ x: 340, y: 270, r: 42 }, { x: 545, y: 200, r: 36 }];
-        let nodes = [{ ...start, parent: -1 }], path = [], sample = null, growing = false;
+        const sampleCap = 4000, status = document.getElementById('status');
+        let nodes = [{ ...start, parent: -1 }], path = [], sample = null, growing = false, generation = 0;
         function blocked(ax, ay, bx, by) {
             if (bx < 16 || by < 16 || bx > W - 16 || by > H - 16) return true;
             return rects.some((r) => DemoKit.segmentHitsRect(ax, ay, bx, by, r.x, r.y, r.w, r.h))
@@ -101,7 +102,7 @@
                 let k = nodes.length - 1;
                 while (k >= 0) { path.push(nodes[k]); k = nodes[k].parent; }
                 growing = false;
-                document.getElementById('status').textContent = '到达，节点 ' + nodes.length;
+                status.textContent = '到达，节点 ' + nodes.length;
                 return true;
             }
             return false;
@@ -109,26 +110,34 @@
         async function grow() {
             if (growing) return;
             growing = true;
-            document.getElementById('status').textContent = '生长中';
-            for (let i = 0; i < 4000 && growing; i += 1) {
+            const run = ++generation;
+            status.textContent = '生长中';
+            for (let i = 0; i < sampleCap; i += 1) {
                 if (step()) break;
                 const every = Math.max(3, Math.round(36 / Math.max(1, DemoKit.rangeValue('speed'))));
-                if (i % every === 0) { draw(); await new Promise((r) => setTimeout(r, DemoKit.frameDelay(16))); }
+                if (i % every === 0) {
+                    draw();
+                    await new Promise((r) => setTimeout(r, DemoKit.frameDelay(16)));
+                    if (run !== generation) return;
+                }
             }
-            draw();
+            if (growing) status.textContent = '已达 ' + sampleCap + ' 次采样上限，本轮未找到路径';
             growing = false;
+            draw();
+        }
+        function clearRun(message) {
+            generation += 1;
+            growing = false; nodes = [{ ...start, parent: -1 }]; path = []; sample = null;
+            status.textContent = message;
+            draw();
         }
         document.getElementById('run').onclick = grow;
-        document.getElementById('reset').onclick = () => {
-            growing = false; nodes = [{ ...start, parent: -1 }]; path = []; sample = null;
-            document.getElementById('status').textContent = '';
-            draw();
-        };
+        document.getElementById('reset').onclick = () => clearRun('');
         document.getElementById('c').onclick = (event) => {
-            goal = DemoKit.pointer(document.getElementById('c'), event, view);
-            growing = false; nodes = [{ ...start, parent: -1 }]; path = []; sample = null;
-            document.getElementById('status').textContent = '已改终点，点生长';
-            draw();
+            const p = DemoKit.pointer(document.getElementById('c'), event, view);
+            if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || blocked(p.x, p.y, p.x, p.y)) return;
+            goal = p;
+            clearRun('已改终点，点生长');
         };
         draw();
     </script>

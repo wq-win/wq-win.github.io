@@ -3,6 +3,7 @@
 from html.parser import HTMLParser
 import importlib.util
 import json
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -50,6 +51,32 @@ class LobbyDiscoveryTests(unittest.TestCase):
                 self.assertEqual(entry['kind'], 'page')
                 self.assertTrue(entry['title'] and entry['excerpt'])
                 self.assertNotIn(entry['id'], related)
+
+
+class RelatedLabelTests(unittest.TestCase):
+    def test_labels_reflect_each_destination(self):
+        items = builder.collect_items()
+        related = builder.build_related(items)
+
+        def find(source, target):
+            return next(entry for entry in related[source] if entry["id"] == target)
+
+        self.assertEqual(find("rl:13-dpg", "robot-learn:013-naf")["reason"], "跨系列相关方法")
+        self.assertEqual(find("rl:13-dpg", "rl:17-ddpg")["reason"], "同系列相关方法")
+        self.assertEqual(find("rl:27-ppo", "game:rl-ppo")["reason"], "对照阅读")
+        for source, destination, label in [
+            ("00-reading-guide", "00-reading-guide", "跨系列导读"),
+            ("00-timeline", "00-timeline", "跨系列总览"),
+            ("61-epilogue", "101-epilogue", "跨系列结语"),
+        ]:
+            with self.subTest(label=label):
+                self.assertEqual(find(f"rl:{source}", f"llm:{destination}")["reason"], label)
+
+        prefix = "window.RELATED_PAPERS = "
+        script = (ROOT / "js/related-data.js").read_text()
+        self.assertTrue(script.startswith(prefix) and script.endswith(";\n"))
+        self.assertEqual(json.loads(script[len(prefix):-2]), related)
+        self.assertFalse(any("同一方法" in entry["reason"] for entries in related.values() for entry in entries))
 
 
 class RssTests(unittest.TestCase):

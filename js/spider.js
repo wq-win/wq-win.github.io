@@ -164,6 +164,7 @@
             ids.add(card.id); var expected=deck[card.id-1]; return card.r===expected.r && card.s===expected.s;
         }) && run.columns.every(function(col){ return !col.length || col[col.length-1].up; });
     }
+    // Save board mutations explicitly; rendering must not overwrite other tabs.
     function saveRun() {
         try { localStorage.setItem(RUN_KEY, JSON.stringify({version:1,state:state,past:past})); } catch (_) {}
     }
@@ -181,7 +182,6 @@
     }
 
     function render() {
-        saveRun();
         var cols = document.getElementById('spider-cols');
         var stock = document.getElementById('spider-stock');
         var done = document.getElementById('spider-done');
@@ -282,6 +282,7 @@
         if (peel(state.columns[col])) state.done += 1;
         selected = null;
         noteWin();
+        saveRun();
         render();
     }
 
@@ -317,6 +318,7 @@
         selected = null;
         noteWin();
         if (state.done !== 8) setMessage('');
+        saveRun();
         render();
     }
 
@@ -365,6 +367,7 @@
         selected = null;
         try { localStorage.setItem('mylog-spider-suits', String(suits)); } catch (_) {}
         setMessage('');
+        saveRun();
         render();
     }
 
@@ -379,6 +382,7 @@
         state = past.pop();
         selected = null;
         setMessage('');
+        saveRun();
         render();
     }
 
