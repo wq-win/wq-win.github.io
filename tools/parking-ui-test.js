@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const E=require('../game/js/parking-engine');
 const parkingCSS=fs.readFileSync(path.resolve(__dirname,'../game/assets/parking.css'),'utf8');assert(!parkingCSS.includes('preserve-3d'),'car hit areas must remain in the 2D stacking context');assert(!parkingCSS.includes('rotateX('),'board uses affine tilt for reliable pointer hit testing');assert(!/\.car:hover\{/.test(parkingCSS),'hover must not change button compositing or stacking');assert(/\.board\{overflow:clip\}/.test(parkingCSS),'departing cars must be clipped at the board so animation cannot resize scroll bounds');const root=path.resolve(__dirname,'..');
-const html=fs.readFileSync(path.join(root,'game/parking.html'),'utf8');for(const file of ['parking-engine','parking'])assert(html.includes(`js/${file}.js?v=20261115-v5`),'engine/UI version tokens stay paired');
+const html=fs.readFileSync(path.join(root,'game/parking.html'),'utf8');for(const file of ['parking-engine','parking'])assert(html.includes(`js/${file}.js?v=20261120-v6`),'engine/UI version tokens stay paired');
 (async()=>{const {Window}=await import('happy-dom');
 // CSS cascade regression for the clipped desktop controls. Happy DOM does not
 // render geometry; normalize its @media-whitespace parser limitation only here.
@@ -23,6 +23,43 @@ for(const [width,height] of [[1188,761],[1366,768],[800,500],[761,481],[390,844]
  await cssWindow.happyDOM.abort();
 }
 function setup(saved,reduced=true,legacy,withSession=false,primary){const w=new Window({url:'https://example.test/game/parking.html',settings:{disableJavaScriptEvaluation:true,disableJavaScriptFileLoading:true,disableCSSFileLoading:true}});w.document.write(fs.readFileSync(path.join(root,'game/parking.html'),'utf8'));w.matchMedia=()=>({matches:reduced});if(saved)w.localStorage.setItem('cozy-parking-v3',saved);if(primary)w.localStorage.setItem('cozy-parking-v5',primary);if(legacy)w.localStorage.setItem('cozy-parking-v2',legacy);w.eval(fs.readFileSync(path.join(root,'game/js/parking-engine.js'),'utf8'));if(withSession)w.eval(fs.readFileSync(path.join(root,'game/js/workshop-session.js'),'utf8'));w.eval(fs.readFileSync(path.join(root,'game/js/parking.js'),'utf8'));w.eval(fs.readFileSync(path.join(root,'js/game-view.js'),'utf8'));return w;}
+// Control only the controller's post-boot timers; do not wait on the host clock.
+const timing=setup();
+try{
+ let now=0,nextId=0;
+ const pending=new Map();
+ timing.setTimeout=(fn,delay)=>{const id=++nextId;pending.set(id,{fn,due:now+delay});return id;};
+ timing.clearTimeout=id=>pending.delete(id);
+ function advance(ms){
+  const end=now+ms;
+  for(;;){
+   const next=[...pending].filter(([,job])=>job.due<=end).sort(([,a],[,b])=>a.due-b.due)[0];
+   if(!next)break;
+   const [id,job]=next;pending.delete(id);now=job.due;job.fn();
+  }
+  now=end;
+ }
+ const click=id=>timing.document.querySelector(`[data-car="${id}"]`).click();
+ const clues=()=>[...timing.document.querySelectorAll('.blocked,.obstacle')].map(c=>Number(c.dataset.car)).sort((a,b)=>a-b);
+ const progress=()=>timing.localStorage.getItem('cozy-parking-v5');
+ const initialSave=progress();
+ click(0);assert.deepEqual(clues(),[0,8],'first attempt identifies car 9 as the blocker');
+ advance(750);
+ click(1);assert.deepEqual(clues(),[1,2],'retry switches the blocker to car 3 immediately');
+ advance(150);assert.deepEqual(clues(),[1,2],'first deadline must not clear the retry');
+ advance(749);assert.deepEqual(clues(),[1,2]);
+ advance(1);assert.deepEqual(clues(),[],'retry clears at its own 900 ms deadline');
+ assert.equal(progress(),initialSave,'blocked attempts and their timeouts do not save progress');
+ click(0);advance(100);
+ timing.document.getElementById('restart').click();
+ assert.deepEqual(clues(),[],'restart clears pending highlights immediately');
+ click(1);advance(800);assert.deepEqual(clues(),[1,2],'pre-restart timer cannot clear a fresh clue');
+ click(E.solve(E.LEVELS[0])[0]);
+ assert.deepEqual(clues(),[],'successful move immediately clears the blocked feedback');
+ assert.equal(JSON.parse(progress()).moves,1,'successful move still saves once accepted');
+ advance(900);
+ assert.equal(timing.document.querySelectorAll('.car').length,11,'departure timer still removes the car');
+}finally{await timing.happyDOM.abort();}
 const tick=()=>new Promise(r=>setTimeout(r,5));const w=setup();const $=id=>w.document.getElementById(id);
 try{assert.equal(w.document.querySelectorAll('.car').length,12);assert.equal($('level-select').options.length,16);for(const dir of ['右下','左下','左上','右上'])assert([...w.document.querySelectorAll('.car')].some(c=>c.getAttribute('aria-label').includes('朝'+dir)), 'diagonal direction is announced');for(let i=0;i<16;i++){$('level-select').value=String(i);$('level-select').dispatchEvent(new w.Event('change'));const level=E.LEVELS[i];for(const car of level.cars){const button=w.document.querySelector(`[data-car="${car.id}"]`);assert(button.style.width.includes(String(E.LENGTH)));assert(button.style.height.includes(String(E.WIDTH)));const travel=name=>Number(button.style.getPropertyValue(name).match(/\*([-\d.]+)\)/)[1]);const moved={...car,x:car.x+travel('--exit-x'),y:car.y+travel('--exit-y')},corners=E.corners(moved);assert([0,1].some(axis=>corners.every(p=>p[axis]<0)||corners.every(p=>p[axis]>level.size)),'animation carries every cardinal and diagonal body fully beyond one lot edge');}}$('level-select').value='0';$('level-select').dispatchEvent(new w.Event('change'));
 // Exercise the real layout/input handlers with deterministic container sizes.

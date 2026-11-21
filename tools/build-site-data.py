@@ -200,8 +200,8 @@ STATIC_PAGES = [
         "url": "game/index.html",
         "title": "演示与游戏",
         "cardTitle": "演示与游戏",
-        "question": "交互演示",
-        "excerpt": "数独、蜘蛛纸牌、斗地主残局、跑得快、江湖 Slay，以及四套精读对应的算法演示。",
+        "question": "南昌麻将联机或单机 · 跑得快联机 · 好友开房",
+        "excerpt": "数独、蜘蛛纸牌、斗地主残局、跑得快、江湖 Slay 与四套算法演示。南昌麻将支持 2–4 人和好友联机。在线跑得快房间可用手机开房间，朋友凭六位房间号加入。",
         "series": "game",
         "seriesLabel": "演示",
         "year": 2026,
@@ -238,10 +238,10 @@ STATIC_PAGES = [
     },
     {
         "url": "game/paodekuai.html",
-        "title": "跑得快",
-        "cardTitle": "跑得快",
+        "title": "跑得快（单机）",
+        "cardTitle": "跑得快（单机）",
         "question": "有牌必压",
-        "excerpt": "三人十六张，有牌必压，黑桃 3 先出。",
+        "excerpt": "和两位电脑牌友打三人十六张，有牌必压，黑桃 3 先出。",
         "series": "game",
         "seriesLabel": "演示",
         "year": 2026,
@@ -653,14 +653,14 @@ def build_related(items):
             return
         related[src].append({"id": dst, "reason": reason})
 
+    # Alias groups are topical, not a claim of algorithmic equivalence.
+    companion_labels = {"guide": "导读", "overview": "总览", "epilogue": "结语"}
     for ids in groups.values():
-        if len(ids) < 2:
-            continue
-        series_set = {item_id.split(":")[0] for item_id in ids}
-        reason = "跨系列同一方法" if len(series_set) > 1 else "同系列相关方法"
         for src in ids:
             for dst in ids:
-                add(src, dst, reason)
+                source, target = by_id[src], by_id[dst]
+                scope = "同系列" if source["series"] == target["series"] else "跨系列"
+                add(src, dst, scope + companion_labels.get(target["kind"], "相关方法"))
 
     for src, dst in EXTRA_EDGES:
         add(src, dst, "对照阅读")

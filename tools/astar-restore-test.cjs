@@ -112,6 +112,37 @@ async function resultPath(algorithm, expected) {
     const prior=goalKey();point(model('maze.start.x+1'),model('maze.start.y'),true);
     assert.notEqual(goalKey(),prior);clean();
 
+    nodes.reset.onclick();
+    const wall = [6,1], goalBefore = goalKey(), wallsBefore = mazeSignature();
+    assert.equal(model("maze.walls.has('6,1')"),true);
+    await resultPath('dijkstra',/^Dijkstra.*路径 36$/);
+    const completedStatus=nodes.status.textContent, completedPaint=model('JSON.stringify(paint)');
+    point(...wall,true);
+    assert.equal(mazeSignature(),wallsBefore,'a rejected goal placement must not remove a wall');
+    assert.equal(goalKey(),goalBefore);
+    assert.equal(nodes.status.textContent,completedStatus);
+    assert.equal(model('JSON.stringify(paint)'),completedPaint);
+    await resultPath('dijkstra',/^Dijkstra.*路径 36$/);
+
+    nodes.astar.onclick();
+    await tick();
+    const pendingPaint=model('JSON.stringify(paint)');
+    point(...wall,true);
+    assert.equal(isRunning(),true,'a rejected goal placement must not cancel an active search');
+    assert.equal(mazeSignature(),wallsBefore);
+    assert.equal(goalKey(),goalBefore);
+    assert.equal(model('JSON.stringify(paint)'),pendingPaint);
+    await drain();
+    assert.match(nodes.status.textContent,/^A\*.*路径 36$/);
+
+    point(...wall); clean(); // The ordinary click intentionally removes this wall.
+    assert.equal(model("maze.walls.has('6,1')"),false);
+    assert.equal(goalKey(),goalBefore);
+    await resultPath('dijkstra',/^Dijkstra.*路径 16$/);
+    point(...wall,true); clean(); // It is now a valid goal.
+    assert.equal(goalKey(),'6,1');
+    await resultPath('dijkstra',/^Dijkstra.*路径 5$/);
+
     // Heuristic weight is fixed per run; speed stays live.
     nodes.reset.onclick();
     await resultPath('astar',/^A\*.*路径 36$/);

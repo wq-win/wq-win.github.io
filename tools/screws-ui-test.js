@@ -5,6 +5,41 @@ function boot(saved,savedRun){const w=new Window({url:'https://example.test/game
 const w=boot('{bad'),d=w.document,E=w.ScrewPuzzle,api=w.__test;const wait=()=>new Promise(r=>setTimeout(r,8));const click=async id=>{d.querySelector('[data-screw="'+id+'"]').click();await wait();};
 try{
  assert.equal(d.querySelectorAll('#level option').length,16);assert.equal(d.querySelectorAll('.screw').length,9);assert.equal(d.querySelectorAll('.slot').length,5);assert.equal(d.getElementById('result').hidden,true);
+ const branch=boot(JSON.stringify({version:3,index:0,completed:[]}),JSON.stringify({version:3,index:0,moves:[1,2]}));
+ try{
+  const bd=branch.document;
+  function clues(){
+   const rows=[...bd.querySelectorAll('.lane')].map(lane=>[...lane.querySelectorAll('.preview-group')].map(group=>{
+    assert.equal(group.hasAttribute('aria-label'),false);
+    assert.equal(group.querySelectorAll('.preview-dot[aria-hidden="true"]').length,3);
+    const text=group.querySelector('.sr-only');
+    assert(text&&!text.closest('[aria-hidden="true"],[hidden],[aria-live]'));
+    return text.textContent;
+   }));
+   const tray=bd.getElementById('tray'),summary=tray.querySelector('.sr-only');
+   assert(summary&&!summary.closest('[aria-hidden="true"],[hidden],[aria-live]'));
+   assert.equal(tray.querySelectorAll('.slot').length,5);
+   assert.equal(tray.querySelectorAll('.slot[aria-label]').length,0);
+   return {rows,tray:summary.textContent};
+  }
+  const beforeClues=clues();
+  assert.equal(beforeClues.rows[0][0],'第1排下方第1层：湖蓝、朱砂、青绿');
+  assert.equal(beforeClues.rows[1][0],'第2排下方第1层：朱砂、湖蓝、朱砂');
+  assert.equal(beforeClues.tray,'托盘：湖蓝、青绿；剩余3个空格。');
+  assert.match(bd.querySelector('[data-screw="0"]').getAttribute('aria-label'),/姜黄/);
+  assert.match(bd.querySelector('[data-screw="4"]').getAttribute('aria-label'),/姜黄/);
+  bd.querySelector('[data-screw="0"]').click();await wait();
+  const fallen=clues();
+  assert.equal(fallen.rows[0].length,beforeClues.rows[0].length-1);
+  assert(fallen.rows[0].every((text,i)=>text===beforeClues.rows[0][i+1].replace('下方第'+(i+2)+'层','下方第'+(i+1)+'层')));
+  assert.equal(fallen.tray,'托盘：湖蓝、青绿、姜黄；剩余2个空格。');
+  bd.getElementById('undo').click();
+  assert.deepEqual(clues(),beforeClues,'Undo restores exact preview and tray descriptions');
+ }finally{await branch.happyDOM.abort();}
+ const css=fs.readFileSync(path.join(root,'game/assets/screws.css'),'utf8');
+ const srOnly=css.match(/\.sr-only\{([^}]+)\}/)[1];
+ for(const rule of ['position:absolute','width:1px','height:1px','overflow:hidden','clip:rect(0,0,0,0)'])assert(srOnly.includes(rule));
+ assert.doesNotMatch(srOnly,/display:none|visibility:hidden/);
  const solution=E.solve(api.state).path;
  const before=JSON.stringify(api.state);await click(solution[0]);d.getElementById('undo').click();assert.equal(JSON.stringify(api.state),before,'undo restores exact state');
  for(const id of solution.slice(0,5))await click(id);

@@ -33,6 +33,15 @@ for (const [path, root] of [['/', './'], ['/rl/27-ppo.html', '../']]) {
     assert.ok([...d.querySelectorAll('.site-search-hit')].some(a => new URL(a.href).pathname === url),
       name + ' discoverable from ' + path);
   }
+  const roomQueries = ['南昌麻将', '好友开房', '好友联机', '开房间', '房间号', '跑得快联机', '在线跑得快', '跑得快房间', '南昌麻将联机'];
+  for (const query of [...roomQueries, '跑得快']) {
+    input.value = query;
+    input.dispatchEvent(new w.Event('input'));
+    const first = d.querySelector('.site-search-hit');
+    const isSolo = query === '跑得快';
+    assert.equal(first ? new URL(first.href).pathname : null, isSolo ? '/game/paodekuai.html' : '/game/index.html', query + ' first result from ' + path);
+    if (isSolo) assert.ok(first.textContent.includes('（单机）'));
+  }
   input.value = ''; input.dispatchEvent(new w.Event('input'));
   assert.equal(d.querySelectorAll('.site-search-hit').length, 0);
   d.dispatchEvent(new w.KeyboardEvent('keydown', {key:'Escape'}));

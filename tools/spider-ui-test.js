@@ -185,7 +185,7 @@ function createGame(options = {}) {
     document.documentElement = document.querySelector('html');
     document.body = document.querySelector('body');
     document.activeElement = document.body;
-    const storage = Object.assign({}, options.storage);
+    const storage = options.sharedStorage || Object.assign({}, options.storage);
     const random = Object.create(Math);
     random.random = seeded(options.seed || 42);
     const sandbox = {
@@ -193,7 +193,7 @@ function createGame(options = {}) {
         CustomEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
         localStorage: {
             getItem(name) { if(options.blockStorage) throw Error('Storage blocked'); return storage[name] ?? null; },
-            setItem(name, value) { if(options.blockStorage) throw Error('Storage blocked'); storage[name] = String(value); }
+            setItem(name, value) { if(options.blockStorage) throw Error('Storage blocked'); storage[name] = String(value); options.onWrite?.(name); }
         }
     };
     sandbox.confirm = options.confirm || (() => true);
@@ -267,6 +267,32 @@ test('cancelled restart and difficulty change preserve saved game, history and s
     assert.equal(g.api.history(), 0);
     const restored = createGame({storage:g.storage});
     assert.deepEqual(restored.snap(), g.snap());
+});
+
+test('a stale tab can request hints and select cards without writing over a committed deal', () => {
+    const key = 'mylog-spider-run-v1', storage = {}, writes = [];
+    const tab = () => createGame({sharedStorage:storage,onWrite:name=>writes.push(name)});
+    const a = tab(), opening = a.snap(), b = tab();
+    assert.deepEqual(b.snap(),opening);
+    a.get('spider-deal').click();
+    const afterDeal = storage[key], writesBeforeHint = writes.length;
+    assert.equal(JSON.parse(afterDeal).state.stock.length,40);
+    assert.equal(JSON.parse(afterDeal).past.length,1);
+    b.get('spider-hint').click();
+    assert.equal(storage[key],afterDeal,'Hint must not replace the newer deal');
+    const hinted = b.selection();
+    if (hinted) b.card(hinted.col,hinted.index).click();
+    b.card(0,opening.columns[0].length-1).click();
+    assert.equal(storage[key],afterDeal);
+    assert.equal(writes.length,writesBeforeHint);
+    const restored = tab();
+    assert.equal(writes.length,writesBeforeHint,'Loading a valid saved game must not write');
+    assert.deepEqual(restored.snap(),a.snap());
+    assert.equal(restored.api.history(),1);
+    restored.get('spider-undo').click();
+    assert.deepEqual(restored.snap(),opening);
+    assert.equal(writes.length,writesBeforeHint+1);
+    assert.equal(JSON.parse(storage[key]).past.length,0);
 });
 
 test('saved game restores cards and undo history; malformed saves fall back safely', () => {
@@ -378,23 +404,28 @@ test('five stock-row clicks deal and disable the stock; five undos restore the e
 });
 
 test('moving a same-suit run through DOM clicks flips its covered card and undo restores it', () => {
-    const g = createGame();
+    const writes=[];
+    const g = createGame({onWrite:name=>writes.push(name)});
     const initial = fixture([[card(5, 'S', false), card(8), card(7), card(6)], [card(9, 'H')]], [], 0, 2);
     g.api.load(initial);
+    const before=writes.length;
     g.card(0, 1).click();
     g.card(1, 0).click();
     assert.deepEqual(g.snap().columns[0], [{ ...initial.columns[0][0], up: true }]);
     assert.deepEqual(g.snap().columns[1].map(c => c.r), [9,8,7,6]);
     assert.equal(g.selection(), null);
     assert.equal(g.api.history(), 1);
+    assert.equal(writes.length,before+1);
     g.get('spider-undo').click();
     assert.deepEqual(g.snap(), initial);
 });
 
 test('illegal destination and mixed-suit runs retain the original rules and deck', () => {
-    const g = createGame();
+    const writes=[];
+    const g = createGame({onWrite:name=>writes.push(name)});
     const initial = fixture([[card(8), card(7)], [card(11)], [card(6), card(5, 'H')]], [], 0, 2);
     g.api.load(initial);
+    const before=writes.length;
     g.card(0, 0).click();
     g.card(1, 0).click();
     assert.deepEqual(g.snap(), initial);
@@ -405,16 +436,20 @@ test('illegal destination and mixed-suit runs retain the original rules and deck
     assert.equal(g.selection(), null);
     assert.deepEqual(g.snap(), initial);
     assert.match(g.get('spider-status').textContent, /同花色/);
+    assert.equal(writes.length,before);
 });
 
 test('empty column remains a move target while any empty column prevents dealing', () => {
-    const g = createGame();
+    const writes=[];
+    const g = createGame({onWrite:name=>writes.push(name)});
     const initial = fixture([[card(8), card(7)], []], Array.from({ length: 10 }, () => card(2, 'S', false)));
     g.api.load(initial);
+    const before=writes.length;
     g.get('spider-deal').click();
     assert.deepEqual(g.snap(), initial);
     assert.match(g.get('spider-status').textContent, /空列/);
     assert.equal(g.api.history(), 0);
+    assert.equal(writes.length,before);
     g.card(0, 0).click();
     assert.ok(g.columns()[1].classList.contains('is-empty'));
     g.columns()[1].click();
