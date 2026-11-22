@@ -6,10 +6,23 @@
     const stage = document.getElementById('course-stage');
     const grade = document.getElementById('course-grade');
     const cards = Array.from(document.querySelectorAll('[data-course-lesson]'));
+    const gradesByStage = new Map();
+    cards.forEach(({dataset:{stage,grade}}) => {
+      if (!gradesByStage.has(stage)) gradesByStage.set(stage, new Set());
+      gradesByStage.get(stage).add(grade);
+    });
+    function syncGrade() {
+      const allowed = gradesByStage.get(stage.value);
+      Array.from(grade.options).forEach(option => { option.disabled = !!allowed && !!option.value && !allowed.has(option.value); });
+      if (!allowed || !grade.value || allowed.has(grade.value)) return false;
+      grade.value = '';
+      return true;
+    }
     const status = document.getElementById('course-result-count');
     const empty = document.getElementById('course-empty');
     const normalize = value => String(value || '').toLowerCase().normalize('NFKC').trim();
     function apply(updateURL) {
+      const droppedGrade = syncGrade();
       const words = normalize(query.value).split(/\s+/).filter(Boolean);
       let visible = 0;
       cards.forEach(card => {
@@ -23,19 +36,24 @@
       if (updateURL) {
         const url = new URL(location.href);
         [['q', query.value.trim()], ['stage', stage.value], ['grade', grade.value]].forEach(([key, value]) => value ? url.searchParams.set(key, value) : url.searchParams.delete(key));
-        history.replaceState(null, '', url);
+        history.replaceState(history.state, '', url);
       }
+      return droppedGrade;
     }
     function readURL() {
       const params = new URLSearchParams(location.search);
       query.value = params.get('q') || '';
       stage.value = params.get('stage') || '';
       grade.value = params.get('grade') || '';
-      apply(false);
+      if (apply(false)) {
+        const url = new URL(location.href);
+        url.searchParams.delete('grade');
+        history.replaceState(history.state, '', url);
+      }
     }
     form.addEventListener('submit', event => { event.preventDefault(); apply(true); });
     query.addEventListener('input', () => apply(true));
-    stage.addEventListener('change', () => { grade.value = ''; apply(true); });
+    stage.addEventListener('change', () => apply(true));
     grade.addEventListener('change', () => apply(true));
     form.addEventListener('reset', () => { query.value = ''; stage.value = ''; grade.value = ''; apply(true); });
     window.addEventListener('popstate', readURL);
