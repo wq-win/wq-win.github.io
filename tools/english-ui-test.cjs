@@ -36,6 +36,75 @@ const { ROOT, COURSE, loadLessons } = require('./build-english.cjs');
       const restored = setup('index.html', 'index.html?stage=senior', width);
       assert.equal(restored.document.querySelectorAll('[data-course-lesson]:not([hidden])').length, lessons.filter(lesson => lesson.stage === 'senior').length, 'reload deep link');
     }
+    const matrix = setup('index.html', 'index.html');
+    const md = matrix.document, selectStage = md.getElementById('course-stage'), selectGrade = md.getElementById('course-grade');
+    const matrixQuery = md.getElementById('course-query');
+    const resultCount = () => md.querySelectorAll('[data-course-lesson]:not([hidden])').length;
+    const stages = [...new Set(lessons.map(lesson => lesson.stage))], grades = [...new Set(lessons.map(lesson => lesson.gradeLabel))];
+    function assertOptions(stage) {
+      const allowed = new Set(lessons.filter(lesson => !stage || lesson.stage === stage).map(lesson => lesson.gradeLabel));
+      for (const option of selectGrade.options) assert.equal(option.disabled, !!option.value && !allowed.has(option.value), stage + ' / ' + option.value);
+    }
+    function restore(stage, grade, query = '') {
+      const params = new URLSearchParams({ref:'directory', q:query});
+      params.append('ref','extra');
+      if (stage) params.set('stage',stage);
+      if (grade) params.set('grade',grade);
+      matrix.history.pushState({from:'prior'}, '', 'index.html?' + params + '#units');
+      const before = matrix.location.href;
+      matrix.dispatchEvent(new matrix.PopStateEvent('popstate', {state:matrix.history.state}));
+      return before;
+    }
+    let possible = 0, impossible = 0;
+    for (const stage of ['', ...stages]) for (const grade of grades) {
+      const before = restore(stage,grade);
+      const compatible = lessons.filter(lesson => (!stage || lesson.stage === stage) && lesson.gradeLabel === grade);
+      const url = new URL(matrix.location.href);
+      if (compatible.length) {
+        assert.equal(selectGrade.value,grade);
+        assert.equal(resultCount(),compatible.length);
+        assert.equal(url.href,before,'valid pairs and grade-only URLs are not rewritten');
+        if(stage)possible++;
+      } else {
+        impossible++;
+        assert.equal(selectGrade.value,'');
+        assert.equal(resultCount(),lessons.filter(lesson => lesson.stage === stage).length);
+        assert.equal(url.searchParams.has('grade'),false);
+        assert.equal(url.searchParams.get('stage'),stage);
+        assert.equal(url.searchParams.get('q'),'');
+        assert.deepEqual(url.searchParams.getAll('ref'),['directory','extra']);
+        assert.equal(url.hash,'#units');
+        assert.equal(matrix.history.state.from,'prior');
+      }
+      assertOptions(stage);
+    }
+    assert.deepEqual([possible,impossible],[16,48]);
+    const deep = setup('index.html', 'index.html?stage=senior&grade=%E4%B8%89%E5%B9%B4%E7%BA%A7&q=+%E6%97%B6%E6%80%81+&keep=1#units');
+    const deepURL = new URL(deep.location.href);
+    assert.equal(deepURL.searchParams.has('grade'),false);
+    assert.equal(deepURL.searchParams.get('q'),' 时态 ');
+    assert.equal(deepURL.searchParams.get('keep'),'1');
+    assert.equal(deepURL.hash,'#units');
+    assert.equal(deep.document.querySelectorAll('[data-course-lesson]:not([hidden])').length,5);
+
+    restore('','高二'); selectStage.focus(); selectStage.value='senior'; selectStage.dispatchEvent(new matrix.Event('change'));
+    assert.equal(selectGrade.value,'高二'); assert.equal(resultCount(),12); assert.equal(md.activeElement,selectStage);
+    selectStage.value=''; selectStage.dispatchEvent(new matrix.Event('change'));
+    assert.equal(selectGrade.value,'高二'); assert.equal(resultCount(),12); assertOptions('');
+    selectStage.value='junior'; selectStage.dispatchEvent(new matrix.Event('change'));
+    assert.equal(selectGrade.value,''); assertOptions('junior');
+    assert.equal(new URL(matrix.location.href).searchParams.has('grade'),false);
+    restore('senior','高二','no lesson should match this');
+    assert.equal(resultCount(),0);
+    assert.equal(selectGrade.value,'高二'); assertOptions('senior');
+    assert.equal(md.getElementById('course-empty').hidden,false);
+    md.getElementById('course-filter').reset();
+    assert.equal(matrixQuery.value,''); assert.equal(selectStage.value,''); assert.equal(selectGrade.value,'');
+    assert.equal(resultCount(),lessons.length); assertOptions('');
+    const resetURL = new URL(matrix.location.href);
+    assert.deepEqual([...resetURL.searchParams.keys()],['ref','ref']);
+    assert.equal(resetURL.hash,'#units');
+
     const lesson = lessons[0], window = setup(lesson.slug + '.html', lesson.slug + '.html');
     const details = window.document.querySelector('.course-answers'); assert(details && !details.open, 'answers initially folded');
     window.location.hash = '#%E5%8F%82%E8%80%83%E7%AD%94%E6%A1%88%E4%B8%8E%E8%A7%A3%E6%9E%90'; window.dispatchEvent(new window.Event('hashchange'));
