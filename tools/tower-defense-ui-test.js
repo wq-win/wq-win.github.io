@@ -16,10 +16,92 @@ const instrumented = controller.replace(/\}\)\(\);\s*$/, '\nwindow.__tdTest = { 
 assert.notEqual(instrumented, controller, 'Test-only state instrumentation installed');
 const clone = value => JSON.parse(JSON.stringify(value));
 
+async function testSharedStorage(Window) {
+    const SAVE='mylog-forest-defense-checkpoint-v2', STARS='mylog-forest-tactics-stars-v1';
+    const items=new Map(), writes=[], tabs=[];
+    function open() {
+        const w=new Window({url:'https://example.test/game/tower-defense.html',
+            settings:{disableJavaScriptEvaluation:true,disableJavaScriptFileLoading:true,disableCSSFileLoading:true}});
+        tabs.push(w);
+        w.document.write(page.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,''));
+        const ctx=new Proxy({}, {get:(_,key)=>key==='createLinearGradient'||key==='createRadialGradient'?
+            ()=>({addColorStop(){}}):()=>{}});
+        w.HTMLCanvasElement.prototype.getContext=()=>ctx;
+        Object.defineProperty(w,'localStorage',{value:{
+            getItem:key=>items.get(key)??null,
+            setItem:(key,value)=>{writes.push(key);items.set(key,value);}
+        }});
+        let frame, now=1000;
+        w.requestAnimationFrame=fn=>{frame=fn;return 1;};
+        w.ForestDefense=E; w.eval(instrumented);
+        return {
+            slots:w.document.querySelectorAll('.td-slot'), get:id=>w.document.getElementById(id),
+            type:type=>w.document.querySelector('[data-tower="'+type+'"]').click(), w,
+            finish(level,health) {
+                const state=w.__tdTest.state;
+                // Enter a valid end-of-final-wave fixture; the real loop and engine detect the transition.
+                Object.assign(state,E.create(level),{state:'running',wave:E.WAVES_PER_LEVEL,health});
+                frame(now+=50); frame(now+=50);
+                assert.equal(state.state,'cleared');
+                assert.equal(E.rating(state),health>=18?3:1);
+            }
+        };
+    }
+    try {
+        const a=open();
+        a.slots[0].click();
+        assert.equal(JSON.parse(items.get(SAVE)).gold,210);
+        const inspection=open();
+        a.type('magic'); a.slots[1].click();
+        let latest=items.get(SAVE);
+        assert.equal(JSON.parse(latest).gold,80);
+        writes.length=0; inspection.slots[0].click();
+        assert.equal(inspection.get('upgrade').hidden,false,'inspection still opens upgrade controls');
+        assert.equal(items.get(SAVE),latest,'inspection must not overwrite the newer checkpoint');
+        assert.deepEqual(writes,[]);
+        const failed=open();
+        a.slots[0].click(); a.get('upgrade').click(); latest=items.get(SAVE);
+        assert.equal(JSON.parse(latest).gold,8);
+        assert.equal(JSON.parse(latest).towers[0].level,2);
+        writes.length=0; failed.type('cannon'); failed.slots[2].click();
+        assert.match(failed.get('announcement').textContent,/金币不足/);
+        assert.equal(items.get(SAVE),latest,'rejected purchase must not overwrite the newer checkpoint');
+        assert.deepEqual(writes,[]);
+        const reload=open();
+        assert.equal(reload.w.__tdTest.state.gold,8);
+        assert.equal(reload.w.__tdTest.state.towers[1].type,'magic');
+
+        const first=open(), second=open(), lower=open(), equal=open();
+        first.finish(1,20); second.finish(2,20);
+        assert.deepEqual(JSON.parse(items.get(STARS)),{'1':3,'2':3});
+        writes.length=0; lower.finish(1,3); equal.finish(1,20);
+        assert.deepEqual(JSON.parse(items.get(STARS)),{'1':3,'2':3});
+        assert.equal(writes.includes(STARS),false,'lower or equal result must not write the star map');
+        assert.match(lower.get('mission-goal').textContent,/最佳 ★★★/);
+        items.set(STARS,JSON.stringify({'1':3,'3':4,'4':'2','5':1,'999':3}));
+        open().finish(3,20);
+        assert.deepEqual(JSON.parse(items.get(STARS)),{'1':3,'3':3,'5':1});
+        for(const raw of ['{bad','null','[]']) {
+            items.set(STARS,raw); open().finish(3,20);
+            assert.deepEqual(JSON.parse(items.get(STARS)),{'3':3});
+        }
+        const blocked=open();
+        blocked.w.localStorage.getItem=key=>{ if(key===STARS)throw Error('read unavailable'); return items.get(key)??null; };
+        writes.length=0; blocked.finish(4,20);
+        assert.equal(writes.includes(STARS),false,'unavailable read must not overwrite the star map');
+        assert.match(blocked.get('mission-goal').textContent,/最佳 ★★★/,'local result remains visible without storage');
+        assert.deepEqual(JSON.parse(items.get(STARS)),{'3':3});
+        console.log('Tower defense shared storage: stale inspection/rejected build, committed checkpoints, star maxima, and invalid storage passed.');
+    } finally {
+        for (const w of tabs) await w.happyDOM.close();
+    }
+}
+
 async function main() {
     let dependency = process.env.HAPPY_DOM_PATH || require.resolve('happy-dom');
     if (fs.statSync(dependency).isDirectory()) dependency = path.join(dependency, 'lib/index.js');
     const { Window } = await import(pathToFileURL(path.resolve(dependency)).href);
+    await testSharedStorage(Window);
     const window = new Window({ url: 'https://example.test/game/tower-defense.html',
         settings: { disableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } });
     try {

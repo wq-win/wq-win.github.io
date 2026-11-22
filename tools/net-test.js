@@ -102,7 +102,7 @@ const root = path.resolve(__dirname, '..'), html = fs.readFileSync(path.join(roo
 const els = Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(m => [m[1], new Element(m[1])]));
 const document = { getElementById: id => els[id], createElement: () => new Element(), activeElement: null };
 let nextSeed = 20;
-const window = { NetEngine: E, NetSession: require('../js/net-session.js'), crypto: { getRandomValues(a) { a[0] = nextSeed++; return a; } } };
+const window = { addEventListener() {}, NetEngine: E, NetSession: require('../js/net-session.js'), crypto: { getRandomValues(a) { a[0] = nextSeed++; return a; } } };
 const uiSource = fs.readFileSync(path.join(root, 'js/net.js'), 'utf8');
 const instrumented = uiSource.replace('}());', 'window.testNet = { getBoard: () => board, render, newBoard };\n}());');
 vm.runInNewContext(instrumented, { window, document, Uint32Array, Math, Date });

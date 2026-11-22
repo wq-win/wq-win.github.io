@@ -15,9 +15,28 @@
     const SAVE_KEY='mylog-forest-defense-checkpoint-v2';
     let restoredCheckpoint=false,legacyCheckpoint=false;
     const mission=()=>E.mission(state.level);
+    const STARS_KEY='mylog-forest-tactics-stars-v1';
     let bestStars={};
-    try {const saved=JSON.parse(localStorage.getItem('mylog-forest-tactics-stars-v1')||'{}');if(saved&&typeof saved==='object'&&!Array.isArray(saved)){for(let i=1;i<=E.LEVEL_COUNT;i++)if(Number.isInteger(saved[i])&&saved[i]>=1&&saved[i]<=3)bestStars[i]=saved[i];}}catch(_){}
-    function recordStars(){const stars=E.rating(state);if(stars>(bestStars[state.level]||0)){bestStars[state.level]=stars;try{localStorage.setItem('mylog-forest-tactics-stars-v1',JSON.stringify(bestStars));}catch(_){}}}
+    function readStars() {
+        const raw=localStorage.getItem(STARS_KEY), stars={};
+        let saved;
+        try {saved=JSON.parse(raw);}catch(_){return stars;}
+        if(saved&&typeof saved==='object'&&!Array.isArray(saved)) {
+            for(let i=1;i<=E.LEVEL_COUNT;i++)if(Number.isInteger(saved[i])&&saved[i]>=1&&saved[i]<=3)stars[i]=saved[i];
+        }
+        return stars;
+    }
+    try {bestStars=readStars();}catch(_){}
+    function recordStars() {
+        const stars=E.rating(state),level=state.level;
+        if(!stars)return;
+        let saved;
+        try {saved=readStars();}catch(_){bestStars[level]=Math.max(stars,bestStars[level]||0);return;}
+        bestStars=saved;
+        if(stars<=(saved[level]||0))return;
+        saved[level]=stars;
+        try {localStorage.setItem(STARS_KEY,JSON.stringify(saved));}catch(_){}
+    }
 
     function restoreCheckpoint(raw) {
         if(typeof raw!=='string'||raw.length>5000)return null;
@@ -442,10 +461,9 @@
             if(paused||['cleared','won','lost'].includes(state.state))return;
             selectedSlot=i;
             if(!state.towers[i]) {
-                if(E.build(state,i,selectedType)){announce(`${i+1} 号位建成${E.TYPES[selectedType].name}。`);pulse(b);feedback?.play('success');}
+                if(E.build(state,i,selectedType)){announce(`${i+1} 号位建成${E.TYPES[selectedType].name}。`);pulse(b);feedback?.play('success');saveCheckpoint();}
                 else announce(`金币不足，${E.TYPES[selectedType].name}需要 ${E.TYPES[selectedType].cost} 金币。`);
             }
-            saveCheckpoint();
             sync();
         });
         $('slots').appendChild(b);

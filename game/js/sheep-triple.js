@@ -34,9 +34,9 @@ function updateMusic(s){
 if(music){updateMusic(music.getState());$('music-toggle').addEventListener('click',()=>music.toggle());$('music-volume').addEventListener('input',()=>music.setVolume(Number($('music-volume').value)/100));}
 else{$('music-toggle').disabled=true;$('music-volume').disabled=true;$('music-status').textContent='音乐资源未加载，仍可继续游戏';}
 const SAVE_KEY='mylog-meadow-run-v1';
-let state=E.create(0),busy=false,steps=[],previousLayout=null,resumed=false;
+let state=E.create(0),busy=false,steps=[],previousLayout=null,resumed=false,expectedRaw,saveConflict=false;
 try {
- const raw=localStorage.getItem(SAVE_KEY);
+ const raw=expectedRaw=localStorage.getItem(SAVE_KEY);
  if(raw && raw.length<60000){
   const saved=JSON.parse(raw);
   if(![1,2].includes(saved.version)||(saved.version===2&&![1,2].includes(saved.boardVersion))||!Number.isInteger(saved.level)||saved.level<0||saved.level>4||!Number.isInteger(saved.seed)||saved.seed<0||saved.seed>4294967295||!(saved.previousLayout===null||(Number.isInteger(saved.previousLayout)&&saved.previousLayout>=0&&saved.previousLayout<6))||!Array.isArray(saved.steps)||saved.steps.length>600)throw Error('Invalid save');
@@ -45,10 +45,23 @@ try {
   state=restored;steps=saved.steps;previousLayout=saved.previousLayout;resumed=true;
  }
 }catch(_){}
-function saveRun(){
- try{localStorage.setItem(SAVE_KEY,JSON.stringify({version:2,boardVersion:state.boardVersion,level:state.level,seed:state.seed,previousLayout,steps}));$('save-status').textContent='本局自动保存 · 随时回来继续';}
- catch(_){$('save-status').textContent='当前浏览器无法保存，请勿关闭本局';}
+function saveStatus(text){$('save-status').textContent=text;}
+function checkSave(){
+ if(!saveConflict&&expectedRaw!==undefined){
+  try{saveConflict=localStorage.getItem(SAVE_KEY)!==expectedRaw;}
+  catch(_){saveStatus('当前浏览器无法保存，请勿关闭本局');return 'unavailable';}
+ }
+ if(saveConflict){saveStatus('另一个页面已更改存档 · 本页未保存，可刷新读取当前存档');return 'conflict';}
+ if(expectedRaw===undefined){saveStatus('当前浏览器无法保存，请勿关闭本局');return 'unavailable';}
+ return 'current';
 }
+function saveRun(){
+ if(checkSave()!=='current')return;
+ const raw=JSON.stringify({version:2,boardVersion:state.boardVersion,level:state.level,seed:state.seed,previousLayout,steps});
+ try{localStorage.setItem(SAVE_KEY,raw);expectedRaw=raw;saveStatus('本局自动保存 · 随时回来继续');}
+ catch(_){saveStatus('当前浏览器无法保存，请勿关闭本局');}
+}
+window.addEventListener('storage',event=>{if(event.key===SAVE_KEY||event.key===null)checkSave();});
 
 const motion=typeof window.matchMedia==='function'?window.matchMedia('(prefers-reduced-motion: reduce)'):null;
 const feedbackTimers=new Set();
@@ -93,7 +106,7 @@ function render(){
 }
 function pick(id){if(busy)return;busy=true;const before=state.matched,tile=tileById(id),fromBoard=!state.holding.includes(id);if(E.take(state,id)){steps.push(['take',id]);saveRun();render();const kind=state.status==='won'?'win':state.status==='lost'?'lost':state.matched>before?'match':'tap';cue(kind,fromBoard?tile:null);if(state.status==='playing')message(state.matched>before?'＋3！三张配成一组，继续向下探索。':state.rack.length>=5?'收集槽快满了，留意已有的图案。':'已收进卡槽，再找相同的图案。');}busy=false;}
 function use(tool){if(busy)return;busy=true;if(E.tool(state,tool)){steps.push(['tool',tool]);saveRun();render();cue('tool');if(state.status==='playing')message(state.message||{remove:'已移入暂存区，点选卡牌可放回。',undo:'已撤回一步，换个顺序试试。',shuffle:'剩余卡牌已重新排列。'}[tool]);}else message(state.message||'现在不能使用这个道具。');busy=false;}
-function start(level){clearFeedback();$('message').removeAttribute('data-feedback');$('result').classList.remove('result-won','result-lost');$('rack').classList.remove('rack-warning','match-pop');previousLayout=state.layout;state=E.create(level,undefined,previousLayout);steps=[];saveRun();render();message('先看看哪些卡牌没有被压住。');}
+function start(level){if(checkSave()==='conflict')return;clearFeedback();$('message').removeAttribute('data-feedback');$('result').classList.remove('result-won','result-lost');$('rack').classList.remove('rack-warning','match-pop');previousLayout=state.layout;state=E.create(level,undefined,previousLayout);steps=[];saveRun();render();message('先看看哪些卡牌没有被压住。');}
 const leaveDialog=$('leave-dialog');
 let pendingLevel=null,leaveTrigger=null;
 function requestStart(level,trigger){
@@ -113,5 +126,5 @@ $('leave-confirm').addEventListener('click',()=>closeLeave(true));
 leaveDialog.addEventListener('cancel',event=>{event.preventDefault();closeLeave(false);});
 for(let i=0;i<5;i++){const b=document.createElement('button');b.className='level';b.innerHTML='<strong>0'+(i+1)+'</strong><small>'+E.LEVELS[i].cards+' 张 · '+E.LEVELS[i].types+' 种</small>';b.setAttribute('aria-label','第 '+(i+1)+' 关，'+E.LEVELS[i].cards+' 张，'+E.LEVELS[i].types+' 种图案，每种道具 '+E.LEVELS[i].tools+' 次');b.addEventListener('click',()=>{if(i!==state.level)requestStart(i,b);});$('levels').append(b);}
 for(const t of ['remove','undo','shuffle'])$('tool-'+t).addEventListener('click',()=>use(t));
-$('restart').addEventListener('click',()=>requestStart(state.level,$('restart')));$('next').addEventListener('click',()=>start(Math.min(4,state.level+1)));$('help').addEventListener('click',()=>{if(!$('help-dialog').open)$('help-dialog').showModal();});for(const id of ['close-help','understood'])$(id).addEventListener('click',()=>$('help-dialog').close());window.addEventListener('resize',resize);if(window.ResizeObserver)new ResizeObserver(resize).observe(document.querySelector('.field'));render();saveRun();if(resumed)message(state.boardVersion===1?'已恢复旧版 288 张牌局，道具与撤回记录都保留；下次新开局使用短局关卡。':'已恢复上次的牌局，道具与撤回记录都保留。');
+$('restart').addEventListener('click',()=>requestStart(state.level,$('restart')));$('next').addEventListener('click',()=>start(Math.min(4,state.level+1)));$('help').addEventListener('click',()=>{if(!$('help-dialog').open)$('help-dialog').showModal();});for(const id of ['close-help','understood'])$(id).addEventListener('click',()=>$('help-dialog').close());window.addEventListener('resize',resize);if(window.ResizeObserver)new ResizeObserver(resize).observe(document.querySelector('.field'));render();if(checkSave()==='current')saveStatus(resumed?'本局自动保存 · 随时回来继续':'开始操作后自动保存');if(resumed)message(state.boardVersion===1?'已恢复旧版 288 张牌局，道具与撤回记录都保留；下次新开局使用短局关卡。':'已恢复上次的牌局，道具与撤回记录都保留。');
 })();

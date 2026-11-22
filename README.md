@@ -49,11 +49,12 @@ The [demo hub](https://wq-win.github.io/game/) includes 29 algorithm demos:
 ### Browser games
 
 - [Snow Camp / 雪境营地](https://wq-win.github.io/game/snow-camp.html): an original single-player snow-town survival prototype. Assign eight residents, gather fuel and food, upgrade the camp, and survive five days. Local browser saves; no account or server needed.
-- [Mini Tower Defense / 迷你塔防](https://wq-win.github.io/game/tower-defense.html): defend a forest path through twenty increasingly difficult levels of fifteen waves each with arrow, magic, and cannon towers. Build, upgrade, pause, or speed up the battle.
+- [Mini Tower Defense / 迷你塔防](https://wq-win.github.io/game/tower-defense.html): defend a forest path through 20 increasingly difficult levels of six waves each with arrow, magic, and cannon towers. Build, upgrade, pause, or speed up the battle.
 - [Net / 接线谜题](https://wq-win.github.io/game/net.html): rotate wire tiles to connect the source and light the terminals. Twenty levels grow from 5×5 to 14×15 cells, with solvable generated boards, reset, hints, and keyboard controls.
 
-- [Paodekuai / 跑得快](https://wq-win.github.io/game/paodekuai.html): play against two computer opponents with 16 cards each. Includes tap/drag selection, cycling legal-move hints, automatic passes when no response is possible, and a public-information card counter. The counter subtracts your hand and played cards without revealing either opponent's hand.
-- [Doudizhu endgames / 斗地主残局](https://wq-win.github.io/game/doudizhu.html): 11 one-on-one, face-up puzzles with strategic hints, restart confirmation, saved completion progress, and explicit replay/next-level controls. Hints select a move without playing it; a search-limit fallback is labeled as a legal suggestion rather than a guaranteed win.
+- [Solo Paodekuai / 跑得快（单机）](https://wq-win.github.io/game/paodekuai.html): play against two computer opponents with 16 cards each. Includes tap/drag selection, cycling legal-move hints, automatic passes when no response is possible, and a public-information card counter. The counter subtracts your hand and played cards without revealing either opponent's hand.
+- [Friend rooms / 好友联机](https://wq-win.github.io/game/#friend-rooms-title): three-player Paodekuai and 2–4-player Nanchang Mahjong, which also supports solo play. Join with a six-digit room code.
+- [Doudizhu endgames / 斗地主残局](https://wq-win.github.io/game/doudizhu.html): 16 one-on-one, face-up puzzles with strategic hints, restart confirmation, saved completion progress, and explicit replay/next-level controls. Hints select a move without playing it; a search-limit fallback is labeled as a legal suggestion rather than a guaranteed win.
 - [Spider Solitaire](https://wq-win.github.io/game/spider.html), [Sudoku](https://wq-win.github.io/game/sudoku.html), and [Jianghu Slay](https://wq-win.github.io/game/jianghu-slay/)
 
 Paodekuai and Doudizhu share blue-and-gold table styling, original character portraits, and illustrated court cards. See the [asset notes](game/assets/paodekuai/README.md) for their provenance.

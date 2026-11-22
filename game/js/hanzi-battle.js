@@ -10,10 +10,36 @@
   const suspended = () => paused || document.hidden || helpOpen();
   let state, selected = null, busy = false, generation = 0, soundOn = false, audio, best = {};
   const SETTINGS = 'ink-hanzi-settings-v1';
-  try { const settings = JSON.parse(localStorage.getItem(SETTINGS) || '{}'); soundOn = settings.sound === true; best = settings.best && typeof settings.best === 'object' && !Array.isArray(settings.best) ? settings.best : {}; } catch (_) {}
+  const record = value => value && typeof value === 'object' && !Array.isArray(value);
+  function readSettings() {
+    const raw = localStorage.getItem(SETTINGS);
+    let settings;
+    try { settings = JSON.parse(raw); } catch (_) {}
+    if (!record(settings)) settings = {};
+    return { sound: settings.sound === true, best: record(settings.best) ? settings.best : {} };
+  }
+  try { ({ sound: soundOn, best } = readSettings()); } catch (_) {}
   const timers = new Set();
   try { state = E.restore(localStorage.getItem(KEY)); } catch (_) { state = E.create(); }
-  function save() { try { localStorage.setItem(KEY, E.save(state)); localStorage.setItem(SETTINGS, JSON.stringify({sound:soundOn,best})); } catch (_) {} }
+  function save() { try { localStorage.setItem(KEY, E.save(state)); } catch (_) {} }
+  function saveSound() {
+    try { const settings = readSettings(); settings.sound = soundOn; localStorage.setItem(SETTINGS, JSON.stringify(settings)); } catch (_) {}
+  }
+  function recordWin() {
+    save();
+    const level = state.level, hp = state.gate.hp;
+    const improved = scores => {
+      const score = scores[level], old = typeof score === 'string' ? Number(score) : score;
+      return Math.max(Number.isFinite(old) ? old : 0, hp);
+    };
+    best[level] = improved(best);
+    try {
+      const settings = readSettings();
+      settings.best[level] = improved(settings.best);
+      best = settings.best;
+      localStorage.setItem(SETTINGS, JSON.stringify(settings));
+    } catch (_) {}
+  }
   function tone(hz) {
     if (!soundOn) return;
     try { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; audio = audio || new AC(); if (audio.state === 'suspended') audio.resume().catch(() => {}); const o = audio.createOscillator(), g = audio.createGain(); o.connect(g); g.connect(audio.destination); o.frequency.value = hz; g.gain.setValueAtTime(.035, audio.currentTime); g.gain.exponentialRampToValueAtTime(.001, audio.currentTime + .1); o.start(); o.stop(audio.currentTime + .1); } catch (_) {}
@@ -173,10 +199,10 @@
   function battleTurn() {
     if (state.phase !== 'battle' || suspended()) return;
     const events = E.step(state);
-    if (state.phase === 'won') best[state.level] = Math.max(Number(best[state.level]) || 0, state.gate.hp);
+    if (state.phase === 'won') recordWin();
     tone(state.phase === 'won' ? 880 : 330); effects(events);
     later(() => {
-      $('fx-layer').replaceChildren(); $('gate').classList.remove('hit'); render(); save();
+      $('fx-layer').replaceChildren(); $('gate').classList.remove('hit'); render();
       const gateDamage = events.filter(e => e.type === 'gate').reduce((n, e) => n + e.amount, 0), fallen = events.filter(e => e.type === 'defeat' && e.side === 'enemy').length;
       message(state.phase === 'won' ? '敌阵全破，城门守住了。' : state.phase === 'lost' ? '城门归零。保留阵容，换个站位再试试。' : '第 ' + state.round + ' 回合 · ' + (fallen ? fallen + ' 路墨兽退场。' : '双方同步交锋。') + (gateDamage ? '城门受到 ' + gateDamage + ' 点伤害。' : '城门安好。'));
       if (state.phase === 'battle') later(battleTurn, reduced() ? 65 : 470);
@@ -185,7 +211,7 @@
   }
   function march() {
     if (busy || helpOpen()) return; const result = E.start(state); if (!result.ok) { message(result.error); return; }
-    selected = null; save(); render(); message('战斗开始。每回合同步攻击，留意各路血量。'); later(battleTurn, reduced() ? 0 : 440); $('pause-battle').focus({ preventScroll: true });
+    selected = null; render(); message('战斗开始。每回合同步攻击，留意各路血量。'); later(battleTurn, reduced() ? 0 : 440); $('pause-battle').focus({ preventScroll: true });
   }
   function restart(index, keepFormation) {
     paused = false; cancelPending(); const completed = state.completed.slice();
@@ -200,7 +226,7 @@
   $('rearrange').addEventListener('click', () => restart(state.level, true));
   function syncBattle() {
     if (state.phase !== 'battle') return;
-    cancelPending(); save(); render();
+    cancelPending(); render();
     if (paused) message('交锋已暂停，可以观察三路局势。');
     else if (helpOpen()) message('查看玩法时暂停交锋。');
     else if (document.hidden) message('已暂停交锋，返回页面后继续。');
@@ -243,7 +269,7 @@
     if (state.phase !== 'battle' || helpOpen() || document.hidden) return;
     paused = !paused; syncBattle();
   });
-  $('sound-toggle').addEventListener('click', () => { soundOn = !soundOn; save(); render(); tone(550); });
+  $('sound-toggle').addEventListener('click', () => { soundOn = !soundOn; saveSound(); render(); tone(550); });
   document.addEventListener('visibilitychange', syncBattle);
   render();
 })();

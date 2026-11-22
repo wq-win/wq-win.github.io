@@ -1,6 +1,7 @@
 (function () {
     'use strict';
     var PK = window.Paodekuai;
+    var STATS_KEY = 'mylog-paodekuai';
     var NAMES = ['你', '下家', '上家'];
     var SUIT_NAMES = ['黑桃', '红桃', '方块', '梅花'];
     var TYPES = { single: '单张', pair: '对子', triple: '三张', triple1: '三带一', triple2: '三带二', straight: '顺子', pairseq: '连对', plane: '飞机', bomb: '炸弹' };
@@ -18,20 +19,29 @@
     var dialog = document.getElementById('pdk-restart-dialog');
 
     function stats() {
+        var raw;
+        try { raw = localStorage.getItem(STATS_KEY); } catch (error) { return null; }
         try {
-            var value = JSON.parse(localStorage.getItem('mylog-paodekuai'));
+            var value = JSON.parse(raw);
             if (value && Number.isFinite(value.wins) && Number.isFinite(value.games) && value.wins >= 0 && value.games >= value.wins) return value;
-        } catch (error) { /* A private browser can disable storage. The game still works. */ }
+        } catch (error) { /* Invalid readable data can start fresh on the next completed round. */ }
         return { wins: 0, games: 0 };
+    }
+
+    function paintScore() {
+        var saved = stats();
+        document.getElementById('pdk-score').textContent = saved ? '胜 ' + saved.wins + ' / ' + saved.games + ' 局' : '战绩暂不可用';
     }
 
     function remember() {
         if (state.recorded) return;
         state.recorded = true;
         var saved = stats();
+        if (!saved) { state.recordError = '无法读取战绩，本局结果未记录'; return; }
         saved.games += 1;
         if (state.over === 0) saved.wins += 1;
-        try { localStorage.setItem('mylog-paodekuai', JSON.stringify(saved)); } catch (error) { /* Optional persistence. */ }
+        try { localStorage.setItem(STATS_KEY, JSON.stringify(saved)); }
+        catch (error) { state.recordError = '无法保存战绩，本局结果未记录'; }
     }
 
     function ctx(seat) {
@@ -232,7 +242,6 @@
     function render() {
         cancelGesture();
         var result = document.getElementById('pdk-result');
-        var saved = stats();
         paintSeat(2, 'pdk-left');
         paintSeat(1, 'pdk-right');
         paintTrick();
@@ -244,14 +253,14 @@
             hand.appendChild(face);
         });
         paintControls();
-        document.getElementById('pdk-score').textContent = '胜 ' + saved.wins + ' / ' + saved.games + ' 局';
+        paintScore();
         document.getElementById('pdk-you-count').textContent = state.hands[0].length + ' 张手牌';
         result.hidden = state.over === null;
         if (state.over !== null) {
             document.getElementById('pdk-result-title').textContent = state.over === 0 ? '你赢了！' : NAMES[state.over] + '赢了';
             document.getElementById('pdk-result-sub').textContent = [0, 1, 2].filter(function (seat) { return seat !== state.over; }).map(function (seat) {
                 return NAMES[seat] + '剩 ' + state.hands[seat].length + ' 张' + (!state.thrown[seat] ? '，全关' : '');
-            }).join(' · ');
+            }).join(' · ') + (state.recordError ? ' · ' + state.recordError : '');
         }
         fitCards();
     }
@@ -470,6 +479,10 @@
     dialog.addEventListener('close', resumeGame);
     document.getElementById('pdk-restart-cancel').addEventListener('click', function () { dialog.close(); resumeGame(); });
     document.getElementById('pdk-restart-confirm').addEventListener('click', function () { restartPending = false; dialog.close(); start(); });
+    window.addEventListener('storage', function (event) {
+        if (event.key !== STATS_KEY && event.key !== null) return;
+        try { if (event.storageArea === localStorage) paintScore(); } catch (error) { /* Storage may be unavailable. */ }
+    });
     document.addEventListener('visibilitychange', function () {
         window.clearTimeout(timer); revision += 1; thinking = false; cancelGesture(); moveCache = null;
         if (!state) return; render(); if (!document.hidden) poke();
