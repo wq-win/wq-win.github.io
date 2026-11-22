@@ -200,7 +200,7 @@ function createGame(options = {}) {
     const timers = new Map();
     const allTimers = new Map();
     let timerId = 0;
-    const storage = Object.assign({}, options.storage);
+    const storage = options.sharedStorage || Object.assign({}, options.storage);
     const sandbox = {
         document,
         console,
@@ -445,6 +445,57 @@ test('blocked browser storage does not interrupt a completed game', () => {
     assert.doesNotThrow(() => game.click('pdk-play'));
     assert.equal(game.api.state.over, 0);
     assert.equal(visible(game.el('pdk-result')), true);
+    assert.equal(game.el('pdk-score').textContent, '战绩暂不可用');
+});
+
+const SCORE_KEY = 'mylog-paodekuai';
+function playWinningCard(game) {
+    game.fixture({hands:[[card(3)],[card(4),card(5)],[card(6),card(7)]]});
+    game.select([card(3)]);
+    game.click('pdk-play');
+    assert.equal(game.api.state.over,0);
+    assert.match(game.el('pdk-result-title').textContent,/你赢了/);
+}
+test('a denied score read cannot replace older totals even if writes still work', () => {
+    const previous = '{"wins":2,"games":5}', game = createGame({storage:{[SCORE_KEY]:previous}});
+    const store = game.sandbox.localStorage, get = store.getItem, set = store.setItem;
+    let failOnce = false, writes = 0;
+    store.getItem = key => { if(failOnce){failOnce=false;throw Error('Read temporarily denied');} return get(key); };
+    store.setItem = (key,value) => { writes++; set(key,value); };
+    game.fixture({hands:[[card(3)],[card(4),card(5)],[card(6),card(7)]]});
+    game.select([card(3)]);
+    failOnce=true;
+    game.click('pdk-play');
+    assert.equal(game.api.state.over,0);
+    assert.equal(game.storage[SCORE_KEY],previous);
+    assert.equal(writes,0);
+    assert.match(game.el('pdk-result-title').textContent,/你赢了/);
+    assert.match(game.el('pdk-result-sub').textContent,/无法读取战绩.*本局结果未记录/);
+    assert.match(game.el('pdk-score').textContent,/2 \/ 5/);
+    game.api.render(); game.click('pdk-play');
+    assert.equal(writes,0,'a normal render or duplicate play must not retry the round');
+    assert.match(game.el('pdk-result-sub').textContent,/本局结果未记录/);
+    game.api.start();
+    assert.equal(visible(game.el('pdk-result')),false);
+});
+test('denied writes keep readable totals and separate the recording failure from the actual win', () => {
+    const previous = '{"wins":2,"games":5}', game = createGame({storage:{[SCORE_KEY]:previous}});
+    let attempts = 0;
+    game.sandbox.localStorage.setItem = () => { attempts++; throw Error('Write denied'); };
+    playWinningCard(game);
+    assert.equal(game.storage[SCORE_KEY],previous);
+    assert.match(game.el('pdk-score').textContent,/2 \/ 5/);
+    assert.match(game.el('pdk-result-sub').textContent,/无法保存战绩.*本局结果未记录/);
+    game.api.render(); game.click('pdk-play');
+    assert.equal(attempts,1);
+});
+test('absent or malformed readable scores can be initialized on a real win', () => {
+    for(const raw of [undefined,'{bad','{"wins":9,"games":2}','[]']) {
+        const game = createGame({storage:{[SCORE_KEY]:raw}});
+        playWinningCard(game);
+        assert.deepEqual(JSON.parse(game.storage[SCORE_KEY]),{wins:1,games:1});
+        assert.doesNotMatch(game.el('pdk-result-sub').textContent,/未记录/);
+    }
 });
 
 // Feature checks deliberately fail if upgraded controls disappear.
@@ -722,6 +773,39 @@ function gestureFixture(game) {
     game.fixture({ hands: [[card(0, 0), card(1), card(2), card(3), card(4), card(5)], [card(6), card(7)], [card(8), card(9)]] });
     return pointerHand(game);
 }
+
+test('only local score storage events repaint without disturbing hand, capture or focus', () => {
+    const shared = {[SCORE_KEY]:'{"wins":2,"games":5}'};
+    const a=createGame({sharedStorage:shared}), b=createGame({sharedStorage:shared}), input=gestureFixture(b);
+    const store=b.sandbox.localStorage;
+    b.document.activeElement=input.faces[1];
+    let captured;
+    input.hand.setPointerCapture=id=>{captured=id;};
+    input.hand.hasPointerCapture=id=>captured===id;
+    input.hand.releasePointerCapture=()=>{captured=null;};
+    input.dispatch('pointerdown',1); input.dispatch('pointermove',3);
+    assert.deepEqual(input.selectedIndices(),[1,2,3]);
+    const notify=(key,storageArea=store)=>b.document.dispatchEvent({type:'storage',key,storageArea});
+    playWinningCard(a);
+    assert.deepEqual(JSON.parse(shared[SCORE_KEY]),{wins:3,games:6});
+    notify('unrelated'); notify(SCORE_KEY,{});
+    assert.match(b.el('pdk-score').textContent,/2 \/ 5/);
+    notify(SCORE_KEY);
+    assert.match(b.el('pdk-score').textContent,/3 \/ 6/);
+    assert.equal(input.hand.querySelectorAll('.pcard')[1],input.faces[1]);
+    assert.equal(b.document.activeElement,input.faces[1]);
+    assert(input.hand.hasPointerCapture(1));
+    assert.deepEqual(input.selectedIndices(),[1,2,3]);
+    input.dispatch('pointerup',3);
+    playWinningCard(b);
+    assert.deepEqual(JSON.parse(shared[SCORE_KEY]),{wins:4,games:7});
+    delete shared[SCORE_KEY]; notify(SCORE_KEY);
+    assert.match(b.el('pdk-score').textContent,/0 \/ 0/);
+    shared[SCORE_KEY]='{"wins":2,"games":5}'; notify(SCORE_KEY);
+    delete shared[SCORE_KEY]; notify(null);
+    assert.match(b.el('pdk-score').textContent,/0 \/ 0/);
+    assert.equal(shared[SCORE_KEY],undefined,'external deletion/clear is never rewritten');
+});
 
 test('keyboard selection toggles while synthetic pointer click does not double-toggle', () => {
     const game = createGame();

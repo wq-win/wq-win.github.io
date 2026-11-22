@@ -5,12 +5,16 @@ const { pathToFileURL } = require('node:url');
   const { Window } = await import(pathToFileURL(require.resolve('happy-dom')).href);
   const root = path.resolve(__dirname, '..'), html = fs.readFileSync(path.join(root, 'game/hanzi-battle.html'), 'utf8');
   const windows = [], KEY = 'ink-hanzi-battle-v1'; let checks = 0;
-  function boot(saved, motion = true, unavailableStorage = false, settings) {
+  function boot(saved, motion = true, unavailableStorage = false, settings, shared) {
     const w = new Window({ url: 'https://example.test/game/hanzi-battle.html', settings: { disableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } }); windows.push(w);
     w.document.write(html.replace(/<script[\s\S]*?<\/script>/g, ''));
+    if (shared) Object.defineProperty(w, 'localStorage', { configurable:true, value:{
+      getItem: key => shared.items.get(key) ?? null,
+      setItem: (key, value) => { shared.writes.push(key); shared.items.set(key, String(value)); }
+    } });
     if (saved) w.localStorage.setItem(KEY, saved);
     if (settings) w.localStorage.setItem('ink-hanzi-settings-v1', settings);
-    if (unavailableStorage) { w.localStorage.getItem = () => { throw new Error('blocked'); }; w.localStorage.setItem = () => { throw new Error('blocked'); }; }
+    if (unavailableStorage) { const blocked=()=>{ throw Error('blocked'); }; Object.defineProperty(w,'localStorage',{configurable:true,value:{getItem:blocked,setItem:blocked}}); }
     w.matchMedia = () => ({ matches: motion });
     for (const file of ['hanzi-battle-levels.js', 'hanzi-battle-engine.js', 'hanzi-battle.js']) {
       let code = fs.readFileSync(path.join(root, 'game/js', file), 'utf8');
@@ -23,6 +27,17 @@ const { pathToFileURL } = require('node:url');
   const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
   async function until(predicate, label, timeout = 3000) { const started = Date.now(); while (!predicate()) { if (Date.now() - started > timeout) throw new Error('Timed out: ' + label); await pause(8); } }
   async function test(name, fn) { await fn(); checks++; console.log('  ✓ ' + name); }
+  const SETTINGS = 'ink-hanzi-settings-v1';
+  const createShared = () => ({items:new Map(),writes:[]});
+  const child = (w, type, index) => w.document.querySelector(`[data-${type}="${index}"]`);
+  const bar = (w, id) => w.document.getElementById(id);
+  function clock(w) {
+    let next = 0;
+    const jobs = new Map();
+    w.setTimeout = (fn, delay) => { jobs.set(++next,{fn,delay}); return next; };
+    w.clearTimeout = id => jobs.delete(id);
+    return () => { const job = [...jobs].sort(([,a],[,b]) => a.delay-b.delay)[0]; assert(job, 'expected battle callback'); jobs.delete(job[0]); job[1].fn(); };
+  }
   const w = boot('{broken'), d = w.document, api = w.__test, E = w.HanziBattleEngine;
   const slot = index => d.querySelector('[data-slot="' + index + '"]'), lane = index => d.querySelector('[data-army="' + index + '"]');
   const pickLevel = index => { d.getElementById('level-select').value = String(index); d.getElementById('level-select').dispatchEvent(new w.Event('change')); };
@@ -34,6 +49,63 @@ const { pathToFileURL } = require('node:url');
   }
   try {
     console.log('Hanzi Battle UI tests');
+    await test('stale tab sound, march, visibility/help/pause, rounds and defeat never save a newer preparation over', () => {
+      const shared=createShared(), a=boot(null,true,false,null,shared), b=boot(null,true,false,null,shared), step=clock(b);
+      child(b,'slot',0).click(); child(b,'army',1).click();
+      assert.equal(JSON.parse(shared.items.get(KEY)).army[1],'木');
+      child(b,'army',1).click(); assert.equal(JSON.parse(shared.items.get(KEY)).army[1],null);
+      child(b,'slot',0).click(); child(b,'army',1).click();
+      child(a,'slot',0).click(); child(a,'slot',1).click();
+      const newest=shared.items.get(KEY);
+      assert.deepEqual(JSON.parse(newest).board.slice(0,3),['林',null,'木']);
+      shared.items.set(SETTINGS,JSON.stringify({sound:false,best:{2:9}})); shared.writes.length=0;
+      bar(b,'sound-toggle').click();
+      assert.equal(shared.items.get(KEY),newest);
+      assert.deepEqual(JSON.parse(shared.items.get(SETTINGS)),{sound:true,best:{2:9}});
+      assert.deepEqual(shared.writes,[SETTINGS]); shared.writes.length=0;
+      bar(b,'march').click();
+      Object.defineProperty(b.document,'hidden',{configurable:true,value:true}); b.document.dispatchEvent(new b.Event('visibilitychange'));
+      Object.defineProperty(b.document,'hidden',{configurable:true,value:false}); b.document.dispatchEvent(new b.Event('visibilitychange'));
+      bar(b,'pause-battle').click(); bar(b,'help-open').click(); bar(b,'help-close').click(); bar(b,'pause-battle').click();
+      assert.deepEqual(shared.writes,[]);
+      step(); step();
+      assert.equal(b.__test.state.phase,'battle'); assert.equal(b.__test.state.round,1);
+      assert.deepEqual(shared.writes,[]);
+      for(let i=0;i<100 && bar(b,'result').hidden;i++)step();
+      assert.equal(b.__test.state.phase,'lost'); assert.deepEqual(shared.writes,[]);
+      assert.equal(shared.items.get(KEY),newest);
+      const reload=boot(newest); assert.equal(reload.__test.state.board[0],'林');
+      bar(b,'restart').click(); assert.deepEqual(shared.writes,[KEY]);
+    });
+    await test('malformed settings recover, but an unavailable read never guesses a settings write', () => {
+      for (const bad of ['{broken','null','[]','{"sound":17,"best":[]}']) {
+        const shared=createShared(), a=boot(null,true,false,bad,shared);
+        assert.equal(bar(a,'sound-toggle').getAttribute('aria-pressed'),'false');
+        shared.writes.length=0; bar(a,'sound-toggle').click();
+        assert.deepEqual(JSON.parse(shared.items.get(SETTINGS)),{sound:true,best:{}});
+        assert.deepEqual(shared.writes,[SETTINGS]);
+      }
+      const shared=createShared(), a=boot(null,true,false,null,shared);
+      a.localStorage.getItem = () => { throw Error('unavailable read'); };
+      bar(a,'sound-toggle').click();
+      assert.equal(bar(a,'sound-toggle').getAttribute('aria-pressed'),'true');
+      assert.deepEqual(shared.writes,[]);
+    });
+    await test('a win saves completion before animation and merges the latest bests without changing sound', () => {
+      const shared=createShared(), q=boot(null,true,false,null,shared), step=clock(q);
+      child(q,'slot',0).click(); child(q,'army',1).click();
+      child(q,'slot',5).click(); child(q,'slot',6).click();
+      child(q,'slot',5).click(); child(q,'army',2).click(); // Genuine winning formation with 5 HP left.
+      shared.items.set(SETTINGS,JSON.stringify({sound:true,best:{0:12,3:9}})); shared.writes.length=0;
+      bar(q,'march').click();
+      for(let i=0;i<100 && q.__test.state.phase==='battle';i++)step();
+      assert.equal(q.__test.state.phase,'won'); assert.equal(q.__test.state.gate.hp,5); assert.equal(bar(q,'result').hidden,true);
+      assert.deepEqual(JSON.parse(shared.items.get(KEY)).completed,[0]);
+      assert.deepEqual(JSON.parse(shared.items.get(SETTINGS)),{sound:true,best:{0:12,3:9}});
+      assert.deepEqual(shared.writes,[KEY,SETTINGS]);
+      step(); assert.equal(bar(q,'result').hidden,false); assert.deepEqual(shared.writes,[KEY,SETTINGS]);
+    });
+
     await test('corrupt save recovers, twelve board slots and three deployment controls exist, empty army cannot march', () => {
       assert.equal(api.state.level, 0); assert.equal(api.state.phase, 'prepare'); assert.equal(d.querySelectorAll('[data-slot]').length, 12); assert.equal(d.querySelectorAll('[data-army]').length, 3); assert.equal(d.querySelectorAll('#level-select option').length, 6); assert.equal(d.getElementById('march').disabled, true); assert.equal(d.getElementById('result').hidden, true);
       api.march(); assert.equal(api.state.phase, 'prepare');
@@ -61,6 +133,7 @@ const { pathToFileURL } = require('node:url');
       assert.equal(testApi.state.completed.length, 1); assert.equal(doc.getElementById('result-title').textContent, '终阵已破'); assert.match(doc.getElementById('progress').textContent, /1 \/ 6/); fresh.happyDOM.abort();
     });
     await test('each of six searched solutions can be crafted, deployed and won entirely through UI clicks', async () => {
+      w.localStorage.setItem(SETTINGS, '{"sound":false,"best":{"0":{"toString":null,"valueOf":null}}}');
       for (let i = 0; i < 6; i++) {
         pickLevel(i); const solution = E.solve(i); replay(solution); assert.equal(JSON.stringify(api.state.army), JSON.stringify(solution.army));
         d.getElementById('march').click(); d.getElementById('march').click(); assert.equal(api.state.phase, 'battle'); assert.equal(d.querySelectorAll('.character:not(:disabled)').length, 0); assert.equal(d.querySelectorAll('.army-slot:not(:disabled)').length, 0);
@@ -69,6 +142,8 @@ const { pathToFileURL } = require('node:url');
         if (i < 5) { d.getElementById('result-action').click(); assert.equal(api.state.level, i + 1); assert.equal(api.state.phase, 'prepare'); }
       }
       assert.equal(api.state.completed.length, 6); assert.equal(JSON.parse(w.localStorage.getItem(KEY)).completed.length, 6);
+      assert.deepEqual(Object.keys(JSON.parse(w.localStorage.getItem(SETTINGS)).best),['0','1','2','3','4','5']);
+      assert.equal(JSON.parse(w.localStorage.getItem(SETTINGS)).best[0], E.solve(0).gateHp);
     });
     await test('losing formation, result re-formation and complete restart preserve the right state', async () => {
       pickLevel(0); slot(0).click(); lane(0).click(); slot(3).click(); lane(1).click(); slot(5).click(); lane(2).click();

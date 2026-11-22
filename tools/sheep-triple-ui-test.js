@@ -12,11 +12,112 @@ assert(F.tool(legacy,'undo'));steps.push(['tool','undo']);
 if(F.tool(legacy,'remove'))steps.push(['tool','remove']);
 assert(F.tool(legacy,'shuffle'));steps.push(['tool','shuffle']);
 const raw=JSON.stringify({version:1,level:2,seed:42,previousLayout:0,steps});
-function restoreRun(saved,reduced=false){const rw=new Window({url:'https://example.test/game/sheep-triple.html',settings:{disableJavaScriptEvaluation:true,disableJavaScriptFileLoading:true,disableCSSFileLoading:true}});rw.document.write(fs.readFileSync(path.join(root,'game/sheep-triple.html'),'utf8').replace(/<script[\s\S]*?<\/script>/g,''));rw.matchMedia=()=>({matches:reduced});rw.localStorage.setItem('mylog-meadow-run-v1',saved);rw.eval(fs.readFileSync(path.join(root,'game/js/sheep-triple-engine.js'),'utf8'));let source=fs.readFileSync(path.join(root,'game/js/sheep-triple.js'),'utf8');source=source.replace(/\}\)\(\);\s*$/,'window.__state=()=>JSON.parse(JSON.stringify(state));})();');rw.eval(source);return rw;}
+function restoreRun(saved,reduced=false,shared){const rw=new Window({url:'https://example.test/game/sheep-triple.html',settings:{disableJavaScriptEvaluation:true,disableJavaScriptFileLoading:true,disableCSSFileLoading:true}});rw.document.write(fs.readFileSync(path.join(root,'game/sheep-triple.html'),'utf8').replace(/<script[\s\S]*?<\/script>/g,''));rw.matchMedia=()=>({matches:reduced});if(shared)Object.defineProperty(rw,'localStorage',{value:{
+getItem:key=>{if(shared.readFails)throw Error('read denied');return shared.items.get(key)??null;},
+setItem:(key,value)=>{if(shared.writeFails)throw Error('write denied');shared.items.set(key,String(value));shared.writes++;}
+}});else rw.localStorage.setItem('mylog-meadow-run-v1',saved);rw.eval(fs.readFileSync(path.join(root,'game/js/sheep-triple-engine.js'),'utf8'));let source=fs.readFileSync(path.join(root,'game/js/sheep-triple.js'),'utf8');source=source.replace(/\}\)\(\);\s*$/,'window.__state=()=>JSON.parse(JSON.stringify(state));})();');rw.eval(source);return rw;}
+const key='mylog-meadow-run-v1';
+const open=(shared)=>restoreRun(undefined,true,shared);
+const get=(win,id)=>win.document.getElementById(id);
+const pick=(win,id)=>{const b=win.document.querySelector(`[data-id="${id}"]`);assert(b&&!b.disabled,`tile ${id} is selectable`);b.click();};
+const fixture=(boardVersion,version=boardVersion)=>{const board=F.create(4,42,null,boardVersion);return JSON.stringify({
+ version,...(version===2?{boardVersion}:{}),level:4,seed:42,previousLayout:null,steps:board.certificate.slice(0,24).map(id=>['take',id])
+});};
+for(const [boardVersion,run,alternate] of [[2,[92,14,66,99],14],[1,[246,277,284,261],186]]) {
+ const initial=fixture(boardVersion), shared={items:new Map([[key,initial]]),writes:0}, a=open(shared), b=open(shared);
+ try {
+  run.forEach(id=>pick(a,id));
+  const latest=shared.items.get(key);
+  assert.equal(JSON.parse(latest).steps.length,28);
+  pick(b,alternate);
+  assert.equal(shared.items.get(key),latest,'older legal move must preserve the newer saved bytes');
+  assert.equal(b.__state().removed.length,25,'older board remains locally playable');
+  assert.match(get(b,'save-status').textContent,/另一个页面已更改存档.*未保存/);
+  const r=open(shared); assert.equal(JSON.stringify(r.__state()),JSON.stringify(a.__state())); await r.happyDOM.abort();
+  get(b,'restart').click(); get(b,'leave-confirm').click();
+  assert.equal(b.__state().removed.length,25,'stale restart cannot discard the local board');
+  b.document.querySelectorAll('.level')[3].click(); get(b,'leave-confirm').click();
+  assert.equal(b.__state().level,4,'stale switch cannot discard the local board');
+  assert.equal(shared.items.get(key),latest);
+  assert.equal(shared.writes,4,'no passive write (including legacy resume) or rejected write');
+ } finally {await a.happyDOM.abort();await b.happyDOM.abort();}
+}
+{
+ const initial=fixture(2), shared={items:new Map([[key,initial]]),writes:0}, a=open(shared);
+ try {
+  get(a,'restart').click(); assert(get(a,'leave-dialog').open);
+  shared.items.delete(key); // Clear happened while confirmation was open.
+  const event=new a.Event('storage'); Object.defineProperty(event,'key',{value:null});
+  a.dispatchEvent(event);
+  assert.match(get(a,'save-status').textContent,/另一个页面已更改存档/);
+  get(a,'leave-confirm').click(); assert.equal(a.__state().removed.length,24);
+  pick(a,14); assert.equal(a.__state().removed.length,25);
+  assert.equal(shared.items.has(key),false,'never resurrect a cleared save');
+  shared.items.set(key,initial); // Even exact old bytes cannot unmark an already seen conflict.
+  get(a,'tool-undo').click(); assert.equal(shared.writes,0);
+ } finally {await a.happyDOM.abort();}
+}
+{
+ const initial=fixture(2), shared={items:new Map([[key,initial]]),writes:0}, a=open(shared);
+ try {
+  shared.writeFails=true; pick(a,92);
+  assert.match(get(a,'save-status').textContent,/无法保存/);
+  assert.equal(shared.items.get(key),initial);
+  shared.writeFails=false; pick(a,14);
+  assert.equal(JSON.parse(shared.items.get(key)).steps.length,26,'retry includes both local actions');
+  assert.match(get(a,'save-status').textContent,/自动保存/);
+  const r=open(shared); assert.equal(JSON.stringify(r.__state()),JSON.stringify(a.__state())); await r.happyDOM.abort();
+ } finally {await a.happyDOM.abort();}
+}
+{
+ const initial=fixture(2), shared={items:new Map([[key,initial]]),writes:0,readFails:true}, a=open(shared);
+ try {
+  assert.match(get(a,'save-status').textContent,/无法保存/);
+  shared.readFails=false;
+  const first=a.document.querySelector('.tile.available');first.click();
+  assert.equal(a.__state().removed.length,1);
+  assert.equal(shared.items.get(key),initial,'initial unavailable read does not establish save ownership');
+ } finally {await a.happyDOM.abort();}
+}
+for(const starting of [null,'{invalid']){
+ const shared={items:new Map(starting===null?[]:[[key,starting]]),writes:0}, a=open(shared), b=open(shared);
+ try {
+  assert.equal(shared.items.get(key)??null,starting,'loading does not replace missing or malformed bytes');
+  assert.equal(shared.writes,0);
+  a.document.querySelector('.tile.available').click();
+  const first=shared.items.get(key);
+  assert.equal(JSON.parse(first).steps.length,1);
+  b.document.querySelector('.tile.available').click();
+  assert.equal(shared.items.get(key),first,'first committed move wins from vacant or malformed baseline');
+  assert.equal(shared.writes,1);
+  assert.match(get(b,'save-status').textContent,/另一个页面已更改存档/);
+ } finally {await a.happyDOM.abort();await b.happyDOM.abort();}
+}
+for(const status of ['won','lost']){
+ const seed=1, board=F.create(0,seed,null,2);
+ const play=status==='won'?board.certificate.slice():[18,19,20,0,2,21,1,3,22,23,5,24,4,25,7,26];
+ const initial=JSON.stringify({version:2,boardVersion:2,level:0,seed,previousLayout:null,steps:play.slice(0,-1).map(id=>['take',id])});
+ const shared={items:new Map([[key,initial]]),writes:0}, a=open(shared);
+ try {
+  pick(a,play.at(-1));
+  assert.equal(a.__state().status,status);
+  const r=open(shared); assert.equal(JSON.stringify(r.__state()),JSON.stringify(a.__state())); await r.happyDOM.abort();
+  if(status==='won') {
+   shared.items.delete(key);
+   get(a,'next').click();
+   assert.equal(a.__state().level,0); assert.equal(a.__state().status,'won');
+   assert.equal(shared.items.has(key),false);
+  }
+ } finally {await a.happyDOM.abort();}
+}
 const migrated=restoreRun(raw);assert.equal(JSON.stringify(migrated.__state()),JSON.stringify(legacy));assert.match(migrated.document.getElementById('message').textContent,/旧版 288/);
-const migratedSave=JSON.parse(migrated.localStorage.getItem('mylog-meadow-run-v1'));assert.equal(migratedSave.version,2);assert.equal(migratedSave.boardVersion,1);assert.deepEqual(migratedSave.steps,steps);
+assert.equal(migrated.localStorage.getItem(key),raw,'opening a legacy save must not rewrite it');
+const migrationMove=Number(migrated.document.querySelector('.tile.available').dataset.id);
+migrated.document.querySelector('[data-id="'+migrationMove+'"]').click();
+assert(F.take(legacy,migrationMove));steps.push(['take',migrationMove]);
+const migratedSave=JSON.parse(migrated.localStorage.getItem(key));assert.equal(migratedSave.version,2);assert.equal(migratedSave.boardVersion,1);assert.deepEqual(migratedSave.steps,steps);
 const again=restoreRun(JSON.stringify(migratedSave));assert.equal(JSON.stringify(again.__state()),JSON.stringify(legacy));
 again.document.getElementById('restart').click();again.document.getElementById('leave-confirm').click();assert.equal(again.__state().boardVersion,2);assert.equal(again.__state().tiles.length,72);assert.equal(JSON.parse(again.localStorage.getItem('mylog-meadow-run-v1')).boardVersion,2);
-const quiet=restoreRun(raw,true);const available=quiet.document.querySelector('.tile.available');available.click();assert.equal(quiet.document.querySelector('.meadow-tile-feedback'),null);assert(!quiet.document.getElementById('rack').classList.contains('match-pop'));assert.equal(quiet.__state().removed.length,legacy.removed.length+1);await quiet.happyDOM.abort();
+const quiet=restoreRun(raw,true);const available=quiet.document.querySelector('.tile.available');available.click();assert.equal(quiet.document.querySelector('.meadow-tile-feedback'),null);assert(!quiet.document.getElementById('rack').classList.contains('match-pop'));assert.equal(quiet.__state().removed.length,legacy.removed.length);await quiet.happyDOM.abort();
 await migrated.happyDOM.abort();await again.happyDOM.abort();
 assert(!w.document.documentElement.innerHTML.includes('初始布局相同'));await w.happyDOM.abort();console.log('sheep-triple UI: five budgets, fresh restart, undo/remove/shuffle, full 36-click win and next-level PASS');})();
