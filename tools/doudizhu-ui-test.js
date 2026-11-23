@@ -1169,6 +1169,32 @@ test('blocked localStorage read and write cannot break completion', () => {
     }
 });
 
+test('a failed win read never overwrites older clears and a later win saves the union', () => {
+    const raw = '{ "2": 1, "7": 1 }';
+    const game = createGame({ storage: { [STORAGE_KEY]: raw } });
+    game.fixture({ you: counts(3), opp: counts(4, 5) });
+    game.select([3]);
+    const local = game.sandbox.localStorage;
+    const get = local.getItem.bind(local), set = local.setItem.bind(local);
+    let reads = 0, writes = 0;
+    local.getItem = key => { if (++reads === 1) throw new Error('read denied'); return get(key); };
+    local.setItem = (key, value) => { writes++; return set(key, value); };
+    game.click('dd-play');
+    assert.equal(game.api.state.over, 'you');
+    assert.equal(game.storage[STORAGE_KEY], raw);
+    assert.equal(writes, 0);
+    assert.equal(game.document.querySelector('[data-level="1"]').classList.contains('is-cleared'), true);
+    assert.match(game.el('dd-result-sub').textContent, /暂仅保留/);
+
+    game.fixture({ index: 2, level: game.levels[2], you: counts(3), opp: counts(4, 5) });
+    game.select([3]);
+    game.click('dd-play');
+    assert.equal(game.api.state.over, 'you');
+    assert.deepEqual(JSON.parse(game.storage[STORAGE_KEY]), {1:1, 2:1, 3:1, 7:1});
+    assert.equal(writes, 1);
+    assert.doesNotMatch(game.el('dd-result-sub').textContent, /暂仅保留/);
+});
+
 test('malformed localStorage shapes cannot break initialization or completion', () => {
     for (const value of ['{', 'null', '[]', 'false', '1', '"text"', '{"1":1,"unrelated":true}']) {
         const game = createGame({ storage: { [STORAGE_KEY]: value } });

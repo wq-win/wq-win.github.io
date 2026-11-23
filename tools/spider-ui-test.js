@@ -619,6 +619,58 @@ test('source-derived sizing matrix keeps every rank inside its exposed strip fro
     console.log(`  source-derived geometry: ${sizes.length * 2} viewport/view combinations; no browser-layout claim`);
 });
 
+for (const suits of [1, 2, 4]) {
+    test(`${suits}-suit Spider deal credits only once through Undo, replay and reload`, () => {
+        const runKey = 'mylog-spider-run-v1', winsKey = 'mylog-spider-wins';
+        const suit = suits === 1 ? 'S' : suits === 2 ? 'H' : 'C';
+        const offset = suits === 1 ? 0 : suits === 2 ? 13 : 39;
+        const cards = Array.from({length: 13}, (_, i) => ({id: offset + 13 - i, r: 13 - i, s: suit, up: true}));
+        const state = {columns: [cards.slice(0, 12), [cards[12]], ...Array.from({length: 8}, () => [])], stock: [], done: 7, suits};
+        const prior = {...state, columns: [cards.slice(0, 12), [], [cards[12]], ...Array.from({length: 7}, () => [])]};
+        const storage = {[runKey]: JSON.stringify({version: 1, state, past: [prior]}), [winsKey]: JSON.stringify({[suits]: 3})};
+        const writes = [];
+        const open = () => createGame({sharedStorage: storage, onWrite: key => writes.push(key)});
+        const saved = () => JSON.parse(storage[runKey]).state;
+        const wins = () => JSON.parse(storage[winsKey])[suits];
+        const finish = g => { g.card(1, 0).click(); g.card(0, 11).click(); };
+        const a = open();
+        assert.equal(writes.length, 0, 'restoring a deal is read-only');
+        finish(a);
+        assert.equal(wins(), 4, 'first completion earns exactly one credit');
+        assert.equal(writes.filter(key => key === winsKey).length, 1);
+        a.get('spider-undo').click();
+        const firstUndo = saved();
+        a.get('spider-undo').click();
+        const secondUndo = saved();
+        const b = open();
+        b.card(2, 0).click();
+        b.columns()[1].click();
+        const beforeReplay = writes.length;
+        finish(b);
+        assert.equal(saved().done, 8);
+        assert.equal(wins(), 4, 'replaying the same deal must not add a second credit');
+        assert.equal(firstUndo.won, true);
+        assert.equal(secondUndo.won, true);
+        assert.match(b.get('spider-status').textContent, /这局收完了/);
+        assert.ok(!writes.slice(beforeReplay).includes(winsKey), 'replay must not write statistics');
+
+        b.get('spider-new').click();
+        const newDeal = saved();
+        assert.equal(newDeal.done, 0);
+        assert.notEqual(newDeal.won, true);
+        storage[runKey] = JSON.stringify({version: 1, state: {...state, won: newDeal.won}, past: []});
+        finish(open());
+        assert.equal(wins(), 5, 'a new deal can earn its own credit');
+
+        storage[runKey] = JSON.stringify({version: 1, state: {...state, won: 'yes'}, past: []});
+        const malformed = open();
+        assert.equal(saved().won, 'yes', 'loading the legacy optional marker is read-only');
+        finish(malformed);
+        assert.equal(wins(), 6, 'a truthy non-boolean marker is not a credit');
+        assert.equal(saved().won, true);
+    });
+}
+
 (async function () {
     for (const { name, body } of tests) {
         try {

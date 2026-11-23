@@ -287,12 +287,13 @@
     }
 
     function noteWin() {
-        if (state.done !== 8 || state.won) return;
+        if (state.done !== 8) return;
+        setMessage('这局收完了');
+        if (state.won === true) return;
         state.won = true;
         var wins = readWins();
         wins[state.suits] = (wins[state.suits] || 0) + 1;
         try { localStorage.setItem(winsKey(), JSON.stringify(wins)); } catch (_) {}
-        setMessage('这局收完了');
     }
 
     function dealRow() {
@@ -379,7 +380,9 @@
 
     function undo() {
         if (!past.length) return;
+        var won = state.won === true;
         state = past.pop();
+        if (won) state.won = true;
         selected = null;
         setMessage('');
         saveRun();

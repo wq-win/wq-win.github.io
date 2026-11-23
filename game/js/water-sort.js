@@ -37,26 +37,42 @@ function readRecords(raw) {
 }
 let hintTimer = null;
 let state, selected = null, pending = null, timer = null, effectTimer = null, epoch = 0, storageOK = true;
-try { state = E.restore(localStorage.getItem(STORAGE_KEY)); } catch (_) { state = E.create(); storageOK = false; }
+let activeBaseline = false;
+try {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  state = E.restore(raw);
+  activeBaseline = true;
+} catch (_) { state = E.create(); storageOK = false; }
 const reduced = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const message = (text,type='') => { feedback.textContent = text; feedback.className = 'feedback' + (type ? ' '+type : ''); };
+function showStorageStatus() {
+  $('saved').textContent = storageOK ? '进度自动保存' : '本次可玩 · 无法保存';
+}
 function store() {
   const won = E.won(state.bottles);
   if (won && state.moves>0 && state.moves<(records[state.level]??Infinity)) records[state.level]=state.moves;
   try {
     // Combine only durable progress; each saved board/history must be one run.
-    const completed = readCompleted(localStorage.getItem(STORAGE_KEY));
+    const raw = localStorage.getItem(STORAGE_KEY);
+    // A fallback run may claim an empty slot, but not replace an unseen save.
+    if (!activeBaseline && raw !== null) {
+      showStorageStatus();
+      return;
+    }
+    const completed = readCompleted(raw);
     state.completed = [...new Set([...completed,...state.completed])];
     const savedRecords = readRecords(localStorage.getItem(RECORDS_KEY));
     E.LEVELS.forEach((_,i)=>{
       if (savedRecords[i]<(records[i]??Infinity)) records[i]=savedRecords[i];
     });
     localStorage.setItem(STORAGE_KEY,E.save(state));
+    activeBaseline = true;
     if (Object.keys(records).some(i=>records[i]!==savedRecords[i])) {
       localStorage.setItem(RECORDS_KEY,JSON.stringify(records));
     }
+    storageOK = true;
   } catch (_) { storageOK = false; }
-  $('saved').textContent = storageOK ? '进度自动保存' : '本次可玩 · 无法保存';
+  showStorageStatus();
 }
 function cancelAnimation() {
   epoch++; clearTimeout(hintTimer); hintTimer=null; $('hint').disabled=false; clearTimeout(timer); clearTimeout(effectTimer); timer = null; pending = null; layer.replaceChildren();$('win-card').classList.remove('water-win-arrive');feedback.classList.remove('pour-feedback');
@@ -189,7 +205,8 @@ board.addEventListener('keydown',event=>{
   if(Object.hasOwn(offsets,event.key)){event.preventDefault();const next=(Number(button.dataset.bottle)+offsets[event.key]+state.bottles.length)%state.bottles.length;board.querySelector(`[data-bottle="${next}"]`).focus();}
 });
 window.addEventListener('resize',()=>{if(pending)finishPour();});document.querySelector('[data-game-view]').addEventListener('gameviewchange',()=>{if(pending)finishPour();});
-store();render();
+if (activeBaseline) store(); else showStorageStatus();
+render();
 if(state.moves)message('已接上上次进度 · 第 '+(state.level+1)+' 关，已走 '+state.moves+' 步。');
 if(E.won(state.bottles))message('这一关已完成，可以继续下一关。','success');else if(!E.legalMoves(state.bottles).length)message('没有可倒的位置了，可撤销一步重新规划。','error');
 })();

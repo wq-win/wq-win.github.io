@@ -45,6 +45,32 @@ try{
  assert.deepEqual(savedState(legacy),E.create(3,[0,2]));assert.equal($(legacy,'level-number').textContent,'04');assert.equal(JSON.parse(legacy.localStorage.getItem('cozy-water-sort-v1')).v,2);
  const bad=setup({saved:'{broken'});assert.equal(bad.document.querySelectorAll('.bottle').length,7);
  const denied=setup({denied:true});clickMove(denied,E.solve(E.create())[0]);assert.equal(denied.document.querySelectorAll('.liquid').length,20);assert.match($(denied,'saved').textContent,/无法保存/);
+ // Startup read failure must not let either boot or a fallback move overwrite an active run.
+ const activeKey='cozy-water-sort-v1', bestKey='cozy-water-sort-records-v1';
+ const start4=E.create(3,[0,2]), move4=E.solve(start4)[0], played4=E.act(start4,move4.from,move4.to).state;
+ const activeRaw=' '+E.save(played4), bestRaw='{"0":16}';
+ const faultedStorage=entries=>{
+   const slots=new Map(entries), writes=[];let fail=true;
+   const adapter={getItem:k=>{if(k===activeKey&&fail){fail=false;throw new Error('startup read failed');}return slots.get(k)??null;},
+     setItem:(k,v)=>{writes.push(k);slots.set(k,String(v));}};
+   return {slots,writes,adapter};
+ };
+ const occupied=faultedStorage([[activeKey,activeRaw],[bestKey,bestRaw]]), fallback=setup({shared:occupied.adapter});
+ assert.equal(occupied.slots.get(activeKey),activeRaw);assert.deepEqual(occupied.writes,[]);
+ assert.match($(fallback,'saved').textContent,/无法保存/);
+ clickMove(fallback,E.solve(E.create())[0]);
+ assert.equal($(fallback,'move-count').textContent,'1');
+ assert.equal(occupied.slots.get(activeKey),activeRaw);assert.equal(occupied.slots.get(bestKey),bestRaw);
+ assert.deepEqual(occupied.writes,[]);assert.match($(fallback,'saved').textContent,/无法保存/);
+ const restored=setup({shared:occupied.adapter});
+ assert.equal($(restored,'level-number').textContent,'04');assert.equal($(restored,'move-count').textContent,'1');
+ assert.deepEqual(savedState(restored),played4);assert.equal(occupied.slots.get(bestKey),bestRaw);
+ const vacant=faultedStorage([]), fresh=setup({shared:vacant.adapter});
+ assert.equal(vacant.slots.has(activeKey),false);assert.deepEqual(vacant.writes,[]);
+ assert.match($(fresh,'saved').textContent,/无法保存/);
+ clickMove(fresh,E.solve(E.create())[0]);
+ assert.equal(savedState(fresh).moves,1);assert.deepEqual(vacant.writes,[activeKey]);
+ assert.match($(fresh,'saved').textContent,/进度自动保存/);
  // Accepted moves save immediately; new input settles presentation without waiting.
  const racing=setup({reduced:false});const first=E.solve(E.create())[0];clickMove(racing,first);assert(racing.document.querySelector('.pour-ghost'));assert(!b(racing,0).disabled);assert.equal(savedState(racing).moves,1,'Accepted move saved before animation completes');b(racing,2).click();assert.equal(savedState(racing).moves,1);assert.equal(racing.document.querySelector('.pour-ghost'),null,'A new input settles the old effect');
  $(racing,'restart').click();assert.equal($(racing,'water-confirm').open,true);assert.equal(savedState(racing).moves,1,'Accepted pour survives pending confirmation');$(racing,'water-replace').click();assert.equal(racing.document.querySelectorAll('.pour-ghost').length,0);await delay(570);assert.deepEqual(savedState(racing).bottles,E.create().bottles);assert(!b(racing,0).disabled);
@@ -76,7 +102,7 @@ try{
  const firstTarget=resumedHints.document.querySelector('.hint-target');assert(firstTarget);firstTarget.click();
  $(resumedHints,'undo').click();assert.deepEqual(savedState(resumedHints),old);$(resumedHints,'hint').click();await delay(50);assert(resumedHints.document.querySelector('.hint-target'));
  const html=fs.readFileSync(path.join(root,'game/water-sort.html'),'utf8');
- assert(html.includes('js/water-sort-engine.js?v=20261115-hints'));assert(html.includes('js/water-sort.js?v=20261119-progress-merge'));
+ assert(html.includes('js/water-sort-engine.js?v=20261115-hints'));assert(html.includes('js/water-sort.js?v=20261122-startup-read'));
  // Model two tabs without storage events: completion data is shared, active boards are not.
  const slots=new Map(), shared={getItem:k=>slots.get(k)??null,setItem:(k,v)=>slots.set(k,String(v))};
  const tabA=setup({shared}),tabB=setup({shared});
