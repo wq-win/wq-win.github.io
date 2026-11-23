@@ -47,11 +47,52 @@ for(const [url,id]of [['?view=symbols&series=llm#symbol-llm-llm-query','symbol-l
 return n;
 }
 
+async function testProgress(){
+ const key='mylog-progress-v1', prior='{"rl:16-dqn":7,"llm:001-lstm":11}', target='rl:61-cpo';
+ const open=raw=>{
+  const w=new Window({url:'https://mylog.test/rl/61-cpo.html'}),d=w.document;
+  d.write('<div id="article-body"></div><nav id="article-nav"></nav>');
+  let record=raw, reads=0, writes=0, failRead=false, failWrite=false;
+  Object.defineProperty(w,'localStorage',{value:{
+   getItem(k){assert.equal(k,key);reads++;if(failRead){failRead=false;throw Error('blocked read');}return record;},
+   setItem(k,v){assert.equal(k,key);writes++;if(failWrite)throw Error('blocked write');record=v;}
+  }});
+  w.ReadingGuide={mount(){}};
+  w.eval(fs.readFileSync(root+'/js/reader.js','utf8'));
+  return {w,d,record:()=>record,counts:()=>[reads,writes],failRead:()=>failRead=true,failWrite:()=>failWrite=true};
+ };
+ let t=open(prior);
+ try{
+  t.failRead();t.w.SeriesReader.init();assert.equal(t.record(),prior);
+  assert.deepEqual(t.counts(),[2,0],'failed auto-mark never retries a mutation implicitly');
+  t.w.SeriesReader.init();
+  const marked=JSON.parse(t.record());assert.equal(marked['rl:16-dqn'],7);assert.equal(marked['llm:001-lstm'],11);assert.ok(Number.isInteger(marked[target]));
+  const button=t.d.getElementById('mark-read-button');
+  assert.equal(button.classList.contains('is-read'),true);
+  t.failRead();button.click();assert.deepEqual(JSON.parse(t.record()),marked);assert.equal(t.counts()[1],1);
+  button.click();assert.equal(t.record(),prior);assert.equal(button.classList.contains('is-read'),false);
+  t.failWrite();button.click();assert.equal(t.record(),prior);assert.equal(button.classList.contains('is-read'),false);
+ }finally{await t.w.happyDOM.close();}
+ for(const raw of ['', '{', 'null', '[]', '1', 'true', '"text"']){
+  t=open(raw);try{
+   t.w.SeriesReader.init();t.d.getElementById('mark-read-button').click();
+   assert.equal(t.record(),raw);assert.equal(t.counts()[1],0);
+  }finally{await t.w.happyDOM.close();}
+ }
+ t=open(null);try{
+  t.w.SeriesReader.init();assert.deepEqual(Object.keys(JSON.parse(t.record())),[target]);
+  const before=t.counts()[1];t.w.SeriesReader.init();assert.equal(t.counts()[1],before,'already-read auto mark is a no-op');
+  t.w.SeriesReader.setRead('rl','61-cpo',true);assert.equal(t.counts()[1],before+1,'explicit API still writes');
+  t.w.SeriesReader.setRead('rl','61-cpo',false);assert.equal(t.record(),'{}');
+ }finally{await t.w.happyDOM.close();}
+}
+
 (async()=>{
  let dependency=process.env.HAPPY_DOM_PATH||'happy-dom';
  if(dependency!=='happy-dom'&&fs.statSync(dependency).isDirectory())dependency=path.join(dependency,'lib/index.js');
  ({Window}=await import(dependency));
+ await testProgress();
  await testRuntime();
  const referenceChecks=await testReference();
- console.log(`${runtimeChecks} production-bootstrap and ${referenceChecks} reference assertions passed.`);
+ console.log(`${runtimeChecks} production-bootstrap and ${referenceChecks} reference assertions passed; reader save faults and public API covered.`);
 })().catch(error=>{console.error(error);process.exit(1)});

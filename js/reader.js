@@ -3,9 +3,12 @@
 
     function loadProgress() {
         try {
-            return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (raw === null) return {};
+            const data = JSON.parse(raw);
+            return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
         } catch (error) {
-            return {};
+            return null;
         }
     }
 
@@ -35,15 +38,23 @@
 
     function isRead(series, slug) {
         const data = loadProgress();
-        return Boolean(data[progressKey(series, slug)]);
+        return Boolean(data?.[progressKey(series, slug)]);
+    }
+
+    function changeRead(series, slug, choose, skipUnchanged = false) {
+        const data = loadProgress();
+        if (!data) return;
+        const key = progressKey(series, slug);
+        const current = Boolean(data[key]);
+        const next = Boolean(choose(current));
+        if (skipUnchanged && next === current) return;
+        if (next) data[key] = Date.now();
+        else delete data[key];
+        saveProgress(data);
     }
 
     function setRead(series, slug, value) {
-        const data = loadProgress();
-        const key = progressKey(series, slug);
-        if (value) data[key] = Date.now();
-        else delete data[key];
-        saveProgress(data);
+        changeRead(series, slug, () => value);
     }
 
     function countRead(posts, series) {
@@ -172,16 +183,14 @@
             : '<i class="fa fa-bookmark-o"></i> 标为已读';
         button.classList.toggle('is-read', read);
         button.onclick = () => {
-            setRead(series, slug, !isRead(series, slug));
+            changeRead(series, slug, read => !read);
             renderProgressButton(series, slug);
         };
     }
 
     function markOpened(series, slug) {
         if (!series || !slug || slug === 'index') return;
-        if (!isRead(series, slug)) {
-            setRead(series, slug, true);
-        }
+        changeRead(series, slug, () => true, true);
     }
 
     function decorateCatalog(series) {
