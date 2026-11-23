@@ -21,22 +21,33 @@
     function element(id) { return document.getElementById(id); }
     function storageKey() { return 'mylog-doudizhu-cleared-v2'; }
 
-    function cleared() {
-        var done;
+    function parseClears(raw) {
         try {
-            done = JSON.parse(localStorage.getItem(storageKey()));
-            if (!done || typeof done !== 'object' || Array.isArray(done)) done = {};
+            var done = JSON.parse(raw);
+            return done && typeof done === 'object' && !Array.isArray(done) ? done : {};
         } catch (error) {
-            done = {};
+            return {};
         }
+    }
+
+    function mergeSessionClears(done) {
         Object.keys(savedClears).forEach(function (id) { done[id] = 1; });
         return done;
+    }
+
+    function cleared() {
+        try {
+            return mergeSessionClears(parseClears(localStorage.getItem(storageKey())));
+        } catch (error) {
+            return mergeSessionClears({});
+        }
     }
 
     function markCleared(id) {
         savedClears[id] = 1;
         try {
-            localStorage.setItem(storageKey(), JSON.stringify(cleared()));
+            var done = parseClears(localStorage.getItem(storageKey()));
+            localStorage.setItem(storageKey(), JSON.stringify(mergeSessionClears(done)));
             storageUnavailable = false;
         } catch (error) {
             storageUnavailable = true;

@@ -2,11 +2,29 @@
 'use strict';
 const E=window.ScrewPuzzle,$=id=>document.getElementById(id),colors=['var(--red)','var(--blue)','var(--yellow)','var(--green)','var(--purple)'],symbols=['○','△','□','◇','✚'];
 const KEY='pine-screw-progress-v1';let completed=[],index=0,busy=false,timer=0,token=0;
-try{const saved=JSON.parse(localStorage.getItem(KEY)||'{}');completed=Array.isArray(saved.completed)?[...new Set(saved.completed.filter(n=>Number.isInteger(n)&&n>=0&&n<16))]:[];index=Number.isInteger(saved.index)&&saved.index>=0&&saved.index<16?saved.index:0;}catch(_){}
-const levelOrder=[0,1,3,4,2,5,7,8,6,9,11,12,10,13,14,15];try{const old=JSON.parse(localStorage.getItem(KEY));if(old&&(!old.version||old.version<2)){index=levelOrder.indexOf(index);completed=completed.map(n=>levelOrder.indexOf(n));}}catch(_){}
+const levelOrder=[0,1,3,4,2,5,7,8,6,9,11,12,10,13,14,15];
+function decodeProgress(raw){
+ let saved;
+ try{saved=JSON.parse(raw);}catch(_){}
+ if(!saved||typeof saved!=='object'||Array.isArray(saved))return {index:0,completed:[]};
+ const valid=n=>Number.isInteger(n)&&n>=0&&n<levelOrder.length;
+ const order=n=>!saved.version||saved.version<2?levelOrder.indexOf(n):n;
+ return {index:order(valid(saved.index)?saved.index:0),completed:Array.isArray(saved.completed)?[...new Set(saved.completed.filter(valid).map(order))]:[]};
+}
+try{({completed,index}=decodeProgress(localStorage.getItem(KEY)));}catch(_){}
 let state=E.create(index),history=[];const sound=window.WorkshopFeedback?window.WorkshopFeedback($('sound')):{play(){}};
 try{const run=JSON.parse(localStorage.getItem(KEY+'-run'));if(run&&run.version===3&&run.index===index&&Array.isArray(run.moves)&&run.moves.length<=30){const candidate=E.create(index);if(run.moves.every(id=>E.take(candidate,id))){state=candidate;history=run.moves.slice();}}}catch(_){}
-function save(){try{localStorage.setItem(KEY,JSON.stringify({version:3,completed,index:state.index}));localStorage.setItem(KEY+'-run',JSON.stringify({version:3,index:state.index,moves:history}));}catch(_){}}
+function noteClear(){if(state.status==='won'&&!completed.includes(state.index))completed.push(state.index);}
+noteClear(); // Recover a badge from a verified winning replay without writing during boot.
+function save(){
+ try{
+  const durable=decodeProgress(localStorage.getItem(KEY));
+  completed=[...new Set([...durable.completed,...completed])];
+  localStorage.setItem(KEY,JSON.stringify({version:3,completed,index:state.index}));
+  localStorage.setItem(KEY+'-run',JSON.stringify({version:3,index:state.index,moves:history}));
+  return true;
+ }catch(_){return false;}
+}
 function element(tag,cls,text){const el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el;}
 function head(c){const h=element('span','head');h.append(element('span','screw-symbol',symbols[c]));h.style.setProperty('--color',colors[c]);h.setAttribute('aria-hidden','true');return h;}
 function render(){$('undo').disabled=!history.length||busy;
@@ -24,11 +42,10 @@ $('tray-count').textContent=state.rack.length+' / 5';$('tray').classList.toggle(
 $('result').hidden=state.status==='playing';if(state.status!=='playing'){const won=state.status==='won';$('result-icon').textContent=won?'✧':'↶';$('result-title').textContent=won?'木落，心也轻了':'托盘有点挤';$('result-copy').textContent=won?(state.index===15?'最后一件也解开了。可以回去重温喜欢的关卡。':'这一件收好了。继续拆下一件吧。'):'五格已满。先凑齐同色，再为下层留出空位。';$('result-action').textContent=won&&state.index<15?'下一件木作 →':'重新拆这一关';}
 }
 function pick(id,button){if(busy||state.status!=='playing')return;busy=true;$('undo').disabled=true;const myToken=token;button.classList.add('unscrewing');document.querySelectorAll('.screw').forEach(b=>b.disabled=true);const motion=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-timer=setTimeout(()=>{if(myToken!==token)return;const panel=button.closest('.plate'),ghost=panel.cloneNode(true),lane=panel.parentNode.className;ghost.querySelectorAll('button').forEach(b=>b.remove());const result=E.take(state,id);busy=false;if(!result){render();return;}history.push(id);sound.play(state.status==='won'?'win':result.matched?'match':result.fallen?'fall':'take');save();
-if(state.status==='won'&&!completed.includes(state.index)){completed.push(state.index);save();}
+timer=setTimeout(()=>{if(myToken!==token)return;const panel=button.closest('.plate'),ghost=panel.cloneNode(true),lane=panel.parentNode.className;ghost.querySelectorAll('button').forEach(b=>b.remove());const result=E.take(state,id);busy=false;if(!result){render();return;}history.push(id);sound.play(state.status==='won'?'win':result.matched?'match':result.fallen?'fall':'take');noteClear();const saved=save();
 render();if(result.fallen&&!motion){const holder=element('div',lane);holder.style.pointerEvents='none';holder.setAttribute('aria-hidden','true');ghost.classList.add('falling');holder.append(ghost);$('plates').append(holder);setTimeout(()=>holder.remove(),500);}
 if(result.matched){$('tray').classList.remove('match');void $('tray').offsetWidth;$('tray').classList.add('match');}
-$('status').textContent=state.status==='won'?'这一关已完成，进度已保存在此设备。':state.status==='lost'?'托盘已满，换个拆解顺序再试一次。':result.matched?'三枚'+E.COLORS[result.color]+'归入工具盒。托盘又空出了一些。':result.fallen?'木板落下了，新的螺丝露出来了。':state.rack.length===4?'还剩最后一格，下一枚最好能凑齐三枚。':'收好一枚'+E.COLORS[result.color]+'。留意下层的颜色。';
+$('status').textContent=state.status==='won'?(saved?'这一关已完成，进度已保存在此设备。':'这一关已完成，但进度未能完整保存。'):state.status==='lost'?'托盘已满，换个拆解顺序再试一次。':result.matched?'三枚'+E.COLORS[result.color]+'归入工具盒。托盘又空出了一些。':result.fallen?'木板落下了，新的螺丝露出来了。':state.rack.length===4?'还剩最后一格，下一枚最好能凑齐三枚。':'收好一枚'+E.COLORS[result.color]+'。留意下层的颜色。';
 const next=document.querySelector('.screw:not(:disabled)');if(state.status!=='playing')$('result-action').focus({preventScroll:true});else if(next)next.focus({preventScroll:true});
 },motion?0:230);
 }

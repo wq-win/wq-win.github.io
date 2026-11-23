@@ -2,11 +2,45 @@
 'use strict';
 const E=window.ParkingEngine,$=id=>document.getElementById(id),KEY='cozy-parking-v5';
 const colors=[['#ec9b64','#bd7246'],['#80b5b3','#588c8b'],['#e4c767','#b29b49'],['#b4a5c9','#8f7fa6'],['#c48378','#9f625b'],['#9cb976','#768e56'],['#83a5c8','#5e7fa0'],['#dba6ba','#b47e92']];
-const names={E:'右',SE:'右下',S:'下',SW:'左下',W:'左',NW:'左上',N:'上',NE:'右上'},angles={E:0,SE:45,S:90,SW:135,W:180,NW:225,N:270,NE:315};let state;try{state=E.restore(localStorage.getItem(KEY)||localStorage.getItem('cozy-parking-v3')||localStorage.getItem('cozy-parking-v2'));}catch(e){state=E.create();}let epoch=0,zoom=1,sound=false,audio,blockerTimer;
+const names={E:'右',SE:'右下',S:'下',SW:'左下',W:'左',NW:'左上',N:'上',NE:'右上'},angles={E:0,SE:45,S:90,SW:135,W:180,NW:225,N:270,NE:315};
+let state=E.create(),expected,conflict=false,unsupported=false,epoch=0,zoom=1,sound=false,audio,blockerTimer;
+const V3='cozy-parking-v3',V2='cozy-parking-v2';
+function readSave(){
+ const primary=localStorage.getItem(KEY);
+ if(primary)return {primary,key:KEY,raw:primary};
+ const legacy=localStorage.getItem(V3);
+ if(legacy)return {primary,key:V3,raw:legacy};
+ return {primary,key:V2,raw:localStorage.getItem(V2)};
+}
+try{
+ expected=readSave();
+ try{const version=JSON.parse(expected.raw)?.v;unsupported=Number.isInteger(version)&&version>5;}catch(_){}
+ state=E.restore(expected.raw);
+}catch(_){}
+function saveStatus(text){const node=$('saved');if(node.textContent!==text)node.textContent=text;}
+function checkSave(){
+ if(!conflict&&expected){
+  try{const current=readSave();conflict=current.primary!==expected.primary||current.key!==expected.key||current.raw!==expected.raw;}
+  catch(_){saveStatus('当前无法读取存档 · 本页进度未保存');return 'unavailable';}
+ }
+ if(conflict){saveStatus('另一个页面已更改存档 · 本页未保存，可刷新读取当前存档');return 'conflict';}
+ if(unsupported){saveStatus('此存档来自较新版本 · 本页不会覆盖');return 'unavailable';}
+ if(!expected){saveStatus('当前无法读取存档 · 本页进度未保存');return 'unavailable';}
+ return 'current';
+}
+function persist(){
+ if(checkSave()!=='current')return;
+ try{const raw=E.save(state);localStorage.setItem(KEY,raw);expected={primary:raw,key:KEY,raw};saveStatus('进度自动保存在此浏览器');}
+ catch(_){saveStatus('此浏览器无法保存；本次仍可游玩');}
+}
+window.addEventListener('storage',event=>{
+ if(event.key!==null&&event.key!==KEY&&event.key!==expected?.key&&!(expected?.key===V2&&event.key===V3))return;
+ try{if(event.storageArea===localStorage)checkSave();}catch(_){}
+});
+
 try{sound=localStorage.getItem('cozy-parking-sound')==='on';}catch(e){}
 function soundLabel(){$('sound-toggle').textContent='声音：'+(sound?'开':'关');$('sound-toggle').setAttribute('aria-pressed',String(sound));}
 function tone(blocked){if(!sound)return;try{audio=audio||new(window.AudioContext||window.webkitAudioContext)();audio.resume().catch(()=>{});const o=audio.createOscillator(),g=audio.createGain();o.connect(g);g.connect(audio.destination);o.frequency.setValueAtTime(blocked?150:620,audio.currentTime);o.frequency.exponentialRampToValueAtTime(blocked?110:930,audio.currentTime+.1);g.gain.setValueAtTime(.025,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+.12);o.start();o.stop(audio.currentTime+.13);}catch(e){}}
-function persist(){try{localStorage.setItem(KEY,E.save(state));$('saved').textContent='进度自动保存在此浏览器';}catch(e){$('saved').textContent='此浏览器无法保存；本次仍可游玩';}}
 function feedback(text,error=false){$('feedback').textContent=text;$('feedback').classList.toggle('error',error);}
 function layout(){const v=$('board-viewport'),b=$('parking-board'),size=E.levelFor(state).size;const fit=Math.max(5,Math.min((v.clientWidth-28)/size,(v.clientHeight-28)/size));const cell=Math.max(fit,Math.min(56,fit*zoom));b.style.setProperty('--cell',cell+'px');b.style.setProperty('--grid-size',size);b.classList.toggle('compact',cell<25);$('zoom-out').disabled=zoom<=1;$('zoom-in').disabled=cell>=56;$('zoom-hint').textContent=zoom===1?'全景 · 点 ＋ 放大，滑动查看':'已放大 · 滑动查看停车场';}
 function win(){if(state.remaining.length)return;$('win-title').textContent=state.level===15?(state.completed.length===16?'十六站，全部走过！':'最后一站，顺利出发！'):'小车都出发啦！';$('win-card').hidden=false;}
@@ -15,12 +49,12 @@ const left=new Set(state.remaining);for(const c of level.cars){if(!left.has(c.id
 let pointerStart=null,dragged=false;const viewport=$('board-viewport');viewport.addEventListener('pointerdown',e=>{pointerStart={x:e.clientX,y:e.clientY};dragged=false;});viewport.addEventListener('pointermove',e=>{if(pointerStart&&Math.hypot(e.clientX-pointerStart.x,e.clientY-pointerStart.y)>9)dragged=true;});viewport.addEventListener('pointercancel',()=>{pointerStart=null;dragged=true;});viewport.addEventListener('pointerup',()=>{pointerStart=null;});
 function depart(id,button,keyboard){if(!state.remaining.includes(id))return;clearTimeout(blockerTimer);document.querySelectorAll('.obstacle,.blocked').forEach(el=>el.classList.remove('obstacle','blocked'));const result=E.act(state,id);tone(!result.ok);if(!result.ok){button.classList.add('blocked');result.blockers.forEach(id=>document.querySelector(`[data-car="${id}"]`)?.classList.add('obstacle'));feedback('前方还有车，先让红框小车出发吧',true);const ticket=epoch;blockerTimer=setTimeout(()=>{if(ticket===epoch)document.querySelectorAll('.obstacle,.blocked').forEach(el=>el.classList.remove('obstacle','blocked'));},900);return;}
 button.classList.add('leaving');button.disabled=true;$('remaining').textContent=String(state.remaining.length);$('cleared-count').textContent=String(E.levelFor(state).cars.length-state.remaining.length);$('lot-progress').value=E.levelFor(state).cars.length-state.remaining.length;feedback(result.won?'停车场清空了，出发去下一站！':'顺利出发！可以连续点选已腾出路的小车');persist();const ticket=epoch,reduced=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;setTimeout(()=>{if(ticket!==epoch)return;button.remove();if(!state.remaining.length){win();if(keyboard)$('next-level').focus();}else if(keyboard){document.querySelector('.car:not(:disabled)')?.focus({preventScroll:true});}},reduced?0:270);}
-function go(i){const completed=state.completed.slice();state=E.create(i);state.completed=completed;zoom=1;$('board-viewport').scrollTo(0,0);render();feedback('看清八向车头，车身前方整条路空了才能走');persist();}
+function go(i){if(checkSave()==='conflict'){$('level-select').value=String(state.level);return;}const completed=state.completed.slice();state=E.create(i);state.completed=completed;zoom=1;$('board-viewport').scrollTo(0,0);render();feedback('看清八向车头，车身前方整条路空了才能走');persist();}
 for(let i=0;i<16;i++){const option=document.createElement('option');option.value=String(i);option.textContent=`第 ${i+1} 关 · ${E.LEVELS[i].cars.length} 辆车`;$('level-select').append(option);}
 const session=window.WorkshopSession&&window.WorkshopSession({rules:'① 看车头箭头，点击小车沿直线出发。\n② 红框标出挡路的车，先让它们离开。\n③ 车辆太小时用 ＋ 放大，再滑动查看。没有倒计时。'});
 function requestGo(i){if(session&&state.remaining.length&&state.remaining.length<E.levelFor(state).cars.length){$('level-select').value=String(state.level);session.confirm(()=>go(i));}else go(i);}
 $('restart').addEventListener('click',()=>requestGo(state.level));$('next-level').addEventListener('click',()=>go((state.level+1)%16));$('level-select').addEventListener('change',e=>requestGo(Number(e.target.value)));
 function changeZoom(value){const v=$('board-viewport'),old=$('parking-board').offsetWidth,cx=v.scrollLeft+v.clientWidth/2,cy=v.scrollTop+v.clientHeight/2;zoom=value;layout();const ratio=$('parking-board').offsetWidth/old;v.scrollLeft=cx*ratio-v.clientWidth/2;v.scrollTop=cy*ratio-v.clientHeight/2;}
 $('zoom-in').addEventListener('click',()=>changeZoom(zoom*1.6));$('zoom-out').addEventListener('click',()=>changeZoom(Math.max(1,zoom/1.6)));$('zoom-reset').addEventListener('click',()=>{zoom=1;layout();$('board-viewport').scrollTo(0,0);});$('sound-toggle').addEventListener('click',()=>{sound=!sound;soundLabel();try{localStorage.setItem('cozy-parking-sound',sound?'on':'off');}catch(e){}if(sound)tone(false);});
-window.addEventListener('resize',layout);if(window.ResizeObserver)new ResizeObserver(layout).observe($('board-viewport'));soundLabel();render();persist();
+window.addEventListener('resize',layout);if(window.ResizeObserver)new ResizeObserver(layout).observe($('board-viewport'));soundLabel();render();checkSave();
 })();
