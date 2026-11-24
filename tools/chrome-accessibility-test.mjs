@@ -32,6 +32,37 @@ for (const initial of ['light', 'dark']) {
     assertTheme(initial === 'dark');
     toggle.click(); assertTheme(initial !== 'dark');
     toggle.click(); assertTheme(initial === 'dark');
+    const desktop = [...doc.querySelectorAll('[data-desktop-disclosure]')];
+    equal(desktop.length, 2, 'both desktop navigation disclosures');
+    for (const group of desktop) {
+        const trigger = group.querySelector('button');
+        const panel = doc.getElementById(trigger.getAttribute('aria-controls'));
+        const link = panel.querySelector('a');
+        const assertDisclosure = open => {
+            equal(trigger.getAttribute('aria-expanded'), String(open), 'desktop disclosure announces visibility');
+            equal(panel.hidden, !open, 'desktop closed links are not tabbable');
+        };
+        assertDisclosure(false);
+        trigger.focus();
+        trigger.click();
+        assertDisclosure(true);
+        link.focus();
+        link.dispatchEvent(new w.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+        assertDisclosure(false);
+        equal(doc.activeElement, trigger, 'desktop Escape restores focus');
+        trigger.click(); assertDisclosure(true);
+        toggle.focus(); assertDisclosure(false);
+        group.dispatchEvent(new w.PointerEvent('pointerenter', {pointerType:'mouse'}));
+        assertDisclosure(true);
+        group.dispatchEvent(new w.PointerEvent('pointerleave', {pointerType:'mouse'}));
+        assertDisclosure(false);
+        group.dispatchEvent(new w.PointerEvent('pointerenter', {pointerType:'touch'}));
+        assertDisclosure(false);
+        trigger.click(); assertDisclosure(true);
+        doc.body.click(); assertDisclosure(false);
+        trigger.click(); assertDisclosure(true);
+        trigger.click(); assertDisclosure(false);
+    }
     const open = doc.getElementById('mobile-menu-button');
     const close = doc.getElementById('close-menu-button');
     const menu = doc.getElementById('mobile-menu');

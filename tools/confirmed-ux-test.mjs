@@ -71,6 +71,55 @@ for (const series of ['robot-classic', 'rl', 'llm', 'robot-learn']) {
  await w.happyDOM.close();
 }
 
+// Number intent is confined to the active series catalog. Real reader
+// decorations must survive a filter redraw without changing the stored progress.
+for (const series of ['rl', 'llm', 'robot-classic', 'robot-learn']) {
+ const w=create('https://mylog.test/'+series+'/index.html'), d=w.document, html=read(series+'/index.html');
+ d.write(html.replace(/<script[\s\S]*?<\/script>/g,''));
+ w.eval(read(series+'/js/catalog.js'));
+ const posts=w.RL_POSTS||w.SERIES_POSTS;
+ const paper=post=>!post.kind ? !/reading-guide|timeline|epilogue/.test(post.slug) : post.kind==='paper';
+ const byDay=day=>posts.find(post=>paper(post)&&Number(post.day)===day);
+ const progress=JSON.stringify({[series+':'+byDay(61).slug]:1234});
+ w.localStorage.setItem('mylog-progress-v1',progress);
+ w.eval(read('js/reader.js'));
+ w.eval(read('js/series-hub.js'));
+ w.eval(scripts(html).find(s=>s.includes('SeriesHub.init')));
+ d.dispatchEvent(new w.Event('DOMContentLoaded'));
+ const input=d.querySelector('#series-search, #rl-search');
+ const root=d.querySelector('#series-catalog, #rl-catalog');
+ const count=d.querySelector('#series-count, #rl-count');
+ const buttons=[...d.querySelectorAll('[data-era]')];
+ const target=day=>byDay(day).slug+'.html';
+ const hits=()=>[...root.querySelectorAll('a.article-card')].map(a=>a.getAttribute('href'));
+ const search=value=>{input.value=value;input.dispatchEvent(new w.Event('input'));};
+ for(const day of [1,60,61,62,100]) {
+  const padded=String(day).padStart(3,'0');
+  const full=padded.replace(/\d/g,digit=>String.fromCharCode(0xFF10+Number(digit)));
+  for(const query of [String(day),'第'+day+'篇','第 '+padded+' 篇','Day '+day,'第'+full+'天']) {
+   search(query);
+   assert.deepEqual(hits(),[target(day)],series+' '+query);
+   check(count.textContent==='显示 1 篇论文精读', series+' '+query+' count');
+   if(day===61) check(root.querySelector('.read-badge')?.textContent==='已读',series+' badge remains');
+  }
+ }
+ const exact=buttons.find(b=>b.dataset.era===byDay(61).eraId);
+ const other=buttons.find(b=>b.dataset.era!=='all'&&b!==exact);
+ other.focus();other.click();search('第61篇');
+ assert.deepEqual(hits(),[],series+' does not fall back to unrelated text within another era');
+ check(other.getAttribute('aria-pressed')==='true'&&d.activeElement===other,series+' incompatible era remains selected');
+ exact.click();assert.deepEqual(hits(),[target(61)]);
+ buttons[0].click();
+ for(const query of ['Day 0','0','101','第999篇','2024','Vanilla 61','PPO','学习',' ','']) {
+  search(query);
+  const expected=Array.from(posts).filter(post=>!query.trim()||[post.title,post.cardTitle,post.shortTitle,post.question,String(post.year||''),post.excerpt,post.eraLabel]
+   .join(' ').toLowerCase().includes(query.toLowerCase())).map(post=>post.slug+'.html').sort();
+  assert.deepEqual(hits().sort(),expected,series+' unchanged text query '+query);
+ }
+ check(w.localStorage.getItem('mylog-progress-v1')===progress,series+' filtering never writes badges');
+ await w.happyDOM.close();
+}
+
 // Glossary uses canonical term as well as visible Chinese/English text.
 for(const q of ['RoPE','rope','旋转位置编码','Rotary Position Embedding']) {
  const w=create('https://mylog.test/glossary.html?q='+encodeURIComponent(q)),d=w.document;

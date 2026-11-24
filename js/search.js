@@ -4,8 +4,36 @@
     let loaded = false;
     let bound = false;
 
+    const lobby = 'game/index.html';
+    const solo = 'game/paodekuai.html';
+    const roomFragment = '#friend-rooms-title';
+    const roomQueries = new Set(['南昌麻将', '好友开房', '好友联机', '开房间', '房间号',
+        '跑得快联机', '在线跑得快', '跑得快房间', '南昌麻将联机',
+        '房间码', '六位房间码', '六位房间号', '6位房间号', '好友牌桌', '加入房间', '跑得快开房', '南昌麻将开房']);
+
+    function foldWidth(text) {
+        return text.replace(/[\uFF01-\uFF5E\u3000]/g, (char) =>
+            char === '\u3000' ? ' ' : String.fromCharCode(char.charCodeAt(0) - 0xFEE0));
+    }
+
+    function preferredPath(normalizedQuery) {
+        const intent = normalizedQuery.replace(/\s/g, '');
+        return roomQueries.has(intent) ? lobby : intent === '跑得快单机' ? solo : null;
+    }
+
+    function resultHref(item, preferred) {
+        if (preferred !== lobby || item.url !== lobby) return root + item.url;
+        const target = new URL(root + lobby, global.location.href);
+        const here = global.location;
+        const directory = target.pathname.slice(0, -'index.html'.length);
+        if (target.origin === here.origin && (here.pathname === target.pathname || here.pathname === directory)) {
+            return here.pathname + here.search + roomFragment;
+        }
+        return root + lobby + roomFragment;
+    }
+
     function normalize(text) {
-        return String(text || '')
+        return foldWidth(String(text || ''))
             .toLowerCase()
             .replace(/[‐‑–—]/g, '-')
             .replace(/\s+/g, ' ')
@@ -61,8 +89,7 @@
         return misses <= 2;
     }
 
-    function scoreItem(item, query) {
-        const q = normalize(query);
+    function scoreItem(item, q) {
         if (!q) return 0;
         const hay = normalize([
             item.title, item.cardTitle, item.question, item.excerpt,
@@ -91,27 +118,37 @@
         const q = query.trim();
         if (!q) return source;
         const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        return source.replace(new RegExp(escaped, 'ig'), (match) => `<mark>${match}</mark>`);
+        // Each folded character maps to one code unit in the displayed source.
+        let out = '', start = 0;
+        for (const match of foldWidth(source).matchAll(new RegExp(escaped, 'ig'))) {
+            const end = match.index + match[0].length;
+            out += source.slice(start, match.index) + '<mark>' + source.slice(match.index, end) + '</mark>';
+            start = end;
+        }
+        return out + source.slice(start);
     }
 
-    function renderResults(query) {
+    function renderResults(rawQuery) {
         const box = document.getElementById('site-search-results');
         if (!box) return;
+        const query = foldWidth(rawQuery);
         if (!query.trim()) {
             box.innerHTML = '<p class="text-gray-500 py-6 text-center">输入标题、方法名、年份或中文关键词。拼写差一点也可以。</p>';
             return;
         }
+        const normalizedQuery = normalize(query);
+        const preferred = preferredPath(normalizedQuery);
         const ranked = index
-            .map((item) => ({ item, score: scoreItem(item, query) }))
-            .filter((entry) => entry.score >= 18)
-            .sort((a, b) => b.score - a.score)
+            .map((item) => ({ item, score: scoreItem(item, normalizedQuery), promoted: preferred === item.url }))
+            .filter((entry) => entry.promoted || entry.score >= 18)
+            .sort((a, b) => Number(b.promoted) - Number(a.promoted) || b.score - a.score)
             .slice(0, 20);
         if (!ranked.length) {
             box.innerHTML = '<p class="text-gray-500 py-6 text-center">没有匹配。可以试试 PPO、注意力、A*、DMP。</p>';
             return;
         }
         box.innerHTML = ranked.map(({ item }) => `
-            <a class="site-search-hit" href="${root}${item.url}">
+            <a class="site-search-hit" href="${resultHref(item, preferred)}">
                 <div class="flex justify-between gap-3 mb-1">
                     <span class="font-medium text-gray-800">${highlight(item.cardTitle, query)}</span>
                     <span class="text-xs text-gray-400 shrink-0">${item.seriesLabel}${item.year ? ' · ' + item.year : ''}</span>
@@ -147,6 +184,21 @@
         if (modal) {
             modal.addEventListener('click', (event) => {
                 if (event.target === modal) closeModal();
+                if (event.defaultPrevented || event.button !== 0 || event.metaKey ||
+                    event.ctrlKey || event.shiftKey || event.altKey) return;
+                const link = event.target.closest('.site-search-hit');
+                if (!link || link.hash !== roomFragment) return;
+                const target = new URL(link.href);
+                const here = global.location;
+                if (target.origin !== here.origin || target.pathname !== here.pathname || target.search !== here.search) return;
+                const heading = document.getElementById(roomFragment.slice(1));
+                closeModal();
+                if (!heading) return;
+                if (!heading.hasAttribute('tabindex')) {
+                    heading.setAttribute('tabindex', '-1');
+                    heading.addEventListener('blur', () => heading.removeAttribute('tabindex'), { once: true });
+                }
+                heading.focus({ preventScroll: true });
             });
         }
         if (input) {

@@ -57,8 +57,8 @@
         changeRead(series, slug, () => value);
     }
 
-    function countRead(posts, series) {
-        return posts.filter((post) => post.day > 0 && post.kind !== 'overview' && post.kind !== 'epilogue' && !/epilogue|reading-guide/.test(post.slug) && isRead(series, post.slug)).length;
+    function countRead(posts, series, progress = loadProgress()) {
+        return posts.filter((post) => post.day > 0 && post.kind !== 'overview' && post.kind !== 'epilogue' && !/epilogue|reading-guide/.test(post.slug) && progress?.[progressKey(series, post.slug)]).length;
     }
 
     function slugifyHeading(text, used) {
@@ -193,12 +193,17 @@
         changeRead(series, slug, () => true, true);
     }
 
-    function decorateCatalog(series) {
-        const root = document.getElementById('series-catalog') || document.getElementById('rl-catalog');
+    function catalogRoot() {
+        return document.getElementById('series-catalog') || document.getElementById('rl-catalog');
+    }
+
+    function decorateCatalog(series, progress) {
+        const root = catalogRoot();
         if (!root || !series) return;
+        if (progress === undefined) progress = loadProgress();
         root.querySelectorAll('a[href$=".html"]').forEach((link) => {
             const slug = (link.getAttribute('href') || '').replace('.html', '');
-            if (isRead(series, slug)) {
+            if (progress?.[progressKey(series, slug)]) {
                 link.classList.add('is-read-card');
                 if (!link.querySelector('.read-badge')) {
                     const badge = document.createElement('span');
@@ -210,15 +215,15 @@
         });
     }
 
-    function renderHubProgress(posts, series) {
+    function renderHubProgress(posts, series, progress) {
         if (!posts || !series) return;
+        let host = document.getElementById('reading-progress');
+        const catalog = host ? null : catalogRoot();
+        if (!host && !catalog) return;
         const papers = posts.filter((post) => post.day > 0 && (post.kind || 'paper') === 'paper' && !/timeline|epilogue|reading-guide/.test(post.slug));
         if (!papers.length) return;
-        const read = countRead(papers, series);
-        let host = document.getElementById('reading-progress');
+        const read = countRead(papers, series, progress);
         if (!host) {
-            const catalog = document.getElementById('series-catalog') || document.getElementById('rl-catalog');
-            if (!catalog) return;
             host = document.createElement('div');
             host.id = 'reading-progress';
             host.className = 'reading-progress';
@@ -252,9 +257,15 @@
                 renderProgressButton(series, slug);
             }
         }
-        decorateCatalog(series);
+        const catalog = catalogRoot();
         const posts = global.SERIES_POSTS || global.RL_POSTS || (global.RL_CATALOG && global.RL_CATALOG.posts);
-        if (posts) renderHubProgress(posts, series);
+        const hasTotal = posts && (catalog || document.getElementById('reading-progress'));
+        if (series && (catalog || hasTotal)) {
+            // A snapshot is for this display pass only, never for a mutation.
+            const progress = loadProgress();
+            if (catalog) decorateCatalog(series, progress);
+            if (hasTotal) renderHubProgress(posts, series, progress);
+        }
     }
 
     global.SeriesReader = {
