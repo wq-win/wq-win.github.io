@@ -12,7 +12,7 @@
         { group: '游戏', href: 'game/sudoku.html', title: 'Sudoku' },
         { group: '游戏', href: 'game/spider.html', title: '蜘蛛纸牌' },
         { group: '游戏', href: 'game/doudizhu.html', title: '斗地主残局' },
-        { group: '游戏', href: 'game/paodekuai.html', title: '跑得快' },
+        { group: '游戏', href: 'game/paodekuai.html', title: '跑得快（单机）' },
         { group: '游戏', href: 'game/jianghu-slay/', title: '江湖 Slay' },
         { group: '强化学习', cat: 'rl', file: 'q-learning', href: 'game/rl/q-learning.html', title: 'Q-learning 迷宫' },
         { group: '强化学习', cat: 'rl', file: 'value-iteration', href: 'game/rl/value-iteration.html', title: '价值迭代' },
@@ -39,7 +39,10 @@
     }
 
     function gameGroups() {
-        const groups = [{ heading: '入口', items: [{ href: 'game/index.html', label: '全部演示' }] }];
+        const groups = [{ heading: '入口', items: [
+            { href: 'game/index.html', label: '全部演示' },
+            { href: 'game/index.html#friend-rooms-title', label: '好友开房' }
+        ] }];
         demoItems().forEach((item) => {
             let group = groups.find((entry) => entry.heading === item.group);
             if (!group) {
@@ -444,34 +447,34 @@
         return `<a href="${href}" class="${cls}">${label}</a>`;
     }
 
-    function dropdown(label, items, active, width) {
+    function dropdown(id, label, items, active, width) {
         const list = items.map((item) => {
             const current = item.id && item.id === active ? ' text-primary font-medium' : ' text-gray-700';
             return `<a href="${item.href}" class="block px-4 py-2 text-sm${current} hover:bg-indigo-50 hover:text-indigo-800">${item.label}</a>`;
         }).join('');
         return `
-                <div class="relative group">
-                    <button class="${active ? 'text-primary' : 'text-gray-700 hover:text-primary'} font-medium flex items-center focus:outline-none">
+                <div class="relative" data-desktop-disclosure>
+                    <button type="button" aria-controls="${id}" aria-expanded="false" class="${active ? 'text-primary' : 'text-gray-700 hover:text-primary'} font-medium flex items-center">
                         ${label} <i class="fa fa-caret-down ml-1 text-xs"></i>
                     </button>
-                    <div class="absolute right-0 mt-2 ${width || 'w-64'} bg-white rounded-md shadow-lg py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-50 max-h-[80vh] overflow-y-auto">
+                    <div id="${id}" hidden class="absolute right-0 top-full ${width || 'w-64'} bg-white rounded-md shadow-lg py-1 z-50 max-h-[80vh] overflow-y-auto">
                         ${list}
                     </div>
                 </div>`;
     }
 
-    function groupedDropdown(label, groups, width) {
+    function groupedDropdown(id, label, groups, width) {
         const list = groups.map((group) => {
             const head = group.heading ? `<div class="px-4 pt-2 pb-1 text-[11px] tracking-wide text-gray-400">${group.heading}</div>` : '';
             const items = group.items.map((item) => `<a href="${item.href}" class="block px-4 py-1.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-800">${item.label}</a>`).join('');
             return head + items;
         }).join('');
         return `
-                <div class="relative group">
-                    <button class="text-gray-700 hover:text-primary font-medium flex items-center focus:outline-none">
+                <div class="relative" data-desktop-disclosure>
+                    <button type="button" aria-controls="${id}" aria-expanded="false" class="text-gray-700 hover:text-primary font-medium flex items-center">
                         ${label} <i class="fa fa-caret-down ml-1 text-xs"></i>
                     </button>
-                    <div class="absolute right-0 mt-2 ${width || 'w-64'} bg-white rounded-md shadow-lg py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-50 max-h-[80vh] overflow-y-auto">
+                    <div id="${id}" hidden class="absolute right-0 top-full ${width || 'w-64'} bg-white rounded-md shadow-lg py-1 z-50 max-h-[80vh] overflow-y-auto">
                         ${list}
                     </div>
                 </div>`;
@@ -489,8 +492,8 @@
             </a>
             <div class="hidden md:flex items-center space-x-6">
                 ${navLink(root + 'index.html', 'Home')}
-                ${dropdown('系列', seriesItems, active)}
-                ${groupedDropdown('演示', groups.map((group) => ({
+                ${dropdown('desktop-series-links', '系列', seriesItems, active)}
+                ${groupedDropdown('desktop-demo-links', '演示', groups.map((group) => ({
                     heading: group.heading,
                     items: group.items.map((item) => ({ href: root + item.href, label: item.label }))
                 })), 'w-72')}
@@ -713,8 +716,60 @@
         button.classList.toggle('visible', show);
     }
 
+    function bindDesktopDisclosures() {
+        const groups = document.querySelectorAll('#site-header [data-desktop-disclosure]');
+        let open = null;
+        groups.forEach((group) => {
+            const trigger = group.querySelector('button');
+            const panel = document.getElementById(trigger.getAttribute('aria-controls'));
+            let pinned = false;
+            const state = {
+                group,
+                close(restoreFocus = false) {
+                    if (open !== state) return;
+                    open = null;
+                    pinned = false;
+                    trigger.setAttribute('aria-expanded', 'false');
+                    if (restoreFocus) trigger.focus();
+                    panel.hidden = true;
+                }
+            };
+            function show(pin) {
+                if (open && open !== state) open.close();
+                open = state;
+                pinned = pin;
+                panel.hidden = false;
+                trigger.setAttribute('aria-expanded', 'true');
+            }
+            trigger.addEventListener('click', () => {
+                if (open === state && pinned) state.close();
+                else show(true);
+            });
+            group.addEventListener('pointerenter', (event) => {
+                if (event.pointerType === 'mouse' && !open) show(false);
+            });
+            group.addEventListener('pointerleave', (event) => {
+                if (event.pointerType === 'mouse' && !pinned && !panel.contains(document.activeElement)) state.close();
+            });
+            group.addEventListener('focusout', (event) => {
+                if (!group.contains(event.relatedTarget)) state.close();
+            });
+            group.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && open === state) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    state.close(true);
+                }
+            });
+        });
+        document.addEventListener('click', (event) => {
+            if (open && !open.group.contains(event.target)) open.close();
+        });
+    }
+
     function bindChrome() {
         ensureBgLayer();
+        bindDesktopDisclosures();
         const mobileMenu = document.getElementById('mobile-menu');
         const backToTopButton = document.getElementById('back-to-top');
         const openMenu = document.getElementById('mobile-menu-button');
