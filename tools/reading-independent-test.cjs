@@ -58,6 +58,7 @@ async function testProgress(){
    setItem(k,v){assert.equal(k,key);writes++;if(failWrite)throw Error('blocked write');record=v;}
   }});
   w.ReadingGuide={mount(){}};
+  w.SERIES_POSTS=[{day:61,slug:'61-cpo',kind:'paper'}];
   w.eval(fs.readFileSync(root+'/js/reader.js','utf8'));
   return {w,d,record:()=>record,counts:()=>[reads,writes],failRead:()=>failRead=true,failWrite:()=>failWrite=true};
  };
@@ -87,11 +88,37 @@ async function testProgress(){
  }finally{await t.w.happyDOM.close();}
 }
 
+async function testHubProgress(){
+ for(const series of ['rl','llm','robot-learn','robot-classic']){
+  for(const mode of ['healthy','malformed','array','null','denied']){
+   const w=new Window({url:`https://mylog.test/${series}/index.html`}),d=w.document;
+   try{
+    d.write('<main><div id="series-catalog"><a href="paper-a.html"><div>A</div></a><a href="paper-b.html"><div>B</div></a></div></main>');
+    const key='mylog-progress-v1', marks={[series+':paper-a']:3,[series+':paper-b']:0}, posts=[{day:1,slug:'paper-a'},{day:2,slug:'paper-b'},{day:0,slug:'reading-guide',kind:'guide'}];
+    let reads=0,raw=mode==='healthy'?JSON.stringify(marks):mode==='malformed'?'{':mode==='array'?'[]':'null';
+    Object.defineProperty(w,'localStorage',{value:{getItem(k){assert.equal(k,key);reads++;if(mode==='denied')throw Error('blocked');return raw;},setItem(){assert.fail('catalog display wrote progress');}}});
+    w.SERIES_POSTS=posts;
+    w.eval(fs.readFileSync(root+'/js/reader.js','utf8'));
+    w.SeriesReader.init();
+    assert.equal(reads,1,'all visible reader progress uses one snapshot: '+series+' '+mode);
+    assert.match(d.getElementById('reading-progress').textContent,mode==='healthy'?/1 \/ 2/:/0 \/ 2/);
+    assert.equal(d.querySelectorAll('.read-badge').length,mode==='healthy'?1:0);
+    d.getElementById('series-catalog').innerHTML='<a href="paper-b.html"><div>B</div></a>';
+    raw=JSON.stringify({[series+':paper-b']:5});
+    w.SeriesReader.decorateCatalog(series);
+    assert.equal(reads,2,'later filtered catalog refresh reads once');
+    assert.equal(d.querySelectorAll('.read-badge').length,mode==='denied'?0:1);
+   }finally{await w.happyDOM.close();}
+  }
+ }
+}
+
 (async()=>{
  let dependency=process.env.HAPPY_DOM_PATH||'happy-dom';
  if(dependency!=='happy-dom'&&fs.statSync(dependency).isDirectory())dependency=path.join(dependency,'lib/index.js');
  ({Window}=await import(dependency));
  await testProgress();
+ await testHubProgress();
  await testRuntime();
  const referenceChecks=await testReference();
  console.log(`${runtimeChecks} production-bootstrap and ${referenceChecks} reference assertions passed; reader save faults and public API covered.`);

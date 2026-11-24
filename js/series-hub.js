@@ -4,6 +4,7 @@
         const eraOrder = config.eras || [{ id: 'all', label: '全部' }];
         let activeEra = 'all';
         let query = '';
+        let queryDay = null;
 
         function postKind(post) {
             if (post.kind) return post.kind;
@@ -14,6 +15,17 @@
             return 'paper';
         }
 
+        const paperDays = new Set(papers().map(post => Number(post.day))
+            .filter(day => Number.isInteger(day) && day > 0));
+
+        function resolveDay(value) {
+            const normalized = value.trim().replace(/[０-９]/g, digit => String(digit.charCodeAt(0) - 0xFF10));
+            const match = /^(?:第\s*(\d{1,3})\s*[篇天]|day\s*(\d{1,3})|(\d{1,3}))$/i.exec(normalized);
+            if (!match) return null;
+            const day = Number(match[1] || match[2] || match[3]);
+            return paperDays.has(day) ? day : null;
+        }
+
         function postTitle(post) {
             return post.cardTitle || post.shortTitle || post.title || post.slug;
         }
@@ -21,6 +33,7 @@
         function matches(post) {
             if (activeEra !== 'all' && post.eraId !== activeEra) return false;
             if (!query.trim()) return true;
+            if (queryDay !== null) return postKind(post) === 'paper' && Number(post.day) === queryDay;
             const q = query.toLowerCase();
             return [post.title, post.cardTitle, post.shortTitle, post.question, String(post.year || ''), post.excerpt, post.eraLabel]
                 .join(' ')
@@ -148,6 +161,7 @@
             if (search) {
                 search.addEventListener('input', (event) => {
                     query = event.target.value;
+                    queryDay = resolveDay(query);
                     renderCatalog();
                 });
             }
