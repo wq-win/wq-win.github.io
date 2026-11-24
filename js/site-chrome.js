@@ -716,9 +716,12 @@
         button.classList.toggle('visible', show);
     }
 
+    let desktopOpen = null;
+    let desktopDismissBound = false;
+
     function bindDesktopDisclosures() {
         const groups = document.querySelectorAll('#site-header [data-desktop-disclosure]');
-        let open = null;
+        desktopOpen = null;
         groups.forEach((group) => {
             const trigger = group.querySelector('button');
             const panel = document.getElementById(trigger.getAttribute('aria-controls'));
@@ -726,8 +729,8 @@
             const state = {
                 group,
                 close(restoreFocus = false) {
-                    if (open !== state) return;
-                    open = null;
+                    if (desktopOpen !== state) return;
+                    desktopOpen = null;
                     pinned = false;
                     trigger.setAttribute('aria-expanded', 'false');
                     if (restoreFocus) trigger.focus();
@@ -735,18 +738,18 @@
                 }
             };
             function show(pin) {
-                if (open && open !== state) open.close();
-                open = state;
+                if (desktopOpen && desktopOpen !== state) desktopOpen.close();
+                desktopOpen = state;
                 pinned = pin;
                 panel.hidden = false;
                 trigger.setAttribute('aria-expanded', 'true');
             }
             trigger.addEventListener('click', () => {
-                if (open === state && pinned) state.close();
+                if (desktopOpen === state && pinned) state.close();
                 else show(true);
             });
             group.addEventListener('pointerenter', (event) => {
-                if (event.pointerType === 'mouse' && !open) show(false);
+                if (event.pointerType === 'mouse' && !desktopOpen) show(false);
             });
             group.addEventListener('pointerleave', (event) => {
                 if (event.pointerType === 'mouse' && !pinned && !panel.contains(document.activeElement)) state.close();
@@ -755,16 +758,19 @@
                 if (!group.contains(event.relatedTarget)) state.close();
             });
             group.addEventListener('keydown', (event) => {
-                if (event.key === 'Escape' && open === state) {
+                if (event.key === 'Escape' && desktopOpen === state) {
                     event.preventDefault();
                     event.stopPropagation();
                     state.close(true);
                 }
             });
         });
-        document.addEventListener('click', (event) => {
-            if (open && !open.group.contains(event.target)) open.close();
-        });
+        if (!desktopDismissBound) {
+            desktopDismissBound = true;
+            document.addEventListener('click', (event) => {
+                if (desktopOpen && !desktopOpen.group.contains(event.target)) desktopOpen.close();
+            });
+        }
     }
 
     function bindChrome() {
