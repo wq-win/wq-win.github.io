@@ -48,7 +48,18 @@ assert.notEqual(source,instrumented);
   c.api.select('furnace');c.window.document.querySelector('[data-heat="3"]').click();assert.equal(c.api.state.furnace.level,3);assert.match(c.$('heat-info').textContent,/32.6/);
   const beforeDispatch=c.api.state.jobs.wood;c.window.document.querySelector('[data-dispatch="wood"]').click();assert.equal(c.api.state.jobs.wood,beforeDispatch+1);assert.equal(E.view(c.api.state).workers,E.view(c.api.state).population,'dispatch transfers instead of creating workers');assert.match(c.$('scene-feedback').textContent,/调派/);
   for(const [job,x,y] of [['wood',885,350],['coal',770,190],['hunt',210,290]]){const count=c.api.state.jobs[job];c.canvasClick(x,y);assert.equal(c.api.state.jobs[job],count+1,'raw canvas '+job+' hit target');assert.equal(E.view(c.api.state).workers,8);}
+  assert.equal(c.$('pin-furnace').textContent,'3 档 · 调至 1 档');
+  assert.match(c.window.document.querySelector('[data-building="furnace"]').getAttribute('aria-label'),/调至 1 档/);
   c.canvasClick(510,255);assert.equal(c.api.state.furnace.level,1,'canvas furnace cycles heat');
+  assert.equal(c.$('action-message').textContent,'炉火已调至 1 档');
+  for(const [level,next] of [[0,1],[1,2],[2,3],[3,1]]){
+    c.window.document.querySelector('[data-heat="'+level+'"]').click();
+    assert.equal(c.$('pin-furnace').textContent,level+' 档 · 调至 '+next+' 档');
+    if(level===0)assert.equal(c.$('action-message').textContent,'炉火已关闭');
+    c.window.document.querySelector('[data-building="furnace"]').click();
+    assert.equal(c.api.state.furnace.level,next);
+    assert.equal(c.$('action-message').textContent,'炉火已调至 '+next+' 档');
+  }
   c.api.state.resources.wood=100;c.canvasClick(370,210);assert.ok(c.api.state.queue.some(q=>q.building==='clinic'),'canvas clinic starts construction');c.canvasClick(735,290);assert.ok(c.api.state.queue.some(q=>q.building==='sawmill'),'canvas sawmill starts construction');
   c.api.select('furnace');c.window.document.querySelector('[data-heat="3"]').click();
   c.$('speed').click();assert.match(c.$('speed').textContent,/2×/);
@@ -60,7 +71,7 @@ assert.notEqual(source,instrumented);
   c.api.state.status='lost';c.api.state.reason='居民不足';c.api.state.residents.forEach(r=>r.alive=false);c.api.sync();assert.equal(c.$('value-food').textContent,'0%');assert.equal(c.$('value-warm').textContent,'0%');assert.match(c.$('result-title').textContent,/炉火/);
   c.$('result-restart').click();assert.equal(c.api.state.status,'ready');
   assert.match(c.$('resource-outlook').textContent,/当前净变化/);
-  c.$('inspect-map').click();assert.equal(c.$('inspect-map').getAttribute('aria-pressed'),'true');
+  c.$('inspect-map').click();assert.equal(c.$('inspect-map').getAttribute('aria-pressed'),'true');assert.match(c.$('pin-furnace').textContent,/查看$/);
   const planning=JSON.stringify(c.api.state);c.window.document.querySelector('[data-building="housing"]').click();c.canvasClick(510,255);c.window.document.querySelector('[data-dispatch="wood"]').click();
   assert.equal(JSON.stringify(c.api.state),planning,'inspection mode never spends resources or changes staffing');
   c.$('inspect-map').click();assert.equal(c.$('inspect-map').getAttribute('aria-pressed'),'false');

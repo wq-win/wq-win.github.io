@@ -56,8 +56,8 @@ function renderMarkdown(source) {
   }
   return { html, headings };
 }
-function shell(title, body, description = '') {
-  return `<!DOCTYPE html>\n<html lang="zh-CN"><head>\n<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} | MyLog 英语</title>\n<meta name="description" content="${esc(description || title)}">\n<script>try{if(localStorage.getItem('mylog-theme')==='dark')document.documentElement.classList.add('dark')}catch(e){}</script>\n<script src="../js/vendor/tailwind.js"></script><link rel="stylesheet" href="../css/font-awesome.min.css"><link rel="stylesheet" href="../css/style.css"><link rel="stylesheet" href="css/course.css">\n</head><body class="course-page"><a class="course-skip" href="#course-main">跳到正文</a><div id="site-header"></div>\n<main id="course-main" class="course-main">${body}</main>\n<noscript><p class="course-main course-small">如需打印，请先手动展开本页答案与说明，再使用浏览器打印。</p></noscript><div id="site-footer"></div><script src="../js/site-config.js"></script><script src="../js/site-chrome.js"></script><script>SeriesChrome.mount({root:'../',active:'english',seriesLabel:'英语学习'});</script><script src="js/course.js"></script>\n</body></html>\n`;
+function shell(title, body, description = '', courseVersion = '') {
+  return `<!DOCTYPE html>\n<html lang="zh-CN"><head>\n<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} | MyLog 英语</title>\n<meta name="description" content="${esc(description || title)}">\n<script>try{if(localStorage.getItem('mylog-theme')==='dark')document.documentElement.classList.add('dark')}catch(e){}</script>\n<script src="../js/vendor/tailwind.js"></script><link rel="stylesheet" href="../css/font-awesome.min.css"><link rel="stylesheet" href="../css/style.css"><link rel="stylesheet" href="css/course.css">\n</head><body class="course-page"><a class="course-skip" href="#course-main">跳到正文</a><div id="site-header"></div>\n<main id="course-main" class="course-main">${body}</main>\n<noscript><p class="course-main course-small">如需打印，请先手动展开本页答案与说明，再使用浏览器打印。</p></noscript><div id="site-footer"></div><script src="../js/site-config.js"></script><script src="../js/site-chrome.js"></script><script>SeriesChrome.mount({root:'../',active:'english',seriesLabel:'英语学习'});</script><script src="js/course.js${courseVersion}"></script>\n</body></html>\n`;
 }
 function refs(lesson, sources) {
   return (lesson.source_refs || []).map(ref => {
@@ -96,13 +96,13 @@ function indexPage(lessons, guides = []) {
       groups += `<section class="course-semester" data-course-group><h3>${esc(semester)}</h3><ol class="course-lessons">`;
       for (const lesson of stageLessons.filter(item => `${item.gradeLabel} · ${item.semester}` === semester)) {
         const search = [lesson.title, lesson.gradeLabel, lesson.semester, STAGES[lesson.stage].label, ...lesson.tags, ...(lesson.objectives || []).map(item => item.text)].join(' ');
-        groups += `<li class="course-lesson-card" data-course-lesson data-stage="${stageId}" data-grade="${esc(lesson.gradeLabel)}" data-search="${esc(search)}"><h4><a href="${lesson.slug}.html">${esc(lesson.title)}</a></h4><p>${esc((lesson.objectives || [])[0]?.text || lesson.alignment_note)}</p><div class="course-tags">${lesson.tags.slice(0, 5).map(tag => `<span class="course-tag">${esc(tag)}</span>`).join('')}</div></li>`;
+        groups += `<li class="course-lesson-card" data-course-lesson data-stage="${stageId}" data-grade="${esc(lesson.gradeLabel)}" data-semester="${esc(lesson.semester)}" data-search="${esc(search)}"><h4><a href="${lesson.slug}.html">${esc(lesson.title)}</a></h4><p>${esc((lesson.objectives || [])[0]?.text || lesson.alignment_note)}</p><div class="course-tags">${lesson.tags.slice(0, 5).map(tag => `<span class="course-tag">${esc(tag)}</span>`).join('')}</div></li>`;
       }
       groups += '</ol></section>';
     }
     groups += '</section>';
   }
-  return shell('英语学习：小学—初中—高中—大学', hero + scope + stageCards + `<section id="course-directory"><h2>课程目录</h2>${filter}${groups}</section>`, '江西暂定人教版参照的原创英语分阶段学习资料；每课含讲解、例题、练习和答案。');
+  return shell('英语学习：小学—初中—高中—大学', hero + scope + stageCards + `<section id="course-directory"><h2>课程目录</h2>${filter}${groups}</section>`, '江西暂定人教版参照的原创英语分阶段学习资料；每课含讲解、例题、练习和答案。', '?v=20261125-semester');
 }
 function coveragePage(lessons) {
   const intro = `<header class="course-hero"><p class="course-eyebrow"><a href="index.html">英语学习</a> / Coverage</p><h1>目标要有落点，练习要有答案。</h1><p class="course-lead">下表统计的是已写成课程的自定学习目标，逐项链接实际讲解和练习。它不是最新版课标逐条审计，也不是全套教材词表／单元已完全覆盖的证明。阶段缺项和教材待核事项见<a href="sources.html">来源与范围</a>。</p></header>`;
