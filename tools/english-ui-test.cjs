@@ -79,6 +79,28 @@ const { ROOT, COURSE, loadLessons } = require('./build-english.cjs');
       assertOptions(stage);
     }
     assert.deepEqual([possible,impossible],[16,48]);
+    function resultLinks() {
+      return Array.from(md.querySelectorAll('[data-course-lesson]:not([hidden]) a'), el => el.getAttribute('href')).sort();
+    }
+    const digits = '三四五六七八九';
+    for (let n = 3; n <= 9; n++) {
+      const label = digits[n - 3] + '年级';
+      for (const semester of ['上','下']) for (const prefix of [n, digits[n - 3]]) {
+        const query = prefix + '年级' + semester + '册';
+        restore('', '', query);
+        assert.deepEqual(resultLinks(), lessons.filter(l => l.gradeLabel === label && l.semester === semester).map(l => l.slug + '.html').sort(), query);
+      }
+    }
+    for (const [query, count] of [['7年级',18],['７年级',18],['七年级 上',9],['七年级 上册 名词',2],['７年级下册 时态',2],['高一上学期',6],['17年级',0],['11—20',1]]) {
+      restore('', '', query);
+      assert.equal(resultCount(), count, query);
+      assert.equal(matrixQuery.value, query);
+      assert.equal(new URL(matrix.location.href).searchParams.get('q'), query);
+    }
+    restore('senior', '', '7年级上册'); assert.equal(resultCount(), 0);
+    restore('junior', '八年级', '7年级上册'); assert.equal(resultCount(), 0);
+    const gradeShared = setup('index.html', 'index.html?stage=junior&q=7年级#course-directory');
+    assert.equal(gradeShared.document.querySelectorAll('[data-course-lesson]:not([hidden])').length, 18);
     const deep = setup('index.html', 'index.html?stage=senior&grade=%E4%B8%89%E5%B9%B4%E7%BA%A7&q=+%E6%97%B6%E6%80%81+&keep=1#units');
     const deepURL = new URL(deep.location.href);
     assert.equal(deepURL.searchParams.has('grade'),false);

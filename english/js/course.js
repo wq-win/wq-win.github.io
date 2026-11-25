@@ -21,12 +21,21 @@
     const status = document.getElementById('course-result-count');
     const empty = document.getElementById('course-empty');
     const normalize = value => String(value || '').toLowerCase().normalize('NFKC').trim();
+    function queryParts(value) {
+      const normalized = normalize(value);
+      const match = /(^|\s)(?:([3-9三四五六七八九])年级|(高[一二三]))(?:\s*([上下])(?:学期|册)?(?=\s|$))?(?=\s|$)/.exec(normalized);
+      if (!match) return { words: normalized.split(/\s+/).filter(Boolean) };
+      const level = match[2];
+      const label = match[3] || (/^[3-9]$/.test(level) ? '三四五六七八九'[Number(level) - 3] : level) + '年级';
+      const rest = normalized.slice(0, match.index) + ' ' + normalized.slice(match.index + match[0].length);
+      return { label, semester: match[4], words: rest.split(/\s+/).filter(Boolean) };
+    }
     function apply(updateURL) {
       const droppedGrade = syncGrade();
-      const words = normalize(query.value).split(/\s+/).filter(Boolean);
+      const { label, semester, words } = queryParts(query.value);
       let visible = 0;
       cards.forEach(card => {
-        const matches = (!stage.value || card.dataset.stage === stage.value) && (!grade.value || card.dataset.grade === grade.value) && words.every(word => normalize(card.dataset.search).includes(word));
+        const matches = (!stage.value || card.dataset.stage === stage.value) && (!grade.value || card.dataset.grade === grade.value) && (!label || card.dataset.grade === label) && (!semester || card.dataset.semester === semester) && words.every(word => normalize(card.dataset.search).includes(word));
         card.hidden = !matches;
         if (matches) visible += 1;
       });

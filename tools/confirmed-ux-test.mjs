@@ -171,4 +171,29 @@ for(const dark of [false,true]) {
  check(rects.length===144 && rects.every(([,y,,h])=>y+h<=height-20), 'temperature redraw retains full 12-token matrix');
  await w.happyDOM.close();
 }
+// Optional diagram failure must not remove site chrome or typed article links.
+for (const kind of ['offline','missing','throw','reject','silent','ready','dark']) {
+ const w=create('https://mylog.test/map.html'),d=w.document,html=read('map.html');
+ d.write(html.replace(/<script[\s\S]*?<\/script>/g,''));
+ const graph=d.getElementById('concept-graph'), text=d.getElementById('concept-links');
+ let mounted=0, theme;
+ w.SeriesChrome={mount(){mounted++;}};
+ if(kind==='dark')d.documentElement.classList.add('dark');
+ if(kind!=='missing')w.mermaid={
+  initialize(options){theme=options.theme;if(kind==='throw')throw Error('mermaid unavailable');},
+  async run({nodes}){if(kind==='reject')throw Error('render failure');if(kind!=='silent')nodes[0].innerHTML='<svg></svg>';}
+ };
+ w.eval(scripts(html).find(s=>s.includes('function graphUnavailable')));
+ check(mounted===1 && graph.hidden,'site navigation mounts before fetching diagram');
+ const alternate=[...text.querySelectorAll('a')].map(a=>a.getAttribute('href')).sort();
+ check(JSON.stringify(alternate)===JSON.stringify([...html.matchAll(/click [A-Z]+ "([^"]+)"/g)].map(m=>m[1]).sort()),'ordinary link for every clickable node');
+ check(d.querySelectorAll('section[aria-label="对照阅读与演示"] a').length===10,'both reading tracks plus four demos');
+ d.querySelector('script[src*="mermaid"]').dispatchEvent(new w.Event(kind==='offline'?'error':'load'));
+ await new Promise(resolve => setImmediate(resolve));
+ if(kind==='ready'||kind==='dark'){
+  check(!graph.hidden && graph.style.visibility==='' && graph.querySelector('svg'),'optional diagram renders on success');
+  check(theme===(kind==='dark'?'dark':'neutral'),'diagram inherits launch theme');
+ }else check(graph.hidden && text.open && !d.getElementById('concept-graph-unavailable').hidden,'diagram error exposes ordinary links: '+kind);
+ await w.happyDOM.close();
+}
 console.log(`${checks} confirmed UX regression checks passed (DOM and drawing commands, not browser visual QA).`);

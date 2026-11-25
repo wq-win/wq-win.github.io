@@ -132,6 +132,47 @@ async function main() {
             assert.equal(cell(row, col).querySelector('.cell-value').textContent, '');
             assert.ok(!cell(row, col).classList.contains('cell-conflict'));
         });
+        await test('selecting the current difficulty preserves a started puzzle', () => {
+            const g = setup(390, 844);
+            const { row, col } = g.empty();
+            g.cell(row, col).click();
+            g.key(String(g.state.solution[row][col]));
+            g.find('give-hint').click();
+            g.state.elapsedTime = 47;
+            const view = g.snapshot();
+            assert.equal(g.find('undo-input').disabled, false);
+            g.find('easy').click();
+            assert.deepEqual(g.snapshot(), view);
+            g.find('undo-input').click();
+            assert.equal(g.state.hintCount, view.hintCount - 1);
+            g.find('medium').click();
+            assert.equal(g.state.difficulty, 'medium');
+            assert.equal(g.state.elapsedTime, 0);
+            assert.equal(g.find('undo-input').disabled, true);
+            const medium = g.snapshot();
+            g.find('new-game').click();
+            assert.equal(g.state.difficulty, 'medium');
+            assert.notDeepEqual(g.state.original, medium.original);
+        });
+        await test('same digit and clear on empty do not consume undo history', () => {
+            const g = setup();
+            const { row, col } = g.empty();
+            g.cell(row, col).click();
+            const digit = String(g.state.solution[row][col]);
+            g.key(digit);
+            for (let i = 0; i < 105; i++) {
+                g.cell(row, col).click();
+                g.key(digit);
+            }
+            const emptyCell = g.document.querySelector('#sudoku-board [data-row="'+g.state.selectedCell.row+'"][data-col="'+g.state.selectedCell.col+'"]');
+            assert.ok(emptyCell, 'reentering the correct digit still advances');
+            assert.notDeepEqual(g.state.selectedCell, {row,col});
+            g.find('clear-btn').click();
+            g.key('Backspace');
+            g.find('undo-input').click();
+            assert.equal(g.state.board[row][col], 0);
+            assert.equal(g.find('undo-input').disabled, true);
+        });
         await test('undo restores input and clear without touching clues; new game clears history', () => {
             find('new-game').click(); assert.equal(find('undo-input').disabled,true);
             const {row,col}=empty(); cell(row,col).click();

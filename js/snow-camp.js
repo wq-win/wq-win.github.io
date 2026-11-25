@@ -10,6 +10,7 @@
     const hints = {wood:'木材 / 建筑升级',hunt:'生食 / 暴雪减产',coal:'煤炭 / 维持供暖',cook:'生食 → 餐食',build:'逐项完成施工',medic:'需先建医务站'};
     const tips = {furnace:'气温加上供暖与住所保温，就是居民的体感温度。低于 0°C 时寒冷会累积。',housing:'房屋升级为所有居民保温，每级增加 6°C。升级须由建造工完成。',sawmill:'锯木场每级让伐木产量增加 50%。木材可用于所有建筑升级。',kitchen:'厨房升级可提高加工速度与食材利用率。没有生食，厨师也无法做饭。',clinic:'医务站建成后，分配医护才能持续恢复居民健康。保暖和充足餐食仍然重要。'};
     let feedbackUntil=0, previousMilestones=new Set(), inspectMap=false;
+    const nextHeat = () => state.furnace.level >= 3 ? 1 : state.furnace.level + 1;
     // Exact storage bytes, not elapsed time: a deliberate restart can be newer at time zero.
     let checkpoint;
     function readSlot(){
@@ -35,7 +36,7 @@
         button.addEventListener('click',()=>{
             select(key);
             if(inspectMap){feedback('已查看'+names[key]+'，可在设施面板确认操作。');return;}
-            if(key==='furnace') action({type:'heat',level:state.furnace.level>=3?1:state.furnace.level+1});
+            if(key==='furnace') action({type:'heat',level:nextHeat()});
             else action({type:'build',building:key});
         });$('building-pins').appendChild(button);
     });
@@ -54,7 +55,7 @@
         if(x>130&&x<260&&y>240&&y<340){action({type:'dispatch',job:'hunt'});return;}
         const anchors={furnace:[510,255],housing:[325,350],sawmill:[735,290],kitchen:[650,420],clinic:[370,210]};
         const hit=Object.entries(anchors).filter(([,p])=>Math.abs(x-p[0])<65&&Math.abs(y-p[1])<65).sort((a,b)=>Math.hypot(x-a[1][0],y-a[1][1])-Math.hypot(x-b[1][0],y-b[1][1]))[0];
-        if(hit){const key=hit[0];select(key);action(key==='furnace'?{type:'heat',level:state.furnace.level>=3?1:state.furnace.level+1}:{type:'build',building:key});}
+        if(hit){const key=hit[0];select(key);action(key==='furnace'?{type:'heat',level:nextHeat()}:{type:'build',building:key});}
     });
     Object.keys(E.JOBS).forEach(key=>{
         const row=document.createElement('div');row.className='job-row';row.innerHTML='<div class="job-name">'+E.JOBS[key].name+'<small>'+hints[key]+'</small></div><div class="job-controls"><button data-job="'+key+'" data-delta="-1" aria-label="减少一名'+E.JOBS[key].name+'工人">−</button><b id="job-'+key+'">0</b><button data-job="'+key+'" data-delta="1" aria-label="增加一名'+E.JOBS[key].name+'工人">＋</button></div>';$('job-list').appendChild(row);
@@ -90,7 +91,7 @@
         return slot;
     }
     function feedback(message,ok=true){$('scene-feedback').textContent=message;$('scene-feedback').classList.toggle('error',!ok);$('scene-feedback').hidden=false;feedbackUntil=performance.now()+4200;}
-    function action(a){const result=E.act(state,a);$('action-message').textContent=result.message;feedback(result.message,result.ok);sync();persist();return result;}
+    function action(a){const result=E.act(state,a);const message=result.ok&&a.type==='heat'&&a.level?'炉火已调至 '+a.level+' 档':result.message;$('action-message').textContent=message;feedback(message,result.ok);sync();persist();return result;}
     function select(key){selected=key;$('action-message').textContent='';renderDetails();sync();}
     function renderDetails(){
         $('building-name').textContent=names[selected];$('building-art').textContent=icons[selected];$('building-description').textContent=selected==='furnace'?'暖炉是营地的心脏。燃烧煤炭，为每一位居民抵御风雪。':E.BUILDINGS[selected].description+'。';$('building-tip').textContent=tips[selected];
@@ -129,7 +130,7 @@
         document.querySelectorAll('[data-building]').forEach(b=>{
             const key=b.dataset.building,q=state.queue.find(q=>q.building===key),level=state.buildings[key];
             b.classList.toggle('selected',key===selected);b.classList.toggle('constructing',!!q);b.setAttribute('aria-pressed',key===selected?'true':'false');b.disabled=intro||ended;
-            const label=key==='furnace'?'升火 · '+state.furnace.level+'档':q?'施工 '+Math.floor(q.progress/q.required*100)+'%':level>=2?'已满级':(level?'升级':'建造')+' · '+E.BUILDINGS[key].costs[level]+'木';
+            const label=key==='furnace'?state.furnace.level+' 档 · '+(inspectMap?'查看':'调至 '+nextHeat()+' 档'):q?'施工 '+Math.floor(q.progress/q.required*100)+'%':level>=2?'已满级':(level?'升级':'建造')+' · '+E.BUILDINGS[key].costs[level]+'木';
             $('pin-'+key).textContent=label;b.setAttribute('aria-label',names[key]+'，'+label);
             b.style.setProperty('--build-progress',q?Math.floor(q.progress/q.required*100)+'%':'0%');
         });
