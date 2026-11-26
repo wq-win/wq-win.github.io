@@ -154,7 +154,9 @@
         return n === 2 || n === 4 ? n : 1;
     }
 
-    var RUN_KEY = 'mylog-spider-run-v1';
+    var RUN_KEY = 'mylog-spider-run-v1', expectedRun;
+    var runReadIssue = '无法读取存档 · 本页进度未保存';
+    var runIssue = runReadIssue;
     function validRun(run) {
         if (!run || ![1,2,4].includes(run.suits) || !Number.isInteger(run.done) || run.done<0 || run.done>8 || !Array.isArray(run.columns) || run.columns.length!==10 || !run.columns.every(Array.isArray) || !Array.isArray(run.stock) || run.stock.length>50 || run.stock.length%10) return false;
         var cards = run.columns.flat().concat(run.stock), deck = buildDeck(run.suits), ids = new Set();
@@ -164,15 +166,38 @@
             ids.add(card.id); var expected=deck[card.id-1]; return card.r===expected.r && card.s===expected.s;
         }) && run.columns.every(function(col){ return !col.length || col[col.length-1].up; });
     }
-    // Save board mutations explicitly; rendering must not overwrite other tabs.
+    function showRunIssue(text) {
+        var node = document.getElementById('spider-save-note');
+        if (node && node.textContent !== text) node.textContent = text;
+    }
+    // Only committed actions save, and only while the observed checkpoint still matches.
     function saveRun() {
-        try { localStorage.setItem(RUN_KEY, JSON.stringify({version:1,state:state,past:past})); } catch (_) {}
+        if (expectedRun === undefined) { showRunIssue(runIssue); return; }
+        try {
+            if (localStorage.getItem(RUN_KEY) !== expectedRun) {
+                expectedRun = undefined;
+                runIssue = '其他页面已更改存档 · 本页进度未保存';
+                showRunIssue(runIssue);
+                return;
+            }
+        } catch (_) { showRunIssue(runReadIssue); return; }
+        try {
+            var raw = JSON.stringify({version:1,state:state,past:past});
+            localStorage.setItem(RUN_KEY, raw);
+            expectedRun = raw;
+            showRunIssue('');
+        } catch (_) { showRunIssue('无法保存本页进度 · 请勿关闭页面'); }
     }
     function restoreRun() {
+        var raw;
+        try { raw = localStorage.getItem(RUN_KEY); } catch (_) { return false; }
+        if (raw === null) { expectedRun = null; return false; }
+        runIssue = '存档无法识别 · 本页不会覆盖原存档';
         try {
-            var raw=localStorage.getItem(RUN_KEY); if (!raw || raw.length>700000) return false;
-            var saved=JSON.parse(raw);
-            if(saved.version!==1 || !validRun(saved.state) || !Array.isArray(saved.past) || saved.past.length>80 || !saved.past.every(validRun)) return false;
+            if (raw.length > 700000) return false;
+            var saved = JSON.parse(raw);
+            if (!saved || saved.version !== 1 || !validRun(saved.state) || !Array.isArray(saved.past) || saved.past.length > 80 || !saved.past.every(validRun)) return false;
+            expectedRun = raw;
             state=saved.state; past=saved.past; selected=null; setMessage('已恢复上次牌局 · 撤销记录也保留'); render(); return true;
         } catch (_) { return false; }
     }

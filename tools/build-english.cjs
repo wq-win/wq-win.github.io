@@ -102,7 +102,7 @@ function indexPage(lessons, guides = []) {
     }
     groups += '</section>';
   }
-  return shell('英语学习：小学—初中—高中—大学', hero + scope + stageCards + `<section id="course-directory"><h2>课程目录</h2>${filter}${groups}</section>`, '江西暂定人教版参照的原创英语分阶段学习资料；每课含讲解、例题、练习和答案。', '?v=20261125-semester');
+  return shell('英语学习：小学—初中—高中—大学', hero + scope + stageCards + `<section id="course-directory"><h2>课程目录</h2>${filter}${groups}</section>`, '江西暂定人教版参照的原创英语分阶段学习资料；每课含讲解、例题、练习和答案。', '?v=20261126-joined-term');
 }
 function coveragePage(lessons) {
   const intro = `<header class="course-hero"><p class="course-eyebrow"><a href="index.html">英语学习</a> / Coverage</p><h1>目标要有落点，练习要有答案。</h1><p class="course-lead">下表统计的是已写成课程的自定学习目标，逐项链接实际讲解和练习。它不是最新版课标逐条审计，也不是全套教材词表／单元已完全覆盖的证明。阶段缺项和教材待核事项见<a href="sources.html">来源与范围</a>。</p></header>`;

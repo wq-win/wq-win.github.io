@@ -19,7 +19,7 @@ const clone = value => JSON.parse(JSON.stringify(value));
 async function testSharedStorage(Window) {
     const SAVE='mylog-forest-defense-checkpoint-v2', STARS='mylog-forest-tactics-stars-v1';
     const items=new Map(), writes=[], tabs=[];
-    function open() {
+    function open({ failFirstRead = false, failLegacyRead = false } = {}) {
         const w=new Window({url:'https://example.test/game/tower-defense.html',
             settings:{disableJavaScriptEvaluation:true,disableJavaScriptFileLoading:true,disableCSSFileLoading:true}});
         tabs.push(w);
@@ -28,7 +28,7 @@ async function testSharedStorage(Window) {
             ()=>({addColorStop(){}}):()=>{}});
         w.HTMLCanvasElement.prototype.getContext=()=>ctx;
         Object.defineProperty(w,'localStorage',{value:{
-            getItem:key=>items.get(key)??null,
+            getItem:key=>{if(key===SAVE&&failFirstRead){failFirstRead=false;throw Error("first read unavailable");}if(key==="mylog-forest-defense-checkpoint-v1"&&failLegacyRead){failLegacyRead=false;throw Error("first legacy read unavailable");}return items.get(key)??null;},
             setItem:(key,value)=>{writes.push(key);items.set(key,value);}
         }});
         let frame, now=1000;
@@ -91,6 +91,45 @@ async function testSharedStorage(Window) {
         assert.equal(writes.includes(STARS),false,'unavailable read must not overwrite the star map');
         assert.match(blocked.get('mission-goal').textContent,/最佳 ★★★/,'local result remains visible without storage');
         assert.deepEqual(JSON.parse(items.get(STARS)),{'3':3});
+        const LEGACY='mylog-forest-defense-checkpoint-v1';
+        const levelNine=JSON.stringify({...JSON.parse(latest),level:9});
+        items.set(SAVE,levelNine); writes.length=0;
+        const unreadable=open({failFirstRead:true});
+        assert.equal(items.get(SAVE),levelNine,'opening with a transient read failure preserves exact bytes');
+        unreadable.slots[0].click();
+        assert.equal(unreadable.w.__tdTest.state.gold,210,'play continues in memory');
+        unreadable.get('next-wave').click();
+        assert.match(unreadable.get('checkpoint-note').textContent,/未保存/);
+        assert.equal(items.get(SAVE),levelNine);
+        assert.equal(writes.includes(SAVE),false);
+        const restored=open();
+        assert.equal(restored.w.__tdTest.state.level,9);
+        assert.equal(restored.w.__tdTest.state.gold,8);
+        assert.equal(writes.includes(SAVE),false,'valid load must not write');
+        // A committed action in a stale tab must not replace the newer board.
+        const newer=open(); newer.slots[1].click(); newer.get('sell').click();
+        const newerRaw=items.get(SAVE); assert.notEqual(newerRaw,levelNine);
+        writes.length=0; restored.slots[1].click(); restored.get('sell').click();
+        assert.equal(items.get(SAVE),newerRaw);
+        assert.equal(writes.includes(SAVE),false);
+        assert.match(restored.get('checkpoint-note').textContent,/其他页面/);
+        items.set(LEGACY,'{"version":1,"level":6}');
+        for (const broken of ['', '{bad', '{"version":99}']) {
+            items.set(SAVE,broken);writes.length=0;
+            const fallback=open(); fallback.slots[0].click();
+            assert.equal(fallback.w.__tdTest.state.level,1,'invalid current data must not load legacy');
+            assert.equal(items.get(SAVE),broken);assert.equal(writes.includes(SAVE),false);
+        }
+        items.delete(SAVE);writes.length=0;
+        const legacyFailure=open({failLegacyRead:true});
+        legacyFailure.slots[0].click();
+        assert.equal(items.has(SAVE),false,'failed legacy read must not create a current checkpoint');
+        assert.equal(writes.includes(SAVE),false);
+        assert.match(legacyFailure.get('checkpoint-note').textContent,/未保存/);
+        const migration=open();
+        assert.equal(migration.w.__tdTest.state.level,6);
+        assert.equal(JSON.parse(items.get(SAVE)).version,2);
+        assert.equal(writes.filter(key=>key===SAVE).length,1);
         console.log('Tower defense shared storage: stale inspection/rejected build, committed checkpoints, star maxima, and invalid storage passed.');
     } finally {
         for (const w of tabs) await w.happyDOM.close();

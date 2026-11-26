@@ -192,8 +192,8 @@ function createGame(options = {}) {
         console, document, Math: random,
         CustomEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
         localStorage: {
-            getItem(name) { if(options.blockStorage) throw Error('Storage blocked'); return storage[name] ?? null; },
-            setItem(name, value) { if(options.blockStorage) throw Error('Storage blocked'); storage[name] = String(value); options.onWrite?.(name); }
+            getItem(name) { if(options.blockStorage || options.failRead?.(name)) throw Error('Storage blocked'); return storage[name] ?? null; },
+            setItem(name, value) { if(options.blockStorage || options.failWrite?.(name)) throw Error('Storage blocked'); storage[name] = String(value); options.onWrite?.(name); }
         }
     };
     sandbox.confirm = options.confirm || (() => true);
@@ -293,6 +293,50 @@ test('a stale tab can request hints and select cards without writing over a comm
     assert.deepEqual(restored.snap(),opening);
     assert.equal(writes.length,writesBeforeHint+1);
     assert.equal(JSON.parse(storage[key]).past.length,0);
+});
+
+test('unread, invalid and newer Spider checkpoints survive committed actions', () => {
+    const key = 'mylog-spider-run-v1', sharedStorage = {}, writes = [];
+    const open = (options = {}) => createGame({sharedStorage,onWrite:name=>writes.push(name),...options});
+    const a = open(), old = open({confirm:()=>true,seed:123});
+    a.get('spider-deal').click(); a.get('spider-deal').click();
+    const newest = sharedStorage[key];
+    assert.equal(JSON.parse(newest).past.length,2);
+    writes.length=0; old.get('spider-deal').click();
+    assert.equal(old.snap().stock.length,40);
+    assert.match(old.get('spider-save-note').textContent,/其他页面/);
+    old.get('spider-hint').click();
+    assert.notEqual(old.get('spider-status').textContent,'','hints remain visible');
+    old.get('spider-new').click();
+    assert.equal(sharedStorage[key],newest,'ordinary restart must not overwrite a different stored run');
+    assert.equal(writes.includes(key),false);
+    let failRead = true;
+    const unread = open({failRead:name=>{if(name!==key||!failRead)return false;failRead=false;return true;}});
+    unread.get('spider-deal').click();
+    assert.equal(sharedStorage[key],newest);
+    assert.equal(writes.includes(key),false);
+    assert.match(unread.get('spider-save-note').textContent,/无法读取/);
+    const restored = open(); assert.equal(restored.snap().stock.length,30); assert.equal(restored.api.history(),2);
+    for(const bad of ['', '{bad', '{"version":99}']) {
+        sharedStorage[key]=bad; const g=open(); g.get('spider-deal').click();
+        assert.equal(sharedStorage[key],bad);
+        assert.match(g.get('spider-save-note').textContent,/不会覆盖/);
+    }
+    assert.equal(writes.includes(key),false);
+});
+
+test('a later read or write failure retries only against the last known Spider checkpoint', () => {
+    const key='mylog-spider-run-v1', sharedStorage={};
+    let readBlocked=false,writeBlocked=false;
+    const g=createGame({sharedStorage,failRead:name=>name===key&&readBlocked,failWrite:name=>name===key&&writeBlocked});
+    const opening=sharedStorage[key];
+    readBlocked=true;g.get('spider-deal').click();assert.equal(sharedStorage[key],opening);
+    assert.match(g.get('spider-save-note').textContent,/无法读取/);
+    readBlocked=false;writeBlocked=true;g.get('spider-deal').click();assert.equal(sharedStorage[key],opening);
+    assert.match(g.get('spider-save-note').textContent,/无法保存/);
+    writeBlocked=false;g.get('spider-undo').click();
+    assert.equal(JSON.parse(sharedStorage[key]).past.length,1);
+    assert.equal(g.get('spider-save-note').textContent,'');
 });
 
 test('saved game restores cards and undo history; malformed saves fall back safely', () => {

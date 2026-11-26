@@ -211,6 +211,26 @@ async function main() {
             key('Delete');
             assert.equal(state.board[row][col], 0);
         });
+        await test('correct-entry advance skips solved cells and wraps to a wrong editable cell', () => {
+            const g = setup();
+            const editable = g.state.original.flat().flatMap((value, i) => value ? [] : [i]);
+            const [first, second] = editable, last = editable.at(-1);
+            const pos = index => [Math.floor(index / 9), index % 9];
+            const [fr, fc] = pos(first), [sr, sc] = pos(second), [lr, lc] = pos(last);
+            g.cell(sr, sc).click();
+            g.key(String(g.state.solution[sr][sc]));
+            g.cell(fr, fc).click();
+            g.key(String(g.state.solution[fr][fc]));
+            const [nr, nc] = pos(editable[2]);
+            assert.deepEqual(clone(g.state.selectedCell), {row:nr,col:nc});
+            g.cell(fr,fc).click();
+            g.key(String(g.state.solution[fr][fc] % 9 + 1));
+            assert.deepEqual(clone(g.state.selectedCell), {row:fr,col:fc}, 'wrong entry stays selected');
+            g.cell(lr,lc).click();
+            g.key(String(g.state.solution[lr][lc]));
+            assert.deepEqual(clone(g.state.selectedCell), {row:fr,col:fc}, 'last editable cell wraps across trailing clues');
+            assert.equal(g.state.board[sr][sc],g.state.solution[sr][sc], 'previously solved cell is untouched');
+        });
         await test('original clues cannot be selected for overwrite', () => {
             find('new-game').click();
             const index = state.original.flat().findIndex(Boolean);

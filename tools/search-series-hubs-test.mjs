@@ -39,7 +39,9 @@ for (const [path, root] of [['/', './'], ['/rl/27-ppo.html', '../'], ['/game/', 
     return [...d.querySelectorAll('.site-search-hit')];
   };
   const roomQueries = ['南昌麻将', '好友开房', '好友联机', '开房间', '房间号', '跑得快联机', '在线跑得快', '跑得快房间', '南昌麻将联机',
-    '房间码', '六位房间码', '六位房间号', '6位房间号', '６位 房间号', '好友牌桌', '加入房间', '跑得快 联机', '跑得快 开房', '南昌麻将 开房'];
+    '房间码', '六位房间码', '六位房间号', '6位房间号', '６位 房间号', '好友牌桌', '加入房间', '跑得快 联机', '跑得快 开房', '南昌麻将 开房',
+    '6位房间码', '６位 房间码', '输入房间码', '跑得快好友开房', '跑得快房间码', '南昌麻将房间码？',
+    '开房间的模式', '手机开房', '怎么加入房间？', '如何开房间', '跑得快怎么开房', '南昌麻将如何开房?'];
   const roomPath = path.startsWith('/game/') ? path : '/game/index.html';
   for (const query of roomQueries) {
     const hits = results(query);
@@ -52,7 +54,7 @@ for (const [path, root] of [['/', './'], ['/rl/27-ppo.html', '../'], ['/game/', 
     assert.equal(new URL(first.href).pathname, '/game/paodekuai.html', query);
     assert.ok(first.textContent.includes('（单机）'));
   }
-  for (const query of ['邀请码','联机学习','123456','演示与游戏','蜘蛛纸牌']) {
+  for (const query of ['邀请码','联机学习','123456','演示与游戏','蜘蛛纸牌','手机如何开房门','跑得快单机房间规则','房间码识别论文']) {
     assert.ok(!results(query).some(a=>a.hash==='#friend-rooms-title'), query);
   }
   for (const [ascii,wide] of [['DQN','ＤＱＮ'],['PPO','ＰＰＯ'],['A*','Ａ＊'],['DMP','ＤＭＰ'],['2024','２０２４'],['  PPO  ','　ＰＰＯ　']]) {

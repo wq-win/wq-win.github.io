@@ -13,7 +13,7 @@
         animation.finished?.catch(()=>{});
     }
     const SAVE_KEY='mylog-forest-defense-checkpoint-v2';
-    let restoredCheckpoint=false,legacyCheckpoint=false;
+    let restoredCheckpoint=false,legacyCheckpoint=false,expectedCheckpoint,checkpointIssue='',checkpointCurrent=false;
     const mission=()=>E.mission(state.level);
     const STARS_KEY='mylog-forest-tactics-stars-v1';
     let bestStars={};
@@ -42,7 +42,7 @@
         if(typeof raw!=='string'||raw.length>5000)return null;
         try {
             const data=JSON.parse(raw),n=(v,min,max)=>Number.isInteger(v)&&v>=min&&v<=max;
-            if(data.version===1&&n(data.level,1,E.LEVEL_COUNT)){legacyCheckpoint=true;return E.create(data.level);}
+            if(data.version===1&&n(data.level,1,E.LEVEL_COUNT))return E.create(data.level);
             if(data.version!==2||!n(data.level,1,E.LEVEL_COUNT)||!n(data.wave,0,E.WAVES_PER_LEVEL)||!n(data.gold,0,1000000)||!n(data.health,1,20)||!n(data.kills,0,1000000)||!n(data.built,0,1000000)||!n(data.leaks,0,1000000)||!['ready','cleared','won'].includes(data.state)||!Array.isArray(data.towers)||data.towers.length!==E.SLOTS.length)return null;
             if((data.state==='ready'&&data.wave>=E.WAVES_PER_LEVEL)||(data.state==='cleared'&&(data.wave!==E.WAVES_PER_LEVEL||data.level===E.LEVEL_COUNT))||(data.state==='won'&&(data.wave!==E.WAVES_PER_LEVEL||data.level!==E.LEVEL_COUNT)))return null;
             if(!data.towers.every(t=>t===null||(t&&Object.hasOwn(E.TYPES,t.type)&&n(t.level,1,3)&&(t.level<3||['power','reach'].includes(t.branch)))))return null;
@@ -51,13 +51,41 @@
             return next;
         } catch(_){return null;}
     }
-    try { const checkpoint=restoreCheckpoint(localStorage.getItem(SAVE_KEY)||localStorage.getItem('mylog-forest-defense-checkpoint-v1')); if(checkpoint){state=checkpoint;restoredCheckpoint=true;wasState=state.state;} } catch(_){}
+    const savedNote='已保存备战点 · 可关闭后继续';
+    const readIssue='无法读取存档 · 本页进度未保存';
+    const writeIssue='无法保存本页进度 · 请勿关闭页面';
+    function showCheckpointNote(text) { const node=$('checkpoint-note'); if(node.textContent!==text)node.textContent=text; }
+    try {
+        const raw=localStorage.getItem(SAVE_KEY);
+        const legacy=raw===null?localStorage.getItem('mylog-forest-defense-checkpoint-v1'):null;
+        const checkpoint=restoreCheckpoint(raw??legacy);
+        if(checkpoint){
+            expectedCheckpoint=raw;state=checkpoint;restoredCheckpoint=true;wasState=state.state;
+            legacyCheckpoint=raw===null||JSON.parse(raw).version===1;
+            checkpointCurrent=!legacyCheckpoint;
+        } else if(raw===null&&legacy===null)expectedCheckpoint=null;
+        else checkpointIssue='存档无法识别 · 本页不会覆盖原存档';
+    } catch(_) {checkpointIssue=readIssue;}
+    function canSaveCheckpoint() {
+        if(expectedCheckpoint===undefined){showCheckpointNote(checkpointIssue);return false;}
+        try {
+            if(localStorage.getItem(SAVE_KEY)===expectedCheckpoint)return true;
+        } catch(_) {showCheckpointNote(readIssue);return false;}
+        expectedCheckpoint=undefined;
+        checkpointIssue='其他页面已更改存档 · 本页不会覆盖较新的进度';
+        showCheckpointNote(checkpointIssue);
+        return false;
+    }
     function saveCheckpoint() {
         if(!['ready','cleared','won'].includes(state.state))return;
+        checkpointCurrent=false;
+        if(!canSaveCheckpoint())return;
         try {
-            localStorage.setItem(SAVE_KEY,JSON.stringify({version:2,built:state.built,leaks:state.leaks,level:state.level,wave:state.wave,gold:state.gold,health:state.health,kills:state.kills,state:state.state,towers:state.towers.map(t=>t?{type:t.type,level:t.level,...(t.branch?{branch:t.branch}:{})}:null)}));
-            $('checkpoint-note').textContent='已保存备战点 · 可关闭后继续';
-        } catch(_) { $('checkpoint-note').textContent='无法保存 · 请勿关闭页面'; }
+            const raw=JSON.stringify({version:2,built:state.built,leaks:state.leaks,level:state.level,wave:state.wave,gold:state.gold,health:state.health,kills:state.kills,state:state.state,towers:state.towers.map(t=>t?{type:t.type,level:t.level,...(t.branch?{branch:t.branch}:{})}:null)});
+            localStorage.setItem(SAVE_KEY,raw);
+            expectedCheckpoint=raw;checkpointCurrent=true;
+            showCheckpointNote(savedNote);
+        } catch(_) {showCheckpointNote(writeIssue);}
     }
 
     const terrain=document.createElement('canvas');
@@ -582,7 +610,7 @@
         if(!paused&&E.startWave(state)) {
             feedback?.play('tap');
             announce(`第 ${state.level} 关 · 第 ${state.wave} 波来袭！战斗中也可以建造和升级。`);
-            $('checkpoint-note').textContent='战斗中 · 本波结束后保存，离开将从本波前重打';
+            if(canSaveCheckpoint())showCheckpointNote(checkpointCurrent?'战斗中 · 本波结束后保存，离开将从本波前重打':writeIssue);
             sync();
         }
     });
@@ -650,7 +678,7 @@
     drawTerrain();
     if(legacyCheckpoint)announce('塔防已更新为六波短关，保留你的关卡编号，从本关重新布阵。旧版十五波存档不会套用到新规则。');
     else if(restoredCheckpoint)announce(`已恢复第 ${state.level} 关的备战点。已守住 ${state.wave} 波，金币与塔楼保留；未结束的波次需要重打。`);
-    saveCheckpoint();
+    if(checkpointCurrent)showCheckpointNote(savedNote);else saveCheckpoint();
     sync();
     requestAnimationFrame(frame);
 })();

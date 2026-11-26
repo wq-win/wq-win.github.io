@@ -9,7 +9,8 @@
     const roomFragment = '#friend-rooms-title';
     const roomQueries = new Set(['南昌麻将', '好友开房', '好友联机', '开房间', '房间号',
         '跑得快联机', '在线跑得快', '跑得快房间', '南昌麻将联机',
-        '房间码', '六位房间码', '六位房间号', '6位房间号', '好友牌桌', '加入房间', '跑得快开房', '南昌麻将开房']);
+        '房间码', '六位房间码', '六位房间号', '6位房间号', '好友牌桌', '加入房间', '跑得快开房', '南昌麻将开房',
+        '6位房间码', '输入房间码', '跑得快好友开房', '跑得快房间码', '南昌麻将房间码', '开房间的模式', '手机开房']);
 
     function foldWidth(text) {
         return text.replace(/[\uFF01-\uFF5E\u3000]/g, (char) =>
@@ -18,7 +19,9 @@
 
     function preferredPath(normalizedQuery) {
         const intent = normalizedQuery.replace(/\s/g, '');
-        return roomQueries.has(intent) ? lobby : intent === '跑得快单机' ? solo : null;
+        const roomIntent = intent.replace(/\?$/, '');
+        const roomQuestion = /^(?:(?:怎么|如何)(?:加入房间|开房间)|(?:跑得快|南昌麻将)(?:怎么|如何)开房)$/.test(roomIntent);
+        return roomQueries.has(roomIntent) || roomQuestion ? lobby : intent === '跑得快单机' ? solo : null;
     }
 
     function resultHref(item, preferred) {
