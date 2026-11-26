@@ -97,6 +97,25 @@ const { ROOT, COURSE, loadLessons } = require('./build-english.cjs');
       assert.equal(matrixQuery.value, query);
       assert.equal(new URL(matrix.location.href).searchParams.get('q'), query);
     }
+    for (const [joined, spaced, expected] of [
+      ['七年级上册名词','七年级上册 名词',['junior-g7a-02.html','junior-g7a-03.html']],
+      ['７年级上学期名词','7年级上学期 名词',['junior-g7a-02.html','junior-g7a-03.html']],
+      ['高一上册时态','高一上册 时态',['senior-tense-foundations.html','senior-term-10a.html']],
+    ]) {
+      restore('', '', spaced);
+      assert.deepEqual(resultLinks(), expected.slice().sort(), spaced);
+      matrixQuery.value = joined;
+      matrixQuery.dispatchEvent(new matrix.Event('input'));
+      assert.deepEqual(resultLinks(), expected.slice().sort(), joined);
+      const shared = new URL(matrix.location.href);
+      assert.equal(shared.searchParams.get('q'), joined);
+      assert.deepEqual(shared.searchParams.getAll('ref'), ['directory','extra']);
+      assert.equal(shared.hash, '#units');
+      const reloaded = setup('index.html', shared.pathname.split('/').at(-1) + shared.search + shared.hash);
+      assert.equal(reloaded.document.getElementById('course-query').value,joined);
+      assert.equal(reloaded.document.querySelectorAll('[data-course-lesson]:not([hidden])').length,expected.length);
+    }
+    restore('senior', '', '七年级上册名词'); assert.equal(resultCount(), 0);
     restore('senior', '', '7年级上册'); assert.equal(resultCount(), 0);
     restore('junior', '八年级', '7年级上册'); assert.equal(resultCount(), 0);
     const gradeShared = setup('index.html', 'index.html?stage=junior&q=7年级#course-directory');

@@ -38,6 +38,31 @@ const { pathToFileURL } = require('node:url');
         assert.equal(shared.getItem(bestKey), '2', 'an older tab cannot erase the newer best');
         assert.match(stale.d.querySelector('.best-score').textContent, /最高 2/);
         assert.equal(stale.api.state.score, 0, 'best refresh does not change this round score');
+        let failRead = false, failWrite = false, bestWrites = [];
+        const faultStorage = {
+            getItem(key) { if(key===bestKey&&failRead)throw Error('read'); return scores.get(key)??null; },
+            setItem(key,value) { if(key===bestKey){bestWrites.push(String(value));if(failWrite)throw Error('write');} scores.set(key,String(value)); }
+        };
+        const play = (tab, moves) => {
+            tab.api.load(fixture());
+            drag(tab,{row:0,col:0},{row:0,col:1});
+            if(moves===2)drag(tab,{row:6,col:4},{row:6,col:5});
+            if(tab.api.state.status!=='finished'){tab.time(tab.api.state.deadline);tab.frame();}
+        };
+        scores.set(bestKey,'1');
+        const readFail = boot({storage:faultStorage});
+        scores.set(bestKey,'34'); failRead=true; play(readFail,2);
+        assert.equal(scores.get(bestKey),'34','failed read must not clobber a higher score');
+        assert.deepEqual(bestWrites,[]);
+        failRead=false; play(readFail,1);
+        assert.match(readFail.d.querySelector('.best-score').textContent,/最高 34/);
+        assert.deepEqual(bestWrites,[]);
+        scores.set(bestKey,'0'); bestWrites=[];
+        const writeFail = boot({storage:faultStorage});
+        failWrite=true; play(writeFail,2); assert.equal(scores.get(bestKey),'0');
+        failWrite=false; play(writeFail,1); assert.equal(scores.get(bestKey),'4');
+        assert.deepEqual(bestWrites,['4','4']);
+        assert.equal(writeFail.api.state.score,2);
         const c = boot(), { d, api, w } = c;
         assert.equal(d.querySelectorAll('[data-cell]').length, 48); assert.equal(w.SumTenDebug.layout().rows, 8); assert.equal(api.state.status, 'ready'); assert.equal(c.frames.size, 0); assert.equal(d.getElementById('time').textContent, '90');
         c.advance(900000); c.frame(); d.dispatchEvent(new w.Event('visibilitychange')); assert.equal(api.state.status, 'ready'); assert.equal(api.state.deadline, null);

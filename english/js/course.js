@@ -23,7 +23,7 @@
     const normalize = value => String(value || '').toLowerCase().normalize('NFKC').trim();
     function queryParts(value) {
       const normalized = normalize(value);
-      const match = /(^|\s)(?:([3-9三四五六七八九])年级|(高[一二三]))(?:\s*([上下])(?:学期|册)?(?=\s|$))?(?=\s|$)/.exec(normalized);
+      const match = /(^|\s)(?:([3-9三四五六七八九])年级|(高[一二三]))(?:\s*([上下])(?:(?:学期|册)(?=\s|$|\p{Script=Han})|(?=\s|$))|(?=\s|$))/u.exec(normalized);
       if (!match) return { words: normalized.split(/\s+/).filter(Boolean) };
       const level = match[2];
       const label = match[3] || (/^[3-9]$/.test(level) ? '三四五六七八九'[Number(level) - 3] : level) + '年级';

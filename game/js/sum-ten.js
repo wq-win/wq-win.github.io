@@ -6,12 +6,12 @@
     var orientation = window.matchMedia('(orientation: landscape)'), reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
     var state = E.create(), landscape = orientation.matches, cells = [], cursor = 0, selection = null, drag = null, keyAnchor = null, frame = 0, epoch = 0, timers = new Set(), lastPhase = '', lastSecond = -1;
     var manualPause = false, tapMode = false, tapAnchor = null;
-    var pausedAt = null, best = 0, sound=window.CozyThirdFeedback, bestKey = 'cozy-sum-ten-best-v1';
+    var pausedAt = null, best = 0, earnedBest = 0, sound=window.CozyThirdFeedback, bestKey = 'cozy-sum-ten-best-v1';
     sound.attach(d.querySelector('.nav-actions'));
-    function refreshBest() {
-        try { best = Math.max(best, Math.min(48, Number(localStorage.getItem(bestKey)) || 0)); } catch (_) {}
+    function readBest() {
+        try { return Math.max(0, Math.min(48, Number(localStorage.getItem(bestKey)) || 0)); } catch (_) { return null; }
     }
-    refreshBest();
+    best = readBest() ?? 0;
     var bestEl=d.createElement('span');bestEl.className='best-score';bestEl.textContent=' · 最高 '+best;scoreEl.parentElement.querySelector('span').append(bestEl);
     function now() { return pausedAt === null ? performance.now() : pausedAt; }
     function syncPause() {
@@ -68,10 +68,11 @@
             lastPhase = state.status; paintCells(); result.hidden = state.status !== 'finished';
             if (state.status === 'finished') {
                 cancelSelection(); if (frame) cancelAnimationFrame(frame); frame = 0;
-                refreshBest();
-                if (state.score > best) {
-                    best = state.score;
-                    try { localStorage.setItem(bestKey, String(best)); } catch (_) {}
+                earnedBest = Math.max(earnedBest, state.score);
+                var storedBest = readBest();
+                best = Math.max(best, earnedBest, storedBest ?? 0);
+                if (storedBest !== null && earnedBest > storedBest) {
+                    try { localStorage.setItem(bestKey, String(earnedBest)); } catch (_) {}
                 }
                 bestEl.textContent = ' · 最高 ' + best;
                 if(state.reason==='cleared')sound.tone('win');
