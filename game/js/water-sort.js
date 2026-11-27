@@ -15,7 +15,7 @@ const $ = id => document.getElementById(id);
 const board = $('water-board'), feedback = $('feedback'), layer = $('pour-layer');
 const STORAGE_KEY = 'cozy-water-sort-v1';
 const RECORDS_KEY = 'cozy-water-sort-records-v1';
-let records = {};
+let records = {}, recordsOK = true;
 function readJSON(raw) {
   try { return JSON.parse(raw); } catch (_) { return null; }
 }
@@ -46,11 +46,13 @@ try {
 const reduced = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const message = (text,type='') => { feedback.textContent = text; feedback.className = 'feedback' + (type ? ' '+type : ''); };
 function showStorageStatus() {
-  $('saved').textContent = storageOK ? '进度自动保存' : '本次可玩 · 无法保存';
+  $('saved').textContent = storageOK ? recordsOK ? '进度自动保存' : '进度自动保存 · 最佳纪录暂不可用' : '本次可玩 · 无法保存';
+}
+function noteWinningRecord() {
+  if (E.won(state.bottles) && state.moves > 0 && state.moves < (records[state.level] ?? Infinity)) records[state.level] = state.moves;
 }
 function store() {
-  const won = E.won(state.bottles);
-  if (won && state.moves>0 && state.moves<(records[state.level]??Infinity)) records[state.level]=state.moves;
+  noteWinningRecord();
   try {
     // Combine only durable progress; each saved board/history must be one run.
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -61,17 +63,20 @@ function store() {
     }
     const completed = readCompleted(raw);
     state.completed = [...new Set([...completed,...state.completed])];
+    localStorage.setItem(STORAGE_KEY,E.save(state));
+    activeBaseline = true;
+    storageOK = true;
+  } catch (_) { storageOK = false; }
+  if (storageOK) try {
     const savedRecords = readRecords(localStorage.getItem(RECORDS_KEY));
     E.LEVELS.forEach((_,i)=>{
       if (savedRecords[i]<(records[i]??Infinity)) records[i]=savedRecords[i];
     });
-    localStorage.setItem(STORAGE_KEY,E.save(state));
-    activeBaseline = true;
     if (Object.keys(records).some(i=>records[i]!==savedRecords[i])) {
       localStorage.setItem(RECORDS_KEY,JSON.stringify(records));
     }
-    storageOK = true;
-  } catch (_) { storageOK = false; }
+    recordsOK = true;
+  } catch (_) { recordsOK = false; }
   showStorageStatus();
 }
 function cancelAnimation() {
@@ -118,7 +123,7 @@ function render(focusIndex) {
     $('next-level').textContent = state.level===E.LEVELS.length-1 ? '回到第一关 ↺' : '下一份色彩 →';
     $('next-level').focus();
   } else if (Number.isInteger(focusIndex)) board.querySelector(`[data-bottle="${focusIndex}"]`)?.focus({preventScroll:true});
-  $('saved').textContent = storageOK ? '进度自动保存' : '本次可玩 · 无法保存';
+  showStorageStatus();
 }
 function start(level) {
   cancelAnimation(); selected = null; state = E.create(level,state.completed); store(); render();
@@ -205,7 +210,8 @@ board.addEventListener('keydown',event=>{
   if(Object.hasOwn(offsets,event.key)){event.preventDefault();const next=(Number(button.dataset.bottle)+offsets[event.key]+state.bottles.length)%state.bottles.length;board.querySelector(`[data-bottle="${next}"]`).focus();}
 });
 window.addEventListener('resize',()=>{if(pending)finishPour();});document.querySelector('[data-game-view]').addEventListener('gameviewchange',()=>{if(pending)finishPour();});
-if (activeBaseline) store(); else showStorageStatus();
+try { records = readRecords(localStorage.getItem(RECORDS_KEY)); } catch (_) { recordsOK = false; }
+noteWinningRecord();
 render();
 if(state.moves)message('已接上上次进度 · 第 '+(state.level+1)+' 关，已走 '+state.moves+' 步。');
 if(E.won(state.bottles))message('这一关已完成，可以继续下一关。','success');else if(!E.legalMoves(state.bottles).length)message('没有可倒的位置了，可撤销一步重新规划。','error');

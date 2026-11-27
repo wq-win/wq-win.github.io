@@ -9,7 +9,7 @@ const { pathToFileURL } = require('node:url');
     const w = new Window({ url: 'https://example.test/game/hanzi-battle.html', settings: { disableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } }); windows.push(w);
     w.document.write(html.replace(/<script[\s\S]*?<\/script>/g, ''));
     if (shared) Object.defineProperty(w, 'localStorage', { configurable:true, value:{
-      getItem: key => shared.items.get(key) ?? null,
+      getItem: key => shared.beforeRead ? shared.beforeRead(key) : shared.items.get(key) ?? null,
       setItem: (key, value) => { shared.writes.push(key); shared.items.set(key, String(value)); }
     } });
     if (saved) w.localStorage.setItem(KEY, saved);
@@ -50,14 +50,15 @@ const { pathToFileURL } = require('node:url');
   try {
     console.log('Hanzi Battle UI tests');
     await test('stale tab sound, march, visibility/help/pause, rounds and defeat never save a newer preparation over', () => {
-      const shared=createShared(), a=boot(null,true,false,null,shared), b=boot(null,true,false,null,shared), step=clock(b);
+      const shared=createShared(), b=boot(null,true,false,null,shared), step=clock(b);
       child(b,'slot',0).click(); child(b,'army',1).click();
       assert.equal(JSON.parse(shared.items.get(KEY)).army[1],'木');
       child(b,'army',1).click(); assert.equal(JSON.parse(shared.items.get(KEY)).army[1],null);
       child(b,'slot',0).click(); child(b,'army',1).click();
-      child(a,'slot',0).click(); child(a,'slot',1).click();
+      const a=boot(null,true,false,null,shared);
+      child(a,'slot',1).click(); child(a,'slot',2).click();
       const newest=shared.items.get(KEY);
-      assert.deepEqual(JSON.parse(newest).board.slice(0,3),['林',null,'木']);
+      assert.deepEqual(JSON.parse(newest).board.slice(0,3),[null,'林',null]);
       shared.items.set(SETTINGS,JSON.stringify({sound:false,best:{2:9}})); shared.writes.length=0;
       bar(b,'sound-toggle').click();
       assert.equal(shared.items.get(KEY),newest);
@@ -74,8 +75,8 @@ const { pathToFileURL } = require('node:url');
       for(let i=0;i<100 && bar(b,'result').hidden;i++)step();
       assert.equal(b.__test.state.phase,'lost'); assert.deepEqual(shared.writes,[]);
       assert.equal(shared.items.get(KEY),newest);
-      const reload=boot(newest); assert.equal(reload.__test.state.board[0],'林');
-      bar(b,'restart').click(); assert.deepEqual(shared.writes,[KEY]);
+      const reload=boot(newest); assert.equal(reload.__test.state.board[1],'林');
+      bar(b,'restart').click(); assert.deepEqual(shared.writes,[]); assert.match(bar(b,'save-warning').textContent,/不会覆盖/);
     });
     await test('malformed settings recover, but an unavailable read never guesses a settings write', () => {
       for (const bad of ['{broken','null','[]','{"sound":17,"best":[]}']) {
@@ -171,6 +172,34 @@ const { pathToFileURL } = require('node:url');
       doc.querySelector('[data-slot="0"]').click(); doc.querySelector('[data-slot="1"]').click(); assert.equal(a.busy, true); assert.equal(a.state.board[0], '林'); assert.equal(doc.querySelectorAll('.merge-ghost').length, 1);
       doc.querySelector('[data-slot="2"]').click(); assert.equal(a.state.board[2], '木');
       doc.getElementById('restart').click(); await pause(390); assert.equal(a.busy, false); assert.equal(a.state.board[0], '木'); assert.equal(a.state.board[1], '木'); assert.equal(doc.querySelectorAll('.merge-ghost').length, 0); assert.equal(a.timers, 0); animated.happyDOM.abort();
+    });
+    await test('an unreadable or changed gameplay save is never overwritten by a fallback or stale tab', () => {
+      const shared=createShared(), higher=E.create(5);higher.completed=[0,1,2,3,4];
+      const [a,b,c]=higher.board.flatMap((ch,i)=>ch==='木'?[i]:[]);
+      assert(E.combine(higher,a,b).ok);assert(E.combine(higher,a,c).ok);assert(E.deploy(higher,a,0).ok);
+      const original=E.save(higher);shared.items.set(KEY,original);
+      let once=true;shared.beforeRead=key=>{if(key===KEY&&once){once=false;throw Error('startup');}return shared.items.get(key)??null;};
+      const fallback=boot(null,true,false,null,shared);
+      child(fallback,'slot',0).click();child(fallback,'slot',1).click();
+      assert.equal(fallback.__test.state.board[0],'林');
+      assert.match(bar(fallback,'save-warning').textContent,/不会保存/);
+      assert.equal(shared.items.get(KEY),original);assert.deepEqual(shared.writes,[]);
+      assert.equal(boot(null,true,false,null,shared).__test.state.level,5);
+      shared.items.clear();
+      const newer=boot(null,true,false,null,shared), stale=boot(null,true,false,null,shared), step=clock(stale);
+      child(newer,'slot',0).click();child(newer,'slot',1).click();child(newer,'slot',0).click();child(newer,'slot',2).click();
+      child(newer,'slot',0).click();child(newer,'army',1).click();
+      assert.equal(JSON.parse(shared.items.get(KEY)).army[1],'森');
+      const expected=shared.items.get(KEY);shared.writes.length=0;
+      child(stale,'slot',0).click();child(stale,'army',1).click();
+      child(stale,'slot',5).click();child(stale,'slot',6).click();child(stale,'slot',5).click();child(stale,'army',2).click();
+      bar(stale,'march').click();
+      for(let i=0;i<100&&stale.__test.state.phase==='battle';i++)step();
+      assert.equal(stale.__test.state.phase,'won');assert.equal(shared.items.get(KEY),expected);assert.deepEqual(shared.writes,[]);
+      assert.match(bar(stale,'save-warning').textContent,/不会覆盖/);
+      step();assert.equal(bar(stale,'result').hidden,false);
+      bar(stale,'result-action').click();assert.equal(shared.items.get(KEY),expected);
+      bar(stale,'sound-toggle').click();assert.deepEqual(shared.writes,[SETTINGS]);
     });
     await test('blocked storage does not prevent a playable new game', () => {
       const blocked = boot(null, true, true); blocked.document.querySelector('[data-slot="0"]').click(); blocked.document.querySelector('[data-slot="1"]').click(); assert.equal(blocked.__test.state.board[0], '林'); blocked.happyDOM.abort();

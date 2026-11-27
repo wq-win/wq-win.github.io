@@ -11,23 +11,29 @@ function decodeProgress(raw){
  const order=n=>!saved.version||saved.version<2?levelOrder.indexOf(n):n;
  return {index:order(valid(saved.index)?saved.index:0),completed:Array.isArray(saved.completed)?[...new Set(saved.completed.filter(valid).map(order))]:[]};
 }
-try{({completed,index}=decodeProgress(localStorage.getItem(KEY)));}catch(_){}
+let initialReadable=true, saveIssue='';
+function initialRead(key){try{return localStorage.getItem(key);}catch(_){initialReadable=false;return null;}}
+({completed,index}=decodeProgress(initialRead(KEY)));
 let state=E.create(index),history=[];const sound=window.WorkshopFeedback?window.WorkshopFeedback($('sound')):{play(){}};
-try{const run=JSON.parse(localStorage.getItem(KEY+'-run'));if(run&&run.version===3&&run.index===index&&Array.isArray(run.moves)&&run.moves.length<=30){const candidate=E.create(index);if(run.moves.every(id=>E.take(candidate,id))){state=candidate;history=run.moves.slice();}}}catch(_){}
+try{const run=JSON.parse(initialRead(KEY+'-run'));if(run&&run.version===3&&run.index===index&&Array.isArray(run.moves)&&run.moves.length<=30){const candidate=E.create(index);if(run.moves.every(id=>E.take(candidate,id))){state=candidate;history=run.moves.slice();}}}catch(_){}
 function noteClear(){if(state.status==='won'&&!completed.includes(state.index))completed.push(state.index);}
 noteClear(); // Recover a badge from a verified winning replay without writing during boot.
 function save(){
+ if(!initialReadable)return false;
  try{
   const durable=decodeProgress(localStorage.getItem(KEY));
   completed=[...new Set([...durable.completed,...completed])];
   localStorage.setItem(KEY,JSON.stringify({version:3,completed,index:state.index}));
   localStorage.setItem(KEY+'-run',JSON.stringify({version:3,index:state.index,moves:history}));
-  return true;
- }catch(_){return false;}
+  saveIssue='';return true;
+ }catch(_){saveIssue='本次进度未能完整保存。';return false;}
 }
 function element(tag,cls,text){const el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el;}
 function head(c){const h=element('span','head');h.append(element('span','screw-symbol',symbols[c]));h.style.setProperty('--color',colors[c]);h.setAttribute('aria-hidden','true');return h;}
-function render(){$('undo').disabled=!history.length||busy;
+function render(){const notice=$('save-warning');
+const warning=initialReadable?saveIssue:'旧存档暂时无法读取。本页可继续玩，但不会保存；刷新可重试读取，未保存的操作会丢失。';
+if(notice.textContent!==warning)notice.textContent=warning;notice.hidden=!warning;
+$('undo').disabled=!history.length||busy;
 const level=E.levels[state.index];$('level-label').textContent=String(state.index+1).padStart(2,'0')+' / '+level.name;$('removed').textContent=String(state.moves);$('total').textContent=String(level.plates.length*3);$('level').value=String(state.index);$('progress').textContent='已完成 '+completed.length+' / 16';
 const board=$('plates');board.replaceChildren();for(let lane=0;lane<3;lane++){
  const wrap=element('div','lane lane-'+lane);const remain=level.plates.filter(p=>p.lane===lane&&!E.plateGone(state,p));
