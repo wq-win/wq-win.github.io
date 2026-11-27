@@ -93,6 +93,27 @@ try{
    assert.equal(store.disk.get(runKey),active(win0.slice(0,-1)));
   }finally {await tab.happyDOM.abort();}
  }
+ for(const [idx,moves,failed] of [[0,[0,4,3,5,12],runKey],[3,[0,2,1,9,10],key]]){
+  const summary=JSON.stringify({version:3,index:idx,completed:[1]}), replay=JSON.stringify({version:3,index:idx,moves});
+  const st=driver([[key,summary],[runKey,replay]]);st.deny.read=failed;const tab=boot(null,null,st.ls);delete st.deny.read;
+  try{
+   assert.equal(tab.__test.state.index,0);assert.equal(tab.__test.state.moves,0);
+   await act(tab,1);assert.equal(tab.__test.state.moves,1);
+   tab.document.getElementById('undo').click();tab.__test.start(2);
+   assert.match(tab.document.getElementById('save-warning').textContent,/不会保存/);assert.deepEqual(st.writes,[]);
+   assert.equal(st.disk.get(key),summary);assert.equal(st.disk.get(runKey),replay);
+   const reload=boot(null,null,st.ls);try{assert.equal(reload.__test.state.index,idx);assert.equal(reload.__test.state.moves,5);assert.deepEqual(st.writes,[]);}finally{await reload.happyDOM.abort();}
+  }finally{await tab.happyDOM.abort();}
+ }
+ const split=driver([[key,JSON.stringify({version:3,index:3,completed:[0,1]})],[runKey,JSON.stringify({version:3,index:3,moves:[0,2,1,9,10]})]]);
+ const oldReplay=split.disk.get(runKey), switching=boot(null,null,split.ls);
+ try{
+  split.deny.write=runKey;switching.__test.start(4);
+  assert.deepEqual(split.writes,[key,runKey]);assert.equal(split.disk.get(runKey),oldReplay);
+  assert.equal(switching.document.getElementById('save-warning').hidden,false);
+  assert.match(switching.document.getElementById('save-warning').textContent,/未能完整保存/);
+  delete split.deny.write;switching.__test.start(4);assert.equal(switching.document.getElementById('save-warning').hidden,true);
+ }finally{await switching.happyDOM.abort();}
  const historical=driver([[key,'{"version":1,"index":2,"completed":[2,4,2,99]}']]),v1=boot(null,null,historical.ls);
  try {
   assert.equal(v1.__test.state.index,4);assert.match(v1.document.getElementById('progress').textContent,/2 \/ 16/);assert.deepEqual(historical.writes,[]);

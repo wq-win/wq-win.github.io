@@ -25,13 +25,15 @@
         const preference = localStorage.getItem(SOUND_KEY);
         return preference === 'on' || (preference !== 'off' && raw.sound === true);
     }
+    let initialReadable = false, opening = {};
     try {
-        const raw = readProgress();
-        mergeProgress(raw);
-        resumed = E.restore(raw.run);
-        index = Number.isInteger(raw.index) && E.levels[raw.index] ? raw.index : 0;
-        soundOn = readSound(raw);
+        opening = readProgress();
+        initialReadable = true;
+        mergeProgress(opening);
+        resumed = E.restore(opening.run);
+        index = Number.isInteger(opening.index) && E.levels[opening.index] ? opening.index : 0;
     } catch (_) { savedOK = false; }
+    try { soundOn = readSound(opening); } catch (_) {}
     const svg = body => '<svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">' + body + '</svg>';
     const ground = '<ellipse cx="48" cy="73" rx="33" ry="10" fill="#637f4b" opacity=".16"/>';
     function pine(x, y, scale) { return '<g transform="translate(' + x + ' ' + y + ') scale(' + scale + ')"><path d="M-3 1H3V24H-3Z" fill="#806345"/><path d="M0-49 19-17H10L26 6H-26L-10-17H-19Z" fill="#416c50"/><path d="M0-49V6H-26L-10-17H-19Z" fill="#55835c"/><path d="M0-34 11-15H5L15 0" fill="none" stroke="#71966a" stroke-width="2"/></g>'; }
@@ -57,13 +59,15 @@
     function later(callback, delay) { const ownEpoch = epoch; const timer = setTimeout(() => { timers.delete(timer); if (ownEpoch === epoch) callback(); }, delay); timers.add(timer); return timer; }
     function reduced() { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
     function save() {
+        if (!initialReadable) return;
         try {
             const raw = readProgress();
             // Milestones are shared, but the board and its replay must come from one tab.
             mergeProgress(raw);
-            const sound = readSound(raw);
-            if (!soundUnsaved) soundOn = sound;
-            localStorage.setItem(KEY, JSON.stringify({ index: state.index, completed, run: E.save(state), best, sound }));
+            const next = { index: state.index, completed, run: E.save(state), best };
+            if (Object.hasOwn(raw, 'sound')) next.sound = raw.sound;
+            try { const sound = readSound(raw); next.sound = sound; if (!soundUnsaved) soundOn = sound; } catch (_) {}
+            localStorage.setItem(KEY, JSON.stringify(next));
             savedOK = true;
         } catch (_) { savedOK = false; }
     }
@@ -97,7 +101,7 @@
         }
     }
     function render() {
-        $('save-status').textContent = savedOK ? '本局与完成进度自动保存在当前浏览器。' : '此浏览器暂时无法保存进度，仍可正常游玩。';
+        $('save-status').textContent = !initialReadable ? '旧存档暂时无法读取，本页进度无法保存。刷新可重试读取，未保存的操作会丢失。' : savedOK ? '本局与完成进度自动保存在当前浏览器。' : '此浏览器暂时无法保存进度，仍可正常游玩。';
         const level = E.levels[state.index], active = document.activeElement, focusId = active && active.dataset ? active.dataset.tile : undefined;
         $('wood-count').textContent = state.wood; $('troop-count').textContent = state.troops; $('action-count').textContent = state.budget - state.actions;
         $('action-count').parentElement.classList.toggle('low-actions',state.budget-state.actions<=5);

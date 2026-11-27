@@ -42,7 +42,8 @@ try{
  const direct=setup();$(direct,'level-select').value='7';$(direct,'level-select').dispatchEvent(new direct.Event('change'));assert.equal(direct.document.querySelectorAll('.bottle').length,9);assert.equal(direct.document.querySelectorAll('.bottle-row').length,2);
  for(const m of E.solve(E.create(7)))clickMove(direct,m);assert.match($(direct,'win-title').textContent,/最后一份/);assert.doesNotMatch($(direct,'win-title').textContent,/八份|全部/);assert.match($(direct,'win-detail').textContent,/1 \/ 8/);$(direct,'next-level').click();assert.equal($(direct,'level-number').textContent,'01');
  const legacy=setup({saved:JSON.stringify({v:1,level:3,history:[[0,4],[1,5]],completed:[0,2]})});
- assert.deepEqual(savedState(legacy),E.create(3,[0,2]));assert.equal($(legacy,'level-number').textContent,'04');assert.equal(JSON.parse(legacy.localStorage.getItem('cozy-water-sort-v1')).v,2);
+ assert.deepEqual(savedState(legacy),E.create(3,[0,2]));assert.equal($(legacy,'level-number').textContent,'04');assert.equal(JSON.parse(legacy.localStorage.getItem('cozy-water-sort-v1')).v,1);
+ clickMove(legacy,E.solve(E.create(3))[0]);assert.equal(JSON.parse(legacy.localStorage.getItem('cozy-water-sort-v1')).v,2);assert.deepEqual(savedState(legacy).completed,[0,2]);
  const bad=setup({saved:'{broken'});assert.equal(bad.document.querySelectorAll('.bottle').length,7);
  const denied=setup({denied:true});clickMove(denied,E.solve(E.create())[0]);assert.equal(denied.document.querySelectorAll('.liquid').length,20);assert.match($(denied,'saved').textContent,/无法保存/);
  // Startup read failure must not let either boot or a fallback move overwrite an active run.
@@ -71,6 +72,23 @@ try{
  clickMove(fresh,E.solve(E.create())[0]);
  assert.equal(savedState(fresh).moves,1);assert.deepEqual(vacant.writes,[activeKey]);
  assert.match($(fresh,'saved').textContent,/进度自动保存/);
+ // Loading only reads, even if a newer run arrives between the former read and write.
+ const newer4=[[0,6],[0,7],[4,6]].reduce((run,[from,to])=>E.act(run,from,to).state,E.create(3,[0]));
+ const previous1=E.act(E.create(0,[3]),1,5).state, newBytes=E.save(newer4);
+ let bytes=E.save(previous1), activeReads=0, bootWrites=[];
+ const interleaving={getItem(k){if(k!==activeKey)return null;const value=bytes;if(++activeReads===1)bytes=newBytes;return value;},
+  setItem(k,v){bootWrites.push(k);if(k===activeKey)bytes=String(v);}};
+ const fromOld=setup({shared:interleaving});
+ assert.equal($(fromOld,'level-number').textContent,'01');assert.equal(activeReads,1);assert.deepEqual(bootWrites,[]);assert.equal(bytes,newBytes);
+ const fromNew=setup({shared:interleaving});
+ assert.equal($(fromNew,'level-number').textContent,'04');assert.equal($(fromNew,'move-count').textContent,'3');assert.deepEqual(bootWrites,[]);
+ const bestDisk=new Map([[activeKey,newBytes],[bestKey,'{"3":15}']]);let denyBest=true;const applied=[];
+ const bestFault={getItem(k){if(denyBest&&k===bestKey)throw Error('read');return bestDisk.get(k)??null;},
+  setItem(k,v){applied.push(k);bestDisk.set(k,String(v));}};
+ const pours=setup({shared:bestFault});clickMove(pours,{from:1,to:4});
+ assert.equal(savedState(pours).moves,4);assert.deepEqual(applied,[activeKey]);assert.match($(pours,'saved').textContent,/最佳纪录暂不可用/);
+ denyBest=false;$(pours,'undo').click();
+ assert.deepEqual(applied,[activeKey,activeKey]);assert.equal(bestDisk.get(bestKey),'{"3":15}');assert.match($(pours,'personal-best').textContent,/15 步/);
  // Accepted moves save immediately; new input settles presentation without waiting.
  const racing=setup({reduced:false});const first=E.solve(E.create())[0];clickMove(racing,first);assert(racing.document.querySelector('.pour-ghost'));assert(!b(racing,0).disabled);assert.equal(savedState(racing).moves,1,'Accepted move saved before animation completes');b(racing,2).click();assert.equal(savedState(racing).moves,1);assert.equal(racing.document.querySelector('.pour-ghost'),null,'A new input settles the old effect');
  $(racing,'restart').click();assert.equal($(racing,'water-confirm').open,true);assert.equal(savedState(racing).moves,1,'Accepted pour survives pending confirmation');$(racing,'water-replace').click();assert.equal(racing.document.querySelectorAll('.pour-ghost').length,0);await delay(570);assert.deepEqual(savedState(racing).bottles,E.create().bottles);assert(!b(racing,0).disabled);
@@ -102,7 +120,7 @@ try{
  const firstTarget=resumedHints.document.querySelector('.hint-target');assert(firstTarget);firstTarget.click();
  $(resumedHints,'undo').click();assert.deepEqual(savedState(resumedHints),old);$(resumedHints,'hint').click();await delay(50);assert(resumedHints.document.querySelector('.hint-target'));
  const html=fs.readFileSync(path.join(root,'game/water-sort.html'),'utf8');
- assert(html.includes('js/water-sort-engine.js?v=20261115-hints'));assert(html.includes('js/water-sort.js?v=20261122-startup-read'));
+ assert(html.includes('js/water-sort-engine.js?v=20261115-hints'));assert(html.includes('js/water-sort.js?v=20261127-save-guard'));
  // Model two tabs without storage events: completion data is shared, active boards are not.
  const slots=new Map(), shared={getItem:k=>slots.get(k)??null,setItem:(k,v)=>slots.set(k,String(v))};
  const tabA=setup({shared}),tabB=setup({shared});
@@ -137,6 +155,14 @@ try{
  // An accepted winning pour saves its best immediately, not after presentation.
  const pathToWin=E.solve(firstLevel);
  const almost=pathToWin.slice(0,-1).reduce((run,m)=>E.act(run,m.from,m.to).state,firstLevel);
+ const winsDisk=new Map([[activeKey,E.save(almost)],[bestKey,'{"0":15}']]);let winsBlocked=true;const winWrites=[];
+ const winsStorage={getItem(k){if(winsBlocked&&k===bestKey)throw Error('read');return winsDisk.get(k)??null;},
+  setItem(k,v){winWrites.push(k);winsDisk.set(k,String(v));}};
+ const accepted=setup({shared:winsStorage,reduced:false});clickMove(accepted,pathToWin.at(-1));
+ assert(accepted.document.querySelector('.pour-ghost'));assert.equal(savedState(accepted).moves,16);
+ assert.deepEqual(savedState(accepted).completed,[0]);assert.deepEqual(winWrites,[activeKey]);
+ winsBlocked=false;$(accepted,'next-level').click();
+ assert.deepEqual(winWrites,[activeKey,activeKey]);assert.equal(winsDisk.get(bestKey),'{"0":15}');
  const winningAnimation=setup({saved:E.save(almost),reduced:false});
  clickMove(winningAnimation,pathToWin.at(-1));
  assert(winningAnimation.document.querySelector('.pour-ghost'));

@@ -20,13 +20,23 @@
   }
   try { ({ sound: soundOn, best } = readSettings()); } catch (_) {}
   const timers = new Set();
-  try { state = E.restore(localStorage.getItem(KEY)); } catch (_) { state = E.create(); }
-  function save() { try { localStorage.setItem(KEY, E.save(state)); } catch (_) {} }
+  let expectedRun, saveIssue = '', saveBlocked = false;
+  try { expectedRun = localStorage.getItem(KEY); state = E.restore(expectedRun); }
+  catch (_) { state = E.create(); saveBlocked = true; saveIssue = '旧存档暂时无法读取。本页不会保存；刷新可重试读取，未保存的操作会丢失。'; }
+  function save() {
+    if (saveBlocked) return false;
+    try {
+      if (localStorage.getItem(KEY) !== expectedRun) {
+        saveBlocked = true; saveIssue = '此页打开后，存档已有变化。本页不会覆盖它；刷新可读取，未保存的操作会丢失。'; return false;
+      }
+      const next = E.save(state); localStorage.setItem(KEY, next); expectedRun = next; saveIssue = ''; return true;
+    } catch (_) { saveIssue = '本次进度未能保存，继续操作时会重试。'; return false; }
+  }
   function saveSound() {
     try { const settings = readSettings(); settings.sound = soundOn; localStorage.setItem(SETTINGS, JSON.stringify(settings)); } catch (_) {}
   }
   function recordWin() {
-    save();
+    if (!save()) return;
     const level = state.level, hp = state.gate.hp;
     const improved = scores => {
       const score = scores[level], old = typeof score === 'string' ? Number(score) : score;
@@ -113,6 +123,9 @@
     }
   }
   function render() {
+    const warning = $('save-warning');
+    if (warning.textContent !== saveIssue) warning.textContent = saveIssue;
+    warning.hidden = !saveIssue;
     const level = levels[state.level];
     $('chapter').textContent = '第 ' + String(state.level + 1).padStart(2, '0') + ' 阵 · ' + level.subtitle;
     $('level-name').textContent = level.title; $('level-hint').textContent = level.hint;

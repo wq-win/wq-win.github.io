@@ -47,6 +47,33 @@ const { pathToFileURL } = require('node:url');
         const restored = boot(w.localStorage.getItem(key)); assert.equal(restored.__frontierTest.state.index, 0); assert.equal(restored.document.getElementById('progress').textContent, '6 / 6');
         for (const saved of ['null', '[]', '5', '{"index":999,"completed":[-1,0,0,2,2.2,7,"3"]}', '{"index":2.5,"completed":{}}']) { const clean = boot(saved); assert.equal(clean.__frontierTest.state.index, 0); assert.equal(clean.__frontierTest.state.actions, 0); }
         const blockedStorage = boot(undefined, { storageFailure: true }); assert.match(blockedStorage.document.getElementById('save-status').textContent, /无法保存/); for (const action of blockedStorage.TileFrontier.solution(0)) play(blockedStorage, action); assert.equal(blockedStorage.__frontierTest.state.status, 'won'); assert.match(blockedStorage.document.getElementById('feedback').textContent, /无法保存/);
+        const progressKey='tiny-frontier-progress-v1', soundKey='tiny-frontier-sound-v1';
+        const sampleEngine=blockedStorage.TileFrontier;
+        const trace=[{type:'reveal',id:17},{type:'attack',id:17},{type:'reveal',id:12}];
+        const sample=sampleEngine.replay(3,trace);
+        assert.equal(sample.valid,true);
+        const original=JSON.stringify({index:3,completed:[0,1],best:{0:6},run:sampleEngine.save(sample.state),sound:false});
+        for(const failed of [progressKey,soundKey]){
+            const disk=new Map([[progressKey,original],[soundKey,'on']]),writes=[];let first=true;
+            const storage={getItem(k){if(k===failed&&(first||failed===soundKey)){first=false;throw Error('read');}return disk.get(k)??null;},
+                setItem(k,v){writes.push(k);disk.set(k,String(v));}};
+            const room=boot(undefined,{storage});
+            assert.deepEqual(writes,[]);
+            if(failed===progressKey){
+                assert.equal(room.__frontierTest.state.index,0);
+                play(room,{type:'reveal',id:17});assert.equal(room.__frontierTest.state.actions,1);
+                assert.equal(disk.get(progressKey),original);assert.deepEqual(writes,[]);
+                assert.match(room.document.getElementById('save-status').textContent,/无法保存/);
+                assert.equal(boot(undefined,{storage}).__frontierTest.state.actions,3);
+            }else{
+                assert.equal(room.__frontierTest.state.actions,3);
+                play(room,{type:'reveal',id:7});assert.equal(room.__frontierTest.state.actions,4);
+                assert.deepEqual(writes,[progressKey]);assert.equal(disk.get(soundKey),'on');
+                const saved=JSON.parse(disk.get(progressKey));assert.equal(saved.sound,false);assert.deepEqual(saved.completed,[0,1]);
+                assert.equal(boot(undefined,{storage}).__frontierTest.state.actions,4);
+                assert.match(room.document.getElementById('save-status').textContent,/自动保存在/);
+            }
+        }
         const values = new Map(), storage = { getItem: k => values.get(k) ?? null, setItem: (k, v) => values.set(k, String(v)) };
         const tabA = boot(undefined, {storage}), tabB = boot(undefined, {storage}), older = boot(undefined, {storage});
         for (const action of tabA.TileFrontier.solution(0)) play(tabA, action);
