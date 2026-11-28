@@ -120,7 +120,42 @@ try{
  const firstTarget=resumedHints.document.querySelector('.hint-target');assert(firstTarget);firstTarget.click();
  $(resumedHints,'undo').click();assert.deepEqual(savedState(resumedHints),old);$(resumedHints,'hint').click();await delay(50);assert(resumedHints.document.querySelector('.hint-target'));
  const html=fs.readFileSync(path.join(root,'game/water-sort.html'),'utf8');
- assert(html.includes('js/water-sort-engine.js?v=20261115-hints'));assert(html.includes('js/water-sort.js?v=20261127-save-guard'));
+ assert(html.includes('js/water-sort-engine.js?v=20261115-hints'));assert(html.includes('js/water-sort.js?v=20261128-choices'));
+ // A stale Undo stays local and does not arm a later pour to replace the newer run.
+ {
+  const key='cozy-water-sort-v1', best='cozy-water-sort-records-v1';
+  const first=E.act(E.create(),1,5).state;
+  const data=new Map([[key,E.save(first)],[best,'{"0":16}']]);let attempts=0;
+  const guard={getItem:k=>data.get(k)??null,setItem:(k,v)=>{attempts++; data.set(k,v);}};
+  const a=setup({shared:guard}), bTab=setup({shared:guard});
+  for(const [from,to] of [[1,6],[2,6],[1,2]])clickMove(a,{from,to});
+  const end=data.get(key);assert.equal(E.restore(end).moves,4);
+  const prior=attempts;
+  $(bTab,'undo').click();
+  assert.equal($(bTab,'move-count').textContent,'0');
+  assert.match($(bTab,'saved').textContent,/另一页面已更新存档.*未保存/);
+  clickMove(bTab,{from:1,to:5});
+  assert.equal($(bTab,'move-count').textContent,'1');
+  assert.equal(data.get(key),end);assert.equal(data.get(best),'{"0":16}');assert.equal(attempts,prior);
+  const recovered=setup({shared:guard});assert.equal($(recovered,'move-count').textContent,'4');
+  $(recovered,'undo').click();assert.equal(E.restore(data.get(key)).moves,3,'same-session Undo still commits');
+  await Promise.all([a,bTab,recovered].map(w=>w.happyDOM.abort()));
+ }
+ {
+  const key='cozy-water-sort-v1', moves=[[0,5],[0,6],[1,0],[2,1],[2,6]];
+  const state=moves.reduce((s,[f,t])=>E.act(s,f,t).state,E.create());
+  const lab=setup({saved:E.save(state)});
+  const raw=lab.localStorage.getItem(key);
+  $(lab,'hint').click();await delay(50);
+  assert.match($(lab,'feedback').textContent,/多撤销几步/);
+  assert.equal(lab.localStorage.getItem(key),raw);
+  $(lab,'undo').click();$(lab,'hint').click();await delay(50);
+  assert.match($(lab,'feedback').textContent,/多撤销几步/);
+  $(lab,'undo').click();$(lab,'hint').click();await delay(50);
+  assert.equal(lab.document.querySelector('.hint-target').dataset.bottle,'6');
+  assert.equal(savedState(lab).moves,3);
+  await lab.happyDOM.abort();
+ }
  // Model two tabs without storage events: completion data is shared, active boards are not.
  const slots=new Map(), shared={getItem:k=>slots.get(k)??null,setItem:(k,v)=>slots.set(k,String(v))};
  const tabA=setup({shared}),tabB=setup({shared});

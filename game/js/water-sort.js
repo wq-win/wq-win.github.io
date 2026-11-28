@@ -37,22 +37,23 @@ function readRecords(raw) {
 }
 let hintTimer = null;
 let state, selected = null, pending = null, timer = null, effectTimer = null, epoch = 0, storageOK = true;
-let activeBaseline = false;
+let activeBaseline = false, baselineRaw, undoPending = false, undoConflict = false;
 try {
   const raw = localStorage.getItem(STORAGE_KEY);
   state = E.restore(raw);
-  activeBaseline = true;
+  activeBaseline = true; baselineRaw = raw;
 } catch (_) { state = E.create(); storageOK = false; }
 const reduced = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const message = (text,type='') => { feedback.textContent = text; feedback.className = 'feedback' + (type ? ' '+type : ''); };
 function showStorageStatus() {
-  $('saved').textContent = storageOK ? recordsOK ? '进度自动保存' : '进度自动保存 · 最佳纪录暂不可用' : '本次可玩 · 无法保存';
+  $('saved').textContent = undoConflict ? '另一页面已更新存档 · 本页进度未保存' : storageOK ? recordsOK ? '进度自动保存' : '进度自动保存 · 最佳纪录暂不可用' : '本次可玩 · 无法保存';
 }
 function noteWinningRecord() {
   if (E.won(state.bottles) && state.moves > 0 && state.moves < (records[state.level] ?? Infinity)) records[state.level] = state.moves;
 }
-function store() {
-  noteWinningRecord();
+function store(isUndo=false) {
+  undoPending ||= isUndo;
+  if (undoConflict) return;
   try {
     // Combine only durable progress; each saved board/history must be one run.
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -61,10 +62,18 @@ function store() {
       showStorageStatus();
       return;
     }
+    // Do not let a rollback from an older open tab replace a newer run.
+    if (undoPending && activeBaseline && raw !== baselineRaw) {
+      undoConflict = true;
+      showStorageStatus();
+      return;
+    }
+    noteWinningRecord();
     const completed = readCompleted(raw);
     state.completed = [...new Set([...completed,...state.completed])];
-    localStorage.setItem(STORAGE_KEY,E.save(state));
-    activeBaseline = true;
+    const nextRaw=E.save(state);
+    localStorage.setItem(STORAGE_KEY,nextRaw);
+    baselineRaw = nextRaw; activeBaseline = true; undoPending = false;
     storageOK = true;
   } catch (_) { storageOK = false; }
   if (storageOK) try {
@@ -102,7 +111,7 @@ function makeBottle(bottle,index) {
 function render(focusIndex) {
   $('undo').disabled = !state.history.length || !!pending;
   $('hint').disabled = !!pending || E.won(state.bottles);
-  $('move-count').textContent = state.moves;
+  $('move-count').textContent = String(state.moves);
   const record=records[state.level];
   $('personal-best').textContent = Number.isInteger(record)&&record>0 ? ' · 最佳 '+record+' 步' : '';
   $('level-progress').max=E.LEVELS[state.level].colors;
@@ -147,7 +156,7 @@ function finishPour() {
 }
 function animate(result) {
   // Persist the accepted move immediately. Animation is presentation only.
-  state=result.state;store();pending=result;selected=null;$('undo').disabled=false;$('hint').disabled=true;$('move-count').textContent=state.moves;const token=++epoch;
+  state=result.state;store();pending=result;selected=null;$('undo').disabled=false;$('hint').disabled=true;$('move-count').textContent=String(state.moves);const token=++epoch;
   if(reduced()){finishPour();return;}
   const source=board.querySelector(`[data-bottle="${result.from}"]`),target=board.querySelector(`[data-bottle="${result.to}"]`),sceneRect=$('scene').getBoundingClientRect();
   const a=source.querySelector('.bottle-glass').getBoundingClientRect(),b=target.querySelector('.bottle-glass').getBoundingClientRect();
@@ -177,13 +186,13 @@ $('hint').addEventListener('click',()=>{
     // Bounded shortest-path search runs only on request; no greedy fallback.
     const solution=E.solve(state,{maxStates:20000,maxDepth:100});
     $('hint').disabled=false;
-    if(!solution||!solution.length){message('暂未找到完整解法。可撤销一步，再重新规划。');return;}
+    if(!solution||!solution.length){message('暂未找到完整解法。可以多撤销几步，再点提示试试。');return;}
     const move=solution[0];selected=move.from;render(move.from);
     const target=board.querySelector(`[data-bottle="${move.to}"]`);target.classList.add('hint-target');
     message(`试试 ${move.from+1} → ${move.to+1} 号瓶。来源已选好，点亮框的目标瓶即可。`,'success');
   },30);
 });
-$('undo').addEventListener('click',()=>{if(pending)finishPour();if(!state.history.length)return;cancelAnimation();selected=null;state=E.undo(state);store();render();message('已撤销上一步，换一种倒法试试。');});
+$('undo').addEventListener('click',()=>{if(pending)finishPour();if(!state.history.length)return;cancelAnimation();selected=null;state=E.undo(state);store(true);render();message('已撤销上一步，换一种倒法试试。');});
 const confirmDialog=$('water-confirm');let requestedLevel=null,returnFocus=null;
 function requestStart(level,trigger){
   if(confirmDialog.open)return;

@@ -34,7 +34,7 @@
         const population=s.residents.filter(r=>r.alive).length,workers=Object.values(s.jobs).reduce((a,b)=>a+b,0);
         const hunting=s.jobs.hunt*.18*(storm?.5:1);
         const cooking=Math.min(s.jobs.cook*.24*(1+s.buildings.kitchen*.5),(s.resources.rawFood+hunting)*(1+s.buildings.kitchen*.25)),rawNeeded=cooking/(1+s.buildings.kitchen*.25);
-        return {day,hour,phase,temperature,stormSoon,storm,workers,freeWorkers:population-workers,population,heat,furnaceActive,effectiveTemperature:temperature+heat+10+s.buildings.housing*6,foodPerDay:population*.02*DAY_SECONDS,progress:s.elapsed/DURATION,forecast:storm?'暴风雪正在肆虐':stormSoon?'暴风雪将在 '+Math.ceil(((s.elapsed<216?216:408)-s.elapsed)/4)+' 小时后抵达':'第 3 天与第 5 天将有暴风雪',rates:{wood:s.jobs.wood*.22*(1+s.buildings.sawmill*.5),rawFood:s.jobs.hunt*.18*(storm?.5:1)-rawNeeded,food:cooking-population*.02,coal:s.jobs.coal*.10-(furnaceActive?FUEL[s.furnace.level]:0)}};
+        return {day,hour,phase,temperature,stormSoon,storm,workers,freeWorkers:population-workers,population,heat,furnaceActive,effectiveTemperature:temperature+heat+10+s.buildings.housing*6,foodPerDay:population*.02*DAY_SECONDS,progress:s.elapsed/DURATION,forecast:storm?'暴风雪正在肆虐':stormSoon?'暴风雪将在 '+Math.ceil(((s.elapsed<216?216:408)-s.elapsed)/4)+' 小时后抵达':s.elapsed>=300?'下一场暴风雪在第 5 天':'第 3 天与第 5 天将有暴风雪',rates:{wood:s.jobs.wood*.22*(1+s.buildings.sawmill*.5),rawFood:s.jobs.hunt*.18*(storm?.5:1)-rawNeeded,food:cooking-population*.02,coal:s.jobs.coal*.10-(furnaceActive?FUEL[s.furnace.level]:0)}};
     }
     function act(s,a){
         const fail=message=>({ok:false,message});

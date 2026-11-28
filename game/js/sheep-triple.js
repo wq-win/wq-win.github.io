@@ -105,7 +105,7 @@ function render(){
  resize();
 }
 function pick(id){if(busy)return;busy=true;const before=state.matched,tile=tileById(id),fromBoard=!state.holding.includes(id);if(E.take(state,id)){steps.push(['take',id]);saveRun();render();const kind=state.status==='won'?'win':state.status==='lost'?'lost':state.matched>before?'match':'tap';cue(kind,fromBoard?tile:null);if(state.status==='playing')message(state.matched>before?'＋3！三张配成一组，继续向下探索。':state.rack.length>=5?'收集槽快满了，留意已有的图案。':'已收进卡槽，再找相同的图案。');}busy=false;}
-function use(tool){if(busy)return;busy=true;if(E.tool(state,tool)){steps.push(['tool',tool]);saveRun();render();cue('tool');if(state.status==='playing')message(state.message||{remove:'已移入暂存区，点选卡牌可放回。',undo:'已撤回一步，换个顺序试试。',shuffle:'剩余卡牌已重新排列。'}[tool]);}else message(state.message||'现在不能使用这个道具。');busy=false;}
+function use(tool){if(busy)return;busy=true;if(E.tool(state,tool,{requireChanged:true})){steps.push(['tool',tool]);saveRun();render();cue('tool');if(state.status==='playing')message(state.message||{remove:'已移入暂存区，点选卡牌可放回。',undo:'已撤回一步，换个顺序试试。',shuffle:'剩余卡牌已重新排列。'}[tool]);}else message(state.message||'现在不能使用这个道具。');busy=false;}
 function start(level){if(checkSave()==='conflict')return;clearFeedback();$('message').removeAttribute('data-feedback');$('result').classList.remove('result-won','result-lost');$('rack').classList.remove('rack-warning','match-pop');previousLayout=state.layout;state=E.create(level,undefined,previousLayout);steps=[];saveRun();render();message('先看看哪些卡牌没有被压住。');}
 const leaveDialog=$('leave-dialog');
 let pendingLevel=null,leaveTrigger=null;

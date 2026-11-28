@@ -93,6 +93,37 @@ for(const starting of [null,'{invalid']){
   assert.match(get(b,'save-status').textContent,/另一个页面已更改存档/);
  } finally {await a.happyDOM.abort();await b.happyDOM.abort();}
 }
+{
+ const seed=88, picks=[24,20,22,6,35,23,25,30,27,19,18,0,5,2,34,4,12,32,1,33,26,9,28,21,14,31];
+ const steps=picks.map(id=>['take',id]);
+ const initial=JSON.stringify({version:2,boardVersion:2,level:0,seed,previousLayout:null,steps});
+ const shared={items:new Map([[key,initial]]),writes:0}, a=open(shared);
+ try {
+  const s=a.__state(), full=JSON.stringify({...s,message:''});
+  assert(s.history.length>0);
+  get(a,'tool-shuffle').focus();
+  get(a,'tool-shuffle').click();
+  assert.equal(JSON.stringify({...s,message:''}),full,'new unchanged shuffle is inert');
+  assert.equal(shared.writes,0);
+  assert.equal(shared.items.get(key),initial);
+  assert.equal(a.document.activeElement.id,'tool-shuffle');
+  assert.match(get(a,'message').textContent,/未扣洗牌次数/);
+  get(a,'tool-undo').click();
+  assert.equal(shared.writes,1);
+  assert.deepEqual(JSON.parse(shared.items.get(key)).steps,[...steps,['tool','undo']]);
+ } finally { await a.happyDOM.abort(); }
+ const oldRaw=JSON.stringify({...JSON.parse(initial),steps:[...steps,['tool','shuffle']]});
+ const old=restoreRun(oldRaw);
+ try {
+  assert.equal(old.__state().counts.shuffle,2);
+  assert.equal(old.__state().history.length,0,'historical unchanged shuffle still replays');
+  assert.equal(old.localStorage.getItem(key),oldRaw);
+ } finally { await old.happyDOM.abort(); }
+ const changed=F.create(0,1,null,2); F.take(changed,changed.certificate[0]);
+ assert(F.shufflePlan(changed).assignments.some(([id,t])=>changed.tiles[id].type!==t));
+ assert(F.tool(changed,'shuffle',{requireChanged:true}));
+ assert(F.verify(changed,changed.certificate).valid);
+}
 for(const status of ['won','lost']){
  const seed=1, board=F.create(0,seed,null,2);
  const play=status==='won'?board.certificate.slice():[18,19,20,0,2,21,1,3,22,23,5,24,4,25,7,26];
