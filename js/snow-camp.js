@@ -104,13 +104,18 @@
     $('building-details').addEventListener('click',e=>{const h=e.target.closest('[data-heat]');if(h) action({type:'heat',level:Number(h.dataset.heat)});if(e.target.closest('#build'))action({type:'build',building:selected});});
     function sync(){
         const v=E.view(state),ended=['won','lost'].includes(state.status);
-        const signed=n=>(n>=0?'+':'−')+Math.abs(n*E.DAY_SECONDS).toFixed(1);
-        $('resource-outlook').textContent='当前净变化 / 天：煤 '+signed(v.rates.coal)+' · 餐食 '+signed(v.rates.food)+'（按当前生产估算）';
-        let warning='物资稳定时，记得为第三天暴雪提前保温。';
+        const signed=n=>{
+            const magnitude=Math.abs(n*E.DAY_SECONDS).toFixed(1);
+            return (magnitude==='0.0'?'':n>=0?'+':'−')+magnitude;
+        };
+        const coalBalance=state.jobs.coal*.10-E.FUEL[state.furnace.level];
+        const outlook='当前净变化 / 天：煤 '+signed(coalBalance)+'（按所选炉火） · 餐食 '+signed(v.rates.food);
+        if($('resource-outlook').textContent!==outlook)$('resource-outlook').textContent=outlook;
+        let warning=v.storm?'暴雪期间狩猎减产，留意保温与口粮。':state.elapsed>=300?'物资稳定时，记得为第五天暴雪提前保温。':'物资稳定时，记得为第三天暴雪提前保温。';
         if(state.furnace.level>0&&!v.furnaceActive)warning='暖炉缺煤：增加采煤工，或暂时调低炉火档位。';
         else if(v.rates.food<0&&state.resources.food<8)warning='餐食正在减少：安排狩猎与厨师，留意生食是否充足。';
         else if(v.effectiveTemperature<0)warning='体感低于 0°C：提高供暖或升级住所，注意煤炭储备。';
-        else if(v.rates.coal<0&&state.resources.coal<8)warning='煤炭储备偏低：增加采煤工，避免夜里断火。';
+        else if(coalBalance<0&&state.resources.coal<8)warning='煤炭储备偏低：增加采煤工，或调低炉火减少消耗。';
         if($('supply-advice').textContent!==warning)$('supply-advice').textContent=warning;
         $('inspect-map').disabled=intro||ended;
         $('inspect-map').setAttribute('aria-pressed',String(inspectMap));

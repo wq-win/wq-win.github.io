@@ -44,7 +44,7 @@
         if (board.level >= LEVELS.length || !inspect(board.masks, board, board.source).solved) return null;
         return generateLevel(board.level + 1, seed);
     }
-    function turn(board, index, direction = 1) { if (!Number.isInteger(index) || index < 0 || index >= board.masks.length || inspect(board.masks, board, board.source).solved) return false; board.masks[index] = rotate(board.masks[index], direction); board.moves++; return true; }
+    function turn(board, index, direction = 1) { if (!Number.isInteger(index) || index < 0 || index >= board.masks.length || inspect(board.masks, board, board.source).solved) return false; const mask = rotate(board.masks[index], direction); if (mask === board.masks[index]) return false; board.masks[index] = mask; board.moves++; return true; }
     function hint(board) {
         if (board.hintsLeft < 1 || inspect(board.masks, board, board.source).solved) return -1;
         const powered = inspect(board.masks, board, board.source).powered;

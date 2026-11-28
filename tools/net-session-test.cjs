@@ -23,6 +23,34 @@ assert.equal(S.restore('{',E),null);assert.equal(S.restore('x'.repeat(13000),E),
  const el=(w,id)=>w.document.getElementById(id);
  const switchTo=(w,level)=>{const control=el(w,'board-level');control.value=String(level);control.dispatchEvent(new w.Event('change'));};
  const rotate=(w)=>el(w,'net-board').querySelector('button').click();
+ {
+  const b=E.generateLevel(1,0), fixed=b.masks.findIndex(m=>m===15);
+  assert.equal(fixed,13);
+  assert.equal(E.turn(b,fixed,1),false);
+  assert.equal(E.turn(b,fixed,-1),false);
+  assert.equal(b.moves,0);
+  E.hint(b); const shared=model(S.encode(b)), w=boot(undefined,shared);
+  try{
+   const tile=i=>el(w,'net-board').children[i];
+   const fixedTile=tile(fixed);
+   fixedTile.focus();
+   fixedTile.click();
+   fixedTile.dispatchEvent(new w.KeyboardEvent('keydown',{key:'r',bubbles:true}));
+   assert.match(el(w,'net-status').textContent,/不计步/);
+   assert.equal(w.document.activeElement,fixedTile);
+   assert.equal(shared.attempts,0);
+   assert.equal(el(w,'undo-board').disabled,true);
+   const real=tile(0);real.click(); const one=shared.items.get(KEY);
+   assert.equal(JSON.parse(one).moves,b.moves+1);
+   fixedTile.click();
+   assert.equal(shared.items.get(KEY),one);
+   assert.equal(shared.attempts,1);
+   el(w,'undo-board').click();
+   assert.deepEqual(JSON.parse(shared.items.get(KEY)).masks,b.masks);
+   assert.equal(JSON.parse(shared.items.get(KEY)).moves,b.moves);
+   assert.equal(shared.attempts,2);
+  } finally { await w.happyDOM.abort(); }
+ }
  const first=S.encode(E.generateLevel(1,42));
  const withHint=E.generateLevel(2,100);E.hint(withHint);
  {

@@ -96,7 +96,12 @@
     }
     function newBoard() { return replaceBoard(() => engine.generateLevel(Number($('board-level').value), seed())); }
     function rotateAt(index, turn = direction) {
-        const before={index,mask:board.masks[index],moves:board.moves};
+        const mask=board.masks[index];
+        if (!hasWon && Number.isInteger(mask) && engine.rotate(mask,turn)===mask) {
+            status.textContent='这格转动后线路不变，不计步。';
+            return;
+        }
+        const before={index,mask,moves:board.moves};
         const prior = engine.inspect(board.masks,board,board.source);
         if (engine.turn(board, index, turn)) {
             history.push(before); if(history.length>100)history.shift(); hinted=-1;selected=index; save();

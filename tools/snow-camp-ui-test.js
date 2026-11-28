@@ -76,6 +76,32 @@ assert.notEqual(source,instrumented);
   assert.equal(JSON.stringify(c.api.state),planning,'inspection mode never spends resources or changes staffing');
   c.$('inspect-map').click();assert.equal(c.$('inspect-map').getAttribute('aria-pressed'),'false');
   c.api.state.resources.food=0;c.api.state.jobs.cook=0;c.api.sync();assert.match(c.$('supply-advice').textContent,/餐食正在减少/);
+  {
+    const camp=E.create();E.act(camp,{type:'heat',level:3});E.act(camp,{type:'start'});
+    while(camp.elapsed<199) E.tick(camp,1);
+    const test=setup(E.save(camp));
+    try {
+      test.$('resume').click();
+      const outlook=()=>test.$('resource-outlook').textContent, advice=()=>test.$('supply-advice').textContent;
+      assert.match(outlook(),/煤 −13.4（按所选炉火）/);
+      assert.match(advice(),/暖炉缺煤/);
+      E.tick(test.api.state,1);test.api.sync();
+      assert.match(outlook(),/煤 −13.4（按所选炉火）/,'same forecast when the next tick can light');
+      E.act(test.api.state,{type:'dispatch',job:'coal'});test.api.sync();assert.match(outlook(),/煤 −3.8/);
+      E.act(test.api.state,{type:'dispatch',job:'coal'});test.api.sync();assert.match(outlook(),/煤 \+5.8/);
+    }finally{await test.window.happyDOM.abort();}
+    E.act(camp,{type:'heat',level:2});
+    const check=setup(E.save(camp));check.$('resume').click();
+    try{
+      assert.match(check.$('resource-outlook').textContent,/煤 0.0/);
+      for(const [time,word] of [[299,/正在肆虐/],[300,/下一场.*第 5 天/],[359,/下一场.*第 5 天/],[360,/12 小时/],[408,/正在肆虐/]]){
+        while(check.api.state.elapsed<time) E.tick(check.api.state,1);
+        check.api.sync();
+        assert.match(check.$('forecast').textContent,word);
+        if(time>=300)assert.doesNotMatch(check.$('supply-advice').textContent,/第三天/);
+      }
+    }finally{await check.window.happyDOM.abort();}
+  }
   const saved=E.create();E.act(saved,{type:'start'});E.tick(saved,5);E.act(saved,{type:'heat',level:2});const savedWood=saved.resources.wood;const d=setup(E.save(saved));
   try{assert.equal(d.$('resume').hidden,false);d.$('resume').click();assert.equal(d.api.state.elapsed,5);assert.equal(d.api.state.status,'running');assert.equal(d.$('intro-overlay').hidden,true);assert.equal(d.api.state.resources.wood,savedWood);assert.equal(d.$('milestones').querySelectorAll('.done').length,1);d.api.sync();d.window.document.querySelector('[data-building="furnace"]').click();assert.equal(d.api.state.resources.wood,savedWood,'resume does not duplicate rewards');}finally{d.window.happyDOM.abort();}
   const bad=setup('{corrupt');try{assert.equal(bad.$('resume').hidden,true);bad.$('begin').click();assert.equal(bad.api.state.status,'running');}finally{bad.window.happyDOM.abort();}
